@@ -35,7 +35,7 @@ if [ $lang == "julia" ]; then
         cmd="./runner_scripts/${dev}/run_${model}_${lang}.sh ${nmax}"
         eval "$cmd"
     fi
-elif [[ $lang == "jax"  ||  $lang == "pytorch" || $lang == "cpp" ]]; then
+elif [[ $lang == "jax"  ||  $lang == "pytorch" || $lang == "cpp" || $lang == "cubie" ]]; then
     if [[ $model != "ode" || $dev != "gpu" ]]; then
         echo "The benchmarking of ensemble ${model^^} solvers on ${dev^^} with ${lang} is not supported. Please use -m flag with \"ode\" and -d with \"gpu\"."
         exit 1

@@ -31,6 +31,10 @@ Torch_data = readdlm(joinpath(base_path, "PyTorch", "Torch_times_unadaptive.txt"
 
 Torch_times = Torch_data[:, 2] .* 1e-3
 
+Cubie_data = readdlm(joinpath(base_path, "CUBIE", "Cubie_times_unadaptive.txt"))
+
+Cubie_times = Cubie_data[:, 2] .* 1e-3
+
 times_v100["Fixed_Julia"] =
     (minimum(Julia_times ./ Julia_times), maximum(Julia_times ./ Julia_times))
 
@@ -42,6 +46,9 @@ times_v100["Fixed_MPGOS"] =
 
 times_v100["Fixed_Torch"] =
     (minimum(Torch_times ./ Julia_times), maximum(Torch_times ./ Julia_times))
+
+times_v100["Fixed_Cubie"] =
+    (minimum(Cubie_times ./ Julia_times), maximum(Cubie_times ./ Julia_times))
 
 xticks = 10 .^ round.(range(1, 7, length = 13), digits = 2)
 
@@ -97,6 +104,17 @@ plt = plot!(
     label = "PyTorch",
     color = :DarkRed,
     marker = :circle,
+)
+
+plt = plot!(
+    Ns,
+    Cubie_times,
+    xaxis = :log,
+    yaxis = :log,
+    linewidth = 2,
+    label = "Cubie",
+    color = :Blue,
+    marker = :diamond,
 )
 
 plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
