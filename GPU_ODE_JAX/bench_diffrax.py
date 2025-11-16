@@ -24,8 +24,7 @@ numberOfParameters = int(sys.argv[1])
 # %%
 
 
-from jax.lib import xla_bridge
-print("Working on :", xla_bridge.get_backend().platform)
+print("Working on :", jax.default_backend())
 
 
 # %%

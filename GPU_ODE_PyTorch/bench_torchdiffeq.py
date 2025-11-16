@@ -29,7 +29,7 @@ from torchdiffeq import odeint
 # %%
 
 ## Checking if torch installation has cuda enabled
-print("CUDA enabled: ", torch.has_cuda)
+print("CUDA enabled: ", torch.backends.cuda.is_built())
 
 
 # %%
