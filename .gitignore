@@ -1,3 +1,7 @@
 plots
 *.exe
+
 /data
+# Ignore virtual environment directories starting with `venv` anywhere
+venv*/
+**/venv*/
