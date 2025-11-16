@@ -5,3 +5,8 @@ plots
 # Ignore virtual environment directories starting with `venv` anywhere
 venv*/
 **/venv*/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
