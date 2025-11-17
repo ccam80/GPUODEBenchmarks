@@ -80,6 +80,18 @@ platforms and said features in the paper.
 
 ## Testing GPU-accelerated ODE Benchmarks with other programs
 
+### Running All Benchmarks
+
+To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, and CUBIE) sequentially in one command:
+```bash
+    $ bash ./run_all_benchmarks.sh
+```
+This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag can be used to specify the upper bound of trajectories:
+```bash
+    $ bash ./run_all_benchmarks.sh -n $((2**20))
+```
+Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
+
 ### Benchmarking Julia (DiffEqGPU.jl) methods
 We will need to install CUDA.jl for benchmarking. It is the only backend
 compatible with the ODE solvers in JAX, PyTorch, and MPGOS. To do so,
