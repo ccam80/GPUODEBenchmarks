@@ -3,8 +3,6 @@
 # Script to run all GPU ODE benchmarks in sequence
 # This allows for set-and-forget benchmarking while the GPU is available
 
-set -e  # Exit on error
-
 echo "========================================="
 echo "Starting All GPU ODE Benchmarks"
 echo "========================================="
