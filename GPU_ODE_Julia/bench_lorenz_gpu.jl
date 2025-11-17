@@ -29,26 +29,16 @@ prob_func = (prob, i, repeat) -> remake(prob, p = @SArray [parameterList[i]])
 
 ensembleProb = EnsembleProblem(lorenzProblem, prob_func = prob_func)
 
-## Building problems here only
-I = 1:numberOfParameters
-if ensembleProb.safetycopy
-    probs = map(I) do i
-        ensembleProb.prob_func(deepcopy(ensembleProb.prob), i, 1)
-    end
-else
-    probs = map(I) do i
-        ensembleProb.prob_func(ensembleProb.prob, i, 1)
-    end
+# Ensure we error on accidental CPU scalar ops with GPU arrays
+CUDA.allowscalar(false)
+
+@info "Solving the problem on GPU (fixed dt)"
+data = @benchmark begin
+    CUDA.@sync solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
+                     trajectories = $numberOfParameters,
+                     save_everystep = false,
+                     dt = 0.001f0)
 end
-
-## Make them compatible with CUDA
-probs = cu(probs)
-
-@info "Solving the problem"
-data = @benchmark CUDA.@sync DiffEqGPU.vectorized_solve($probs, $ensembleProb.prob,
-                                                        GPUTsit5();
-                                                        save_everystep = false,
-                                                        dt = 0.001f0)
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive.txt"),
@@ -61,10 +51,14 @@ println("Parameter number: " * string(numberOfParameters))
 println("Minimum time: " * string(minimum(data.times) / 1e6) * " ms")
 println("Allocs: " * string(data.allocs))
 
-data = @benchmark CUDA.@sync DiffEqGPU.vectorized_asolve($probs, $ensembleProb.prob,
-                                                         GPUTsit5();
-                                                         dt = 0.001f0, reltol = 1.0f-8,
-                                                         abstol = 1.0f-8)
+@info "Solving the problem on GPU (adaptive dt)"
+data = @benchmark begin
+    CUDA.@sync solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
+                     trajectories = $numberOfParameters,
+                     dt = 0.001f0,
+                     reltol = 1.0f-8,
+                     abstol = 1.0f-8)
+end
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive.txt"),

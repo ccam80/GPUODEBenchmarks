@@ -63,9 +63,9 @@ initial_conditions = {
     'z': 0.0
 }
 
-fixed_solver = qb.solver(
+fixed_solver = qb.Solver(
     lorenz_system,
-    algorithm='RK4',
+    algorithm='classical-rk4',
     dt=0.001,
     dt_save=1.0,
     step_controller='fixed',
@@ -73,7 +73,7 @@ fixed_solver = qb.solver(
     time_logging_level='verbose',
 )
 
-adaptive_solver = qb.solver(
+adaptive_solver = qb.Solver(
     lorenz_system,
     algorithm='tsit5',
     atol=1e-08,
@@ -81,7 +81,7 @@ adaptive_solver = qb.solver(
     dt_save=1.0,
     dt_min=1e-9,
     dt_max=0.1,
-    step_controller='adaptive',
+    step_controller='pid',
     output_types=['state'],
     time_logging_level='verbose',
 )
@@ -102,7 +102,7 @@ def solve_fixed(blocksize=256):
 
 def solve_adaptive(blocksize=256):
     """Solve with adaptive time step."""
-    solution = adaptive_solver.solve_ivp(
+    solution = adaptive_solver.solve(
         initial_values=initial_conditions,
         parameters=parameters,
         blocksize=blocksize,
