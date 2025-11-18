@@ -326,3 +326,54 @@ the `data` as the argument to the mentioned command.
     $ julia --project=. ./runner_scripts/plot/\
     plot_mult_gpu.jl /path/to/data/
 ```
+
+## Comparing Numerical Results
+
+The benchmark suite includes a feature to compare the numerical accuracy of
+results between different integration packages. When running benchmarks with
+exactly 32768 trajectories, each package automatically saves its final state
+arrays to CSV files in the `data/numerical/` directory.
+
+### Running Benchmarks for Numerical Comparison
+
+To generate the numerical comparison data, run each benchmark with 32768 
+trajectories:
+
+```bash
+# CUBIE
+source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+python3 ./GPU_ODE_CUBIE/bench_cubie.py 32768
+deactivate
+
+# JAX
+source ./GPU_ODE_JAX/venv_jax/bin/activate
+python3 ./GPU_ODE_JAX/bench_diffrax.py 32768
+deactivate
+
+# PyTorch
+source ./GPU_ODE_PyTorch/venv_torch/bin/activate
+python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
+deactivate
+
+# Julia
+julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768
+```
+
+### Analyzing Numerical Differences
+
+After generating the CSV files, use the comparison script to analyze differences:
+
+```bash
+source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+python3 compare_numerical_results.py
+deactivate
+```
+
+The script performs pairwise comparisons using `numpy.allclose()` and provides:
+- Maximum, mean, minimum, and standard deviation of absolute differences
+- Maximum, mean, minimum, and standard deviation of relative differences  
+- Per-state statistics (for the Lorenz system: x, y, z)
+- List of worst mismatches
+- Summary of which packages pass the allclose test
+
+For more details, see `data/numerical/README.md`.
