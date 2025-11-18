@@ -13,6 +13,7 @@ import sys
 import os
 import timeit
 import sys
+import numpy as np
 
 numberOfParameters = int(sys.argv[1])
 
@@ -95,6 +96,14 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(nu
 file = open("./data/PYTORCH/Torch_times_unadaptive.txt","a+")
 file.write('{0} {1}\n'.format(numberOfParameters, best_time))
 file.close()
+
+# Save numerical output for 32768-trajectory run
+if numberOfParameters == 32768:
+    os.makedirs("./data/numerical", exist_ok=True)
+    traj = torch.vmap(solve)(parameters)
+    # Extract final state values (last time point for each trajectory)
+    final_states = traj[:, -1, :].cpu().numpy()  # shape: (trajectories, states)
+    np.savetxt("./data/numerical/pytorch.csv", final_states, delimiter=',')
 
 
 # %%

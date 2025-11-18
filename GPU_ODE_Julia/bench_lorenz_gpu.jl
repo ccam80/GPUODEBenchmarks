@@ -47,6 +47,28 @@ if !isinteractive()
     end
 end
 
+# Save numerical output for 32768-trajectory run
+if !isinteractive() && numberOfParameters == 32768
+    sol = solve(ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
+                trajectories = numberOfParameters,
+                save_everystep = false,
+                dt = 0.001f0)
+    
+    # Create directory
+    mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
+    
+    # Extract final state values for each trajectory
+    using CSV, DataFrames
+    final_states = zeros(Float32, numberOfParameters, 3)
+    for i in 1:numberOfParameters
+        final_states[i, :] = sol[i].u[end]
+    end
+    
+    # Save to CSV
+    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia.csv"), 
+              DataFrame(final_states, :auto), header=false)
+end
+
 println("Parameter number: " * string(numberOfParameters))
 println("Minimum time: " * string(minimum(data.times) / 1e6) * " ms")
 println("Allocs: " * string(data.allocs))
