@@ -2,6 +2,12 @@ plots
 *.exe
 
 /data
+# But allow the README in the numerical comparison directory
+!/data/numerical/
+!/data/numerical/README.md
+# Ignore the actual CSV data files
+/data/numerical/*.csv
+
 # Ignore virtual environment directories starting with `venv` anywhere
 venv*/
 **/venv*/

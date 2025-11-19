@@ -27,6 +27,7 @@ const int NDO  = 0;     // NumberOfPointsOfDenseOutput
 void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
 void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, const vector<PRECISION>&, int);
 void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
+void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
 
 int main(int argc, char *argv[])
 {
@@ -89,6 +90,11 @@ int main(int argc, char *argv[])
 	
 	//SaveData(ScanLorenz, NT);
 	
+	// Save numerical data for 32768-trajectory run
+	if (NT == 32768) {
+		SaveNumericalData(ScanLorenz, NT);
+	}
+	
 	cout << "Test finished!" << endl;
 }
 
@@ -145,6 +151,27 @@ void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& 
 		DataFile.width(Width); DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 0) << ',';
 		DataFile.width(Width); DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 1) << ',';
 		DataFile.width(Width); DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 2);
+		DataFile << '\n';
+	}
+	
+	DataFile.close();
+}
+
+void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& Solver, int NumberOfThreads)
+{
+	ofstream DataFile;
+	// Create directory if it doesn't exist (assumes unix-like system)
+	system("mkdir -p ./data/numerical");
+	DataFile.open ( "./data/numerical/mpgos.csv" );
+	
+	DataFile.precision(10);
+	DataFile.flags(ios::scientific);
+	
+	for (int tid=0; tid<NumberOfThreads; tid++)
+	{
+		DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 0) << ',';
+		DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 1) << ',';
+		DataFile << Solver.GetHost<PRECISION>(tid, ActualState, 2);
 		DataFile << '\n';
 	}
 	

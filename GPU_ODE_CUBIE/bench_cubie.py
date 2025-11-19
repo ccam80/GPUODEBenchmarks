@@ -124,6 +124,14 @@ os.makedirs("./data/CUBIE", exist_ok=True)
 with open("./data/CUBIE/Cubie_times_unadaptive.txt", "a+") as file:
     file.write(f'{numberOfParameters} {best_time}\n')
 
+# Save numerical output for 32768-trajectory run
+if numberOfParameters == 32768:
+    os.makedirs("./data/numerical", exist_ok=True)
+    solution = solve_fixed()
+    # Extract final state values
+    final_states = solution['state'][:, -1, :]  # shape: (trajectories, states)
+    np.savetxt("./data/numerical/cubie.csv", final_states, delimiter=',')
+
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
 # ========================================

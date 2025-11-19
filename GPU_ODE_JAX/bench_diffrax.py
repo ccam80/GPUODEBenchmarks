@@ -84,6 +84,14 @@ file = open("./data/JAX/Jax_times_unadaptive.txt","a+")
 file.write('{0} {1}\n'.format(numberOfParameters, best_time))
 file.close()
 
+# Save numerical output for 32768-trajectory run
+if numberOfParameters == 32768:
+    os.makedirs("./data/numerical", exist_ok=True)
+    sol = main(parameterList)
+    # Extract final state values (last time point for each trajectory)
+    final_states = np.array(sol.ys[:, -1, :])  # shape: (trajectories, states)
+    np.savetxt("./data/numerical/jax.csv", final_states, delimiter=',')
+
 
 # %%
 # Repeat the same for adaptive time-stepping
