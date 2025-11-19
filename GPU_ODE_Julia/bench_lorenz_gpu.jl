@@ -29,12 +29,11 @@ prob_func = (prob, i, repeat) -> remake(prob, p = @SArray [parameterList[i]])
 
 ensembleProb = EnsembleProblem(lorenzProblem, prob_func = prob_func)
 
-# Ensure we error on accidental CPU scalar ops with GPU arrays
 CUDA.allowscalar(false)
 
 @info "Solving the problem on GPU (fixed dt)"
 data = @benchmark begin
-    CUDA.@sync solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
+    CUDA.@sync sol = solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
                      trajectories = $numberOfParameters,
                      save_everystep = false,
                      dt = 0.001f0)
@@ -75,7 +74,7 @@ println("Allocs: " * string(data.allocs))
 
 @info "Solving the problem on GPU (adaptive dt)"
 data = @benchmark begin
-    CUDA.@sync solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
+    CUDA.@sync sol = solve($ensembleProb, GPUTsit5(), EnsembleGPUKernel(CUDABackend(), 0.0);
                      trajectories = $numberOfParameters,
                      dt = 0.001f0,
                      reltol = 1.0f-8,

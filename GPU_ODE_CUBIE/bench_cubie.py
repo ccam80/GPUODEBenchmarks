@@ -11,6 +11,9 @@ import sys
 import timeit
 import numpy as np
 import cubie as qb
+from cubie.time_logger import _default_timelogger
+
+_default_timelogger.set_verbosity(None)
 
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
@@ -68,9 +71,10 @@ fixed_solver = qb.Solver(
     algorithm='classical-rk4',
     dt=0.001,
     dt_save=1.0,
+    duration=1.001,
     step_controller='fixed',
     output_types=['state'],
-    time_logging_level='verbose',
+    time_logging_level=None,
 )
 
 adaptive_solver = qb.Solver(
@@ -81,9 +85,10 @@ adaptive_solver = qb.Solver(
     dt_save=1.0,
     dt_min=1e-9,
     dt_max=0.1,
+    duration=1.00001,
     step_controller='pid',
     output_types=['state'],
-    time_logging_level='verbose',
+    time_logging_level=None,
 )
 
 # ========================================
@@ -97,6 +102,8 @@ def solve_fixed(blocksize=256):
         initial_values=initial_conditions,
         parameters=parameters,
         blocksize=blocksize,
+        results_type='raw',
+        duration=1.001 # step one past final time - last point is otherwise not saved
     )
     return solution
 
@@ -106,6 +113,10 @@ def solve_adaptive(blocksize=256):
         initial_values=initial_conditions,
         parameters=parameters,
         blocksize=blocksize,
+        results_type='raw',
+        duration=1.000001 # step one past final time - last point is otherwise not saved
+
+
     )
     return solution
 
@@ -113,7 +124,7 @@ def solve_adaptive(blocksize=256):
 _ = solve_fixed()
 
 # Benchmark with 100 repetitions
-res = timeit.repeat(lambda: solve_fixed(), repeat=100, number=1)
+res = timeit.repeat(lambda: solve_fixed(), setup='gc.enable()', repeat=100, number=1)
 
 best_time = min(res) * 1000  # Convert to milliseconds
 print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {best_time:.1f} ms")
@@ -129,8 +140,8 @@ if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_fixed()
     # Extract final state values
-    final_states = solution['state'][:, -1, :]  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie.csv", final_states, delimiter=',')
+    final_states = solution['state'][-1, :, :]  # shape: (trajectories, states)
+    np.savetxt("./data/numerical/cubie_unadaptive.csv", final_states, delimiter=',')
 
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
@@ -141,7 +152,7 @@ print(f"Running {numberOfParameters} trajectories with adaptive time-stepping...
 _ = solve_adaptive()
 
 # Benchmark with 100 repetitions
-res = timeit.repeat(lambda: solve_adaptive(), repeat=100, number=1)
+res = timeit.repeat(lambda: solve_adaptive(), setup='gc.enable()', repeat=100, number=1)
 
 best_time = min(res) * 1000  # Convert to milliseconds
 print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in {best_time:.1f} ms")
@@ -149,3 +160,10 @@ print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in
 # Save results
 with open("./data/CUBIE/Cubie_times_adaptive.txt", "a+") as file:
     file.write(f'{numberOfParameters} {best_time}\n')
+
+if numberOfParameters == 32768:
+    os.makedirs("./data/numerical", exist_ok=True)
+    solution = solve_fixed()
+    # Extract final state values
+    final_states = solution['state'][-1, :, :]  # shape: (trajectories, states)
+    np.savetxt("./data/numerical/cubie_adaptive.csv", final_states, delimiter=',')

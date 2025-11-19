@@ -14,7 +14,7 @@ using namespace std;
 // Solver Configuration
 #define SOLVER RKCK45
 #define PRECISION float  // float, double
-const int NT = 8;
+const int NT = 8388608;
 const int SD   = 3;     // SystemDimension
 const int NCP  = 1;     // NumberOfControlParameters
 const int NSP  = 0;     // NumberOfSharedParameters
@@ -32,7 +32,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 int main(int argc, char *argv[])
 {
 	int NumberOfProblems = NT;
-	int BlockSize        = 1024;
+	int BlockSize        = 32;
 	
 	ListCUDADevices();
 	
@@ -67,10 +67,16 @@ int main(int argc, char *argv[])
 	ScanLorenz.Solve();
 	ScanLorenz.InsertSynchronisationPoint();
 	ScanLorenz.SynchroniseSolver();
-	SimulationEnd = clock();
 	
 	ScanLorenz.SynchroniseFromDeviceToHost(All);
-	
+	ScanLorenz.SynchroniseDevice();
+	SimulationEnd = clock();
+		// Check for kernel launch errors
+	cudaError_t _lastErr = cudaGetLastError();
+	if (_lastErr != cudaSuccess) {
+		std::cerr << "CUDA launch error: " << cudaGetErrorString(_lastErr) << std::endl;
+	}
+	std::cout << ScanLorenz.GetHost<PRECISION>(0, ActualTime) << std::endl;
 	cout << "Total simulation time:           " << 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC << "ms" << endl;
 	cout << "Simulation time / 1000 RK4 step: " << 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC << "ms" << endl;
 	cout << "Ensemble size:                   " << NT << endl << endl;
@@ -78,12 +84,12 @@ int main(int argc, char *argv[])
 	
 	ofstream datafile;
 	if (SOLVER == RK4){
-		datafile.open ("./data/cpp/MPGOS_times_unadaptive.txt",ios::app);
+		datafile.open ("./data/CPP/MPGOS_times_unadaptive.txt",ios::app);
 		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
 		datafile.close();
 	}else{
 		
-		datafile.open ("./data/cpp/MPGOS_times_adaptive.txt",ios::app);
+		datafile.open ("./data/CPP/MPGOS_times_adaptive.txt",ios::app);
 		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
 		datafile.close();
 	}
