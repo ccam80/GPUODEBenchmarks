@@ -71,7 +71,6 @@ fixed_solver = qb.Solver(
     algorithm='classical-rk4',
     dt=0.001,
     dt_save=1.0,
-    duration=1.001,
     step_controller='fixed',
     output_types=['state'],
     time_logging_level=None,
@@ -85,38 +84,40 @@ adaptive_solver = qb.Solver(
     dt_save=1.0,
     dt_min=1e-9,
     dt_max=0.1,
-    duration=1.00001,
-    step_controller='pid',
+    step_controller='i',
     output_types=['state'],
     time_logging_level=None,
 )
 
+fixed_solver.set_stride_order(("time", "variable", "run"))
+adaptive_solver.set_stride_order(("time", "variable", "run"))
+
+initials_array, parameter_array = fixed_solver.grid_builder(
+        states=initial_conditions, params=parameters)
 # ========================================
 # FIXED TIME-STEPPING BENCHMARK
 # ========================================
 print(f"Running {numberOfParameters} trajectories with fixed time-stepping...")
 
-def solve_fixed(blocksize=256):
+def solve_fixed(blocksize=64):
     """Solve with fixed time step (unadaptive)."""
     solution = fixed_solver.solve(
-        initial_values=initial_conditions,
-        parameters=parameters,
+        initial_values=initials_array,
+        parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
         duration=1.001 # step one past final time - last point is otherwise not saved
     )
     return solution
 
-def solve_adaptive(blocksize=256):
+def solve_adaptive(blocksize=64):
     """Solve with adaptive time step."""
     solution = adaptive_solver.solve(
-        initial_values=initial_conditions,
-        parameters=parameters,
+        initial_values=initials_array,
+        parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.000001 # step one past final time - last point is otherwise not saved
-
-
+        duration=1.0 
     )
     return solution
 
