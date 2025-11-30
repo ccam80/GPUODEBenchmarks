@@ -11,8 +11,8 @@ using LinearAlgebra
 
 # Lorenz system parameters
 const σ = 10.0  # sigma
-const ρ = 10.0  # rho (as specified in the task)
-const β = 8.0 / 3.0  # beta
+const ρ = 10.0  # rho (different from benchmark scripts which use 21.0, set to 10.0 per task requirements)
+const β = 2.666  # beta (same as other scripts in the project)
 
 # Define the Lorenz system (in-place form for efficiency)
 function lorenz!(du, u, p, t)
@@ -50,7 +50,7 @@ println()
 # Step through the solution using a function to avoid scope issues
 function run_integration(integrator, tspan)
     step_count = 0
-    while !isempty(integrator.opts.tstops) || integrator.t < tspan[2]
+    while integrator.t < tspan[2]
         step_count += 1
         
         # Get current state before step
@@ -76,11 +76,6 @@ function run_integration(integrator, tspan)
         else
             println("Step $step_count: t = $(round(t_after, digits=10)), dt = $(round(dt, sigdigits=6)), " *
                     "u = [$(round(u_after[1], sigdigits=8)), $(round(u_after[2], sigdigits=8)), $(round(u_after[3], sigdigits=8))]")
-        end
-        
-        # Check if we've reached the end
-        if integrator.t >= tspan[2]
-            break
         end
     end
     return step_count
