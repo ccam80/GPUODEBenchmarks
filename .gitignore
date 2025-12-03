@@ -12,6 +12,9 @@ plots
 venv*/
 **/venv*/
 
+# Ignore cubie clone directories in setup folders
+GPU_ODE_CUBIE/cubie/
+
 # Python cache
 __pycache__/
 *.pyc
