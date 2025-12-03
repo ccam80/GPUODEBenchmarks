@@ -17,10 +17,15 @@ FAILED_SETUPS=()
 echo "========================================="
 echo "1/4: Setting up CUBIE environment..."
 echo "========================================="
-if bash "$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh"; then
-    echo "✓ CUBIE setup completed successfully"
+if [ -f "$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh" ]; then
+    if bash "$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh"; then
+        echo "✓ CUBIE setup completed successfully"
+    else
+        echo "✗ CUBIE setup failed"
+        FAILED_SETUPS+=("CUBIE")
+    fi
 else
-    echo "✗ CUBIE setup failed"
+    echo "✗ CUBIE setup script not found"
     FAILED_SETUPS+=("CUBIE")
 fi
 echo ""
@@ -29,10 +34,15 @@ echo ""
 echo "========================================="
 echo "2/4: Setting up JAX/Diffrax environment..."
 echo "========================================="
-if bash "$SCRIPT_DIR/GPU_ODE_JAX/setup_environment.sh"; then
-    echo "✓ JAX/Diffrax setup completed successfully"
+if [ -f "$SCRIPT_DIR/GPU_ODE_JAX/setup_environment.sh" ]; then
+    if bash "$SCRIPT_DIR/GPU_ODE_JAX/setup_environment.sh"; then
+        echo "✓ JAX/Diffrax setup completed successfully"
+    else
+        echo "✗ JAX/Diffrax setup failed"
+        FAILED_SETUPS+=("JAX")
+    fi
 else
-    echo "✗ JAX/Diffrax setup failed"
+    echo "✗ JAX setup script not found"
     FAILED_SETUPS+=("JAX")
 fi
 echo ""
@@ -41,10 +51,15 @@ echo ""
 echo "========================================="
 echo "3/4: Setting up PyTorch/torchdiffeq environment..."
 echo "========================================="
-if bash "$SCRIPT_DIR/GPU_ODE_PyTorch/setup_environment.sh"; then
-    echo "✓ PyTorch/torchdiffeq setup completed successfully"
+if [ -f "$SCRIPT_DIR/GPU_ODE_PyTorch/setup_environment.sh" ]; then
+    if bash "$SCRIPT_DIR/GPU_ODE_PyTorch/setup_environment.sh"; then
+        echo "✓ PyTorch/torchdiffeq setup completed successfully"
+    else
+        echo "✗ PyTorch/torchdiffeq setup failed"
+        FAILED_SETUPS+=("PyTorch")
+    fi
 else
-    echo "✗ PyTorch/torchdiffeq setup failed"
+    echo "✗ PyTorch setup script not found"
     FAILED_SETUPS+=("PyTorch")
 fi
 echo ""
@@ -53,10 +68,15 @@ echo ""
 echo "========================================="
 echo "4/4: Setting up Julia environment..."
 echo "========================================="
-if bash "$SCRIPT_DIR/setup_julia.sh"; then
-    echo "✓ Julia setup completed successfully"
+if [ -f "$SCRIPT_DIR/setup_julia.sh" ]; then
+    if bash "$SCRIPT_DIR/setup_julia.sh"; then
+        echo "✓ Julia setup completed successfully"
+    else
+        echo "✗ Julia setup failed"
+        FAILED_SETUPS+=("Julia")
+    fi
 else
-    echo "✗ Julia setup failed"
+    echo "✗ Julia setup script not found"
     FAILED_SETUPS+=("Julia")
 fi
 echo ""

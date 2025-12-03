@@ -31,7 +31,10 @@ if [ -d "cubie" ]; then
     echo "Cubie directory already exists, removing..."
     rm -rf cubie
 fi
-git clone https://github.com/ccam80/cubie.git
+if ! git clone https://github.com/ccam80/cubie.git; then
+    echo "Error: Failed to clone cubie repository"
+    exit 1
+fi
 
 # Install cubie from source using uv
 echo "Installing cubie and dependencies..."
