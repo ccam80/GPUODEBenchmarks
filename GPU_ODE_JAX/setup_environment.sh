@@ -27,11 +27,8 @@ pip install uv
 
 # Install JAX with CUDA support and other dependencies
 echo "Installing JAX with CUDA support and dependencies..."
-# Try CUDA 12 first, fall back to CUDA 11 if needed
-if ! uv pip install --upgrade "jax[cuda12]" 2>/dev/null; then
-    echo "CUDA 12 installation failed, trying CUDA 11..."
-    uv pip install --upgrade "jax[cuda11]"
-fi
+# Install JAX with CUDA 12 support (latest available)
+uv pip install --upgrade "jax[cuda12]"
 uv pip install diffrax
 uv pip install equinox
 uv pip install numpy

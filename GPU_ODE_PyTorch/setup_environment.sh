@@ -27,11 +27,8 @@ pip install uv
 
 # Install PyTorch with CUDA support and other dependencies
 echo "Installing PyTorch with CUDA support and dependencies..."
-# Try CUDA 12.1 first, fall back to CUDA 11.8 if needed
-if ! uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 2>/dev/null; then
-    echo "CUDA 12.1 installation failed, trying CUDA 11.8..."
-    uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-fi
+# Install PyTorch with CUDA 12.1 support (latest stable version)
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 uv pip install numpy
 uv pip install scipy
 
