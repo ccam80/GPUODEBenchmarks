@@ -62,13 +62,13 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-5, atol=1e-8):
     print(f"  Min:  {np.min(relative_diff):.6e}")
     print(f"  Std:  {np.std(relative_diff):.6e}")
     
-    # Per-state statistics (assuming each row is a trajectory and columns are states)
-    if arr1.ndim == 2:
-        print(f"\nPer-state statistics (over all trajectories):")
-        for state_idx in range(arr1.shape[1]):
-            state_diff = diff[:, state_idx]
-            print(f"  State {state_idx}: max={np.max(state_diff):.6e}, "
-                  f"mean={np.mean(state_diff):.6e}, min={np.min(state_diff):.6e}")
+    # # Per-state statistics (assuming each row is a trajectory and columns are states)
+    # if arr1.ndim == 2:
+    #     print(f"\nPer-state statistics (over all trajectories):")
+    #     for state_idx in range(arr1.shape[1]):
+    #         state_diff = diff[:, state_idx]
+    #         print(f"  State {state_idx}: max={np.max(state_diff):.6e}, "
+    #               f"mean={np.mean(state_diff):.6e}, min={np.min(state_diff):.6e}")
     
     # Find worst mismatches
     if not is_close:
@@ -101,7 +101,7 @@ def main():
     data_dir = "./data/numerical"
     
     # Define expected packages
-    packages = ["cubie_adaptive", "cubie_unadaptive", "jax", "pytorch", "julia", "mpgos"]
+    packages = ["cubie_adaptive", "cubie_unadaptive", "jax", "pytorch", "julia_adaptive", "julia_fixed", "mpgos"]
     
     print("="*80)
     print("GPU ODE Benchmarks - Numerical Results Comparison")

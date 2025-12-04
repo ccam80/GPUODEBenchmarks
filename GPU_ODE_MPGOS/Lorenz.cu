@@ -22,7 +22,7 @@ const int NISP = 0;     // NumberOfIntegerSharedParameters
 const int NE   = 0;     // NumberOfEvents
 const int NA   = 0;     // NumberOfAccessories
 const int NIA  = 0;     // NumberOfIntegerAccessories
-const int NDO  = 0;     // NumberOfPointsOfDenseOutput
+const int NDO  = 10;     // NumberOfPointsOfDenseOutput
 
 void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
 void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, const vector<PRECISION>&, int);
@@ -99,6 +99,13 @@ int main(int argc, char *argv[])
 	// Save numerical data for 32768-trajectory run
 	if (NT == 32768) {
 		SaveNumericalData(ScanLorenz, NT);
+		SaveData(ScanLorenz, NT);
+		// save per-trajectory step counts (total steps, rejected steps)
+		ScanLorenz.SaveStepCounts("./data/numerical/mpgos_step_counts.csv");
+	}
+	if (NT == 8388608) {
+		if (SOLVER != RK4)
+		ScanLorenz.SaveStepCounts("./data/numerical/mpgos_step_counts.csv");
 	}
 	
 	cout << "Test finished!" << endl;
@@ -145,7 +152,9 @@ void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PREC
 void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& Solver, int NumberOfThreads)
 {
 	ofstream DataFile;
-	DataFile.open ( "Lorenz.txt" );
+	// Create directory if it doesn't exist (assumes unix-like system)
+	system("mkdir -p ./data/numerical");
+	DataFile.open ( "./data/numerical/mpgos_internalsave.csv" );
 	
 	int Width = 18;
 	DataFile.precision(10);

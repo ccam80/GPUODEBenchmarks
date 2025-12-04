@@ -82,15 +82,17 @@ adaptive_solver = qb.Solver(
     atol=1e-08,
     rtol=1e-08,
     dt_save=1.0,
-    dt_min=1e-9,
-    dt_max=0.1,
-    step_controller='i',
+    dt_min=1e-12,
+    dt_max=1e3,
+    step_controller='pid',
+    kp=6/5,
+    kd=0.0,
+    ki=0.0,
+    max_gain=5.0,
+    min_gain=0.1,
     output_types=['state'],
     time_logging_level=None,
 )
-
-fixed_solver.set_stride_order(("time", "variable", "run"))
-adaptive_solver.set_stride_order(("time", "variable", "run"))
 
 initials_array, parameter_array = fixed_solver.grid_builder(
         states=initial_conditions, params=parameters)
@@ -106,7 +108,7 @@ def solve_fixed(blocksize=64):
         parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.001 # step one past final time - last point is otherwise not saved
+        duration=1.0 
     )
     return solution
 
@@ -117,7 +119,7 @@ def solve_adaptive(blocksize=64):
         parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.0 
+        duration=1.0
     )
     return solution
 
@@ -141,7 +143,7 @@ if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_fixed()
     # Extract final state values
-    final_states = solution['state'][-1, :, :]  # shape: (trajectories, states)
+    final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
     np.savetxt("./data/numerical/cubie_unadaptive.csv", final_states, delimiter=',')
 
 # ========================================
@@ -164,7 +166,7 @@ with open("./data/CUBIE/Cubie_times_adaptive.txt", "a+") as file:
 
 if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)
-    solution = solve_fixed()
+    solution = solve_adaptive()
     # Extract final state values
-    final_states = solution['state'][-1, :, :]  # shape: (trajectories, states)
+    final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
     np.savetxt("./data/numerical/cubie_adaptive.csv", final_states, delimiter=',')
