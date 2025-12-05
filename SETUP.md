@@ -6,6 +6,12 @@ This guide explains how to set up the environments for all GPU ODE benchmark pac
 
 To set up all environments at once, run:
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 setup_all_environments.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./setup_all_environments.sh
 ```
@@ -22,6 +28,12 @@ You can also set up each package environment individually:
 
 ### CUBIE
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_CUBIE/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_CUBIE/setup_environment.sh
 ```
@@ -31,10 +43,19 @@ This will:
 - Install `uv` package manager
 - Clone and install the CUBIE library from source
 
-To activate: `source GPU_ODE_CUBIE/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_CUBIE/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_CUBIE\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_CUBIE\venv\Scripts\Activate.ps1`
 
 ### JAX (Diffrax)
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_JAX/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_JAX/setup_environment.sh
 ```
@@ -45,10 +66,19 @@ This will:
 - Install JAX with CUDA support
 - Install Diffrax, Equinox, and other dependencies
 
-To activate: `source GPU_ODE_JAX/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_JAX/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_JAX\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_JAX\venv\Scripts\Activate.ps1`
 
 ### PyTorch (torchdiffeq)
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_PyTorch/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_PyTorch/setup_environment.sh
 ```
@@ -59,10 +89,19 @@ This will:
 - Install PyTorch with CUDA support
 - Install the custom torchdiffeq fork with vmap support
 
-To activate: `source GPU_ODE_PyTorch/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_PyTorch/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_PyTorch\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_PyTorch\venv\Scripts\Activate.ps1`
 
 ### Julia
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 setup_julia.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./setup_julia.sh
 ```
@@ -125,10 +164,19 @@ julia --project=. -e 'using DiffEqGPU, CUDA; println("Julia OK")'
 ### Python Virtual Environments
 
 If a setup fails, you can clean up and retry:
+
+**Linux/macOS:**
 ```bash
 rm -rf GPU_ODE_CUBIE/venv GPU_ODE_CUBIE/cubie
 rm -rf GPU_ODE_JAX/venv
 rm -rf GPU_ODE_PyTorch/venv
+```
+
+**Windows (PowerShell):**
+```powershell
+Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv, GPU_ODE_CUBIE\cubie
+Remove-Item -Recurse -Force GPU_ODE_JAX\venv
+Remove-Item -Recurse -Force GPU_ODE_PyTorch\venv
 ```
 
 Then re-run the appropriate setup script.
@@ -157,3 +205,18 @@ nvcc --version
 - The CUBIE setup clones the repository into `GPU_ODE_CUBIE/cubie/`
 - Virtual environment and cloned repository directories are excluded from git via `.gitignore`
 - The `uv` package manager is used for faster Python package installation
+
+## Platform Compatibility
+
+The repository now includes two versions of setup scripts:
+
+1. **Python scripts** (`.py` files) - **Recommended for all users**
+   - Work on Linux, Windows, and macOS
+   - Automatically detect the operating system and use appropriate paths
+   - Can be run with `python3 script_name.py`
+   
+2. **Bash scripts** (`.sh` files) - **Linux/macOS only**
+   - Original scripts that work on Unix-like systems
+   - Can be run with `./script_name.sh` or `bash script_name.sh`
+
+Both versions provide identical functionality. The Python scripts are recommended as they work across all platforms.

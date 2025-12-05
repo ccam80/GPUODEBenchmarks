@@ -15,7 +15,17 @@ Comparison of Julia's GPU-based ensemble ODE solvers with other open-source impl
 The methods are written in Julia and are part of the repository
 <https://github.com/SciML/DiffEqGPU.jl>. The benchmark suite also
 consists of the raw data, such as simulation times and plots mentioned
-in the paper. The supported OS for the benchmark suite is Linux.
+in the paper. The benchmark suite is supported on Linux, Windows, and macOS.
+
+## Quick Setup (Cross-Platform)
+
+For a streamlined setup experience on any platform, use the Python-based setup scripts:
+
+```bash
+python3 setup_all_environments.py
+```
+
+This will set up all environments (CUBIE, JAX, PyTorch, and Julia) automatically. For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
 
 ## Installing Julia
 
