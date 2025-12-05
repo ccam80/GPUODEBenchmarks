@@ -57,14 +57,12 @@ def main():
             print("Failed to create virtual environment")
             return 1
     
-    # Determine the correct paths for the virtual environment
+    # Determine the correct path for the virtual environment Python
     is_windows = platform.system() == "Windows"
     if is_windows:
         venv_python = venv_path / "Scripts" / "python.exe"
-        venv_pip = venv_path / "Scripts" / "pip.exe"
     else:
         venv_python = venv_path / "bin" / "python"
-        venv_pip = venv_path / "bin" / "pip"
     
     # Upgrade pip
     print("Upgrading pip...")
