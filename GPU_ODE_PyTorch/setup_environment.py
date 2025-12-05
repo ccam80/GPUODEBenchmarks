@@ -65,16 +65,10 @@ def main():
         venv_python = venv_path / "bin" / "python"
         venv_pip = venv_path / "bin" / "pip"
     
-    # Upgrade pip and install uv
+    # Upgrade pip
     print("Upgrading pip...")
     if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
-        return 1
-    
-    print("Installing uv package manager...")
-    
-    if not run_command([str(venv_python), "-m", "pip", "install", "uv"]):
-        print("Failed to install uv")
         return 1
     
     # Install PyTorch with CUDA support and other dependencies
