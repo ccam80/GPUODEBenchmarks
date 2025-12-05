@@ -47,12 +47,15 @@ def main():
         print(f"Error: python3 is not installed: {e}")
         return 1
     
-    # Create venv
-    print("Creating virtual environment...")
+    # Create or use existing venv
     venv_path = script_dir / "venv"
-    if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
-        print("Failed to create virtual environment")
-        return 1
+    if venv_path.exists():
+        print("Virtual environment already exists, using existing one...")
+    else:
+        print("Creating virtual environment...")
+        if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
+            print("Failed to create virtual environment")
+            return 1
     
     # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
@@ -64,20 +67,16 @@ def main():
         venv_pip = venv_path / "bin" / "pip"
     
     # Upgrade pip and install uv
-    print("Installing uv package manager...")
-    if not run_command([str(venv_pip), "install", "--upgrade", "pip"]):
+    print("Upgrading pip...")
+    if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
     
-    if not run_command([str(venv_pip), "install", "uv"]):
+    print("Installing uv package manager...")
+    
+    if not run_command([str(venv_python), "-m", "pip", "install", "uv"]):
         print("Failed to install uv")
         return 1
-    
-    # Determine uv executable path
-    if is_windows:
-        venv_uv = venv_path / "Scripts" / "uv.exe"
-    else:
-        venv_uv = venv_path / "bin" / "uv"
     
     # Check if git is available
     if not shutil.which("git"):
@@ -86,19 +85,19 @@ def main():
         return 1
     
     # Clone cubie source
-    print("Cloning cubie repository...")
     cubie_dir = script_dir / "cubie"
     if cubie_dir.exists():
-        print("Cubie directory already exists, removing...")
-        shutil.rmtree(cubie_dir)
+        print("Cubie directory already exists, skipping clone...")
+        print("(To force re-clone, delete the 'cubie' directory first)")
+    else:
+        print("Cloning cubie repository...")
+        if not run_command(["git", "clone", "https://github.com/ccam80/cubie.git"]):
+            print("Error: Failed to clone cubie repository")
+            return 1
     
-    if not run_command(["git", "clone", "https://github.com/ccam80/cubie.git"]):
-        print("Error: Failed to clone cubie repository")
-        return 1
-    
-    # Install cubie from source using uv
+    # Install cubie from source
     print("Installing cubie and dependencies...")
-    if not run_command([str(venv_uv), "pip", "install", "-e", ".[dev]"], cwd=cubie_dir):
+    if not run_command([str(venv_python), "-m", "pip", "install", "-e", ".[dev]"], cwd=cubie_dir):
         print("Failed to install cubie")
         return 1
     

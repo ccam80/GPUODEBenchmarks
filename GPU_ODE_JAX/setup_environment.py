@@ -46,12 +46,15 @@ def main():
         print(f"Error: python3 is not installed: {e}")
         return 1
     
-    # Create venv
-    print("Creating virtual environment...")
+    # Create or use existing venv
     venv_path = script_dir / "venv"
-    if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
-        print("Failed to create virtual environment")
-        return 1
+    if venv_path.exists():
+        print("Virtual environment already exists, using existing one...")
+    else:
+        print("Creating virtual environment...")
+        if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
+            print("Failed to create virtual environment")
+            return 1
     
     # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
@@ -63,41 +66,37 @@ def main():
         venv_pip = venv_path / "bin" / "pip"
     
     # Upgrade pip and install uv
-    print("Installing uv package manager...")
-    if not run_command([str(venv_pip), "install", "--upgrade", "pip"]):
+    print("Upgrading pip...")
+    if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
     
-    if not run_command([str(venv_pip), "install", "uv"]):
+    print("Installing uv package manager...")
+    
+    if not run_command([str(venv_python), "-m", "pip", "install", "uv"]):
         print("Failed to install uv")
         return 1
-    
-    # Determine uv executable path
-    if is_windows:
-        venv_uv = venv_path / "Scripts" / "uv.exe"
-    else:
-        venv_uv = venv_path / "bin" / "uv"
     
     # Install JAX with CUDA support and other dependencies
     print("Installing JAX with CUDA support and dependencies...")
     # Install JAX with CUDA 12 support (latest available)
-    if not run_command([str(venv_uv), "pip", "install", "--upgrade", "jax[cuda12]"]):
+    if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "jax[cuda12]"]):
         print("Failed to install JAX")
         return 1
     
-    if not run_command([str(venv_uv), "pip", "install", "diffrax"]):
+    if not run_command([str(venv_python), "-m", "pip", "install", "diffrax"]):
         print("Failed to install diffrax")
         return 1
     
-    if not run_command([str(venv_uv), "pip", "install", "equinox"]):
+    if not run_command([str(venv_python), "-m", "pip", "install", "equinox"]):
         print("Failed to install equinox")
         return 1
     
-    if not run_command([str(venv_uv), "pip", "install", "numpy"]):
+    if not run_command([str(venv_python), "-m", "pip", "install", "numpy"]):
         print("Failed to install numpy")
         return 1
     
-    if not run_command([str(venv_uv), "pip", "install", "scipy"]):
+    if not run_command([str(venv_python), "-m", "pip", "install", "scipy"]):
         print("Failed to install scipy")
         return 1
     
