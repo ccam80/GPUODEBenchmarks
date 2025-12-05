@@ -79,6 +79,12 @@ def main():
     else:
         venv_uv = venv_path / "bin" / "uv"
     
+    # Check if git is available
+    if not shutil.which("git"):
+        print("Error: git is not installed")
+        print("Please install git from https://git-scm.com/downloads")
+        return 1
+    
     # Clone cubie source
     print("Cloning cubie repository...")
     cubie_dir = script_dir / "cubie"
