@@ -56,37 +56,51 @@ def main():
             print("Failed to create virtual environment")
             return 1
     
-    # Determine the correct path for the virtual environment Python
+    # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
     if is_windows:
         venv_python = venv_path / "Scripts" / "python.exe"
+        venv_pip = venv_path / "Scripts" / "pip.exe"
     else:
         venv_python = venv_path / "bin" / "python"
+        venv_pip = venv_path / "bin" / "pip"
     
-    # Upgrade pip
+    # Upgrade pip using python -m pip (required for proper upgrade)
     print("Upgrading pip...")
     if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
     
+    # Install uv package manager
+    print("Installing uv package manager...")
+    if not run_command([str(venv_pip), "install", "uv"]):
+        print("Failed to install uv")
+        return 1
+    
+    # Determine uv executable path
+    if is_windows:
+        venv_uv = venv_path / "Scripts" / "uv.exe"
+    else:
+        venv_uv = venv_path / "bin" / "uv"
+    
     # Install PyTorch with CUDA support and other dependencies
     print("Installing PyTorch with CUDA support and dependencies...")
     # Install PyTorch with CUDA 12.1 support (latest stable version)
-    if not run_command([str(venv_python), "-m", "pip", "install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cu121"]):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cu121"]):
         print("Failed to install PyTorch")
         return 1
     
-    if not run_command([str(venv_python), "-m", "pip", "install", "numpy"]):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "numpy"]):
         print("Failed to install numpy")
         return 1
     
-    if not run_command([str(venv_python), "-m", "pip", "install", "scipy"]):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "scipy"]):
         print("Failed to install scipy")
         return 1
     
     # Install custom torchdiffeq fork with vmap support
     print("Installing torchdiffeq with vmap support...")
-    if not run_command([str(venv_python), "-m", "pip", "install", "git+https://github.com/utkarsh530/torchdiffeq.git@u/vmap"]):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "git+https://github.com/utkarsh530/torchdiffeq.git@u/vmap"]):
         print("Failed to install torchdiffeq")
         return 1
     

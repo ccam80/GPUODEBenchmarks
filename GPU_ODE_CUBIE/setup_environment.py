@@ -57,18 +57,32 @@ def main():
             print("Failed to create virtual environment")
             return 1
     
-    # Determine the correct path for the virtual environment Python
+    # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
     if is_windows:
         venv_python = venv_path / "Scripts" / "python.exe"
+        venv_pip = venv_path / "Scripts" / "pip.exe"
     else:
         venv_python = venv_path / "bin" / "python"
+        venv_pip = venv_path / "bin" / "pip"
     
-    # Upgrade pip
+    # Upgrade pip using python -m pip (required for proper upgrade)
     print("Upgrading pip...")
     if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
+    
+    # Install uv package manager
+    print("Installing uv package manager...")
+    if not run_command([str(venv_pip), "install", "uv"]):
+        print("Failed to install uv")
+        return 1
+    
+    # Determine uv executable path
+    if is_windows:
+        venv_uv = venv_path / "Scripts" / "uv.exe"
+    else:
+        venv_uv = venv_path / "bin" / "uv"
     
     # Check if git is available
     if not shutil.which("git"):
@@ -87,9 +101,9 @@ def main():
             print("Error: Failed to clone cubie repository")
             return 1
     
-    # Install cubie from source
+    # Install cubie from source using uv
     print("Installing cubie and dependencies...")
-    if not run_command([str(venv_python), "-m", "pip", "install", "-e", ".[dev]"], cwd=cubie_dir):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "-e", ".[dev]"], cwd=cubie_dir):
         print("Failed to install cubie")
         return 1
     
