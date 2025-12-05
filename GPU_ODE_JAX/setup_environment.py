@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cross-platform setup script for JAX (Diffrax) ODE benchmarking environment.
-Works on both Linux and Windows.
+Works on Linux, Windows, and macOS.
 """
 import os
 import sys

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cross-platform setup script for Julia environment for GPU ODE benchmarking.
-Works on both Linux and Windows.
+Works on Linux, Windows, and macOS.
 """
 import os
 import sys

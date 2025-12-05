@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Master script to setup all GPU ODE benchmark environments.
-Cross-platform: Works on both Linux and Windows.
+Cross-platform: Works on Linux, Windows, and macOS.
 """
 import os
 import sys
