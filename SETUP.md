@@ -6,6 +6,12 @@ This guide explains how to set up the environments for all GPU ODE benchmark pac
 
 To set up all environments at once, run:
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 setup_all_environments.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./setup_all_environments.sh
 ```
@@ -22,6 +28,12 @@ You can also set up each package environment individually:
 
 ### CUBIE
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_CUBIE/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_CUBIE/setup_environment.sh
 ```
@@ -31,10 +43,19 @@ This will:
 - Install `uv` package manager
 - Clone and install the CUBIE library from source
 
-To activate: `source GPU_ODE_CUBIE/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_CUBIE/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_CUBIE\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_CUBIE\venv\Scripts\Activate.ps1`
 
 ### JAX (Diffrax)
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_JAX/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_JAX/setup_environment.sh
 ```
@@ -45,10 +66,19 @@ This will:
 - Install JAX with CUDA support
 - Install Diffrax, Equinox, and other dependencies
 
-To activate: `source GPU_ODE_JAX/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_JAX/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_JAX\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_JAX\venv\Scripts\Activate.ps1`
 
 ### PyTorch (torchdiffeq)
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 GPU_ODE_PyTorch/setup_environment.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./GPU_ODE_PyTorch/setup_environment.sh
 ```
@@ -59,10 +89,19 @@ This will:
 - Install PyTorch with CUDA support
 - Install the custom torchdiffeq fork with vmap support
 
-To activate: `source GPU_ODE_PyTorch/venv/bin/activate`
+To activate:
+- Linux/macOS: `source GPU_ODE_PyTorch/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_PyTorch\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_PyTorch\venv\Scripts\Activate.ps1`
 
 ### Julia
 
+**Cross-platform (Windows/Linux/macOS):**
+```bash
+python3 setup_julia.py
+```
+
+**Linux/macOS (bash):**
 ```bash
 ./setup_julia.sh
 ```
