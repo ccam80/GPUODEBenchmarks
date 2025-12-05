@@ -164,10 +164,19 @@ julia --project=. -e 'using DiffEqGPU, CUDA; println("Julia OK")'
 ### Python Virtual Environments
 
 If a setup fails, you can clean up and retry:
+
+**Linux/macOS:**
 ```bash
 rm -rf GPU_ODE_CUBIE/venv GPU_ODE_CUBIE/cubie
 rm -rf GPU_ODE_JAX/venv
 rm -rf GPU_ODE_PyTorch/venv
+```
+
+**Windows (PowerShell):**
+```powershell
+Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv, GPU_ODE_CUBIE\cubie
+Remove-Item -Recurse -Force GPU_ODE_JAX\venv
+Remove-Item -Recurse -Force GPU_ODE_PyTorch\venv
 ```
 
 Then re-run the appropriate setup script.
@@ -196,3 +205,18 @@ nvcc --version
 - The CUBIE setup clones the repository into `GPU_ODE_CUBIE/cubie/`
 - Virtual environment and cloned repository directories are excluded from git via `.gitignore`
 - The `uv` package manager is used for faster Python package installation
+
+## Platform Compatibility
+
+The repository now includes two versions of setup scripts:
+
+1. **Python scripts** (`.py` files) - **Recommended for all users**
+   - Work on Linux, Windows, and macOS
+   - Automatically detect the operating system and use appropriate paths
+   - Can be run with `python3 script_name.py`
+   
+2. **Bash scripts** (`.sh` files) - **Linux/macOS only**
+   - Original scripts that work on Unix-like systems
+   - Can be run with `./script_name.sh` or `bash script_name.sh`
+
+Both versions provide identical functionality. The Python scripts are recommended as they work across all platforms.
