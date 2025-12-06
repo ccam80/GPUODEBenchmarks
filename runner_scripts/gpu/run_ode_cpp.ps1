@@ -23,13 +23,22 @@ while ($a -le $MaxA) {
     
     # Build and run with RK4
     Push-Location GPU_ODE_MPGOS
-    nmake /f Makefile clean 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        # If nmake fails, try make (for MinGW or similar)
+    $useMake = $false
+    if (Get-Command nmake -ErrorAction SilentlyContinue) {
+        nmake /f Makefile clean 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            nmake /f Makefile
+        } else {
+            $useMake = $true
+        }
+    } else {
+        $useMake = $true
+    }
+    
+    if ($useMake) {
+        # Use make (for MinGW or similar)
         make clean
         make
-    } else {
-        nmake /f Makefile
     }
     Pop-Location
     
@@ -46,13 +55,22 @@ while ($a -le $MaxA) {
     
     # Build and run with RKCK45
     Push-Location GPU_ODE_MPGOS
-    nmake /f Makefile clean 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        # If nmake fails, try make (for MinGW or similar)
+    $useMake = $false
+    if (Get-Command nmake -ErrorAction SilentlyContinue) {
+        nmake /f Makefile clean 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            nmake /f Makefile
+        } else {
+            $useMake = $true
+        }
+    } else {
+        $useMake = $true
+    }
+    
+    if ($useMake) {
+        # Use make (for MinGW or similar)
         make clean
         make
-    } else {
-        nmake /f Makefile
     }
     Pop-Location
     

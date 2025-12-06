@@ -61,10 +61,14 @@ if /i "%lang%"=="julia" (
         )
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     )
-) else if /i "%lang%"=="jax" goto check_ode_gpu
-) else if /i "%lang%"=="pytorch" goto check_ode_gpu
-) else if /i "%lang%"=="cpp" goto check_ode_gpu
-) else if /i "%lang%"=="cubie" goto check_ode_gpu
+) else if /i "%lang%"=="jax" (
+    goto check_ode_gpu
+) else if /i "%lang%"=="pytorch" (
+    goto check_ode_gpu
+) else if /i "%lang%"=="cpp" (
+    goto check_ode_gpu
+) else if /i "%lang%"=="cubie" (
+    goto check_ode_gpu
 ) else (
     goto end_script
 )
@@ -72,15 +76,22 @@ if /i "%lang%"=="julia" (
 goto end_script
 
 :check_ode_gpu
-if not "%model%"=="ode" goto unsupported
-if not "%dev%"=="gpu" goto unsupported
+if /i not "%model%"=="ode" goto unsupported
+if /i not "%dev%"=="gpu" goto unsupported
+
+REM Convert language name to uppercase for data folder
+set data_lang=%lang%
+if /i "%lang%"=="jax" set data_lang=JAX
+if /i "%lang%"=="pytorch" set data_lang=PYTORCH
+if /i "%lang%"=="cpp" set data_lang=CPP
+if /i "%lang%"=="cubie" set data_lang=CUBIE
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
-if exist "data\%lang%\" (
-    del /q "data\%lang%\*" 2>nul
-    if not exist "data\%lang%\" mkdir "data\%lang%"
+if exist "data\%data_lang%\" (
+    del /q "data\%data_lang%\*" 2>nul
+    if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
 ) else (
-    mkdir "data\%lang%"
+    mkdir "data\%data_lang%"
 )
 call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
 goto end_script
