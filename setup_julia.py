@@ -45,18 +45,7 @@ def main():
     if not run_command(["julia", "--version"]):
         return 1
     
-    # Instantiate and precompile the main project
-    print("Installing Julia packages for main project...")
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        "using Pkg; Pkg.instantiate(); Pkg.resolve(); Pkg.precompile()"
-    ]
-    if not run_command(julia_cmd):
-        print("Failed to install Julia packages")
-        return 1
-    
-    # Add CUDA for GPU support (NVIDIA)
+    # Add CUDA first (before other dependencies to avoid compatibility issues)
     print("Adding CUDA package for GPU support...")
     julia_cmd = [
         "julia", "--project=.",
@@ -66,6 +55,46 @@ def main():
     if not run_command(julia_cmd):
         print("Failed to add CUDA package")
         return 1
+    
+    # Manually add all dependencies without using pinned versions
+    print("Adding Julia packages manually (without pinned versions)...")
+    packages = [
+        "BenchmarkTools",
+        "CSV",
+        "Catalyst",
+        "DataFrames",
+        "DiffEqBase",
+        "DiffEqDevTools",
+        "DiffEqGPU",
+        "ModelingToolkit",
+        "OrdinaryDiffEq",
+        "ReactionNetworkImporters",
+        "RecursiveArrayTools",
+        "SciMLBase",
+        "SimpleDiffEq",
+        "StaticArrays"
+    ]
+    
+    for package in packages:
+        print(f"Adding {package}...")
+        julia_cmd = [
+            "julia", "--project=.",
+            "-e",
+            f'using Pkg; Pkg.add("{package}")'
+        ]
+        if not run_command(julia_cmd):
+            print(f"Warning: Failed to add {package}")
+            # Continue with other packages even if one fails
+    
+    # Precompile all packages
+    print("Precompiling packages...")
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        "using Pkg; Pkg.precompile()"
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Precompilation had issues, but continuing...")
     
     print("\nJulia environment setup complete!")
     print("To test the installation, run:")
