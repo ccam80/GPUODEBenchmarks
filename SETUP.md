@@ -303,7 +303,10 @@ This error occurs when NVCC cannot find the Microsoft Visual C++ compiler. Solut
 3. **Run vcvars64.bat before compiling**:
    ```powershell
    # Adjust path based on your Visual Studio installation
-   "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+   # Examples:
+   # Visual Studio 2022 Community: "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+   # Visual Studio 2019 Professional: "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvars64.bat"
+   # Build Tools: "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
    cd path\to\GPUODEBenchmarks
    # Now run your build commands
    ```

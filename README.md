@@ -184,10 +184,7 @@ If `nvcc` is not found, install the CUDA Toolkit from
 
 **Windows users**: On Windows, `nvcc` requires Microsoft Visual C++ compiler (`cl.exe`) to be in your PATH. The easiest way is to use "Developer Command Prompt for VS" or "Developer PowerShell for VS" when running benchmarks. See [SETUP.md](SETUP.md#mpgos-c) for detailed setup instructions.
 
-The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file
-`GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. The MPGOS
-programs can be run with the same bash script by changing the arguments
-as:
+The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file `GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. The MPGOS programs can be run with the same bash script by changing the arguments as:
 ```bash
     $ bash ./run_benchmark.sh -l cpp -d gpu -m ode
 ```
