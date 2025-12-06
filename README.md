@@ -17,6 +17,8 @@ The methods are written in Julia and are part of the repository
 consists of the raw data, such as simulation times and plots mentioned
 in the paper. The benchmark suite is supported on Linux, Windows, and macOS.
 
+**Windows Users:** Windows batch (.bat) versions of all run scripts are provided alongside the bash (.sh) scripts. All benchmark commands documented below have both Linux/macOS and Windows examples.
+
 ## Quick Setup (Cross-Platform)
 
 For a streamlined setup experience on any platform, use the Python-based setup scripts:
@@ -93,13 +95,29 @@ platforms and said features in the paper.
 ### Running All Benchmarks
 
 To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, and CUBIE) sequentially in one command:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_all_benchmarks.sh
 ```
+
+**On Windows:**
+```cmd
+    > run_all_benchmarks.bat
+```
+
 This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag can be used to specify the upper bound of trajectories:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_all_benchmarks.sh -n $((2**20))
 ```
+
+**On Windows:**
+```cmd
+    > run_all_benchmarks.bat -n 1048576
+```
+
 Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
 
 ### Benchmarking Julia (DiffEqGPU.jl) methods
@@ -132,9 +150,17 @@ can generate the timings of ODE solvers written in Julia. There is a
 script to benchmark ODE solvers for the different number of trajectories
 to demonstrate scalability and performance. The script invocation and
 timings can be generated through the following:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l julia -d gpu -m ode
 ```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l julia -d gpu -m ode
+```
+
 It might take around 20 minutes to finish. The flag `-n N` can be used
 to specify the upper bound of the trajectories to benchmark. By default
 $N = 2^{24}$, where the simulation runs for $n \in 8 \le n < N$, with
@@ -146,12 +172,19 @@ the \".txt\" file will be the number of trajectories, and the section
 column will contain the time in milliseconds.
 
 Additionally, to benchmark ODE solvers for other backends:
+
+**On Linux/macOS:**
 ```bash
     $ N = $((2**24))
-    Benchmark
     $ backend = "Metal"
-    $ ./runner_scripts/gpu/run_ode_mult_device.sh\
-    $N $backend
+    $ ./runner_scripts/gpu/run_ode_mult_device.sh $N $backend
+```
+
+**On Windows:**
+```cmd
+    > set N=16777216
+    > set backend=Metal
+    > runner_scripts\gpu\run_ode_mult_device.bat %N% %backend%
 ```
 ### Benchmarking C++ (MPGOS) ODE solvers
 
@@ -172,12 +205,21 @@ for installation.
 
 The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file
 `GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. However, the MPGOS
-programs can be run with the same bash script by changing the arguments
-as:
+programs can be run with the same script by changing the arguments as:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l cpp -d gpu -m ode
 ```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l cpp -d gpu -m ode
+```
+
 It will generate the data files in the `data/cpp` folder.
+
+**Note for Windows:** The C++ runner script uses PowerShell for file manipulation. Ensure PowerShell is available and that the execution policy allows running scripts.
 
 ### Benchmarking JAX (Diffrax) ODE solvers
 
@@ -194,8 +236,15 @@ Diffrax library. The GitHub
 is a guide to follow if the installation fails.
 
 For our purposes, we can benchmark the solvers by:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l jax -d gpu -m ode
+```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l jax -d gpu -m ode
 ```
 
 #### A note on JIT ordering in JAX
@@ -220,18 +269,33 @@ library parts. To download it:
     utkarsh530/torchdiffeq.git@u/vmap
 ```
 Then run the benchmarks by:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l pytorch -d gpu -m ode
+```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l pytorch -d gpu -m ode
 ```
 ## Comparing GPU acceleration of ODEs with CPUs
 
 The benchmark suite can also be used to test the GPU acceleration of ODE
 solvers in comparison with CPUs. The process for generating simulation
-times for GPUs can be done by following the GPU section mentioned earlier. The following bash script
+times for GPUs can be done by following the GPU section mentioned earlier. The following script
 allows the generation of CPU simulation times for ODEs:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l julia -d cpu -m ode
 ```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l julia -d cpu -m ode
+```
+
 The simulation times will be generated in `data/CPU`. Each of the
 workflow takes approximately 20 minutes to finish.
 
@@ -241,13 +305,29 @@ The SDE solvers in Julia are benchmarked by comparing them to the
 CPU-accelerated simulation. This will benchmark the linear SDE with
 three states, as described in the \"Benchmarks and case studies\"
 section. To generate simulation times for GPU, do the following:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l julia -d gpu -m sde
 ```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l julia -d gpu -m sde
+```
+
 We can generate the simulation times for CPU-accelerated codes through the following:
+
+**On Linux/macOS:**
 ```bash
     $ bash ./run_benchmark.sh -l julia -d cpu -m sde
 ```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l julia -d cpu -m sde
+```
+
 The results will get generated in `data/SDE` and `data/CPU/SDE`, taking
 around 10 minutes to complete.
 
