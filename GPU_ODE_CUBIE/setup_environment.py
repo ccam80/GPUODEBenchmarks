@@ -12,24 +12,21 @@ from pathlib import Path
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
-    """Run a command and handle errors."""
+    """Run a command and handle errors, streaming output in real-time."""
     try:
+        # Stream output directly to terminal for real-time feedback
         result = subprocess.run(
             cmd,
             shell=shell,
             check=check,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'  # Replace encoding errors instead of failing
         )
-        if result.stdout:
-            print(result.stdout, end='')
         return result.returncode == 0
     except subprocess.CalledProcessError as e:
         print(f"Error: Command failed with exit code {e.returncode}")
-        if e.stderr:
-            print(e.stderr)
         return False
 
 
@@ -47,12 +44,15 @@ def main():
         print(f"Error: python3 is not installed: {e}")
         return 1
     
-    # Create venv
-    print("Creating virtual environment...")
+    # Create or use existing venv
     venv_path = script_dir / "venv"
-    if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
-        print("Failed to create virtual environment")
-        return 1
+    if venv_path.exists():
+        print("Virtual environment already exists, using existing one...")
+    else:
+        print("Creating virtual environment...")
+        if not run_command([sys.executable, "-m", "venv", str(venv_path)]):
+            print("Failed to create virtual environment")
+            return 1
     
     # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
@@ -63,12 +63,14 @@ def main():
         venv_python = venv_path / "bin" / "python"
         venv_pip = venv_path / "bin" / "pip"
     
-    # Upgrade pip and install uv
-    print("Installing uv package manager...")
-    if not run_command([str(venv_pip), "install", "--upgrade", "pip"]):
+    # Upgrade pip using python -m pip (required for proper upgrade)
+    print("Upgrading pip...")
+    if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
     
+    # Install uv package manager
+    print("Installing uv package manager...")
     if not run_command([str(venv_pip), "install", "uv"]):
         print("Failed to install uv")
         return 1
@@ -86,19 +88,19 @@ def main():
         return 1
     
     # Clone cubie source
-    print("Cloning cubie repository...")
     cubie_dir = script_dir / "cubie"
     if cubie_dir.exists():
-        print("Cubie directory already exists, removing...")
-        shutil.rmtree(cubie_dir)
-    
-    if not run_command(["git", "clone", "https://github.com/ccam80/cubie.git"]):
-        print("Error: Failed to clone cubie repository")
-        return 1
+        print("Cubie directory already exists, skipping clone...")
+        print("(To force re-clone, delete the 'cubie' directory first)")
+    else:
+        print("Cloning cubie repository...")
+        if not run_command(["git", "clone", "https://github.com/ccam80/cubie.git"]):
+            print("Error: Failed to clone cubie repository")
+            return 1
     
     # Install cubie from source using uv
     print("Installing cubie and dependencies...")
-    if not run_command([str(venv_uv), "pip", "install", "-e", ".[dev]"], cwd=cubie_dir):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "-e", ".[dev]"], cwd=cubie_dir):
         print("Failed to install cubie")
         return 1
     

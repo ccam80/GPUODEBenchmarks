@@ -6,14 +6,8 @@ This guide explains how to set up the environments for all GPU ODE benchmark pac
 
 To set up all environments at once, run:
 
-**Cross-platform (Windows/Linux/macOS):**
 ```bash
 python3 setup_all_environments.py
-```
-
-**Linux/macOS (bash):**
-```bash
-./setup_all_environments.sh
 ```
 
 This master script will automatically:
@@ -28,14 +22,8 @@ You can also set up each package environment individually:
 
 ### CUBIE
 
-**Cross-platform (Windows/Linux/macOS):**
 ```bash
 python3 GPU_ODE_CUBIE/setup_environment.py
-```
-
-**Linux/macOS (bash):**
-```bash
-./GPU_ODE_CUBIE/setup_environment.sh
 ```
 
 This will:
@@ -50,14 +38,8 @@ To activate:
 
 ### JAX (Diffrax)
 
-**Cross-platform (Windows/Linux/macOS):**
 ```bash
 python3 GPU_ODE_JAX/setup_environment.py
-```
-
-**Linux/macOS (bash):**
-```bash
-./GPU_ODE_JAX/setup_environment.sh
 ```
 
 This will:
@@ -73,14 +55,8 @@ To activate:
 
 ### PyTorch (torchdiffeq)
 
-**Cross-platform (Windows/Linux/macOS):**
 ```bash
 python3 GPU_ODE_PyTorch/setup_environment.py
-```
-
-**Linux/macOS (bash):**
-```bash
-./GPU_ODE_PyTorch/setup_environment.sh
 ```
 
 This will:
@@ -96,20 +72,14 @@ To activate:
 
 ### Julia
 
-**Cross-platform (Windows/Linux/macOS):**
 ```bash
 python3 setup_julia.py
 ```
 
-**Linux/macOS (bash):**
-```bash
-./setup_julia.sh
-```
-
 This will:
-- Install all Julia packages from `Project.toml`
-- Add CUDA.jl for GPU support
-- Resolve and precompile all packages
+- Add CUDA.jl for GPU support first (to avoid compatibility issues)
+- Manually add all required Julia packages without pinned versions
+- Precompile all packages
 
 To use: `julia --project=.`
 
@@ -208,15 +178,4 @@ nvcc --version
 
 ## Platform Compatibility
 
-The repository now includes two versions of setup scripts:
-
-1. **Python scripts** (`.py` files) - **Recommended for all users**
-   - Work on Linux, Windows, and macOS
-   - Automatically detect the operating system and use appropriate paths
-   - Can be run with `python3 script_name.py`
-   
-2. **Bash scripts** (`.sh` files) - **Linux/macOS only**
-   - Original scripts that work on Unix-like systems
-   - Can be run with `./script_name.sh` or `bash script_name.sh`
-
-Both versions provide identical functionality. The Python scripts are recommended as they work across all platforms.
+All setup scripts are written in Python and work cross-platform on Linux, Windows, and macOS. They automatically detect the operating system and use appropriate paths.

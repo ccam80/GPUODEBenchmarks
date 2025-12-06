@@ -11,24 +11,21 @@ from pathlib import Path
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
-    """Run a command and handle errors."""
+    """Run a command and handle errors, streaming output in real-time."""
     try:
+        # Stream output directly to terminal for real-time feedback
         result = subprocess.run(
             cmd,
             shell=shell,
             check=check,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'  # Replace encoding errors instead of failing
         )
-        if result.stdout:
-            print(result.stdout, end='')
         return result.returncode == 0
     except subprocess.CalledProcessError as e:
         print(f"Error: Command failed with exit code {e.returncode}")
-        if e.stderr:
-            print(e.stderr)
         return False
 
 
@@ -48,18 +45,7 @@ def main():
     if not run_command(["julia", "--version"]):
         return 1
     
-    # Instantiate and precompile the main project
-    print("Installing Julia packages for main project...")
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        "using Pkg; Pkg.instantiate(); Pkg.resolve(); Pkg.precompile()"
-    ]
-    if not run_command(julia_cmd):
-        print("Failed to install Julia packages")
-        return 1
-    
-    # Add CUDA for GPU support (NVIDIA)
+    # Add CUDA first (before other dependencies to avoid compatibility issues)
     print("Adding CUDA package for GPU support...")
     julia_cmd = [
         "julia", "--project=.",
@@ -69,6 +55,68 @@ def main():
     if not run_command(julia_cmd):
         print("Failed to add CUDA package")
         return 1
+    
+    # Manually add all dependencies without using pinned versions
+    # Adding packages in groups for better efficiency while handling failures gracefully
+    print("Adding Julia packages manually (without pinned versions)...")
+    
+    # Group 1: Core utilities (less likely to conflict)
+    print("Adding core utility packages...")
+    core_packages = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays"]
+    pkg_list = ", ".join([f'"{p}"' for p in core_packages])
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        f'using Pkg; Pkg.add([{pkg_list}])'
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Failed to add some core packages, trying individually...")
+        for package in core_packages:
+            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
+            run_command(julia_cmd)
+    
+    # Group 2: DiffEq ecosystem packages
+    print("Adding DiffEq packages...")
+    diffeq_packages = [
+        "DiffEqBase",
+        "DiffEqDevTools", 
+        "DiffEqGPU",
+        "OrdinaryDiffEq",
+        "RecursiveArrayTools",
+        "SciMLBase",
+        "SimpleDiffEq"
+    ]
+    pkg_list = ", ".join([f'"{p}"' for p in diffeq_packages])
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        f'using Pkg; Pkg.add([{pkg_list}])'
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Failed to add some DiffEq packages, trying individually...")
+        for package in diffeq_packages:
+            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
+            run_command(julia_cmd)
+    
+    # Group 3: Modeling packages (may have more dependencies)
+    print("Adding modeling packages...")
+    modeling_packages = ["Catalyst", "ModelingToolkit", "ReactionNetworkImporters"]
+    for package in modeling_packages:
+        print(f"Adding {package}...")
+        julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
+        if not run_command(julia_cmd):
+            print(f"Warning: Failed to add {package}")
+            # Continue with other packages even if one fails
+    
+    # Precompile all packages
+    print("Precompiling packages...")
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        "using Pkg; Pkg.precompile()"
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Precompilation had issues, but continuing...")
     
     print("\nJulia environment setup complete!")
     print("To test the installation, run:")
