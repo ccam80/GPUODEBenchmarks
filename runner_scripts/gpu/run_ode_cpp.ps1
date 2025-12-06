@@ -4,6 +4,28 @@ param(
     [int]$MaxA
 )
 
+function Build-Project {
+    Push-Location GPU_ODE_MPGOS
+    $useMake = $false
+    if (Get-Command nmake -ErrorAction SilentlyContinue) {
+        nmake /f Makefile clean 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            nmake /f Makefile
+        } else {
+            $useMake = $true
+        }
+    } else {
+        $useMake = $true
+    }
+    
+    if ($useMake) {
+        # Use make (for MinGW or similar make implementations)
+        make clean
+        make
+    }
+    Pop-Location
+}
+
 $a = 8
 
 while ($a -le $MaxA) {
@@ -22,26 +44,7 @@ while ($a -le $MaxA) {
     $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
     
     # Build and run with RK4
-    Push-Location GPU_ODE_MPGOS
-    $useGnuMake = $false
-    if (Get-Command nmake -ErrorAction SilentlyContinue) {
-        nmake /f Makefile clean 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            nmake /f Makefile
-        } else {
-            $useGnuMake = $true
-        }
-    } else {
-        $useGnuMake = $true
-    }
-    
-    if ($useGnuMake) {
-        # Use make (for MinGW or similar)
-        make clean
-        make
-    }
-    Pop-Location
-    
+    Build-Project
     & "GPU_ODE_MPGOS\Lorenz.exe" $a
     
     # Read the file content again
@@ -54,26 +57,7 @@ while ($a -le $MaxA) {
     $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
     
     # Build and run with RKCK45
-    Push-Location GPU_ODE_MPGOS
-    $useGnuMake = $false
-    if (Get-Command nmake -ErrorAction SilentlyContinue) {
-        nmake /f Makefile clean 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            nmake /f Makefile
-        } else {
-            $useGnuMake = $true
-        }
-    } else {
-        $useGnuMake = $true
-    }
-    
-    if ($useGnuMake) {
-        # Use make (for MinGW or similar)
-        make clean
-        make
-    }
-    Pop-Location
-    
+    Build-Project
     & "GPU_ODE_MPGOS\Lorenz.exe" $a
     
     # Increment the value

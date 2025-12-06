@@ -175,8 +175,8 @@ Additionally, to benchmark ODE solvers for other backends:
 
 **On Linux/macOS:**
 ```bash
-    $ N = $((2**24))
-    $ backend = "Metal"
+    $ N=$((2**24))
+    $ backend="Metal"
     $ ./runner_scripts/gpu/run_ode_mult_device.sh $N $backend
 ```
 
