@@ -12,24 +12,21 @@ from pathlib import Path
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
-    """Run a command and handle errors."""
+    """Run a command and handle errors, streaming output in real-time."""
     try:
+        # Stream output directly to terminal for real-time feedback
         result = subprocess.run(
             cmd,
             shell=shell,
             check=check,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'  # Replace encoding errors instead of failing
         )
-        if result.stdout:
-            print(result.stdout, end='')
         return result.returncode == 0
     except subprocess.CalledProcessError as e:
         print(f"Error: Command failed with exit code {e.returncode}")
-        if e.stderr:
-            print(e.stderr)
         return False
 
 

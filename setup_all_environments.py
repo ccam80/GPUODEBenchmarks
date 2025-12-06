@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 def run_setup_script(script_path, name):
-    """Run a setup script and return success status."""
+    """Run a setup script and return success status, streaming output in real-time."""
     print("=" * 50)
     print(f"Setting up {name} environment...")
     print("=" * 50)
@@ -21,18 +21,17 @@ def run_setup_script(script_path, name):
         return False
     
     try:
+        # Stream output directly to terminal for real-time feedback
         result = subprocess.run(
             [sys.executable, str(script_path)],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'  # Replace encoding errors instead of failing
         )
-        print(result.stdout, end='')
         print(f"✓ {name} setup completed successfully")
         return True
     except subprocess.CalledProcessError as e:
-        print(e.stdout if e.stdout else "")
         print(f"✗ {name} setup failed")
         return False
     except Exception as e:
