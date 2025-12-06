@@ -27,7 +27,7 @@ python3 setup_all_environments.py
 
 This will set up all environments (CUBIE, JAX, PyTorch, and Julia) automatically. 
 
-**Note**: MPGOS (C++) requires manual setup of build tools (CUDA compiler and C++ compiler). See the [MPGOS setup section in SETUP.md](SETUP.md#mpgos-c) for detailed instructions.
+**Note**: MPGOS (C++) requires manual setup of build tools (CUDA compiler and C++ compiler). See the [MPGOS setup section in SETUP.md](SETUP.md#mpgos-c-1) for detailed instructions.
 
 For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
 
@@ -182,7 +182,7 @@ The installation can be checked through:
 If `nvcc` is not found, install the CUDA Toolkit from
 [`https://developer.nvidia.com/cuda-downloads`](https://developer.nvidia.com/cuda-downloads).
 
-**Windows users**: On Windows, `nvcc` requires Microsoft Visual C++ compiler (`cl.exe`) to be in your PATH. The easiest way is to use "Developer Command Prompt for VS" or "Developer PowerShell for VS" when running benchmarks. See [SETUP.md](SETUP.md#mpgos-c) for detailed setup instructions.
+**Windows users**: On Windows, `nvcc` requires Microsoft Visual C++ compiler (`cl.exe`) to be in your PATH. The easiest way is to use "Developer Command Prompt for VS" or "Developer PowerShell for VS" when running benchmarks. See [SETUP.md](SETUP.md#mpgos-c-1) for detailed setup instructions.
 
 The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file `GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. The MPGOS programs can be run with the same bash script by changing the arguments as:
 ```bash

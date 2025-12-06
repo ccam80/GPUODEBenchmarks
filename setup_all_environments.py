@@ -49,7 +49,6 @@ def main():
     print()
     print("Note: MPGOS (C++) requires manual setup of build tools.")
     print("See SETUP.md for MPGOS setup instructions.")
-    print("=" * 50)
     print()
     
     # Track failures
