@@ -57,31 +57,53 @@ def main():
         return 1
     
     # Manually add all dependencies without using pinned versions
+    # Adding packages in groups for better efficiency while handling failures gracefully
     print("Adding Julia packages manually (without pinned versions)...")
-    packages = [
-        "BenchmarkTools",
-        "CSV",
-        "Catalyst",
-        "DataFrames",
+    
+    # Group 1: Core utilities (less likely to conflict)
+    print("Adding core utility packages...")
+    core_packages = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays"]
+    pkg_list = ", ".join([f'"{p}"' for p in core_packages])
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        f'using Pkg; Pkg.add([{pkg_list}])'
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Failed to add some core packages, trying individually...")
+        for package in core_packages:
+            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
+            run_command(julia_cmd)
+    
+    # Group 2: DiffEq ecosystem packages
+    print("Adding DiffEq packages...")
+    diffeq_packages = [
         "DiffEqBase",
-        "DiffEqDevTools",
+        "DiffEqDevTools", 
         "DiffEqGPU",
-        "ModelingToolkit",
         "OrdinaryDiffEq",
-        "ReactionNetworkImporters",
         "RecursiveArrayTools",
         "SciMLBase",
-        "SimpleDiffEq",
-        "StaticArrays"
+        "SimpleDiffEq"
     ]
+    pkg_list = ", ".join([f'"{p}"' for p in diffeq_packages])
+    julia_cmd = [
+        "julia", "--project=.",
+        "-e",
+        f'using Pkg; Pkg.add([{pkg_list}])'
+    ]
+    if not run_command(julia_cmd):
+        print("Warning: Failed to add some DiffEq packages, trying individually...")
+        for package in diffeq_packages:
+            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
+            run_command(julia_cmd)
     
-    for package in packages:
+    # Group 3: Modeling packages (may have more dependencies)
+    print("Adding modeling packages...")
+    modeling_packages = ["Catalyst", "ModelingToolkit", "ReactionNetworkImporters"]
+    for package in modeling_packages:
         print(f"Adding {package}...")
-        julia_cmd = [
-            "julia", "--project=.",
-            "-e",
-            f'using Pkg; Pkg.add("{package}")'
-        ]
+        julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
         if not run_command(julia_cmd):
             print(f"Warning: Failed to add {package}")
             # Continue with other packages even if one fails
