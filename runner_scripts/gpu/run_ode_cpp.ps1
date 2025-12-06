@@ -23,19 +23,19 @@ while ($a -le $MaxA) {
     
     # Build and run with RK4
     Push-Location GPU_ODE_MPGOS
-    $useMake = $false
+    $useGnuMake = $false
     if (Get-Command nmake -ErrorAction SilentlyContinue) {
         nmake /f Makefile clean 2>$null
         if ($LASTEXITCODE -eq 0) {
             nmake /f Makefile
         } else {
-            $useMake = $true
+            $useGnuMake = $true
         }
     } else {
-        $useMake = $true
+        $useGnuMake = $true
     }
     
-    if ($useMake) {
+    if ($useGnuMake) {
         # Use make (for MinGW or similar)
         make clean
         make
@@ -55,19 +55,19 @@ while ($a -le $MaxA) {
     
     # Build and run with RKCK45
     Push-Location GPU_ODE_MPGOS
-    $useMake = $false
+    $useGnuMake = $false
     if (Get-Command nmake -ErrorAction SilentlyContinue) {
         nmake /f Makefile clean 2>$null
         if ($LASTEXITCODE -eq 0) {
             nmake /f Makefile
         } else {
-            $useMake = $true
+            $useGnuMake = $true
         }
     } else {
-        $useMake = $true
+        $useGnuMake = $true
     }
     
-    if ($useMake) {
+    if ($useGnuMake) {
         # Use make (for MinGW or similar)
         make clean
         make

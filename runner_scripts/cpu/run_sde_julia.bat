@@ -6,12 +6,8 @@ set max_a=%1
 set path=CPU
 
 REM Create or clear data directory
-if exist "data\%path%\SDE\" (
-    del /q "data\%path%\SDE\*" 2>nul
-    if not exist "data\%path%\SDE\" mkdir "data\%path%\SDE"
-) else (
-    mkdir "data\%path%\SDE"
-)
+if not exist "data\%path%\SDE\" mkdir "data\%path%\SDE"
+del /q "data\%path%\SDE\*" 2>nul
 
 :loop
 if %a% gtr %max_a% goto end

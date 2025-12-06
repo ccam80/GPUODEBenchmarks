@@ -53,12 +53,8 @@ if /i "%lang%"=="julia" (
     ) else if /i "%model%"=="sde" (
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     ) else (
-        if exist "data\Julia\" (
-            del /q "data\Julia\*" 2>nul
-            if not exist "data\Julia\" mkdir "data\Julia"
-        ) else (
-            mkdir "data\Julia"
-        )
+        if not exist "data\Julia\" mkdir "data\Julia"
+        del /q "data\Julia\*" 2>nul
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     )
 ) else if /i "%lang%"=="jax" (
@@ -87,12 +83,8 @@ if /i "%lang%"=="cpp" set data_lang=CPP
 if /i "%lang%"=="cubie" set data_lang=CUBIE
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
-if exist "data\%data_lang%\" (
-    del /q "data\%data_lang%\*" 2>nul
-    if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
-) else (
-    mkdir "data\%data_lang%"
-)
+if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
+del /q "data\%data_lang%\*" 2>nul
 call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
 goto end_script
 

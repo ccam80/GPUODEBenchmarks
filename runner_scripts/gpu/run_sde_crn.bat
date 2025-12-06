@@ -8,16 +8,13 @@ set path=SDE
 REM Create or clear data directories
 if exist "data\%path%\CRN\" (
     rmdir /s /q "data\%path%\CRN" 2>nul
-    mkdir "data\%path%\CRN"
-    
-    if exist "data\CPU\%path%\CRN\" (
-        rmdir /s /q "data\CPU\%path%\CRN" 2>nul
-    )
-    mkdir "data\CPU\%path%\CRN"
-) else (
-    mkdir "data\%path%\CRN"
-    mkdir "data\CPU\%path%\CRN"
 )
+mkdir "data\%path%\CRN"
+
+if exist "data\CPU\%path%\CRN\" (
+    rmdir /s /q "data\CPU\%path%\CRN" 2>nul
+)
+mkdir "data\CPU\%path%\CRN"
 
 :loop
 if %a% gtr %max_a% goto end

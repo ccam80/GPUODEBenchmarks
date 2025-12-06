@@ -6,12 +6,8 @@ set max_a=%1
 set path=SDE
 
 REM Create or clear data directory
-if exist "data\%path%\" (
-    del /q "data\%path%\*" 2>nul
-    if not exist "data\%path%\" mkdir "data\%path%"
-) else (
-    mkdir "data\%path%"
-)
+if not exist "data\%path%\" mkdir "data\%path%"
+del /q "data\%path%\*" 2>nul
 
 :loop
 if %a% gtr %max_a% goto end
