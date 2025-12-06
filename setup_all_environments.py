@@ -47,6 +47,9 @@ def main():
     print("Setting up all GPU ODE benchmark environments")
     print("=" * 50)
     print()
+    print("Note: MPGOS (C++) requires manual setup of build tools.")
+    print("See SETUP.md for MPGOS setup instructions.")
+    print()
     
     # Track failures
     failed_setups = []
@@ -107,6 +110,15 @@ def main():
             print("  JAX:     source GPU_ODE_JAX/venv/bin/activate")
             print("  PyTorch: source GPU_ODE_PyTorch/venv/bin/activate")
         print("  Julia:   julia --project=.")
+        print()
+        print("=" * 50)
+        print("Additional Setup Required:")
+        print("=" * 50)
+        print("MPGOS (C++) requires manual setup of build tools:")
+        print("  - CUDA Toolkit (nvcc compiler)")
+        print("  - C++ compiler (GCC/cl.exe/Clang)")
+        print()
+        print("See SETUP.md for detailed MPGOS setup instructions.")
         return 0
     else:
         print("✗ Some environments failed to setup:")
