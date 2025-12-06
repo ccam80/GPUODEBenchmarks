@@ -1,6 +1,6 @@
 #!/bin/bash
 # Activate venv
-source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+source ./GPU_ODE_CUBIE/venv/bin/activate
 
 a=8
 max_a=$1

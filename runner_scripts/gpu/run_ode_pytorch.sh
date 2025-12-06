@@ -1,6 +1,6 @@
 a=8
 max_a=$1
-source ./GPU_ODE_PyTorch/venv_torch/bin/activate
+source ./GPU_ODE_PyTorch/venv/bin/activate
 while [ $a -le $max_a ]
 do
     	# Print the values
