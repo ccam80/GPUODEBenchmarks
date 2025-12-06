@@ -25,7 +25,11 @@ For a streamlined setup experience on any platform, use the Python-based setup s
 python3 setup_all_environments.py
 ```
 
-This will set up all environments (CUBIE, JAX, PyTorch, and Julia) automatically. For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
+This will set up all environments (CUBIE, JAX, PyTorch, and Julia) automatically. 
+
+**Note**: MPGOS (C++) requires manual setup of build tools (CUDA compiler and C++ compiler). See the [MPGOS setup section in SETUP.md](SETUP.md#mpgos-c) for detailed instructions.
+
+For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
 
 ## Installing Julia
 
@@ -155,23 +159,33 @@ Additionally, to benchmark ODE solvers for other backends:
 ```
 ### Benchmarking C++ (MPGOS) ODE solvers
 
-Benchmarking MPGOS ODE solvers requires the CUDA C++ compiler to be
-installed correctly. The recommended CUDA Toolkit version is \>= 11. The
-installation can be checked through:
+Benchmarking MPGOS ODE solvers requires both the CUDA C++ compiler (`nvcc`) and a host C++ compiler to be installed correctly.
+
+**Prerequisites:**
+- CUDA Toolkit 11.x or 12.x (includes `nvcc`)
+- C++ compiler:
+  - **Linux**: GCC (install with `sudo apt-get install build-essential`)
+  - **Windows**: Microsoft Visual C++ from Visual Studio or Build Tools (see [SETUP.md](SETUP.md#mpgos-c) for detailed instructions)
+  - **macOS**: Clang from Xcode Command Line Tools
+
+The installation can be checked through:
 ```bash
-    $ nvcc
-    If the installation exists, it will return 
-    something like this:
-    nvcc fatal   : No input files specified; 
-    use option --help for more information
+    # Check CUDA compiler
+    $ nvcc --version
+    
+    # Check C++ compiler
+    $ gcc --version      # Linux
+    $ cl                 # Windows
+    $ clang --version    # macOS
 ```
-If `nvcc` is not found, the user must install the CUDA Toolkit. The
-NVIDIA's website lists the resource
-[`https://developer.nvidia.com/cuda-downloads`](https://developer.nvidia.com/cuda-downloads)
-for installation.
+
+If `nvcc` is not found, install the CUDA Toolkit from
+[`https://developer.nvidia.com/cuda-downloads`](https://developer.nvidia.com/cuda-downloads).
+
+**Windows users**: On Windows, `nvcc` requires Microsoft Visual C++ compiler (`cl.exe`) to be in your PATH. The easiest way is to use "Developer Command Prompt for VS" or "Developer PowerShell for VS" when running benchmarks. See [SETUP.md](SETUP.md#mpgos-c) for detailed setup instructions.
 
 The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file
-`GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. However, the MPGOS
+`GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. The MPGOS
 programs can be run with the same bash script by changing the arguments
 as:
 ```bash
