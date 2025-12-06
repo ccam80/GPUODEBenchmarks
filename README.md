@@ -431,17 +431,17 @@ trajectories:
 
 ```bash
 # CUBIE
-source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+source ./GPU_ODE_CUBIE/venv/bin/activate
 python3 ./GPU_ODE_CUBIE/bench_cubie.py 32768
 deactivate
 
 # JAX
-source ./GPU_ODE_JAX/venv_jax/bin/activate
+source ./GPU_ODE_JAX/venv/bin/activate
 python3 ./GPU_ODE_JAX/bench_diffrax.py 32768
 deactivate
 
 # PyTorch
-source ./GPU_ODE_PyTorch/venv_torch/bin/activate
+source ./GPU_ODE_PyTorch/venv/bin/activate
 python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
 deactivate
 
@@ -454,7 +454,7 @@ julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768
 After generating the CSV files, use the comparison script to analyze differences:
 
 ```bash
-source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+source ./GPU_ODE_CUBIE/venv/bin/activate
 python3 compare_numerical_results.py
 deactivate
 ```

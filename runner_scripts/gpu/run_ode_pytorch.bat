@@ -5,7 +5,7 @@ set a=8
 set max_a=%1
 
 REM Activate virtual environment
-call GPU_ODE_PyTorch\venv_torch\Scripts\activate.bat
+call GPU_ODE_PyTorch\venv\Scripts\activate.bat
 
 :loop
 if %a% gtr %max_a% goto end

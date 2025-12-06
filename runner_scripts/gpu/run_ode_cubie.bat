@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 REM Activate virtual environment
-call GPU_ODE_CUBIE\venv_cubie\Scripts\activate.bat
+call GPU_ODE_CUBIE\venv\Scripts\activate.bat
 
 set a=8
 set max_a=%1

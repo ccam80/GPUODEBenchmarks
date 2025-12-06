@@ -6,7 +6,7 @@ set max_a=%1
 set XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 REM Activate virtual environment
-call GPU_ODE_JAX\venv_jax\Scripts\activate.bat
+call GPU_ODE_JAX\venv\Scripts\activate.bat
 
 :loop
 if %a% gtr %max_a% goto end
