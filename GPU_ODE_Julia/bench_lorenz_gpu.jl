@@ -98,7 +98,7 @@ println("Allocs: " * string(data.allocs))
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
     data = @benchmark CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
-                           save_everystep=false,
+#                            save_everystep=false,
                            reltol = 1.0f-8,
                            abstol = 1.0f-8,
                            dt = 0.001f0)
