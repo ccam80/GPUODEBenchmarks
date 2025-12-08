@@ -2,11 +2,14 @@ using Pkg
 
 Pkg.instantiate()
 Pkg.precompile()
-using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays, CUDA
+
+using CUDA
+using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays
+
 
 @show ARGS
 #settings
-
+CUDA.allowscalar(false)
 numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 
 function lorenz(u, p, t)
@@ -19,18 +22,26 @@ end
 u0 = @SVector [1.0f0; 0.0f0; 0.0f0]
 tspan = (0.0f0, 1.0f0)
 p = @SArray [21.0f0]
-prob = ODEProblem(lorenz, u0, tspan, p)
+prob = ODEProblem{false}(lorenz, u0, tspan, p)
 
 parameterList = range(0.0f0, stop = 21.0f0, length = numberOfParameters)
+# parameterList_d = cu(collect(parameterList))          # GPU copy of parameter values
 
-prob_func = (prob, i, repeat) -> remake(prob, p = @SArray [parameterList[i]])
-ensembleProb = EnsembleProblem(prob, prob_func = prob_func, safetycopy=false)
+I = 1:numberOfParameters
+probs = map(I) do i
+    DiffEqGPU.make_prob_compatible(remake(prob,p= @SVector [parameterList[i]]))
+    end
+# prob_func = (prob, i, repeat) -> remake(prob, p = view(parameterList_d, i:i))
+# ensembleProb = EnsembleProblem(prob, prob_func = prob_func, safetycopy=false)
+
+
+
+probs = cu(probs)
 
 @info "Solving the problem on GPU (fixed dt)"
 data = @benchmark begin
-    CUDA.@sync sol = solve(ensembleProb, GPUTsit5(),
-                           EnsembleGPUKernel(CUDA.CUDABackend()),
-                           trajectories=numberOfParameters,  
+    CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
+                           save_everystep=false,
                            dt = 0.001f0)
 end
 
@@ -46,9 +57,8 @@ if !isinteractive() && numberOfParameters == 32768
   
     # Create directory
     mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
-    CUDA.@sync sol = solve(ensembleProb, GPUTsit5(),
-                           EnsembleGPUKernel(CUDA.CUDABackend()),
-                           trajectories=numberOfParameters,  
+    CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
+                           save_everystep=false,
                            dt = 0.001f0)
     # Extract final state values for each trajectory
     using CSV, DataFrames
@@ -67,14 +77,11 @@ println("Minimum time: " * string(minimum(data.times) / 1e6) * " ms")
 println("Allocs: " * string(data.allocs))
 
 @info "Solving the problem on GPU (adaptive dt)"
-data = @benchmark CUDA.@sync sol =solve(ensembleProb, GPUTsit5(),
-                                        EnsembleGPUKernel(CUDA.CUDABackend()),
-                                        trajectories=numberOfParameters,
-                                        adaptive=true,
-                                        atol=1f-8,
-                                        rtol=1f-6,
-                                        saveat=1.0f0,   
-                                        dt = 0.001f0)
+data = @benchmark CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+#                            save_everystep=false,
+                           reltol = 1.0f-8,
+                           abstol = 1.0f-8,
+                           dt = 0.001f0)
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive.txt"),
@@ -90,14 +97,11 @@ println("Allocs: " * string(data.allocs))
 
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
-    data = @benchmark CUDA.@sync sol =solve(ensembleProb, GPUTsit5(),
-                                        EnsembleGPUKernel(CUDA.CUDABackend()),
-                                        trajectories=numberOfParameters,
-                                        adaptive=true,
-                                        atol=1f-8,
-                                        rtol=1f-6,
-                                        saveat=1.0f0,   
-                                        dt = 0.001f0)
+    data = @benchmark CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+                           save_everystep=false,
+                           reltol = 1.0f-8,
+                           abstol = 1.0f-8,
+                           dt = 0.001f0)
     # Create directory
     mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     

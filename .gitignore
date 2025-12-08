@@ -19,3 +19,5 @@ GPU_ODE_CUBIE/cubie/
 __pycache__/
 *.pyc
 *.pyo
+/Manifest.toml
+/Project.toml
