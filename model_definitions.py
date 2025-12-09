@@ -207,7 +207,7 @@ def get_pytorch_model_class(model_name):
             def forward(self, t, u):
                 x, y, z = u[0], u[1], u[2]
                 du1 = self.sigma[0] * (y - x)
-                du2 = x * (self.rho - z) - y
+                du2 = self.rho * x - y - x * z
                 du3 = x * y - self.beta[0] * z
                 return torch.stack([du1, du2, du3])
         return LorenzODE
