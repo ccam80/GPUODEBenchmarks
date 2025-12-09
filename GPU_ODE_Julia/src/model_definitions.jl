@@ -60,7 +60,7 @@ ode_func, u0, p, tspan, dim = get_model("lorenz")
 function get_model(model_name::String, ::Type{T}=Float32) where {T}
     if lowercase(model_name) == "lorenz"
         u0 = @SVector T[1.0, 0.0, 0.0]
-        p = @SArray T[28.0]
+        p = @SArray T[21.0]
         tspan = (T(0.0), T(1.0))
         dim = 3
         return lorenz, u0, p, tspan, dim

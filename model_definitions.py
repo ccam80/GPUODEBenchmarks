@@ -157,11 +157,11 @@ def get_jax_model_class(model_name):
     
     if model_name_lower == 'lorenz':
         class Lorenz(eqx.Module):
-            k1: float
+            rho: float
 
             def __call__(self, t, y, args):
                 f0 = 10.0 * (y[1] - y[0])
-                f1 = self.k1 * y[0] - y[1] - y[0] * y[2]
+                f1 = self.rho * y[0] - y[1] - y[0] * y[2]
                 f2 = y[0] * y[1] - (8/3) * y[2]
                 return jnp.stack([f0, f1, f2])
         return Lorenz
