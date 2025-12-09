@@ -101,11 +101,6 @@ int main(int argc, char *argv[])
 		SaveNumericalData(ScanLorenz, NT);
 		SaveData(ScanLorenz, NT);
 		// save per-trajectory step counts (total steps, rejected steps)
-		ScanLorenz.SaveStepCounts("./data/numerical/mpgos_step_counts.csv");
-	}
-	if (NT == 8388608) {
-		if (SOLVER != RK4)
-		ScanLorenz.SaveStepCounts("./data/numerical/mpgos_step_counts.csv");
 	}
 	
 	cout << "Test finished!" << endl;

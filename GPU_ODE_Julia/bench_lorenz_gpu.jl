@@ -40,10 +40,23 @@ probs = cu(probs)
 
 @info "Solving the problem on GPU (fixed dt)"
 data = @benchmark begin
+    # From my rookie reading of the DiffEqGPU "solve" wrapper, which causes 
+    # the problem to run on CPU right now, the low-level function allocates
+    #  output arrays on the device and returns CuArrays. The higher level
+    # function calls Array(ts), Array(us) to transfer back to CPU,
+    # so we replicate that here to mirror the level of the other packages.
+    # One mystery I haven't cracked is when the initial conditions and 
+    # parameters get transferred to the GPU. To keep it an even comparison,
+    # Let's assume that if it gets transferred earlier, it's made up for 
+    # by Cubie pre-allocating the GPU array.
+
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
+                           saveat=1.0f0,
                            save_everystep=false,
                            dt = 0.001f0)
-end
+        ts = Array(sol[1])
+        us = Array(sol[2])
+    end
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive.txt"),
@@ -58,18 +71,19 @@ if !isinteractive() && numberOfParameters == 32768
     # Create directory
     mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
+                           saveat=1.0f0,
                            save_everystep=false,
                            dt = 0.001f0)
     # Extract final state values for each trajectory
     using CSV, DataFrames
-    final_states = zeros(Float32, numberOfParameters, 3)
-    for i in 1:numberOfParameters
-        final_states[i, :] = sol[i].u[end]
-    end
+    # final_states = zeros(Float32, numberOfParameters, 3)
+    final_states = Array(sol[2][end,:]) #convert to CPU Array
     
     # Save to CSV
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
-              DataFrame(final_states, :auto), header=false)
+    df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
+    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), df2, header=false)
+    # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
+    #           DataFrame(final_states, :auto), header=false)
 end
 
 println("Parameter number: " * string(numberOfParameters))
@@ -77,11 +91,18 @@ println("Minimum time: " * string(minimum(data.times) / 1e6) * " ms")
 println("Allocs: " * string(data.allocs))
 
 @info "Solving the problem on GPU (adaptive dt)"
-data = @benchmark CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
-#                            save_everystep=false,
-                           reltol = 1.0f-8,
-                           abstol = 1.0f-8,
-                           dt = 0.001f0)
+data = @benchmark begin 
+    CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+        saveat=1.0f0,
+        save_everystep=false,
+        reltol = 1.0f-8,
+        abstol = 1.0f-8,
+        dt = 0.001f0)
+    # The low-level function returns an array of CuArrays. Their higher-level "solve" function calls Array(ts), Array(us) to transfer back 
+    # to CPU, so we replicate that here to mirror the level of the other packages.
+    ts = Array(sol[1])
+    us = Array(sol[2])
+end
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive.txt"),
@@ -95,24 +116,24 @@ println("Parameter number: " * string(numberOfParameters))
 println("Minimum time: " * string(minimum(data.times) / 1f6) * " ms")
 println("Allocs: " * string(data.allocs))
 
+results = Vector{Any}(undef, 2)
+
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
-    data = @benchmark CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
-#                            save_everystep=false,
+    CUDA.@sync copyto!(results, DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+                           saveat=1.0f0,
+                           save_everystep=false,
                            reltol = 1.0f-8,
                            abstol = 1.0f-8,
-                           dt = 0.001f0)
+                           dt = 0.001f0))
     # Create directory
     mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     
     # Extract final state values for each trajectory
     using CSV, DataFrames
-    final_states = zeros(Float32, numberOfParameters, 3)
-    for i in 1:numberOfParameters
-        final_states[i, :] = sol[i].u[end]
-    end
+    final_states = Array(sol[2][end,:]) #convert to CPU Array
     
     # Save to CSV
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive.csv"), 
-              DataFrame(final_states, :auto), header=false)
+    df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
+    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive.csv"), df2, header=false)
 end

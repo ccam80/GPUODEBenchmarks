@@ -1,3 +1,4 @@
+unset LD_LIBRARY_PATH
 a=8
 max_a=$1
 while [ $a -le $max_a ]

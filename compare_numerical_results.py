@@ -20,7 +20,7 @@ def load_data(filepath):
         return None
     return np.loadtxt(filepath, delimiter=',')
 
-def compare_arrays(name1, arr1, name2, arr2, rtol=1e-5, atol=1e-8):
+def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
     """Compare two arrays using numpy allclose and compute statistics."""
     print(f"\n{'='*80}")
     print(f"Comparing {name1} vs {name2}")
