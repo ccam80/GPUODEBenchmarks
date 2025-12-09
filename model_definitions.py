@@ -113,7 +113,7 @@ def get_cubie_system(model_name, precision=np.float32):
     if model_name_lower == 'lorenz':
         system_string = """
         dx = sigma * (y - x)
-        dy = x * (rho - z) - y
+        dy = rho * x - y - x * z
         dz = x * y - beta * z
         """
         params = get_lorenz_params(precision)

@@ -48,7 +48,7 @@ y0 = jnp.array(y0_list)
 @jax.jit
 @jax.vmap
 def main(param_value):
-    model = ModelClass(param_value)
+    model = ModelClass(**{param_name: param_value})
     terms = diffrax.ODETerm(model)
     t0 = tspan[0]
     t1 = tspan[1]
@@ -101,7 +101,7 @@ if numberOfParameters == 32768:
 @jax.jit
 @jax.vmap
 def main_adaptive(param_value):
-    model = ModelClass(param_value)
+    model = ModelClass(**{param_name: param_value})
     terms = diffrax.ODETerm(model)
     t0 = tspan[0]
     t1 = tspan[1]
