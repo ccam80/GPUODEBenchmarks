@@ -1,0 +1,256 @@
+Index: setup_all_environments.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/bin/bash\r\n# Master script to setup all GPU ODE benchmark environments\r\nset -e\r\n\r\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\r\ncd \"$SCRIPT_DIR\"\r\n\r\necho \"=========================================\"\r\necho \"Setting up all GPU ODE benchmark environments\"\r\necho \"=========================================\"\r\necho \"\"\r\n\r\n# Track failures\r\nFAILED_SETUPS=()\r\n\r\n# Setup CUBIE\r\necho \"=========================================\"\r\necho \"1/4: Setting up CUBIE environment...\"\r\necho \"=========================================\"\r\nif [ -f \"$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh\" ]; then\r\n    if bash \"$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh\"; then\r\n        echo \"✓ CUBIE setup completed successfully\"\r\n    else\r\n        echo \"✗ CUBIE setup failed\"\r\n        FAILED_SETUPS+=(\"CUBIE\")\r\n    fi\r\nelse\r\n    echo \"✗ CUBIE setup script not found\"\r\n    FAILED_SETUPS+=(\"CUBIE\")\r\nfi\r\necho \"\"\r\n\r\n# Setup JAX/Diffrax\r\necho \"=========================================\"\r\necho \"2/4: Setting up JAX/Diffrax environment...\"\r\necho \"=========================================\"\r\nif [ -f \"$SCRIPT_DIR/GPU_ODE_JAX/setup_environment.sh\" ]; then\r\n    if bash \"$SCRIPT_DIR/GPU_ODE_JAX/setup_environment.sh\"; then\r\n        echo \"✓ JAX/Diffrax setup completed successfully\"\r\n    else\r\n        echo \"✗ JAX/Diffrax setup failed\"\r\n        FAILED_SETUPS+=(\"JAX\")\r\n    fi\r\nelse\r\n    echo \"✗ JAX setup script not found\"\r\n    FAILED_SETUPS+=(\"JAX\")\r\nfi\r\necho \"\"\r\n\r\n# Setup PyTorch/torchdiffeq\r\necho \"=========================================\"\r\necho \"3/4: Setting up PyTorch/torchdiffeq environment...\"\r\necho \"=========================================\"\r\nif [ -f \"$SCRIPT_DIR/GPU_ODE_PyTorch/setup_environment.sh\" ]; then\r\n    if bash \"$SCRIPT_DIR/GPU_ODE_PyTorch/setup_environment.sh\"; then\r\n        echo \"✓ PyTorch/torchdiffeq setup completed successfully\"\r\n    else\r\n        echo \"✗ PyTorch/torchdiffeq setup failed\"\r\n        FAILED_SETUPS+=(\"PyTorch\")\r\n    fi\r\nelse\r\n    echo \"✗ PyTorch setup script not found\"\r\n    FAILED_SETUPS+=(\"PyTorch\")\r\nfi\r\necho \"\"\r\n\r\n# Setup Julia\r\necho \"=========================================\"\r\necho \"4/4: Setting up Julia environment...\"\r\necho \"=========================================\"\r\nif [ -f \"$SCRIPT_DIR/setup_julia.sh\" ]; then\r\n    if bash \"$SCRIPT_DIR/setup_julia.sh\"; then\r\n        echo \"✓ Julia setup completed successfully\"\r\n    else\r\n        echo \"✗ Julia setup failed\"\r\n        FAILED_SETUPS+=(\"Julia\")\r\n    fi\r\nelse\r\n    echo \"✗ Julia setup script not found\"\r\n    FAILED_SETUPS+=(\"Julia\")\r\nfi\r\necho \"\"\r\n\r\n# Summary\r\necho \"=========================================\"\r\necho \"Setup Summary\"\r\necho \"=========================================\"\r\nif [ ${#FAILED_SETUPS[@]} -eq 0 ]; then\r\n    echo \"✓ All environments setup successfully!\"\r\n    echo \"\"\r\n    echo \"To use the environments:\"\r\n    echo \"  CUBIE:   source GPU_ODE_CUBIE/venv/bin/activate\"\r\n    echo \"  JAX:     source GPU_ODE_JAX/venv/bin/activate\"\r\n    echo \"  PyTorch: source GPU_ODE_PyTorch/venv/bin/activate\"\r\n    echo \"  Julia:   julia --project=.\"\r\n    exit 0\r\nelse\r\n    echo \"✗ Some environments failed to setup:\"\r\n    for env in \"${FAILED_SETUPS[@]}\"; do\r\n        echo \"  - $env\"\r\n    done\r\n    exit 1\r\nfi\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/setup_all_environments.sh b/setup_all_environments.sh
+--- a/setup_all_environments.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/setup_all_environments.sh	(date 1764906981220)
+@@ -21,7 +21,7 @@
+     if bash "$SCRIPT_DIR/GPU_ODE_CUBIE/setup_environment.sh"; then
+         echo "✓ CUBIE setup completed successfully"
+     else
+-        echo "✗ CUBIE setup failed"
++        echo "✗ CUBIE setup failed
+         FAILED_SETUPS+=("CUBIE")
+     fi
+ else
+Index: GPU_ODE_CUBIE/setup_environment.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/bin/bash\r\n# Setup Python venv for CUBIE ODE benchmarking\r\nset -e\r\n\r\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\r\ncd \"$SCRIPT_DIR\"\r\n\r\necho \"Setting up CUBIE environment...\"\r\n\r\n# Check if Python is available\r\nif ! command -v python3 &> /dev/null; then\r\n    echo \"Error: python3 is not installed\"\r\n    exit 1\r\nfi\r\n\r\n# Create venv\r\necho \"Creating virtual environment...\"\r\npython3 -m venv venv\r\n\r\n# Activate venv\r\nsource venv/bin/activate\r\n\r\n# Upgrade pip and install uv\r\necho \"Installing uv package manager...\"\r\npip install --upgrade pip\r\npip install uv\r\n\r\n# Clone cubie source\r\necho \"Cloning cubie repository...\"\r\nif [ -d \"cubie\" ]; then\r\n    echo \"Cubie directory already exists, removing...\"\r\n    rm -rf cubie\r\nfi\r\nif ! git clone https://github.com/ccam80/cubie.git; then\r\n    echo \"Error: Failed to clone cubie repository\"\r\n    exit 1\r\nfi\r\n\r\n# Install cubie from source using uv\r\necho \"Installing cubie and dependencies...\"\r\ncd cubie\r\nuv pip install -e .[dev]\r\ncd ..\r\n\r\n# Verify installation\r\necho \"Verifying installation...\"\r\npython -c \"import cubie; print('Cubie installed successfully')\"\r\npython -c \"import numba.cuda; print('CUDA available:', numba.cuda.is_available())\"\r\n\r\n# Deactivate\r\ndeactivate\r\n\r\necho \"CUBIE environment setup complete!\"\r\necho \"To activate: source $SCRIPT_DIR/venv/bin/activate\"\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/GPU_ODE_CUBIE/setup_environment.sh b/GPU_ODE_CUBIE/setup_environment.sh
+--- a/GPU_ODE_CUBIE/setup_environment.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/GPU_ODE_CUBIE/setup_environment.sh	(date 1764906225536)
+@@ -8,14 +8,14 @@
+ echo "Setting up CUBIE environment..."
+ 
+ # Check if Python is available
+-if ! command -v python3 &> /dev/null; then
+-    echo "Error: python3 is not installed"
++if ! command -v python &> /dev/null; then
++    echo "Error: python is not installed"
+     exit 1
+ fi
+ 
+ # Create venv
+ echo "Creating virtual environment..."
+-python3 -m venv venv
++python -m venv venv
+ 
+ # Activate venv
+ source venv/bin/activate
+Index: GPU_ODE_JAX/setup_environment.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/bin/bash\r\n# Setup Python venv for JAX (Diffrax) ODE benchmarking\r\nset -e\r\n\r\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\r\ncd \"$SCRIPT_DIR\"\r\n\r\necho \"Setting up JAX/Diffrax environment...\"\r\n\r\n# Check if Python is available\r\nif ! command -v python3 &> /dev/null; then\r\n    echo \"Error: python3 is not installed\"\r\n    exit 1\r\nfi\r\n\r\n# Create venv\r\necho \"Creating virtual environment...\"\r\npython3 -m venv venv\r\n\r\n# Activate venv\r\nsource venv/bin/activate\r\n\r\n# Upgrade pip and install uv\r\necho \"Installing uv package manager...\"\r\npip install --upgrade pip\r\npip install uv\r\n\r\n# Install JAX with CUDA support and other dependencies\r\necho \"Installing JAX with CUDA support and dependencies...\"\r\n# Install JAX with CUDA 12 support (latest available)\r\nuv pip install --upgrade \"jax[cuda12]\"\r\nuv pip install diffrax\r\nuv pip install equinox\r\nuv pip install numpy\r\nuv pip install scipy\r\n\r\n# Verify installation\r\necho \"Verifying installation...\"\r\npython -c \"import jax; print('JAX version:', jax.__version__); print('JAX backend:', jax.default_backend())\"\r\npython -c \"import diffrax; print('Diffrax installed successfully')\"\r\npython -c \"import equinox; print('Equinox installed successfully')\"\r\n\r\n# Deactivate\r\ndeactivate\r\n\r\necho \"JAX/Diffrax environment setup complete!\"\r\necho \"To activate: source $SCRIPT_DIR/venv/bin/activate\"\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/GPU_ODE_JAX/setup_environment.sh b/GPU_ODE_JAX/setup_environment.sh
+--- a/GPU_ODE_JAX/setup_environment.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/GPU_ODE_JAX/setup_environment.sh	(date 1764906225545)
+@@ -8,14 +8,14 @@
+ echo "Setting up JAX/Diffrax environment..."
+ 
+ # Check if Python is available
+-if ! command -v python3 &> /dev/null; then
+-    echo "Error: python3 is not installed"
++if ! command -v python &> /dev/null; then
++    echo "Error: python is not installed"
+     exit 1
+ fi
+ 
+ # Create venv
+ echo "Creating virtual environment..."
+-python3 -m venv venv
++python -m venv venv
+ 
+ # Activate venv
+ source venv/bin/activate
+Index: runner_scripts/gpu/run_ode_pytorch.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>a=8\r\nmax_a=$1\r\nsource ./GPU_ODE_PyTorch/venv_torch/bin/activate\r\nwhile [ $a -le $max_a ]\r\ndo\r\n    \t# Print the values\r\n    \techo \"No. of trajectories = $a\"\r\n\t\tpython3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a\t\r\n    \t# increment the value\r\n    \ta=$((a*4))\r\ndone\r\ndeactivate\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/runner_scripts/gpu/run_ode_pytorch.sh b/runner_scripts/gpu/run_ode_pytorch.sh
+--- a/runner_scripts/gpu/run_ode_pytorch.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/runner_scripts/gpu/run_ode_pytorch.sh	(date 1764906225526)
+@@ -5,7 +5,7 @@
+ do
+     	# Print the values
+     	echo "No. of trajectories = $a"
+-		python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a	
++		python ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a
+     	# increment the value
+     	a=$((a*4))
+ done
+Index: data/numerical/README.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+># Numerical Comparison of Integration Packages\r\n\r\nThis directory contains the final state arrays from the 32768-trajectory runs of each integration package.\r\n\r\n## Files\r\n\r\nEach package saves its results to a CSV file:\r\n- `cubie.csv` - Results from CUBIE solver\r\n- `jax.csv` - Results from JAX/Diffrax solver\r\n- `pytorch.csv` - Results from PyTorch/torchdiffeq solver\r\n- `julia.csv` - Results from Julia/DiffEqGPU solver\r\n- `mpgos.csv` - Results from MPGOS (C++) solver\r\n\r\n## Format\r\n\r\nEach CSV file contains the final state values for all 32768 trajectories. The format is:\r\n- Each row represents one trajectory\r\n- Each column represents one state variable (x, y, z for the Lorenz system)\r\n- No headers are included in the CSV files\r\n\r\nFor the Lorenz system with 32768 trajectories:\r\n- Shape: (32768, 3)\r\n- Column 0: x final state\r\n- Column 1: y final state\r\n- Column 2: z final state\r\n\r\n## How the data is generated\r\n\r\nThe data files are automatically generated when running the benchmarks with exactly 32768 trajectories. For example:\r\n\r\n```bash\r\n# Run CUBIE benchmark with 32768 trajectories\r\nsource ./GPU_ODE_CUBIE/venv_cubie/bin/activate\r\npython3 ./GPU_ODE_CUBIE/bench_cubie.py 32768\r\ndeactivate\r\n\r\n# Run JAX benchmark with 32768 trajectories\r\nsource ./GPU_ODE_JAX/venv_jax/bin/activate\r\npython3 ./GPU_ODE_JAX/bench_diffrax.py 32768\r\ndeactivate\r\n\r\n# Run PyTorch benchmark with 32768 trajectories\r\nsource ./GPU_ODE_PyTorch/venv_torch/bin/activate\r\npython3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768\r\ndeactivate\r\n\r\n# Run Julia benchmark with 32768 trajectories\r\njulia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768\r\n\r\n# Run MPGOS benchmark with 32768 trajectories (requires modification of NT in Lorenz.cu)\r\ncd GPU_ODE_MPGOS && make && ./lorenz.exe\r\n```\r\n\r\n## Comparing results\r\n\r\nUse the `compare_numerical_results.py` script in the root directory to compare the results:\r\n\r\n```bash\r\n# Activate the cubie venv (which has numpy)\r\nsource ./GPU_ODE_CUBIE/venv_cubie/bin/activate\r\n\r\n# Run comparison\r\npython3 ../compare_numerical_results.py\r\n\r\n# Deactivate\r\ndeactivate\r\n```\r\n\r\nThe comparison script will:\r\n1. Load all available CSV files from this directory\r\n2. Perform pairwise comparisons using `numpy.allclose()`\r\n3. Display detailed statistics including:\r\n   - Maximum, mean, minimum, and standard deviation of absolute differences\r\n   - Maximum, mean, minimum, and standard deviation of relative differences\r\n   - Per-state statistics\r\n   - Top 5 worst mismatches\r\n4. Summarize the comparison results\r\n\r\n## Tolerance settings\r\n\r\nThe comparison uses:\r\n- `rtol=1e-5` (relative tolerance)\r\n- `atol=1e-8` (absolute tolerance)\r\n\r\nThese can be adjusted in the `compare_numerical_results.py` script if needed.\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/data/numerical/README.md b/data/numerical/README.md
+--- a/data/numerical/README.md	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/data/numerical/README.md	(date 1764906225502)
+@@ -31,17 +31,17 @@
+ ```bash
+ # Run CUBIE benchmark with 32768 trajectories
+ source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+-python3 ./GPU_ODE_CUBIE/bench_cubie.py 32768
++python ./GPU_ODE_CUBIE/bench_cubie.py 32768
+ deactivate
+ 
+ # Run JAX benchmark with 32768 trajectories
+ source ./GPU_ODE_JAX/venv_jax/bin/activate
+-python3 ./GPU_ODE_JAX/bench_diffrax.py 32768
++python ./GPU_ODE_JAX/bench_diffrax.py 32768
+ deactivate
+ 
+ # Run PyTorch benchmark with 32768 trajectories
+ source ./GPU_ODE_PyTorch/venv_torch/bin/activate
+-python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
++python ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
+ deactivate
+ 
+ # Run Julia benchmark with 32768 trajectories
+@@ -60,7 +60,7 @@
+ source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+ 
+ # Run comparison
+-python3 ../compare_numerical_results.py
++python ../compare_numerical_results.py
+ 
+ # Deactivate
+ deactivate
+Index: README.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+># GPUODEBenchmarks\r\nComparison of Julia's GPU-based ensemble ODE solvers with other open-source implementations in C++, JAX, and PyTorch. These artifacts are part of the paper:\r\n> Automated Translation and Accelerated Solving of Differential Equations on Multiple GPU Platforms\r\n\r\n**_NOTE:_**  This repository is meant to contain scripts for benchmarking existing ensemble ODE solvers. For external purposes, one can directly use the solvers from the respective libraries. \r\n\r\n### Performance comparison with other open-source ensemble ODE solvers\r\n<img src=\"https://github.com/utkarsh530/GPUODEBenchmarks/blob/main/paper_artifacts/figures/Lorenz_unadaptive.png\" alt=\"drawing\" width=\"50%\"/>\r\n\r\n### Works with NVIDIA, Intel, AMD, and Apple GPUs\r\n<img src=\"https://github.com/utkarsh530/GPUODEBenchmarks/blob/main/paper_artifacts/figures/Multi_GPU_unadaptive.png\" alt=\"drawing\" width=\"50%\"/>\r\n\r\n# Reproduction of the benchmarks\r\n\r\nThe methods are written in Julia and are part of the repository\r\n<https://github.com/SciML/DiffEqGPU.jl>. The benchmark suite also\r\nconsists of the raw data, such as simulation times and plots mentioned\r\nin the paper. The supported OS for the benchmark suite is Linux.\r\n\r\n## Installing Julia\r\n\r\nFirstly, we will need to install Julia. The user can download the\r\nbinaries from the official JuliaLang website\r\n[`https://julialang.org/downloads/`](https://julialang.org/downloads/).\r\nAlternatively, one can use the convenience of a Julia version\r\nmultiplexer, <https://github.com/JuliaLang/juliaup>. The recommended OS\r\nfor installation is Linux. The recommended Julia installation version is\r\nv1.8. To use AMD GPUs, please install v1.9. The Julia installation\r\nshould also be added to the user's path.\r\n\r\n## Setting up DiffEqGPU.jl\r\n\r\n### Installing backends\r\n\r\nThe user must install the GPU backend library for testing\r\nDiffEqGPU.jl-related code.\r\n\r\n```julia\r\n    julia> using Pkg\r\n    julia> #Run either of them\r\n    julia> Pkg.add(\"CUDA\") # NVIDIA GPUs\r\n    julia> Pkg.add(\"AMDGPU\") #AMD GPUs\r\n    julia> Pkg.add(\"oneAPI\") #Intel GPUs\r\n    julia> Pkg.add(\"Metal\") #Apple M series GPUs\r\n```\r\n### Testing DiffEqGPU.jl\r\n\r\nDiffEqGPU.jl is a test suite that regularly checks functionality by\r\ntesting features like multiple backend support, event handling, and\r\nautomatic differentiation. To test the functionality, one can follow the\r\nbelow instructions. The user needs to specify the \\\"backend\\\" for\r\nexample \\\"CUDA\\\" for NVIDIA, \\\"AMDGPU\\\" for AMD, \\\"oneAPI\\\" for Intel\r\n, and \\\"Metal\\\" for Apple GPUs. The estimated time of completion is 20\r\nminutes.\r\n```julia\r\n    $ julia --project=.\r\n    julia> using Pkg\r\n    julia> Pkg.instantiate()\r\n    julia> Pkg.precompile()\r\n```\r\nFinally, test the package with this command\r\n```bash\r\n    $ backend=\"CUDA\"\r\n    $ julia --project=. test_DiffEqGPU.jl $backend\r\n```\r\nAdditionally, the GitHub discussion\r\n[`https://github.com/SciML/DiffEqGPU.jl/issues/224#issuecomment-1453769679`](https://github.com/SciML/DiffEqGPU.jl/issues/224#issuecomment-1453769679)\r\nhighlights the use of textured memory with ODE solvers, accelerates the\r\ncode by $2\\times$ over CPU.\r\n\r\n### Continuous Integration and Development\r\n\r\nDiffEqGPU.jl is a fully featured library with regression testing, semver\r\nversioning, and version control. The tests are performed on cloud\r\nmachines having a multitude of different GPUs\r\n[`https://buildkite.com/julialang/diffeqgpu-dot-jl/builds/705`](https://buildkite.com/julialang/diffeqgpu-dot-jl/builds/705).\r\nThese tests are approximately complete in 30 minutes. The publicly visible\r\ntesting framework serves as a testimonial of compatibility with multiple\r\nplatforms and said features in the paper.\r\n\r\n## Testing GPU-accelerated ODE Benchmarks with other programs\r\n\r\n### Running All Benchmarks\r\n\r\nTo run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, and CUBIE) sequentially in one command:\r\n```bash\r\n    $ bash ./run_all_benchmarks.sh\r\n```\r\nThis script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag can be used to specify the upper bound of trajectories:\r\n```bash\r\n    $ bash ./run_all_benchmarks.sh -n $((2**20))\r\n```\r\nEach benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.\r\n\r\n### Benchmarking Julia (DiffEqGPU.jl) methods\r\nWe will need to install CUDA.jl for benchmarking. It is the only backend\r\ncompatible with the ODE solvers in JAX, PyTorch, and MPGOS. To do so,\r\none can follow the below process in the Julia Terminal:\r\n```julia\r\n    $ julia\r\n    julia> using Pkg\r\n    julia> Pkg.add(\"CUDA\")\r\n```\r\nLet's clone the benchmark suite repository to start benchmarking;\r\n```bash\r\n    $ git clone https://github.com/utkarsh530\\\r\n    /GPUODEBenchmarks.git\r\n```\r\nWe will instantiate and pre-compile all the packages beforehand to avoid\r\nthe wait times during benchmarking. The folder ./GPU_ODE_Julia contains\r\nall the related scripts for the GPU solvers.\r\n```bash\r\n    $ cd ./GPUODEBenchmarks\r\n    $ julia --project=./GPU_ODE_Julia --threads=auto\r\n    julia> using Pkg\r\n    julia> Pkg.instantiate()\r\n    julia> Pkg.precompile()\r\n    julia> exit()\r\n```\r\nIt may take a few minutes to complete (\\< 10 minutes). After this, we\r\ncan generate the timings of ODE solvers written in Julia. There is a\r\nscript to benchmark ODE solvers for the different number of trajectories\r\nto demonstrate scalability and performance. The script invocation and\r\ntimings can be generated through the following:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l julia -d gpu -m ode\r\n```\r\nIt might take around 20 minutes to finish. The flag `-n N` can be used\r\nto specify the upper bound of the trajectories to benchmark. By default\r\n$N = 2^{24}$, where the simulation runs for $n \\in 8 \\le n < N$, with\r\nthe multiples of $4$.\r\n\r\nThe data will be generated in the `data/Julia` directory, with two files\r\nfor fixed and adaptive time-stepping simulations. The first column in\r\nthe \\\".txt\\\" file will be the number of trajectories, and the section\r\ncolumn will contain the time in milliseconds.\r\n\r\nAdditionally, to benchmark ODE solvers for other backends:\r\n```bash\r\n    $ N = $((2**24))\r\n    Benchmark\r\n    $ backend = \"Metal\"\r\n    $ ./runner_scripts/gpu/run_ode_mult_device.sh\\\r\n    $N $backend\r\n```\r\n### Benchmarking C++ (MPGOS) ODE solvers\r\n\r\nBenchmarking MPGOS ODE solvers requires the CUDA C++ compiler to be\r\ninstalled correctly. The recommended CUDA Toolkit version is \\>= 11. The\r\ninstallation can be checked through:\r\n```bash\r\n    $ nvcc\r\n    If the installation exists, it will return \r\n    something like this:\r\n    nvcc fatal   : No input files specified; \r\n    use option --help for more information\r\n```\r\nIf `nvcc` is not found, the user must install the CUDA Toolkit. The\r\nNVIDIA's website lists the resource\r\n[`https://developer.nvidia.com/cuda-downloads`](https://developer.nvidia.com/cuda-downloads)\r\nfor installation.\r\n\r\nThe MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file\r\n`GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. However, the MPGOS\r\nprograms can be run with the same bash script by changing the arguments\r\nas:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l cpp -d gpu -m ode\r\n```\r\nIt will generate the data files in the `data/cpp` folder.\r\n\r\n### Benchmarking JAX (Diffrax) ODE solvers\r\n\r\nBenchmarking JAX-based ODE solvers require installing Python 3.9 and\r\n`conda`. First, we will install all the Python packages for\r\nbenchmarking:\r\n```bash\r\n    $ conda env create -f environment.yml\r\n    $ conda activate venv_jax\r\n```\r\nIt should install the correct version of JAX with CUDA enabled and the\r\nDiffrax library. The GitHub\r\n[`https://github.com/google/jax#installation`](https://github.com/google/jax#installation)\r\nis a guide to follow if the installation fails.\r\n\r\nFor our purposes, we can benchmark the solvers by:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l jax -d gpu -m ode\r\n```\r\n\r\n#### A note on JIT ordering in JAX\r\n\r\nThe JIT ordering JAX matters and sometimes can enhance performance if done correctly. We have tested that vmap and JIT ordering does not make a noticeable difference in our case. The results are available at this [Colab notebook](https://colab.research.google.com/drive/1d7G-O5JX31lHbg7jTzzozbo5-Gp7DBEv?usp=sharing).\r\n\r\n### Benchmarking PyTorch (torchdiffeq) ODE solvers\r\n\r\nBenchmarking PyTorch-based ODE solvers is a similar process compared to\r\nJAX ones.\r\n```bash\r\n    $ conda env create -f environment.yml\r\n    $ conda activate venv_torch\r\n```\r\n`torchdiffeq` does not fully support vectorized maps with ODE solvers.\r\nTo circumvent this, we extended the functionality by rewriting some\r\nlibrary parts. To download it:\r\n```bash\r\n    (venv_torch)$ pip uninstall torchdiffeq\r\n    (venv_torch)$ pip uninstall torchdiffeq\r\n    (venv_torch)$ pip install git+https://github.com/\\\r\n    utkarsh530/torchdiffeq.git@u/vmap\r\n```\r\nThen run the benchmarks by:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l pytorch -d gpu -m ode\r\n```\r\n## Comparing GPU acceleration of ODEs with CPUs\r\n\r\nThe benchmark suite can also be used to test the GPU acceleration of ODE\r\nsolvers in comparison with CPUs. The process for generating simulation\r\ntimes for GPUs can be done by following the GPU section mentioned earlier. The following bash script\r\nallows the generation of CPU simulation times for ODEs:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l julia -d cpu -m ode\r\n```\r\nThe simulation times will be generated in `data/CPU`. Each of the\r\nworkflow takes approximately 20 minutes to finish.\r\n\r\n## Benchmarking GPU acceleration of SDEs with CPUs\r\n\r\nThe SDE solvers in Julia are benchmarked by comparing them to the\r\nCPU-accelerated simulation. This will benchmark the linear SDE with\r\nthree states, as described in the \\\"Benchmarks and case studies\\\"\r\nsection. To generate simulation times for GPU, do the following:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l julia -d gpu -m sde\r\n```\r\nWe can generate the simulation times for CPU-accelerated codes through the following:\r\n```bash\r\n    $ bash ./run_benchmark.sh -l julia -d cpu -m sde\r\n```\r\nThe results will get generated in `data/SDE` and `data/CPU/SDE`, taking\r\naround 10 minutes to complete.\r\n\r\n## Composability with MPI\r\n\r\nJulia supports Message Passing Interface (MPI) to allow Single Program\r\nMultiple Data (SPMD) type parallel programming. The composability of the\r\nGPU ODE solvers enable seamless integration with MPI, enabling scaling\r\nthe ODE solvers to clusters on multiple nodes.\r\n```julia\r\n    $ julia --project=./GPU_ODE_Julia\r\n    julia> using Pkg\r\n    # install MPI.jl\r\n    julia> Pkg.add(\"MPI\")\r\n```\r\nAn example script solving the Lorenz problem for approximately 1 billion\r\nparameters are available in the `MPI` folder. A SLURM-based script is\r\nshown below.\r\n```bash\r\n    #!/bin/bash\r\n    # Slurm Sbatch Options\r\n    # Reqeust no. of GPUs/node\r\n    #SBATCH --gres=gpu:volta:1\r\n    # 1 process per node \r\n    #SBATCH -n 5 -N 5\r\n    #SBATCH --output=\"./mpi_scatter_test.log-%j\"\r\n    # Loading the required module\r\n\r\n    # MPI.jl requires a memory pool to be disabled\r\n    export JULIA_CUDA_MEMORY_POOL=none\r\n    export JULIA_MPI_BINARY=system\r\n    # Use local CUDA toolkit installation\r\n    export JULIA_CUDA_USE_BINARYBUILDER=false\r\n\r\n    source $HOME/.bashrc\r\n    module load cuda mpi\r\n\r\n    srun hostname > hostfile\r\n    time mpiexec julia --project=./GPU_ODE_Julia\\ \r\n    ./MPI/gpu_ode_mpi.jl\r\n```\r\n## Plotting Results\r\n\r\nThe plotting scripts to visualize the simulation times. The scripts are\r\nlocated in the `runner_scripts/plot` folder. These scripts replicate the\r\nbenchmark figures in the paper. The benchmark suite contains the\r\nsimulation data generated by authors, which can be used to verify the\r\nplots. Various benchmarks can be plotted, which are described in the\r\ndifferent sections. The plotting scripts are based on Julia. As a\r\npreliminary step:\r\n```julia\r\n    $ cd GPUODEBenchmarks\r\n    $ julia project=.\r\n    julia> using Pkg\r\n    julia> Pkg.instantiate()\r\n    julia> Pkg.precompile()\r\n```\r\nThe plot comparison between Julia, C++, JAX, and PyTorch mentioned in\r\nthe paper can be generated by using the below command:\r\n```bash\r\n    $ julia --project=. ./runner_scripts/plot\\\r\n    /plot_ode_comp.jl\r\n```\r\nThe plot will get saved in the `plots` folder.\r\n\r\nSimilarly, the other plots in the paper can be generated by running the\r\ndifferent scripts in the folder `runner_scripts/plot`.\r\n```bash\r\n    plot performance of GPU ODE solvers \r\n    with multiple backends\r\n    $ julia --project=. ./runner_scripts/plot\\\r\n    /plot_mult_gpu.jl \r\n    plot GPU ODE solvers comparsion with CPUs\r\n    $ julia --project=. ./runner_scripts/plot\\\r\n    /plot_ode_comp.jl \r\n    plot GPU SDE solvers comparsion with CPUs\r\n    $ julia --project=. ./runner_scripts/plot\\\r\n    /plot_sde_comp.jl \r\n    plot CRN Network sim comparison with CPUs\r\n    $ julia --project=. ./runner_scripts/plot\\\r\n    /plot_sde_crn.jl \r\n```\r\nTo plot data generated by running the scripts, specify the location of\r\nthe `data` as the argument to the mentioned command.\r\n```bash\r\n    $ julia --project=. ./runner_scripts/plot/\\\r\n    plot_mult_gpu.jl /path/to/data/\r\n```\r\n\r\n## Comparing Numerical Results\r\n\r\nThe benchmark suite includes a feature to compare the numerical accuracy of\r\nresults between different integration packages. When running benchmarks with\r\nexactly 32768 trajectories, each package automatically saves its final state\r\narrays to CSV files in the `data/numerical/` directory.\r\n\r\n### Running Benchmarks for Numerical Comparison\r\n\r\nTo generate the numerical comparison data, run each benchmark with 32768 \r\ntrajectories:\r\n\r\n```bash\r\n# CUBIE\r\nsource ./GPU_ODE_CUBIE/venv_cubie/bin/activate\r\npython3 ./GPU_ODE_CUBIE/bench_cubie.py 32768\r\ndeactivate\r\n\r\n# JAX\r\nsource ./GPU_ODE_JAX/venv_jax/bin/activate\r\npython3 ./GPU_ODE_JAX/bench_diffrax.py 32768\r\ndeactivate\r\n\r\n# PyTorch\r\nsource ./GPU_ODE_PyTorch/venv_torch/bin/activate\r\npython3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768\r\ndeactivate\r\n\r\n# Julia\r\njulia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768\r\n```\r\n\r\n### Analyzing Numerical Differences\r\n\r\nAfter generating the CSV files, use the comparison script to analyze differences:\r\n\r\n```bash\r\nsource ./GPU_ODE_CUBIE/venv_cubie/bin/activate\r\npython3 compare_numerical_results.py\r\ndeactivate\r\n```\r\n\r\nThe script performs pairwise comparisons using `numpy.allclose()` and provides:\r\n- Maximum, mean, minimum, and standard deviation of absolute differences\r\n- Maximum, mean, minimum, and standard deviation of relative differences  \r\n- Per-state statistics (for the Lorenz system: x, y, z)\r\n- List of worst mismatches\r\n- Summary of which packages pass the allclose test\r\n\r\nFor more details, see `data/numerical/README.md`.\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/README.md b/README.md
+--- a/README.md	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/README.md	(date 1764906225582)
+@@ -342,17 +342,17 @@
+ ```bash
+ # CUBIE
+ source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+-python3 ./GPU_ODE_CUBIE/bench_cubie.py 32768
++python ./GPU_ODE_CUBIE/bench_cubie.py 32768
+ deactivate
+ 
+ # JAX
+ source ./GPU_ODE_JAX/venv_jax/bin/activate
+-python3 ./GPU_ODE_JAX/bench_diffrax.py 32768
++python ./GPU_ODE_JAX/bench_diffrax.py 32768
+ deactivate
+ 
+ # PyTorch
+ source ./GPU_ODE_PyTorch/venv_torch/bin/activate
+-python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
++python ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
+ deactivate
+ 
+ # Julia
+@@ -365,7 +365,7 @@
+ 
+ ```bash
+ source ./GPU_ODE_CUBIE/venv_cubie/bin/activate
+-python3 compare_numerical_results.py
++python compare_numerical_results.py
+ deactivate
+ ```
+ 
+Index: compare_numerical_results.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/usr/bin/env python3\r\n\"\"\"\r\nCompare numerical results between different integration packages.\r\n\r\nThis script reads CSV files containing final state arrays from different ODE solver packages\r\nand performs pairwise comparisons using numpy's allclose function. It presents detailed\r\nstatistics about the differences between each pair of arrays.\r\n\r\nCreated for GPUODEBenchmarks numerical comparison\r\n\"\"\"\r\n\r\nimport os\r\nimport sys\r\nimport numpy as np\r\nfrom itertools import combinations\r\n\r\ndef load_data(filepath):\r\n    \"\"\"Load CSV data file.\"\"\"\r\n    if not os.path.exists(filepath):\r\n        return None\r\n    return np.loadtxt(filepath, delimiter=',')\r\n\r\ndef compare_arrays(name1, arr1, name2, arr2, rtol=1e-5, atol=1e-8):\r\n    \"\"\"Compare two arrays using numpy allclose and compute statistics.\"\"\"\r\n    print(f\"\\n{'='*80}\")\r\n    print(f\"Comparing {name1} vs {name2}\")\r\n    print(f\"{'='*80}\")\r\n    \r\n    # Check shapes match\r\n    if arr1.shape != arr2.shape:\r\n        print(f\"ERROR: Shape mismatch! {name1}: {arr1.shape}, {name2}: {arr2.shape}\")\r\n        return\r\n    \r\n    print(f\"Array shape: {arr1.shape}\")\r\n    \r\n    # Compute differences\r\n    diff = np.abs(arr1 - arr2)\r\n    relative_diff = np.abs((arr1 - arr2) / (arr1 + 1e-20))  # Add small epsilon to avoid division by zero\r\n    \r\n    # Run numpy allclose\r\n    is_close = np.allclose(arr1, arr2, rtol=rtol, atol=atol)\r\n    print(f\"\\nnumpy.allclose(rtol={rtol}, atol={atol}): {is_close}\")\r\n    \r\n    # Count how many elements pass the allclose test\r\n    elementwise_close = np.abs(arr1 - arr2) <= (atol + rtol * np.abs(arr2))\r\n    num_close = np.sum(elementwise_close)\r\n    total_elements = arr1.size\r\n    percent_close = 100.0 * num_close / total_elements\r\n    print(f\"Elements passing allclose test: {num_close}/{total_elements} ({percent_close:.2f}%)\")\r\n    \r\n    # Absolute difference statistics\r\n    print(f\"\\nAbsolute differences:\")\r\n    print(f\"  Max:  {np.max(diff):.6e}\")\r\n    print(f\"  Mean: {np.mean(diff):.6e}\")\r\n    print(f\"  Min:  {np.min(diff):.6e}\")\r\n    print(f\"  Std:  {np.std(diff):.6e}\")\r\n    \r\n    # Relative difference statistics\r\n    print(f\"\\nRelative differences:\")\r\n    print(f\"  Max:  {np.max(relative_diff):.6e}\")\r\n    print(f\"  Mean: {np.mean(relative_diff):.6e}\")\r\n    print(f\"  Min:  {np.min(relative_diff):.6e}\")\r\n    print(f\"  Std:  {np.std(relative_diff):.6e}\")\r\n    \r\n    # # Per-state statistics (assuming each row is a trajectory and columns are states)\r\n    # if arr1.ndim == 2:\r\n    #     print(f\"\\nPer-state statistics (over all trajectories):\")\r\n    #     for state_idx in range(arr1.shape[1]):\r\n    #         state_diff = diff[:, state_idx]\r\n    #         print(f\"  State {state_idx}: max={np.max(state_diff):.6e}, \"\r\n    #               f\"mean={np.mean(state_diff):.6e}, min={np.min(state_diff):.6e}\")\r\n    \r\n    # Find worst mismatches\r\n    if not is_close:\r\n        print(f\"\\nWorst mismatches (top 5):\")\r\n        flat_diff = diff.flatten()\r\n        worst_indices = np.argsort(flat_diff)[-5:][::-1]\r\n        for idx in worst_indices:\r\n            if arr1.ndim == 2:\r\n                row, col = np.unravel_index(idx, arr1.shape)\r\n                print(f\"  [{row}, {col}]: {name1}={arr1[row, col]:.6e}, \"\r\n                      f\"{name2}={arr2[row, col]:.6e}, diff={flat_diff[idx]:.6e}\")\r\n            else:\r\n                print(f\"  [{idx}]: {name1}={arr1.flat[idx]:.6e}, \"\r\n                      f\"{name2}={arr2.flat[idx]:.6e}, diff={flat_diff[idx]:.6e}\")\r\n    # Return summary statistics so callers can build pairwise tables\r\n    stats = {\r\n        'is_close': bool(is_close),\r\n        'num_close': int(num_close),\r\n        'total_elements': int(total_elements),\r\n        'percent_close': float(percent_close),\r\n        'abs_max': float(np.max(diff)),\r\n        'abs_mean': float(np.mean(diff)),\r\n        'rel_min': float(np.max(relative_diff)),\r\n        'rel_std': float(np.mean(relative_diff)),\r\n    }\r\n    return stats\r\n\r\ndef main():\r\n    \"\"\"Main function to compare all available numerical results.\"\"\"\r\n    data_dir = \"./data/numerical\"\r\n    \r\n    # Define expected packages\r\n    packages = [\"cubie_adaptive\", \"cubie_unadaptive\", \"jax\", \"pytorch\", \"julia_adaptive\", \"julia_fixed\", \"mpgos\"]\r\n    \r\n    print(\"=\"*80)\r\n    print(\"GPU ODE Benchmarks - Numerical Results Comparison\")\r\n    print(\"=\"*80)\r\n    print(f\"\\nLooking for CSV files in: {data_dir}\")\r\n    \r\n    # Load all available data\r\n    data = {}\r\n    for package in packages:\r\n        filepath = os.path.join(data_dir, f\"{package}.csv\")\r\n        arr = load_data(filepath)\r\n        if arr is not None:\r\n            data[package] = arr\r\n            print(f\"✓ Loaded {package}.csv - shape: {arr.shape}\")\r\n        else:\r\n            print(f\"✗ {package}.csv not found\")\r\n    \r\n    if len(data) < 2:\r\n        print(f\"\\nERROR: Need at least 2 datasets to compare. Found {len(data)}.\")\r\n        print(\"Please run the benchmarks with 32768 trajectories first.\")\r\n        sys.exit(1)\r\n    \r\n    print(f\"\\nFound {len(data)} datasets. Performing pairwise comparisons...\")\r\n    \r\n    # Perform pairwise comparisons and collect stats for a summary table\r\n    names = sorted(data.keys())\r\n    pairs = list(combinations(names, 2))\r\n    stats_map = {}\r\n\r\n    for name1, name2 in pairs:\r\n        stats = compare_arrays(name1, data[name1], name2, data[name2])\r\n        stats_map[(name1, name2)] = stats\r\n    \r\n    # Summary\r\n    print(f\"\\n{'='*80}\")\r\n    print(\"SUMMARY\")\r\n    print(f\"{'='*80}\")\r\n    print(f\"Total datasets compared: {len(data)}\")\r\n    print(f\"Total pairwise comparisons: {len(pairs)}\")\r\n    print(f\"\\nPackages included: {', '.join(names)}\")\r\n\r\n    # Build markdown pairwise table and write to file. Each cell shows: max_abs/mean_abs/%close\r\n    md_path = os.path.join('.', 'pairwise_comparisons.md')\r\n    md_lines = []\r\n    md_lines.append('# Pairwise comparisons\\n')\r\n    md_lines.append('Generated by `compare_numerical_results.py`.\\n\\n')\r\n    md_lines.append('## Packages included\\n\\n')\r\n    md_lines.append(', '.join(names) + '\\n\\n')\r\n    md_lines.append('## Pairwise difference table\\n\\n')\r\n\r\n    # Header row\r\n    md_lines.append('| |' + '|'.join(names) + '|\\n')\r\n    md_lines.append('|' + '---|' * (len(names) + 1) + '\\n')\r\n\r\n    for row_name in names:\r\n        cells = [row_name]\r\n        for col_name in names:\r\n            if row_name == col_name:\r\n                cells.append('-')\r\n            else:\r\n                key = (row_name, col_name) if (row_name, col_name) in stats_map else (col_name, row_name)\r\n                stats = stats_map.get(key)\r\n                if stats is None:\r\n                    cells.append('N/A')\r\n                else:\r\n                    # Use <br> so each labeled value appears on its own line inside the Markdown cell\r\n                    cells.append(\r\n                        f\"Max: {stats['abs_max']:.2e}<br>Mean: {stats['abs_mean']:.2e}<br>%Close: {stats['percent_close']:.1f}%\"\r\n                    )\r\n        md_lines.append('|' + '|'.join(cells) + '|\\n')\r\n\r\n    # Write to file\r\n    try:\r\n        with open(md_path, 'w') as f:\r\n            f.writelines(line for line in md_lines)\r\n        print(f\"\\nWrote pairwise comparison table to: {md_path}\")\r\n    except Exception as e:\r\n        print(f\"ERROR: Failed to write markdown file: {e}\")\r\n\r\n    print(f\"\\nTo adjust comparison tolerances, modify rtol and atol in compare_arrays()\")\r\n    print(f\"Current defaults: rtol=1e-5, atol=1e-8\")\r\n\r\nif __name__ == \"__main__\":\r\n    main()\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/compare_numerical_results.py b/compare_numerical_results.py
+--- a/compare_numerical_results.py	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/compare_numerical_results.py	(date 1764906225565)
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python3
++#!/usr/bin/env python
+ """
+ Compare numerical results between different integration packages.
+ 
+Index: runner_scripts/gpu/run_ode_jax.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>a=8\r\nmax_a=$1\r\nXLA_PYTHON_CLIENT_PREALLOCATE=false\r\nsource ./GPU_ODE_JAX/venv_jax/bin/activate\r\nwhile [ $a -le $max_a ]\r\ndo\r\n    \t# Print the values\r\n    \techo \"No. of trajectories = $a\"\r\n\t\tpython3 ./GPU_ODE_JAX/bench_diffrax.py $a\t\r\n    \t# increment the value\r\n    \ta=$((a*4))\r\ndone\r\ndeactivate\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/runner_scripts/gpu/run_ode_jax.sh b/runner_scripts/gpu/run_ode_jax.sh
+--- a/runner_scripts/gpu/run_ode_jax.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/runner_scripts/gpu/run_ode_jax.sh	(date 1764906225556)
+@@ -6,7 +6,7 @@
+ do
+     	# Print the values
+     	echo "No. of trajectories = $a"
+-		python3 ./GPU_ODE_JAX/bench_diffrax.py $a	
++		python ./GPU_ODE_JAX/bench_diffrax.py $a
+     	# increment the value
+     	a=$((a*4))
+ done
+Index: runner_scripts/gpu/run_ode_cubie.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/bin/bash\r\n# Activate venv\r\nsource ./GPU_ODE_CUBIE/venv_cubie/bin/activate\r\n\r\na=8\r\nmax_a=$1\r\nwhile [ $a -le $max_a ]\r\ndo\r\n    echo \"No. of trajectories = $a\"\r\n    python3 ./GPU_ODE_CUBIE/bench_cubie.py $a\r\n    a=$((a*4))\r\ndone\r\n\r\n# Deactivate venv\r\ndeactivate\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/runner_scripts/gpu/run_ode_cubie.sh b/runner_scripts/gpu/run_ode_cubie.sh
+--- a/runner_scripts/gpu/run_ode_cubie.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/runner_scripts/gpu/run_ode_cubie.sh	(date 1764906225514)
+@@ -7,7 +7,7 @@
+ while [ $a -le $max_a ]
+ do
+     echo "No. of trajectories = $a"
+-    python3 ./GPU_ODE_CUBIE/bench_cubie.py $a
++    python ./GPU_ODE_CUBIE/bench_cubie.py $a
+     a=$((a*4))
+ done
+ 
+Index: GPU_ODE_PyTorch/setup_environment.sh
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>#!/bin/bash\r\n# Setup Python venv for PyTorch (torchdiffeq) ODE benchmarking\r\nset -e\r\n\r\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\r\ncd \"$SCRIPT_DIR\"\r\n\r\necho \"Setting up PyTorch/torchdiffeq environment...\"\r\n\r\n# Check if Python is available\r\nif ! command -v python3 &> /dev/null; then\r\n    echo \"Error: python3 is not installed\"\r\n    exit 1\r\nfi\r\n\r\n# Create venv\r\necho \"Creating virtual environment...\"\r\npython3 -m venv venv\r\n\r\n# Activate venv\r\nsource venv/bin/activate\r\n\r\n# Upgrade pip and install uv\r\necho \"Installing uv package manager...\"\r\npip install --upgrade pip\r\npip install uv\r\n\r\n# Install PyTorch with CUDA support and other dependencies\r\necho \"Installing PyTorch with CUDA support and dependencies...\"\r\n# Install PyTorch with CUDA 12.1 support (latest stable version)\r\nuv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121\r\nuv pip install numpy\r\nuv pip install scipy\r\n\r\n# Install custom torchdiffeq fork with vmap support\r\necho \"Installing torchdiffeq with vmap support...\"\r\nuv pip install git+https://github.com/utkarsh530/torchdiffeq.git@u/vmap\r\n\r\n# Verify installation\r\necho \"Verifying installation...\"\r\npython -c \"import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())\"\r\npython -c \"import torchdiffeq; print('torchdiffeq installed successfully')\"\r\n\r\n# Deactivate\r\ndeactivate\r\n\r\necho \"PyTorch/torchdiffeq environment setup complete!\"\r\necho \"To activate: source $SCRIPT_DIR/venv/bin/activate\"\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/GPU_ODE_PyTorch/setup_environment.sh b/GPU_ODE_PyTorch/setup_environment.sh
+--- a/GPU_ODE_PyTorch/setup_environment.sh	(revision f5f49cdd551ffa95ef5645b831f9fd3ef6b62712)
++++ b/GPU_ODE_PyTorch/setup_environment.sh	(date 1764906225573)
+@@ -8,14 +8,14 @@
+ echo "Setting up PyTorch/torchdiffeq environment..."
+ 
+ # Check if Python is available
+-if ! command -v python3 &> /dev/null; then
+-    echo "Error: python3 is not installed"
++if ! command -v python &> /dev/null; then
++    echo "Error: python is not installed"
+     exit 1
+ fi
+ 
+ # Create venv
+ echo "Creating virtual environment..."
+-python3 -m venv venv
++python -m venv venv
+ 
+ # Activate venv
+ source venv/bin/activate

@@ -1,0 +1,16 @@
+Index: .gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+># plots\r\n*.exe\r\n\r\n/data\r\n# But allow the README in the numerical comparison directory\r\n!/data/numerical/\r\n!/data/numerical/README.md\r\n# Ignore the actual CSV data files\r\n/data/numerical/*.csv\r\n\r\n# Ignore virtual environment directories starting with `venv` anywhere\r\nvenv*/\r\n**/venv*/\r\n\r\n# Ignore cubie clone directories in setup folders\r\nGPU_ODE_CUBIE/cubie/\r\n\r\n# Python cache\r\n__pycache__/\r\n*.pyc\r\n*.pyo\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore	(revision 8f5f960688d3d8d7fd676b013560cad5405506b3)
++++ b/.gitignore	(date 1764993541071)
+@@ -19,3 +19,5 @@
+ __pycache__/
+ *.pyc
+ *.pyo
++/Manifest.toml
++/Project.toml
