@@ -13,61 +13,49 @@ import numpy as np
 import cubie as qb
 from cubie.time_logger import _default_timelogger
 
+# Add parent directory to path for model_definitions
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model_definitions import get_cubie_system, get_model_params, get_parameter_list
+
 _default_timelogger.set_verbosity(None)
 
-# Get number of trajectories from command line
+# Get number of trajectories and model name from command line
 numberOfParameters = int(sys.argv[1])
+model_name = sys.argv[2] if len(sys.argv) > 2 else "lorenz"
 
 # ========================================
-# LORENZ SYSTEM DEFINITION
+# MODEL SYSTEM DEFINITION
 # ========================================
-# Mathematical definition:
-#   dx/dt = sigma * (y - x)
-#   dy/dt = x * (rho - z) - y
-#   dz/dt = x * y - beta * z
-#
-# Where:
-#   sigma = 10.0 (fixed)
-#   beta = 8/3 (fixed)  
-#   rho = parameter varied from 0 to 21
-
 precision = np.float32
 
-lorenz_system = qb.create_ODE_system(
-    """
-    dx = sigma * (y - x)
-    dy = x * (rho - z) - y
-    dz = x * y - beta * z
-    """,
-    states={'x': 1.0, 'y': 0.0, 'z': 0.0},
-    parameters={'rho': 21.0},
-    constants={'sigma': 10.0, 'beta': 8.0/3.0},
-    name="Lorenz",
+# Get model definition
+system_string, initial_conditions, param_name, constants = get_cubie_system(model_name, precision)
+model_params = get_model_params(model_name, precision)
+
+# Create ODE system
+ode_system = qb.create_ODE_system(
+    system_string,
+    states=initial_conditions,
+    parameters={param_name: model_params['parameter_default']},
+    constants=constants,
+    name=model_params['name'],
     precision=precision
 )
 
 # ========================================
 # PARAMETER SWEEP SETUP
 # ========================================
-# Create linear space from 0 to 21 for rho parameter
-parameterList = np.linspace(0.0, 21.0, numberOfParameters)
+# Get parameter list for the model
+parameterList = get_parameter_list(model_name, numberOfParameters, precision)
 
 # Build parameter dictionary for batch solve
-# All parameters except rho are scalar (same for all trajectories)
-# rho varies across the ensemble
 parameters = {
-    'rho': parameterList
-}
-
-# Initial conditions (same for all trajectories)
-initial_conditions = {
-    'x': 1.0,
-    'y': 0.0,
-    'z': 0.0
+    param_name: parameterList
 }
 
 fixed_solver = qb.Solver(
-    lorenz_system,
+    ode_system,
     algorithm='classical-rk4',
     dt=0.001,
     dt_save=1.0,
@@ -77,7 +65,7 @@ fixed_solver = qb.Solver(
 )
 
 adaptive_solver = qb.Solver(
-    lorenz_system,
+    ode_system,
     algorithm='tsit5',
     atol=1e-08,
     rtol=1e-08,
@@ -96,6 +84,9 @@ adaptive_solver = qb.Solver(
 
 initials_array, parameter_array = fixed_solver.grid_builder(
         states=initial_conditions, params=parameters)
+
+# Get duration from model parameters
+duration = model_params['tspan'][1] - model_params['tspan'][0]
 # ========================================
 # FIXED TIME-STEPPING BENCHMARK
 # ========================================
@@ -108,7 +99,7 @@ def solve_fixed(blocksize=64):
         parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.0 
+        duration=duration
     )
     return solution
 
@@ -119,7 +110,7 @@ def solve_adaptive(blocksize=64):
         parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.0
+        duration=duration
     )
     return solution
 

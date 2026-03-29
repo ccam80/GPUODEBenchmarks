@@ -1,28 +1,21 @@
 using BenchmarkTools, StaticArrays, OrdinaryDiffEq
 
+include(joinpath(@__DIR__, "src", "model_definitions.jl"))
+
 @show ARGS
 #settings
 
 numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
+model_name = (isinteractive() || length(ARGS) < 2) ? "lorenz" : ARGS[2]
 
-function lorenz(u, p, t)
-    du1 = 10.0 * (u[2] - u[1])
-    du2 = p[1] * u[1] - u[2] - u[1] * u[3]
-    du3 = u[1] * u[2] - 2.666 * u[3]
-    return @SVector [du1, du2, du3]
-end
+# Get model definition
+ode_func, u0, p, tspan, dim = get_model(model_name, Float64)
+parameterList = get_parameter_range(model_name, numberOfParameters, Float64)
 
-u0 = @SVector [1.0; 0.0; 0.0]
-tspan = (0.0, 1.0)
-p = @SArray [21.0]
-prob = ODEProblem(lorenz, u0, tspan, p)
-
-parameterList = range(0.0, stop = 21.0, length = numberOfParameters)
-
-lorenzProblem = ODEProblem(lorenz, u0, tspan, p)
+prob = ODEProblem(ode_func, u0, tspan, p)
 prob_func = (prob, i, repeat) -> remake(prob, p = @SArray [parameterList[i]])
 
-ensembleProb = EnsembleProblem(lorenzProblem, prob_func = prob_func)
+ensembleProb = EnsembleProblem(prob, prob_func = prob_func)
 
 @info "Solving the problem"
 data = @benchmark solve($ensembleProb, Tsit5(), EnsembleThreads(), dt = 0.001,

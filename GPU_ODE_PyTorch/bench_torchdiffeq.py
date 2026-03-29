@@ -15,7 +15,12 @@ import timeit
 import sys
 import numpy as np
 
+# Add parent directory to path for model_definitions
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model_definitions import get_pytorch_model_class, get_model_params, get_parameter_list
+
 numberOfParameters = int(sys.argv[1])
+model_name = sys.argv[2] if len(sys.argv) > 2 else "lorenz"
 
 # %%
 
@@ -26,6 +31,19 @@ import torch.nn as nn
 import timeit
 from torchdiffeq import odeint
 
+# Get model definition
+ModelClass = get_pytorch_model_class(model_name)
+model_params = get_model_params(model_name, np.float32)
+initial_conditions = model_params['initial_conditions']
+tspan = model_params['tspan']
+param_name = model_params['parameter_name']
+
+# Convert initial conditions to tensor
+u0_list = list(initial_conditions.values())
+u0 = torch.tensor(u0_list).cuda()
+
+# Time points
+t = torch.linspace(tspan[0], tspan[1], 2).cuda()
 
 # %%
 
@@ -34,47 +52,18 @@ print("CUDA enabled: ", torch.backends.cuda.is_built())
 
 
 # %%
-# Defining the Lorenz ODE problem
-class LorenzODE(torch.nn.Module):
-
-    def __init__(self, rho = torch.tensor(21.0)):
-        super(LorenzODE, self).__init__()
-        self.sigma = nn.Parameter(torch.as_tensor([10.0]))
-        self.rho = nn.Parameter(rho)
-        self.beta = nn.Parameter(torch.as_tensor([8/3]))
-
-    def forward(self, t, u):
-        x, y, z = u[0],u[1],u[2]
-        du1 = self.sigma[0] * (y - x)
-        du2 = x * (self.rho - z) - y
-        du3 = x * y - self.beta[0] * z
-        return torch.stack([du1, du2, du3])
-
-
-# %%
-# Uncomment for smoke test
-
-# u0 = torch.tensor([1.0,0.0,0.0]).cuda()
-# t = torch.linspace(0, 1.0, 1001).cuda()
-# y = odeint(LorenzODE(), u0, t, method='rk4',options=dict(step_size=0.001))
-
-
-# %%
 # Define the solve without gradient calculations
 # Note: I was't able to JIT compile the code with this application, torchdiffeq + vmap
 def solve(p):
     with torch.no_grad():
-        traj = odeint(LorenzODE(rho = p), u0, t, method='rk4', options=dict(step_size=0.001))
+        model = ModelClass(**{param_name: p})
+        traj = odeint(model, u0, t, method='rk4', options=dict(step_size=0.001))
         return traj
-
-# Define the initial conditions and timepoints to save
-u0 = torch.tensor([1.0,0.0,0.0]).cuda()
-t = torch.linspace(0, 1.0, 2).cuda()
-
 
 # %%
 # Generate parameter list
-parameters = torch.linspace(0.0,21.0,numberOfParameters).cuda()
+param_list = get_parameter_list(model_name, numberOfParameters, np.float32)
+parameters = torch.tensor(param_list).cuda()
 
 
 # %%

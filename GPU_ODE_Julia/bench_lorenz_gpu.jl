@@ -6,25 +6,19 @@ Pkg.precompile()
 using CUDA
 using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays
 
+include(joinpath(@__DIR__, "src", "model_definitions.jl"))
 
 @show ARGS
 #settings
 CUDA.allowscalar(false)
 numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
+model_name = (isinteractive() || length(ARGS) < 2) ? "lorenz" : ARGS[2]
 
-function lorenz(u, p, t)
-    du1 = 10.0f0 * (u[2] - u[1])
-    du2 = p[1] * u[1] - u[2] - u[1] * u[3]
-    du3 = u[1] * u[2] - 2.666f0 * u[3]
-    return @SVector [du1, du2, du3]
-end
+# Get model definition
+ode_func, u0, p, tspan, dim = get_model(model_name, Float32)
+parameterList = get_parameter_range(model_name, numberOfParameters, Float32)
 
-u0 = @SVector [1.0f0; 0.0f0; 0.0f0]
-tspan = (0.0f0, 1.0f0)
-p = @SArray [21.0f0]
-prob = ODEProblem{false}(lorenz, u0, tspan, p)
-
-parameterList = range(0.0f0, stop = 21.0f0, length = numberOfParameters)
+prob = ODEProblem{false}(ode_func, u0, tspan, p)
 # parameterList_d = cu(collect(parameterList))          # GPU copy of parameter values
 
 I = 1:numberOfParameters
@@ -76,11 +70,11 @@ if !isinteractive() && numberOfParameters == 32768
                            dt = 0.001f0)
     # Extract final state values for each trajectory
     using CSV, DataFrames
-    # final_states = zeros(Float32, numberOfParameters, 3)
     final_states = Array(sol[2][end,:]) #convert to CPU Array
     
-    # Save to CSV
-    df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
+    # Save to CSV - determine column names based on dimension
+    col_names = dim == 2 ? [:x, :y] : (dim == 3 ? [:x, :y, :z] : [Symbol("state_$i") for i in 1:dim])
+    df2 = DataFrame([Tuple(s) for s in final_states], col_names)
     CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), df2, header=false)
     # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
     #           DataFrame(final_states, :auto), header=false)
@@ -133,7 +127,8 @@ if !isinteractive() && numberOfParameters == 32768
     using CSV, DataFrames
     final_states = Array(sol[2][end,:]) #convert to CPU Array
     
-    # Save to CSV
-    df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
+    # Save to CSV - determine column names based on dimension
+    col_names = dim == 2 ? [:x, :y] : (dim == 3 ? [:x, :y, :z] : [Symbol("state_$i") for i in 1:dim])
+    df2 = DataFrame([Tuple(s) for s in final_states], col_names)
     CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive.csv"), df2, header=false)
 end
