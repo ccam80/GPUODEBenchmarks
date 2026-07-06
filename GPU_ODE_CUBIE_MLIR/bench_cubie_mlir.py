@@ -11,6 +11,7 @@ separate data files so the two pipelines can be compared directly.
 Created for GPUODEBenchmarks integration
 """
 
+import os
 import sys
 import timeit
 import numpy as np
@@ -21,6 +22,13 @@ default_timelogger.set_verbosity(None)
 
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
+
+# Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
+# additively populated across machines without clobbering each other.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
+from bench_key import dataset_key
+DATASET_KEY = dataset_key()
 
 # ========================================
 # LORENZ SYSTEM DEFINITION
@@ -140,9 +148,8 @@ best_time = min(res) * 1000  # Convert to milliseconds
 print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {best_time:.1f} ms")
 
 # Save results
-import os
 os.makedirs("./data/CUBIE_MLIR", exist_ok=True)
-with open("./data/CUBIE_MLIR/Cubie_mlir_times_unadaptive.txt", "a+") as file:
+with open("./data/CUBIE_MLIR/Cubie_mlir_times_unadaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
     file.write(f'{numberOfParameters} {best_time}\n')
 
 # Save numerical output for 32768-trajectory run
@@ -151,7 +158,7 @@ if numberOfParameters == 32768:
     solution = solve_fixed()
     # Extract final state values
     final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_mlir_unadaptive.csv", final_states, delimiter=',')
+    np.savetxt("./data/numerical/cubie_mlir_unadaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
 
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
@@ -168,7 +175,7 @@ best_time = min(res) * 1000  # Convert to milliseconds
 print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in {best_time:.1f} ms")
 
 # Save results
-with open("./data/CUBIE_MLIR/Cubie_mlir_times_adaptive.txt", "a+") as file:
+with open("./data/CUBIE_MLIR/Cubie_mlir_times_adaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
     file.write(f'{numberOfParameters} {best_time}\n')
 
 if numberOfParameters == 32768:
@@ -176,4 +183,4 @@ if numberOfParameters == 32768:
     solution = solve_adaptive()
     # Extract final state values
     final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_mlir_adaptive.csv", final_states, delimiter=',')
+    np.savetxt("./data/numerical/cubie_mlir_adaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')

@@ -50,6 +50,12 @@ if "%has_n_option%"=="false" (
 REM Accept hyphenated alias for cubie_mlir
 if /i "%lang%"=="cubie-mlir" set lang=cubie_mlir
 
+REM Per-machine dataset key ("<os>_<gpu>"). Timing files are appended across the
+REM N-sweep, so we clear only *this machine's* files before a run; other machines'
+REM keyed files are left in place so data accumulates additively across machines.
+set "DATASET_KEY="
+for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
+
 echo %lang%
 
 if /i "%lang%"=="julia" (
@@ -60,7 +66,7 @@ if /i "%lang%"=="julia" (
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     ) else (
         if not exist "data\Julia\" mkdir "data\Julia"
-        del /q "data\Julia\*" 2>nul
+        del /q "data\Julia\*_%DATASET_KEY%.txt" 2>nul
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     )
 ) else if /i "%lang%"=="jax" (
@@ -95,7 +101,7 @@ if /i "%lang%"=="cubie_mlir" set data_lang=CUBIE_MLIR
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
 if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
-del /q "data\%data_lang%\*" 2>nul
+del /q "data\%data_lang%\*_%DATASET_KEY%.txt" 2>nul
 call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
 goto end_script
 

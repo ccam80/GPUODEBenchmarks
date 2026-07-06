@@ -29,6 +29,74 @@ void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PREC
 void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
 void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
 
+// NOTE: the run_ode_cpp runners rewrite lines 15 and 17 of this file by absolute
+// line number, so nothing may be inserted above the config block. Keep the
+// dataset-key helper below the forward declarations.
+#include <cstdio>
+#include <cctype>
+
+// Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
+// additively populated across machines without clobbering each other. The GPU
+// name comes from nvidia-smi (the single source of truth shared by every
+// framework) and is sanitised identically to runner_scripts/bench_key.*:
+// tokenise on non-alphanumeric characters, drop the NVIDIA/GeForce vendor words,
+// join the rest with '-'. e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
+static std::string DatasetKey()
+{
+	static std::string cached;
+	static bool done = false;
+	if (done) return cached;
+
+#ifdef _WIN32
+	std::string os = "windows";
+#elif defined(__APPLE__)
+	std::string os = "macos";
+#else
+	std::string os = "linux";
+#endif
+
+	std::string raw;
+#ifdef _WIN32
+	FILE* pipe = _popen("nvidia-smi --query-gpu=name --format=csv,noheader", "r");
+#else
+	FILE* pipe = popen("nvidia-smi --query-gpu=name --format=csv,noheader", "r");
+#endif
+	if (pipe)
+	{
+		char buf[256];
+		if (fgets(buf, sizeof(buf), pipe)) raw = buf;
+#ifdef _WIN32
+		_pclose(pipe);
+#else
+		pclose(pipe);
+#endif
+	}
+
+	std::string gpu, tok;
+	for (size_t i = 0; i <= raw.size(); ++i)
+	{
+		char c = (i < raw.size()) ? raw[i] : '\0';
+		if (std::isalnum((unsigned char)c))
+		{
+			tok += c;
+		}
+		else
+		{
+			if (!tok.empty() && tok != "NVIDIA" && tok != "GeForce")
+			{
+				if (!gpu.empty()) gpu += "-";
+				gpu += tok;
+			}
+			tok.clear();
+		}
+	}
+	if (gpu.empty()) gpu = "unknown-gpu";
+
+	cached = os + "_" + gpu;
+	done = true;
+	return cached;
+}
+
 int main(int argc, char *argv[])
 {
 	int NumberOfProblems = NT;
@@ -84,12 +152,12 @@ int main(int argc, char *argv[])
 	
 	ofstream datafile;
 	if (SOLVER == RK4){
-		datafile.open ("./data/CPP/MPGOS_times_unadaptive.txt",ios::app);
+		datafile.open (("./data/CPP/MPGOS_times_unadaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
 		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
 		datafile.close();
 	}else{
 		
-		datafile.open ("./data/CPP/MPGOS_times_adaptive.txt",ios::app);
+		datafile.open (("./data/CPP/MPGOS_times_adaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
 		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
 		datafile.close();
 	}
@@ -149,7 +217,7 @@ void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& 
 	ofstream DataFile;
 	// Create directory if it doesn't exist (assumes unix-like system)
 	system("mkdir -p ./data/numerical");
-	DataFile.open ( "./data/numerical/mpgos_internalsave.csv" );
+	DataFile.open ( ("./data/numerical/mpgos_internalsave_" + DatasetKey() + ".csv").c_str() );
 	
 	int Width = 18;
 	DataFile.precision(10);
@@ -172,7 +240,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 	ofstream DataFile;
 	// Create directory if it doesn't exist (assumes unix-like system)
 	system("mkdir -p ./data/numerical");
-	DataFile.open ( "./data/numerical/mpgos.csv" );
+	DataFile.open ( ("./data/numerical/mpgos_" + DatasetKey() + ".csv").c_str() );
 	
 	DataFile.precision(10);
 	DataFile.flags(ios::scientific);

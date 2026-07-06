@@ -12,6 +12,11 @@ using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays
 CUDA.allowscalar(false)
 numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 
+# Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
+# additively populated across machines without clobbering each other.
+include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
+const DATASET_KEY = dataset_key()
+
 function lorenz(u, p, t)
     du1 = 10.0f0 * (u[2] - u[1])
     du2 = p[1] * u[1] - u[2] - u[1] * u[3]
@@ -59,7 +64,7 @@ data = @benchmark begin
     end
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive.txt"),
+    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive_$(DATASET_KEY).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1e6)
     end
@@ -81,7 +86,7 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), df2, header=false)
+    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed_$(DATASET_KEY).csv"), df2, header=false)
     # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
     #           DataFrame(final_states, :auto), header=false)
 end
@@ -105,7 +110,7 @@ data = @benchmark begin
 end
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive.txt"),
+    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(DATASET_KEY).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1f6)
     end
@@ -135,5 +140,5 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive.csv"), df2, header=false)
+    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive_$(DATASET_KEY).csv"), df2, header=false)
 end

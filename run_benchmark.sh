@@ -17,6 +17,12 @@ if ! $has_n_option; then
 fi
 # Accept hyphenated aliases (e.g. cubie-mlir) by normalizing to underscores
 lang=${lang//-/_}
+
+# Per-machine dataset key ("<os>_<gpu>"). Timing files are appended across the
+# N-sweep, so we clear only *this machine's* files before a run; other machines'
+# keyed files are left in place so data accumulates additively across machines.
+DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
+
 if [ -z "$lang" ] || [ -z "$dev" ] || [ -z "$model" ]; then
     echo "Usage: $0 -l <language> -d <device> -m <model> [-n nmax]"
     exit 1
@@ -30,7 +36,7 @@ if [ "$lang" == "julia" ]; then
         bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
     else
         mkdir -p "./data/${lang^}"
-        rm -f "./data/${lang^}"/*
+        rm -f "./data/${lang^}"/*_"${DATASET_KEY}".txt
         bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
     fi
 elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubie" || $lang == "cubie_mlir" ]]; then
@@ -40,7 +46,7 @@ elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubi
     else
         echo "Benchmarking ${lang^^} ${dev^^} accelerated ensemble ${model^^} solvers..."
         mkdir -p "./data/${lang^^}"
-        rm -rf "./data/${lang^^}"/*
+        rm -f "./data/${lang^^}"/*_"${DATASET_KEY}".txt
         bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
     fi
 else

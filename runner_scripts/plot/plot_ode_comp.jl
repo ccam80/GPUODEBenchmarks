@@ -4,75 +4,128 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
+# Plot the Lorenz timing benchmarks. Data files are postfixed by a per-machine
+# key "<os>_<gpu>" (see runner_scripts/bench_key.*), e.g.
+#   data/Julia/Julia_times_adaptive_linux_RTX-2060-SUPER.txt
+# so the same repo can be populated additively across machines. This script
+# discovers those files, parses (framework, mode, os, gpu) from the names, and
+# emits one plot per (group, mode):
+#   * groups: "all" (everything combined), one per distinct os, one per distinct gpu
+#   * modes:  "fixed" (unadaptive only), "adaptive" (adaptive only), "all" (both)
+# giving e.g. Lorenz_fixed_linux.png, Lorenz_adaptive_linux.png, Lorenz_all_linux.png.
+#
 # Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
-# Map of display name -> (subdirectory, filename prefix)
+# display name => (subdirectory, filename prefix)
 # Note: MPGOS data files are stored under `CPP/` in the repo's `data/` folder.
-frameworks = Dict(
-    "Julia" => ("Julia", "Julia"),
-    "MPGOS" => ("CPP", "MPGOS"),
-    "JAX" => ("JAX", "Jax"),
-    "PYTORCH" => ("PYTORCH", "Torch"),
-    "CUBIE" => ("CUBIE", "Cubie"),
-    "CUBIE_MLIR" => ("CUBIE_MLIR", "Cubie_mlir"),
-)
+frameworks = [
+    ("Julia", "Julia", "Julia"),
+    ("MPGOS", "CPP", "MPGOS"),
+    ("JAX", "JAX", "Jax"),
+    ("PYTORCH", "PYTORCH", "Torch"),
+    ("CUBIE", "CUBIE", "Cubie"),
+    ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
+]
 
 # color/marker choices per framework
 colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red, "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple)
 markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond, "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon)
 
-function main()
-    # Collect available series and first Ns
-    Ns = nothing
-    series_plots = []
+# One benchmark curve loaded from disk.
+struct Series
+    display::String
+    mode::String     # "fixed" or "adaptive"
+    os::String
+    gpu::String
+    key::String      # "<os>_<gpu>"
+    x::Vector{Float64}
+    y::Vector{Float64}
+end
 
-    for (display, tuple) in frameworks
-        dir, prefix = tuple
-        unadaptive_path = joinpath(base_path, dir, "$(prefix)_times_unadaptive.txt")
-        adaptive_path = joinpath(base_path, dir, "$(prefix)_times_adaptive.txt")
-
-        if isfile(unadaptive_path)
-            data = readdlm(unadaptive_path)
-            if Ns === nothing
-                Ns = data[:, 1]
-            end
-            push!(series_plots, (label = "$(display) (fixed)", x = Ns, y = data[:, 2] .* 1e-3, color = colors[display], marker = markers[display]))
-        else
-            println("Warning: missing unadaptive file for $(display) at $(unadaptive_path)")
+# Discover every keyed timing file and load it into a Series.
+function collect_series(base_path, frameworks)
+    series = Series[]
+    for (display, dir, prefix) in frameworks
+        dpath = joinpath(base_path, dir)
+        isdir(dpath) || continue
+        # Match "<prefix>_times_<adaptive|unadaptive>_<os>_<gpu>.txt". The key is
+        # "<os>_<gpu>" where gpu contains no underscores, so os and gpu are the
+        # last two underscore-separated fields.
+        pat = Regex("^" * prefix * "_times_(adaptive|unadaptive)_([^_]+)_([^_]+)\\.txt\$")
+        for fname in sort(readdir(dpath))
+            m = match(pat, fname)
+            m === nothing && continue
+            mode = m.captures[1] == "adaptive" ? "adaptive" : "fixed"
+            os = m.captures[2]
+            gpu = m.captures[3]
+            data = readdlm(joinpath(dpath, fname))
+            isempty(data) && continue
+            order = sortperm(data[:, 1])
+            push!(series, Series(display, mode, os, gpu, "$(os)_$(gpu)",
+                                 Float64.(data[order, 1]), data[order, 2] .* 1e-3))
         end
-
-        if isfile(adaptive_path)
-            data = readdlm(adaptive_path)
-            if Ns === nothing
-                Ns = data[:, 1]
-            end
-            push!(series_plots, (label = "$(display) (adaptive)", x = Ns, y = data[:, 2] .* 1e-3, color = colors[display], marker = markers[display], linestyle = :dash))
-        else
-            println("Warning: missing adaptive file for $(display) at $(adaptive_path)")
-        end
-    # end of per-framework processing
     end
-    if Ns === nothing
-        println("Warning: no data files found under $(base_path). Nothing to plot.")
-    else
-        # proceed to plot available series
-        xticks = 10 .^ round.(range(1, 7, length = 13), digits = 2)
-        yticks = 10 .^ round.(range(2, -5, length = 15), digits = 2)
-        gr(size = (810, 540))
-        plt = plot(xaxis = :log, yaxis = :log, linewidth = 2, ylabel = "Time (s)", xlabel = "Trajectories",
-            title = "Lorenz Problem: Adaptive vs Fixed time-steps (per-framework)", legend = :topleft, xticks = xticks, yticks = yticks, dpi = 600)
+    return series
+end
 
-        for s in series_plots
-            ls = get(s, :linestyle, :solid)
-            plot!(plt, s.x, s.y, label = s.label, color = s.color, marker = s.marker, linestyle = ls)
-        end
+# Draw and save one plot for the given series subset, or warn if it is empty.
+function render_plot(sel, group_label, mode_label, plots_dir, multikey)
+    if isempty(sel)
+        println("Skipping empty plot: $(mode_label)_$(group_label)")
+        return
+    end
+    xticks = 10 .^ round.(range(1, 7, length = 13), digits = 2)
+    yticks = 10 .^ round.(range(2, -5, length = 15), digits = 2)
+    gr(size = (810, 540))
+    modeword = mode_label == "fixed" ? "Fixed" : mode_label == "adaptive" ? "Adaptive" : "Adaptive vs Fixed"
+    plt = plot(xaxis = :log, yaxis = :log, linewidth = 2, ylabel = "Time (s)", xlabel = "Trajectories",
+        title = "Lorenz Problem: $(modeword) time-steps ($(group_label))", legend = :topleft,
+        xticks = xticks, yticks = yticks, dpi = 600)
 
-        plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
-        isdir(plots_dir) || mkdir(plots_dir)
-        savefig(plt, joinpath(plots_dir, "Lorenz_adaptive_vs_unadaptive_per_framework_$(Dates.value(Dates.now())).png"))
-        println("Saved plot to $(plots_dir)")
+    for s in sel
+        stepword = s.mode == "adaptive" ? "adaptive" : "fixed"
+        # Only disambiguate by key when the group mixes machines.
+        label = multikey ? "$(s.display) ($(stepword)) [$(s.key)]" : "$(s.display) ($(stepword))"
+        ls = s.mode == "adaptive" ? :dash : :solid
+        plot!(plt, s.x, s.y, label = label, color = colors[s.display], marker = markers[s.display], linestyle = ls)
+    end
+
+    isdir(plots_dir) || mkpath(plots_dir)
+    outfile = joinpath(plots_dir, "Lorenz_$(mode_label)_$(group_label).png")
+    savefig(plt, outfile)
+    println("Saved $(outfile)")
+end
+
+function main()
+    series = collect_series(base_path, frameworks)
+    if isempty(series)
+        println("Warning: no keyed timing files found under $(base_path). Nothing to plot.")
+        println("Expected files like <Prefix>_times_adaptive_<os>_<gpu>.txt (run the benchmarks first).")
+        return
+    end
+
+    plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
+
+    # Build the output groups: everything combined, one per os, one per gpu.
+    oses = sort(unique(s.os for s in series))
+    gpus = sort(unique(s.gpu for s in series))
+    groups = Tuple{String, Vector{Series}}[]
+    push!(groups, ("all", series))
+    for os in oses
+        push!(groups, (os, filter(s -> s.os == os, series)))
+    end
+    for gpu in gpus
+        push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
+    end
+
+    # For each group, emit fixed-only, adaptive-only, and combined plots.
+    for (label, sel) in groups
+        multikey = length(unique(s.key for s in sel)) > 1
+        render_plot(filter(s -> s.mode == "fixed", sel), label, "fixed", plots_dir, multikey)
+        render_plot(filter(s -> s.mode == "adaptive", sel), label, "adaptive", plots_dir, multikey)
+        render_plot(sel, label, "all", plots_dir, multikey)
     end
 end
 
