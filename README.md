@@ -27,7 +27,7 @@ For a streamlined setup experience on any platform, use the Python-based setup s
 python3 setup_all_environments.py
 ```
 
-This will set up all environments (CUBIE, JAX, PyTorch, and Julia) automatically. For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
+This will set up all environments (CUBIE, CUBIE-MLIR, JAX, PyTorch, and Julia) automatically. For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
 
 ## Installing Julia
 
@@ -94,7 +94,7 @@ platforms and said features in the paper.
 
 ### Running All Benchmarks
 
-To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, and CUBIE) sequentially in one command:
+To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, CUBIE, and CUBIE-MLIR) sequentially in one command:
 
 **On Linux/macOS:**
 ```bash
@@ -279,6 +279,33 @@ Then run the benchmarks by:
 ```cmd
     > run_benchmark.bat -l pytorch -d gpu -m ode
 ```
+
+### Benchmarking CUBIE ODE solvers
+
+CUBIE is benchmarked twice: once on the stock `numba-cuda` compilation
+pipeline (`cubie`, the `main` branch), and once on the `numba-cuda-mlir`
+pipeline (`cubie_mlir`, the `mlir` branch). The two suites use separate
+virtual environments (`GPU_ODE_CUBIE/venv` and `GPU_ODE_CUBIE_MLIR/venv`)
+because both branches install the same `cubie` package. Set them up with
+`setup_all_environments.py` or the individual `setup_environment.py`
+scripts (see [SETUP.md](SETUP.md)), then run:
+
+**On Linux/macOS:**
+```bash
+    $ bash ./run_benchmark.sh -l cubie -d gpu -m ode
+    $ bash ./run_benchmark.sh -l cubie_mlir -d gpu -m ode
+```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l cubie -d gpu -m ode
+    > run_benchmark.bat -l cubie_mlir -d gpu -m ode
+```
+
+Results are written to `data/CUBIE/` and `data/CUBIE_MLIR/` respectively,
+so the MLIR and non-MLIR pipelines appear as separate series in the
+comparison plots.
+
 ## Comparing GPU acceleration of ODEs with CPUs
 
 The benchmark suite can also be used to test the GPU acceleration of ODE
@@ -433,6 +460,11 @@ trajectories:
 # CUBIE
 source ./GPU_ODE_CUBIE/venv/bin/activate
 python3 ./GPU_ODE_CUBIE/bench_cubie.py 32768
+deactivate
+
+# CUBIE-MLIR (cubie on the numba-cuda-mlir backend)
+source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
+python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768
 deactivate
 
 # JAX

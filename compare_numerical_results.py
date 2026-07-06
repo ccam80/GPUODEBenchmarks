@@ -101,7 +101,7 @@ def main():
     data_dir = "./data/numerical"
     
     # Define expected packages
-    packages = ["cubie_adaptive", "cubie_unadaptive", "jax", "pytorch", "julia_adaptive", "julia_fixed", "mpgos"]
+    packages = ["cubie_adaptive", "cubie_unadaptive", "cubie_mlir_adaptive", "cubie_mlir_unadaptive", "jax", "pytorch", "julia_adaptive", "julia_fixed", "mpgos"]
     
     print("="*80)
     print("GPU ODE Benchmarks - Numerical Results Comparison")

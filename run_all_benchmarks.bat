@@ -2,6 +2,9 @@
 REM Script to run all GPU ODE benchmarks in sequence
 REM This allows for set-and-forget benchmarking while the GPU is available
 
+REM Run from the repo root regardless of the caller's working directory
+pushd "%~dp0"
+
 echo =========================================
 echo Starting All GPU ODE Benchmarks
 echo =========================================
@@ -23,7 +26,7 @@ exit /b 1
 :end_parse
 
 REM Array of languages to benchmark
-set languages=julia cpp pytorch jax cubie
+set languages=julia cpp pytorch jax cubie cubie_mlir
 
 REM Run benchmarks for each language
 for %%l in (%languages%) do (
@@ -31,7 +34,7 @@ for %%l in (%languages%) do (
     echo Benchmarking: %%l
     echo =========================================
     
-    call run_benchmark.bat -l %%l -d gpu -m ode %nmax_arg%
+    call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode %nmax_arg%
     if errorlevel 1 (
         echo.
         echo X Error occurred while benchmarking %%l
@@ -47,3 +50,4 @@ for %%l in (%languages%) do (
 echo =========================================
 echo All Benchmarks Completed
 echo =========================================
+popd

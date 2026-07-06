@@ -1,6 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM Run from the repo root regardless of the caller's working directory
+pushd "%~dp0"
+
 REM Parse command line arguments
 set lang=
 set dev=
@@ -44,6 +47,9 @@ if "%has_n_option%"=="false" (
     set /a nmax=16777216
 )
 
+REM Accept hyphenated alias for cubie_mlir
+if /i "%lang%"=="cubie-mlir" set lang=cubie_mlir
+
 echo %lang%
 
 if /i "%lang%"=="julia" (
@@ -65,8 +71,12 @@ if /i "%lang%"=="julia" (
     goto check_ode_gpu
 ) else if /i "%lang%"=="cubie" (
     goto check_ode_gpu
+) else if /i "%lang%"=="cubie_mlir" (
+    goto check_ode_gpu
 ) else (
-    goto end_script
+    echo Unknown language: %lang%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir.
+    popd
+    exit /b 1
 )
 
 goto end_script
@@ -81,6 +91,7 @@ if /i "%lang%"=="jax" set data_lang=JAX
 if /i "%lang%"=="pytorch" set data_lang=PYTORCH
 if /i "%lang%"=="cpp" set data_lang=CPP
 if /i "%lang%"=="cubie" set data_lang=CUBIE
+if /i "%lang%"=="cubie_mlir" set data_lang=CUBIE_MLIR
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
 if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
@@ -91,7 +102,10 @@ goto end_script
 :unsupported
 echo The benchmarking of ensemble %model% solvers on %dev% with %lang% is not supported.
 echo Please use -m flag with "ode" and -d with "gpu".
+popd
 exit /b 1
 
 :end_script
-endlocal
+set benchmark_exit=%errorlevel%
+popd
+endlocal & exit /b %benchmark_exit%

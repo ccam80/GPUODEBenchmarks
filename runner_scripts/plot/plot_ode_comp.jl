@@ -16,11 +16,12 @@ frameworks = Dict(
     "JAX" => ("JAX", "Jax"),
     "PYTORCH" => ("PYTORCH", "Torch"),
     "CUBIE" => ("CUBIE", "Cubie"),
+    "CUBIE_MLIR" => ("CUBIE_MLIR", "Cubie_mlir"),
 )
 
 # color/marker choices per framework
-colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red, "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue)
-markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond, "PYTORCH"=>:xcross, "CUBIE"=>:star5)
+colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red, "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple)
+markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond, "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon)
 
 function main()
     # Collect available series and first Ns

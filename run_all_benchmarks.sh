@@ -3,6 +3,9 @@
 # Script to run all GPU ODE benchmarks in sequence
 # This allows for set-and-forget benchmarking while the GPU is available
 
+# Run from the repo root regardless of the caller's working directory
+cd "$(dirname "$0")" || exit 1
+
 echo "========================================="
 echo "Starting All GPU ODE Benchmarks"
 echo "========================================="
@@ -19,7 +22,7 @@ do
 done
 
 # Array of languages to benchmark
-languages=("julia" "cpp" "pytorch" "jax" "cubie")
+languages=("julia" "cpp" "pytorch" "jax" "cubie" "cubie_mlir")
 
 # Run benchmarks for each language
 for lang in "${languages[@]}"

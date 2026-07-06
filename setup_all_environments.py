@@ -53,34 +53,43 @@ def main():
     
     # Setup CUBIE
     print("=" * 50)
-    print("1/4: Setting up CUBIE environment...")
+    print("1/5: Setting up CUBIE environment...")
     print("=" * 50)
     cubie_setup = script_dir / "GPU_ODE_CUBIE" / "setup_environment.py"
     if not run_setup_script(cubie_setup, "CUBIE"):
         failed_setups.append("CUBIE")
     print()
-    
+
+    # Setup CUBIE-MLIR (mlir branch of cubie on numba-cuda-mlir)
+    print("=" * 50)
+    print("2/5: Setting up CUBIE-MLIR environment...")
+    print("=" * 50)
+    cubie_mlir_setup = script_dir / "GPU_ODE_CUBIE_MLIR" / "setup_environment.py"
+    if not run_setup_script(cubie_mlir_setup, "CUBIE-MLIR"):
+        failed_setups.append("CUBIE-MLIR")
+    print()
+
     # Setup JAX/Diffrax
     print("=" * 50)
-    print("2/4: Setting up JAX/Diffrax environment...")
+    print("3/5: Setting up JAX/Diffrax environment...")
     print("=" * 50)
     jax_setup = script_dir / "GPU_ODE_JAX" / "setup_environment.py"
     if not run_setup_script(jax_setup, "JAX"):
         failed_setups.append("JAX")
     print()
-    
+
     # Setup PyTorch/torchdiffeq
     print("=" * 50)
-    print("3/4: Setting up PyTorch/torchdiffeq environment...")
+    print("4/5: Setting up PyTorch/torchdiffeq environment...")
     print("=" * 50)
     pytorch_setup = script_dir / "GPU_ODE_PyTorch" / "setup_environment.py"
     if not run_setup_script(pytorch_setup, "PyTorch"):
         failed_setups.append("PyTorch")
     print()
-    
+
     # Setup Julia
     print("=" * 50)
-    print("4/4: Setting up Julia environment...")
+    print("5/5: Setting up Julia environment...")
     print("=" * 50)
     julia_setup = script_dir / "setup_julia.py"
     if not run_setup_script(julia_setup, "Julia"):
@@ -99,13 +108,15 @@ def main():
         print()
         print("To use the environments:")
         if is_windows:
-            print("  CUBIE:   GPU_ODE_CUBIE\\venv\\Scripts\\activate.bat")
-            print("  JAX:     GPU_ODE_JAX\\venv\\Scripts\\activate.bat")
-            print("  PyTorch: GPU_ODE_PyTorch\\venv\\Scripts\\activate.bat")
+            print("  CUBIE:      GPU_ODE_CUBIE\\venv\\Scripts\\activate.bat")
+            print("  CUBIE-MLIR: GPU_ODE_CUBIE_MLIR\\venv\\Scripts\\activate.bat")
+            print("  JAX:        GPU_ODE_JAX\\venv\\Scripts\\activate.bat")
+            print("  PyTorch:    GPU_ODE_PyTorch\\venv\\Scripts\\activate.bat")
         else:
-            print("  CUBIE:   source GPU_ODE_CUBIE/venv/bin/activate")
-            print("  JAX:     source GPU_ODE_JAX/venv/bin/activate")
-            print("  PyTorch: source GPU_ODE_PyTorch/venv/bin/activate")
+            print("  CUBIE:      source GPU_ODE_CUBIE/venv/bin/activate")
+            print("  CUBIE-MLIR: source GPU_ODE_CUBIE_MLIR/venv/bin/activate")
+            print("  JAX:        source GPU_ODE_JAX/venv/bin/activate")
+            print("  PyTorch:    source GPU_ODE_PyTorch/venv/bin/activate")
         print("  Julia:   julia --project=.")
         return 0
     else:
