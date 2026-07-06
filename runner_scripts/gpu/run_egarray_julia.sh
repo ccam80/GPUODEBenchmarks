@@ -1,3 +1,4 @@
+#!/bin/bash
 a=8
 max_a=$1
 path="EnsembleGPUArray"

@@ -13,6 +13,7 @@ if %a% gtr %max_a% goto end
 REM Print the values
 echo No. of trajectories = %a%
 python GPU_ODE_PyTorch\bench_torchdiffeq.py %a%
+if errorlevel 1 exit /b 1
 
 REM Increment the value
 set /a a=%a%*4

@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 a=8
 # max_a=$((2**24))
 max_a=$1

@@ -1,3 +1,4 @@
+#!/bin/bash
 a=2
 max_a=4
 

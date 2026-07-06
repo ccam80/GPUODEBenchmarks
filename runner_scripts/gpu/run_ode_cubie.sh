@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 # Activate venv
 source ./GPU_ODE_CUBIE/venv/bin/activate
 

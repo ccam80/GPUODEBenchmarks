@@ -10,6 +10,7 @@ if %a% gtr %max_a% goto end
 REM Print the values
 echo %a%
 julia --project=. GPU_ODE_Julia\bench_lorenz_gpu.jl %a%
+if errorlevel 1 exit /b 1
 
 REM Increment the value
 set /a a=%a%*4

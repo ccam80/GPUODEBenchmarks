@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 unset LD_LIBRARY_PATH
 a=8
 max_a=$1

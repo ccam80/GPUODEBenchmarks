@@ -1,0 +1,6 @@
+# Shell scripts must stay LF — they are executed by bash on Linux/WSL,
+# where CRLF endings are a syntax error.
+*.sh text eol=lf
+# Windows batch and PowerShell scripts use CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf

@@ -1,6 +1,8 @@
+#!/bin/bash
+set -e
 a=8
 max_a=$1
-XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
 source ./GPU_ODE_JAX/venv/bin/activate
 while [ $a -le $max_a ]
 do

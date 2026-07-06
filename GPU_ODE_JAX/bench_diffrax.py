@@ -26,6 +26,13 @@ numberOfParameters = int(sys.argv[1])
 
 print("Working on :", jax.default_backend())
 
+# This is a GPU benchmark: refuse to silently record CPU timings (e.g. on
+# native Windows, where no CUDA jaxlib wheels exist — use Linux or WSL2).
+if jax.default_backend() == "cpu":
+    print("ERROR: JAX is running on the CPU backend; aborting so CPU "
+          "timings are not recorded as GPU results.")
+    sys.exit(1)
+
 
 # %%
 # Defining the Lorenz Problem
@@ -80,6 +87,7 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(nu
 
 # %%
 # Save the minimum time 
+os.makedirs("./data/JAX", exist_ok=True)
 file = open("./data/JAX/Jax_times_unadaptive.txt","a+")
 file.write('{0} {1}\n'.format(numberOfParameters, best_time))
 file.close()

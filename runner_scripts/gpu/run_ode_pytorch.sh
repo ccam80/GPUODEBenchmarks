@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 a=8
 max_a=$1
 source ./GPU_ODE_PyTorch/venv/bin/activate

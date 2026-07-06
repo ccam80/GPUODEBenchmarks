@@ -93,6 +93,7 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(nu
 # %%
 # Save the result
 
+os.makedirs("./data/PYTORCH", exist_ok=True)
 file = open("./data/PYTORCH/Torch_times_unadaptive.txt","a+")
 file.write('{0} {1}\n'.format(numberOfParameters, best_time))
 file.close()
