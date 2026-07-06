@@ -11,9 +11,9 @@ import sys
 import timeit
 import numpy as np
 import cubie as qb
-from cubie.time_logger import _default_timelogger
+from cubie.time_logger import default_timelogger
 
-_default_timelogger.set_verbosity(None)
+default_timelogger.set_verbosity(None)
 
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
@@ -94,8 +94,8 @@ adaptive_solver = qb.Solver(
     time_logging_level=None,
 )
 
-initials_array, parameter_array = fixed_solver.grid_builder(
-        states=initial_conditions, params=parameters)
+initials_array, parameter_array = fixed_solver.build_grid(
+        initial_values=initial_conditions, parameters=parameters)
 # ========================================
 # FIXED TIME-STEPPING BENCHMARK
 # ========================================
