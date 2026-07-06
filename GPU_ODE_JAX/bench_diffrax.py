@@ -84,6 +84,67 @@ parameterList = jnp.linspace(0.0,21.0,numberOfParameters)
 # Test that vmap and JIT ordering does not make a noticeable difference:
 # https://colab.research.google.com/drive/1d7G-O5JX31lHbg7jTzzozbo5-Gp7DBEv?usp=sharing
 
+# ========================================
+# WORK-PRECISION (wp) MODE
+# ========================================
+# `bench_diffrax.py 32768 wp` sweeps fixed dt / adaptive tolerance at N=32768
+# and records "<setting> <time_ms> <error-vs-golden>" per point. Protocol and
+# sweep grids live in runner_scripts/wp_common.py. Note: wp timings call
+# block_until_ready so the full solve (not just the async dispatch) is
+# measured.
+if len(sys.argv) > 2 and sys.argv[2] == "wp":
+    from wp_common import (DTS, TOLS, N_WP, load_golden, ensemble_error,
+                           wp_outfile)
+
+    if numberOfParameters != N_WP:
+        sys.exit("wp mode must be run with N = {0}".format(N_WP))
+    golden = load_golden()
+
+    def make_fixed(dt0):
+        @jax.jit
+        @jax.vmap
+        def m(k1):
+            lorenz = Lorenz(k1)
+            terms = diffrax.ODETerm(lorenz)
+            return diffrax.diffeqsolve(
+                terms, diffrax.Tsit5(), 0.0, 1.0, dt0,
+                jnp.array([1.0, 0.0, 0.0]), max_steps=65536)
+        return m
+
+    def make_adaptive(tol):
+        @jax.jit
+        @jax.vmap
+        def m(k1):
+            lorenz = Lorenz(k1)
+            terms = diffrax.ODETerm(lorenz)
+            return diffrax.diffeqsolve(
+                terms, diffrax.Tsit5(), 0.0, 1.0, 0.001,
+                jnp.array([1.0, 0.0, 0.0]), max_steps=65536,
+                stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
+        return m
+
+    def bench(make, setting, outfh):
+        m = make(setting)
+        sol = m(parameterList)
+        jax.block_until_ready(sol.ys)  # warm-up (JIT) + numerical result
+        err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
+        res = timeit.repeat(
+            lambda: jax.block_until_ready(m(parameterList).ys),
+            repeat=20, number=1)
+        t_ms = min(res) * 1000
+        print("wp setting={0:g}: {1:.2f} ms, err={2:.3e}".format(
+            setting, t_ms, err))
+        outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
+
+    with open(wp_outfile("JAX", "Jax", "fixed", DATASET_KEY), "w") as f:
+        for dt in DTS:
+            bench(make_fixed, dt, f)
+    with open(wp_outfile("JAX", "Jax", "adaptive", DATASET_KEY), "w") as f:
+        for tol in TOLS:
+            bench(make_adaptive, tol, f)
+
+    sys.exit(0)
+
 # %%
 # Use jax.vmap to compute parallel solutions of the ODE
 res = timeit.repeat(lambda: main(parameterList),repeat = 100,number = 1)

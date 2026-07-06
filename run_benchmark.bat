@@ -10,6 +10,7 @@ set dev=
 set model=
 set nmax=
 set has_n_option=false
+set wp=false
 
 :parse_loop
 if "%~1"=="" goto end_parse_loop
@@ -38,6 +39,11 @@ if /i "%~1"=="-n" (
     shift
     goto parse_loop
 )
+if /i "%~1"=="-w" (
+    set wp=true
+    shift
+    goto parse_loop
+)
 echo Unknown option %~1
 exit /b 1
 :end_parse_loop
@@ -46,6 +52,10 @@ REM Set default nmax if not specified
 if "%has_n_option%"=="false" (
     set /a nmax=16777216
 )
+
+REM Work-precision mode (-w): pass "wp" to the runner instead of nmax; the
+REM runner sweeps dt/tolerance at N=32768 against the golden reference.
+if "%wp%"=="true" set nmax=wp
 
 REM Accept hyphenated alias for cubie_mlir
 if /i "%lang%"=="cubie-mlir" set lang=cubie_mlir
@@ -66,7 +76,11 @@ if /i "%lang%"=="julia" (
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     ) else (
         if not exist "data\Julia\" mkdir "data\Julia"
-        del /q "data\Julia\*_%DATASET_KEY%.txt" 2>nul
+        if "%wp%"=="true" (
+            del /q "data\Julia\*_wp_*_%DATASET_KEY%.txt" 2>nul
+        ) else (
+            del /q "data\Julia\*_times_*_%DATASET_KEY%.txt" 2>nul
+        )
         call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
     )
 ) else if /i "%lang%"=="jax" (
@@ -101,7 +115,11 @@ if /i "%lang%"=="cubie_mlir" set data_lang=CUBIE_MLIR
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
 if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
-del /q "data\%data_lang%\*_%DATASET_KEY%.txt" 2>nul
+if "%wp%"=="true" (
+    del /q "data\%data_lang%\*_wp_*_%DATASET_KEY%.txt" 2>nul
+) else (
+    del /q "data\%data_lang%\*_times_*_%DATASET_KEY%.txt" 2>nul
+)
 call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
 goto end_script
 

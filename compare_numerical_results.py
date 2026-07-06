@@ -14,6 +14,12 @@ import sys
 import numpy as np
 from itertools import combinations
 
+# Windows consoles default to a legacy codepage (cp1252) that cannot encode
+# the checkmark glyphs printed below; force UTF-8 where supported.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 def load_data(filepath):
     """Load CSV data file."""
     if not os.path.exists(filepath):

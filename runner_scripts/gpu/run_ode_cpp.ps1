@@ -6,7 +6,10 @@
 # via vswhere) and invokes nvcc directly with the Makefile's flags.
 param(
     [Parameter(Mandatory=$true)]
-    [int]$MaxA
+    [int]$MaxA,
+    # Work-precision mode: build RK4 and RKCK45 once at NT=32768 and run the
+    # dt/tolerance sweeps ("Lorenz.exe 32768 wp") instead of the N sweep.
+    [switch]$Wp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +50,29 @@ function Build-Project {
 }
 
 Enter-VsEnvironment
+
+if ($Wp) {
+    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    $content[16] = "const int NT = 32768;"
+
+    # RK4 build -> fixed-dt sweep
+    $content[14] = "#define SOLVER RK4"
+    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    Build-Project
+    & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
+    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RK4 wp) failed with exit code $LASTEXITCODE" }
+
+    # RKCK45 build -> adaptive-tolerance sweep
+    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    $content[14] = "#define SOLVER RKCK45"
+    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    Build-Project
+    & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
+    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RKCK45 wp) failed with exit code $LASTEXITCODE" }
+
+    Pop-Location
+    return
+}
 
 $a = 8
 

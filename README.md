@@ -499,3 +499,67 @@ The script performs pairwise comparisons using `numpy.allclose()` and provides:
 - Summary of which packages pass the allclose test
 
 For more details, see `data/numerical/README.md`.
+
+## Work-Precision (error vs. runtime) Benchmarks
+
+The trajectory-scaling benchmarks above measure *time only*; the
+work-precision (`wp`) mode additionally measures *solution error* against a
+golden reference, giving DiffEqDevTools-style error-vs-runtime curves for
+every framework at a fixed ensemble size of N = 32768.
+
+### Golden reference
+
+The reference is a Float64 CPU solve (Vern9, abstol = reltol = 1e-13) of the
+same Lorenz ensemble, over the float64 rho linspace rounded through float32
+(the grid the float32 frameworks actually integrate). Generate it once per
+checkout:
+
+```bash
+julia -t auto --project=. runner_scripts/golden/generate_golden.jl
+# -> data/numerical/golden_lorenz_32768.csv (machine independent, no dataset key)
+```
+
+Because the frameworks build their rho grids independently (and differ by
+~1 ulp of float32), and integrate in float32, the meaningful error floor of
+the curves is roughly 1e-6 — inherent to benchmarking float32 solvers, not an
+artifact.
+
+### Running the sweeps
+
+Each framework's `wp` mode sweeps the fixed step size (dyadic dt from 1/16 to
+1/8192) and the adaptive tolerance (rtol = atol from 1e-2 to 1e-8), timing
+each setting with the usual protocol (untimed warm-up, repeated solves, best
+time) and computing the ensemble l2 error of the final states against the
+golden reference. Protocol constants live in `runner_scripts/wp_common.py`
+(mirrored in the Julia and MPGOS writers).
+
+```bash
+./run_benchmark.sh -l cubie      -d gpu -m ode -w
+./run_benchmark.sh -l cubie-mlir -d gpu -m ode -w
+./run_benchmark.sh -l julia      -d gpu -m ode -w
+./run_benchmark.sh -l pytorch    -d gpu -m ode -w   # fixed-dt only: torch.vmap cannot trace adaptive solvers
+./run_benchmark.sh -l jax        -d gpu -m ode -w   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
+./run_benchmark.sh -l cpp        -d gpu -m ode -w   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=32768
+```
+
+(`run_benchmark.bat -l <lang> -d gpu -m ode -w` on Windows.)
+
+Results are written per machine as
+`data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt` with rows
+`<setting> <time_ms> <error>`. Notes:
+
+* The wp timings synchronize the device before stopping the clock (JAX
+  `block_until_ready`, torch `cuda.synchronize`), unlike the historical
+  N-sweep timings for those frameworks.
+* torchdiffeq has no adaptive sweep (data-dependent control flow cannot be
+  `torch.vmap`ed — the same reason its N-sweep is fixed-step only).
+
+### Plotting
+
+```bash
+julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
+```
+
+discovers all keyed wp files and writes `plots/Lorenz_wp_<mode>_<group>.png`
+for the same (all / per-os / per-gpu) x (fixed / adaptive / all) groups as
+`plot_ode_comp.jl`.

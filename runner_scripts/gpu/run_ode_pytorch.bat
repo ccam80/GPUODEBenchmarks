@@ -7,6 +7,15 @@ set max_a=%1
 REM Activate virtual environment
 call GPU_ODE_PyTorch\venv\Scripts\activate.bat
 
+REM Work-precision mode: `run_ode_pytorch.bat wp` sweeps dt at N=32768.
+if /i "%~1"=="wp" (
+    python GPU_ODE_PyTorch\bench_torchdiffeq.py 32768 wp
+    if errorlevel 1 exit /b 1
+    call deactivate
+    endlocal
+    exit /b 0
+)
+
 :loop
 if %a% gtr %max_a% goto end
 

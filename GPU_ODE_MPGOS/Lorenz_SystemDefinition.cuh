@@ -10,7 +10,7 @@ __forceinline__ __device__ void PerThread_OdeFunction(\
 {
 	F[0] = 10.0*( X[1]-X[0] );
 	F[1] = cPAR[0]*X[0] - X[1] - X[0]*X[2];
-	F[2] = X[0]*X[1] - 2.666 * X[2];
+	F[2] = X[0]*X[1] - (8.0/3.0) * X[2];
 }
 
 // EVENTS

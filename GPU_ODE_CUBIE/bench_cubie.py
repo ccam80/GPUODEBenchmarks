@@ -78,7 +78,7 @@ fixed_solver = qb.Solver(
     lorenz_system,
     algorithm='classical-rk4',
     dt=0.001,
-    dt_save=1.0,
+    save_every=1.0,
     step_controller='fixed',
     output_types=['state'],
     time_logging_level=None,
@@ -89,7 +89,7 @@ adaptive_solver = qb.Solver(
     algorithm='tsit5',
     atol=1e-08,
     rtol=1e-08,
-    dt_save=1.0,
+    save_every=1.0,
     dt_min=1e-12,
     dt_max=1e3,
     step_controller='pid',
@@ -104,6 +104,60 @@ adaptive_solver = qb.Solver(
 
 initials_array, parameter_array = fixed_solver.build_grid(
         initial_values=initial_conditions, parameters=parameters)
+
+# ========================================
+# WORK-PRECISION (wp) MODE
+# ========================================
+# `bench_cubie.py 32768 wp` sweeps fixed dt / adaptive tolerance at N=32768
+# and records "<setting> <time_ms> <error-vs-golden>" per point. Protocol and
+# sweep grids live in runner_scripts/wp_common.py.
+if len(sys.argv) > 2 and sys.argv[2] == "wp":
+    from wp_common import (DTS, TOLS, N_WP, load_golden, ensemble_error,
+                           wp_outfile)
+
+    if numberOfParameters != N_WP:
+        sys.exit("wp mode must be run with N = {0}".format(N_WP))
+    golden = load_golden()
+
+    def bench_solver(solver, repeats=20):
+        def run():
+            return solver.solve(
+                initial_values=initials_array,
+                parameters=parameter_array,
+                blocksize=64,
+                results_type='raw',
+                duration=1.0,
+            )
+        solution = run()  # warm-up (JIT compilation) + numerical result
+        final_states = solution['state'][-1, :, :].T
+        err = ensemble_error(final_states, golden)
+        res = timeit.repeat(run, setup='gc.enable()', repeat=repeats, number=1)
+        return min(res) * 1000, err
+
+    with open(wp_outfile("CUBIE", "Cubie", "fixed", DATASET_KEY), "w") as f:
+        for dt in DTS:
+            solver = qb.Solver(
+                lorenz_system, algorithm='classical-rk4', dt=dt, save_every=1.0,
+                step_controller='fixed', output_types=['state'],
+                time_logging_level=None)
+            t_ms, err = bench_solver(solver)
+            print(f"wp fixed dt={dt:g}: {t_ms:.2f} ms, err={err:.3e}")
+            f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
+
+    with open(wp_outfile("CUBIE", "Cubie", "adaptive", DATASET_KEY), "w") as f:
+        for tol in TOLS:
+            solver = qb.Solver(
+                lorenz_system, algorithm='tsit5', atol=tol, rtol=tol,
+                save_every=1.0, dt_min=1e-12, dt_max=1e3,
+                step_controller='pid', kp=6/5, kd=0.0, ki=0.0,
+                max_gain=5.0, min_gain=0.1, output_types=['state'],
+                time_logging_level=None)
+            t_ms, err = bench_solver(solver)
+            print(f"wp adaptive tol={tol:g}: {t_ms:.2f} ms, err={err:.3e}")
+            f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
+
+    sys.exit(0)
+
 # ========================================
 # FIXED TIME-STEPPING BENCHMARK
 # ========================================

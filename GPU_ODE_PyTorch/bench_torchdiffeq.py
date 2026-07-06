@@ -84,6 +84,45 @@ t = torch.linspace(0, 1.0, 2).cuda()
 parameters = torch.linspace(0.0,21.0,numberOfParameters).cuda()
 
 
+# ========================================
+# WORK-PRECISION (wp) MODE
+# ========================================
+# `bench_torchdiffeq.py 32768 wp` sweeps the fixed step size at N=32768 and
+# records "<dt> <time_ms> <error-vs-golden>" per point. Protocol and sweep
+# grids live in runner_scripts/wp_common.py. There is no adaptive sweep:
+# torchdiffeq's adaptive solvers have data-dependent control flow that
+# torch.vmap cannot trace (the reason this benchmark is fixed-step only).
+# Note: unlike the N-sweep above, wp timings synchronize the device so the
+# full solve (not just the async dispatch) is measured.
+if len(sys.argv) > 2 and sys.argv[2] == "wp":
+    from wp_common import DTS, N_WP, load_golden, ensemble_error, wp_outfile
+
+    if numberOfParameters != N_WP:
+        sys.exit("wp mode must be run with N = {0}".format(N_WP))
+    golden = load_golden()
+
+    with open(wp_outfile("PYTORCH", "Torch", "fixed", DATASET_KEY), "w") as f:
+        for dt in DTS:
+            def solve_dt(p, dt=dt):
+                with torch.no_grad():
+                    return odeint(LorenzODE(rho=p), u0, t, method='rk4',
+                                  options=dict(step_size=dt))
+
+            def run():
+                traj = torch.vmap(solve_dt)(parameters)
+                torch.cuda.synchronize()
+                return traj
+
+            traj = run()  # warm-up + numerical result
+            err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
+            res = timeit.repeat(run, repeat=5, number=1)
+            t_ms = min(res) * 1000
+            print("wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}".format(dt, t_ms, err))
+            f.write("{0:.10g} {1} {2:.10e}\n".format(dt, t_ms, err))
+
+    sys.exit(0)
+
+
 # %%
 
 import timeit

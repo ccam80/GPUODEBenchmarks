@@ -1,6 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM Work-precision mode: `run_ode_julia.bat wp` sweeps dt/tolerance at N=32768.
+if /i "%~1"=="wp" (
+    julia --project=. GPU_ODE_Julia\bench_lorenz_gpu.jl 32768 wp
+    if errorlevel 1 exit /b 1
+    endlocal
+    exit /b 0
+)
+
 set a=8
 set max_a=%1
 

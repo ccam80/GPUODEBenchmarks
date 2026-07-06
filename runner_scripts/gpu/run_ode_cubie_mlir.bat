@@ -4,6 +4,15 @@ setlocal enabledelayedexpansion
 REM Activate virtual environment
 call GPU_ODE_CUBIE_MLIR\venv\Scripts\activate.bat
 
+REM Work-precision mode: `run_ode_cubie_mlir.bat wp` sweeps dt/tolerance at N=32768.
+if /i "%~1"=="wp" (
+    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 32768 wp
+    if errorlevel 1 exit /b 1
+    call deactivate
+    endlocal
+    exit /b 0
+)
+
 set a=8
 set max_a=%1
 

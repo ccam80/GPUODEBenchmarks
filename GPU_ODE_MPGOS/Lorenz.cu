@@ -14,7 +14,7 @@ using namespace std;
 // Solver Configuration
 #define SOLVER RKCK45
 #define PRECISION float  // float, double
-const int NT = 512;
+const int NT = 8388608;
 const int SD   = 3;     // SystemDimension
 const int NCP  = 1;     // NumberOfControlParameters
 const int NSP  = 0;     // NumberOfSharedParameters
@@ -34,6 +34,8 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 // dataset-key helper below the forward declarations.
 #include <cstdio>
 #include <cctype>
+#include <chrono>
+#include <cmath>
 
 // Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 // additively populated across machines without clobbering each other. The GPU
@@ -122,8 +124,106 @@ int main(int argc, char *argv[])
 	
 	ScanLorenz.SolverOption(ThreadsPerBlock, BlockSize);
 	ScanLorenz.SolverOption(InitialTimeStep, 1.0e-3);
-	
-	
+
+	// ========================================
+	// WORK-PRECISION (wp) MODE
+	// ========================================
+	// `Lorenz.exe 32768 wp` sweeps the fixed step size (RK4 build) or the
+	// adaptive tolerance (RKCK45 build) at NT=32768 and records
+	// "<setting> <time_ms> <error-vs-golden>" per point. dt and tolerances are
+	// runtime SolverOptions, so only the solver family needs a rebuild. Grids
+	// and protocol mirror runner_scripts/wp_common.py — keep in sync. Unlike
+	// the N-sweep above (single clock() shot), wp times with steady_clock and
+	// takes the minimum of 10 repeats after one warm-up.
+	if (argc > 2 && string(argv[2]) == string("wp"))
+	{
+		if (NT != 32768)
+		{
+			cerr << "wp mode must be built with NT = 32768" << endl;
+			return 1;
+		}
+		vector<double> gx(NT), gy(NT), gz(NT);
+		{
+			ifstream gf("./data/numerical/golden_lorenz_32768.csv");
+			if (!gf)
+			{
+				cerr << "golden reference missing - run "
+				        "runner_scripts/golden/generate_golden.jl first" << endl;
+				return 1;
+			}
+			char comma;
+			for (int i = 0; i < NT; i++)
+				gf >> gx[i] >> comma >> gy[i] >> comma >> gz[i];
+		}
+
+		const bool FixedMode = (SOLVER == RK4);
+		vector<double> Settings;
+		if (FixedMode)
+			for (int k = 4; k <= 13; k++) Settings.push_back(pow(2.0, -k));
+		else
+			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
+
+		string Mode = FixedMode ? "fixed" : "adaptive";
+		ofstream wpfile(("./data/CPP/MPGOS_wp_" + Mode + "_" + DatasetKey() + ".txt").c_str());
+		wpfile.precision(12);
+
+		const int Repeats = 10;
+		for (size_t si = 0; si < Settings.size(); si++)
+		{
+			double Setting = Settings[si];
+			ScanLorenz.SolverOption(InitialTimeStep, FixedMode ? Setting : 1.0e-3);
+			if (!FixedMode)
+			{
+				for (int c = 0; c < SD; c++)
+				{
+					ScanLorenz.SolverOption(RelativeTolerance, c, Setting);
+					ScanLorenz.SolverOption(AbsoluteTolerance, c, Setting);
+				}
+			}
+
+			double BestMs = 1.0e300;
+			for (int r = 0; r <= Repeats; r++)
+			{
+				// Reset states/time domain: Solve() advances in place.
+				FillSolverObject(ScanLorenz, Parameters_R_Values, NT);
+				ScanLorenz.SynchroniseFromHostToDevice(All);
+
+				auto T0 = std::chrono::steady_clock::now();
+				ScanLorenz.Solve();
+				ScanLorenz.InsertSynchronisationPoint();
+				ScanLorenz.SynchroniseSolver();
+				ScanLorenz.SynchroniseFromDeviceToHost(All);
+				ScanLorenz.SynchroniseDevice();
+				auto T1 = std::chrono::steady_clock::now();
+
+				cudaError_t WpErr = cudaGetLastError();
+				if (WpErr != cudaSuccess)
+					cerr << "CUDA launch error: " << cudaGetErrorString(WpErr) << endl;
+
+				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up
+			}
+
+			double Sum2 = 0.0;
+			for (int i = 0; i < NT; i++)
+			{
+				double DX = (double)ScanLorenz.GetHost<PRECISION>(i, ActualState, 0) - gx[i];
+				double DY = (double)ScanLorenz.GetHost<PRECISION>(i, ActualState, 1) - gy[i];
+				double DZ = (double)ScanLorenz.GetHost<PRECISION>(i, ActualState, 2) - gz[i];
+				Sum2 += DX*DX + DY*DY + DZ*DZ;
+			}
+			double Err = sqrt(Sum2 / (NT * 3.0));
+
+			wpfile << Setting << " " << BestMs << " " << scientific << Err << fixed << "\n";
+			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
+			     << " ms, err=" << scientific << Err << fixed << endl;
+		}
+		wpfile.close();
+
+		cout << "wp sweep finished!" << endl;
+		return 0;
+	}
+
 	clock_t SimulationStart;
 	clock_t SimulationEnd;
 	
@@ -201,6 +301,10 @@ void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PREC
 	{
 		Solver.SetHost(ProblemNumber, TimeDomain,  0, 0 );
 		Solver.SetHost(ProblemNumber, TimeDomain,  1, 0.001*1000.0 );
+		// MPGOS Solve() continues from ActualTime (by design, for
+		// continuation runs); reset it so repeated solves in the wp sweep
+		// re-integrate from t=0 instead of no-opping at t=t_end.
+		Solver.SetHost(ProblemNumber, ActualTime, 0 );
 		
 		Solver.SetHost(ProblemNumber, ActualState, 0, 1.0 );
 		Solver.SetHost(ProblemNumber, ActualState, 1, 0.0 );
