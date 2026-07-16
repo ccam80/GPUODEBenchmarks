@@ -79,9 +79,20 @@ def main():
     print("Adding DiffEq packages...")
     diffeq_packages = [
         "DiffEqBase",
-        "DiffEqDevTools", 
+        "DiffEqDevTools",
         "DiffEqGPU",
         "OrdinaryDiffEq",
+        # Solver sub-libraries: the slim OrdinaryDiffEq v7 umbrella only
+        # re-exports the default solver set; the numerical-equivalence suite
+        # (runner_scripts/numerical_equivalence/) needs the rest explicitly.
+        "OrdinaryDiffEqCore",
+        "OrdinaryDiffEqExplicitRK",
+        "OrdinaryDiffEqFIRK",
+        "OrdinaryDiffEqHighOrderRK",
+        "OrdinaryDiffEqLowOrderRK",
+        "OrdinaryDiffEqRosenbrock",
+        "OrdinaryDiffEqSDIRK",
+        "OrdinaryDiffEqVerner",
         "RecursiveArrayTools",
         "SciMLBase",
         "SimpleDiffEq"

@@ -120,6 +120,18 @@ This script will execute all benchmarks one after another, allowing for set-and-
 
 Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
 
+Two further optional flags extend the run:
+
+* `-w` — also run the work-precision (error vs. runtime) sweeps for every
+  framework and generate their plot (see
+  [Work-Precision Benchmarks](#work-precision-error-vs-runtime-benchmarks)).
+* `-np` / `--numerical-precision` — also run the numerical-equivalence
+  suite (cubie vs. DifferentialEquations.jl, error vs. dt and vs. tolerance
+  per algorithm; see
+  [Numerical Equivalence](#numerical-equivalence-error-vs-dt--cubie-vs-differentialequationsjl)).
+  This delegates to `run_numerical_equivalence.sh`/`.bat`, which can also be
+  run standalone.
+
 ### Benchmarking Julia (DiffEqGPU.jl) methods
 We will need to install CUDA.jl for benchmarking. It is the only backend
 compatible with the ODE solvers in JAX, PyTorch, and MPGOS. To do so,
@@ -542,7 +554,9 @@ golden reference. Protocol constants live in `runner_scripts/wp_common.py`
 ./run_benchmark.sh -l cpp        -d gpu -m ode -w   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=32768
 ```
 
-(`run_benchmark.bat -l <lang> -d gpu -m ode -w` on Windows.)
+(`run_benchmark.bat -l <lang> -d gpu -m ode -w` on Windows.) To run every
+framework's wp sweeps and the wp plot in one go, pass `-w` to the all-in-one
+script: `./run_all_benchmarks.sh -w` (`run_all_benchmarks.bat -w`).
 
 Results are written per machine as
 `data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt` with rows
@@ -563,3 +577,125 @@ julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
 discovers all keyed wp files and writes `plots/Lorenz_wp_<mode>_<group>.png`
 for the same (all / per-os / per-gpu) x (fixed / adaptive / all) groups as
 `plot_ode_comp.jl`.
+
+## Numerical Equivalence (error vs. dt) — cubie vs. DifferentialEquations.jl
+
+The work-precision curves compare error against *runtime*; the
+numerical-equivalence (`ne`) suite instead compares error against *dt*, per
+algorithm, to answer a different question: **does each cubie algorithm
+actually calculate what its named method should?** Every algorithm mutually
+supported by cubie and DifferentialEquations.jl (the mapping lives in
+`runner_scripts/numerical_equivalence/algorithms.csv`) integrates the same
+Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1]) fixed-step at every
+dyadic dt from 1/16 to 1/8192 — **both stacks in Float32** — and the final
+states are compared against the Float64 golden reference and against each
+other.
+
+Float32 discipline on the Julia side is enforced, not assumed: u0, tspan, dt
+and the parameter vector are constructed as Float32 (the rho grid is read
+from the golden file, whose values are exactly representable in Float32) and
+every trajectory's final state is asserted to still be Float32, so a silent
+promotion to Float64 aborts the run.
+
+### Running the suite
+
+One command runs everything (golden reference if missing, both reference
+sweeps, both cubie sweeps, comparison report + plots):
+
+```bash
+./run_numerical_equivalence.sh              # Linux/macOS/WSL
+run_numerical_equivalence.bat               # Windows
+```
+
+Both take an optional `fixed|adaptive|all` mode argument (default `all`) to
+run just one of the two sweep types, and exit non-zero when any step fails
+or the comparison finds a MISMATCH / DIVERGENT algorithm — so the exit code
+is directly usable as a CI gate. Alternatively, `-np` /
+`--numerical-precision` on `run_all_benchmarks.sh`/`.bat` appends the same
+suite to a full benchmark run.
+
+Reproducibility: the golden reference and the DifferentialEquations.jl
+outputs under `data/numerical_equivalence/julia/` are machine-independent
+CPU results — once committed, a fresh machine (or cubie's CI) can skip
+Julia entirely and only re-run the cubie sweeps + comparison against the
+committed reference. The golden is regenerated only if its file is missing
+(~1 s of solve time); the Julia sweeps take ~1–3 minutes; the cubie sweeps
+dominate the wall time (one kernel compile per algorithm/setting point,
+~20–25 minutes per mode on an RTX 4070 SUPER). On a fresh checkout run
+`python setup_julia.py` once first (Project.toml is intentionally not
+committed; the setup script builds the Julia environment, including the
+OrdinaryDiffEq solver sub-libraries this suite needs).
+
+The suite's four steps, each also runnable by hand (the two sweep runners
+take the same optional `fixed|adaptive|all` mode argument):
+
+```bash
+julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl
+#   -> data/numerical/golden_ne_lorenz_1024.csv  (Float64 Vern9 tol 1e-13; machine independent)
+julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
+#   -> data/numerical_equivalence/julia/<algorithm>.csv            (fixed sweep)
+#   -> data/numerical_equivalence/julia/<algorithm>_adaptive.csv   (adaptive sweep)
+#   -> data/numerical_equivalence/julia/controller_constants.csv   (resolved defaults)
+GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
+#   -> data/numerical_equivalence/cubie/<algorithm>_<os>_<gpu>.csv
+#   -> data/numerical_equivalence/cubie/<algorithm>_adaptive_<tier>_<os>_<gpu>.csv
+GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
+#   -> numerical_equivalence_<os>_<gpu>.md
+#   -> plots/numerical_equivalence_<os>_<gpu>.png (+ _adaptive_ variant)
+```
+
+### Adaptive sweeps
+
+The fixed-step sweep deliberately removes the step-size controller to
+isolate each tableau; the adaptive sweep tests the opposite composite —
+embedded estimator + error norm + controller — under real controller
+dynamics. Every algorithm with an embedded error estimate on *both* sides
+(the runners derive this programmatically: cubie's
+`tableau.has_error_estimate`, OrdinaryDiffEq's `isadaptive`) integrates the
+ensemble at atol = rtol over 1e-2 .. 1e-6, in Float32, with pinned initial
+dt and dt bounds, and errors are compared against the golden reference as
+error-vs-tolerance curves.
+
+Cubie runs each algorithm twice:
+
+* **default** — cubie's own PI controller defaults: how cubie really
+  behaves out of the box. Compared to the Julia run (its own per-algorithm
+  default controller) as curve tracking within a factor.
+* **matched** — controller type, gains, safety factor, gain clamps and
+  deadband mirrored from the constants DifferentialEquations.jl resolved
+  for that algorithm (exported to `controller_constants.csv`; the gain
+  mapping `kp = beta1*(order+1)`, `ki = -beta2*(order+1)` accounts for the
+  two stacks' different exponent conventions — derivation in
+  `GPU_ODE_CUBIE/numerical_equivalence.py`). Even under identical
+  controller settings a single float32 accept/reject flip decouples the two
+  stacks' dt sequences, after which their mutual distance is bounded below
+  by the local truncation error itself — so the CI gate is relative:
+  TRACKING requires the mutual rms distance to stay within 2x the Julia
+  run's own error at every in-range tolerance. Healthy algorithms sit at
+  ratio ~1; broken ones sit orders of magnitude above (per-trajectory
+  rms/p99/max are all tabulated). Julia's PredictiveController (RadauIIA5)
+  maps to cubie's gustafsson controller as a documented approximate match.
+
+The report tabulates, per algorithm and dt, the ensemble l2 error of both
+implementations against the golden reference, their error ratio, the mutual
+rms difference between the two implementations' final states, and an
+observed convergence order; each algorithm gets a verdict (EQUIVALENT /
+CONSISTENT / MISMATCH — see the report header for the exact criteria).
+
+The implicit solvers' inner tolerances are part of the protocol, matched
+across the two stacks rather than left to defaults: the Julia runner pins
+`abstol=1e-6, reltol=1e-3` (which, with `adaptive=false`, only control the
+Newton termination `eta*||dz/(abstol + reltol*|u|)|| < 1/100`), and the
+cubie runner pins its residual-based `newton_*`/`krylov_*` tolerances to the
+equivalent bound mapped through the golden state scale (derivation in
+`GPU_ODE_CUBIE/numerical_equivalence.py`). A three-way sensitivity study
+(cubie defaults, this mapping, 100x tighter) moved the implicit algorithms'
+ensemble errors by < 0.05%, i.e. the inner solves are not the accuracy
+limiter anywhere in the sweep.
+
+The golden file and the DifferentialEquations.jl outputs are machine
+independent and cheap to regenerate (seconds and ~1 minute respectively), so
+the suite is suitable as a cubie CI accuracy gate: commit (or regenerate)
+the golden + Julia reference CSVs, run only the cubie sweep and the
+comparison, and fail on any MISMATCH verdict
+(`compare_numerical_equivalence.py` exits non-zero in that case).
