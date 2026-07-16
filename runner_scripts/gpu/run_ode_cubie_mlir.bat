@@ -4,6 +4,10 @@ setlocal enabledelayedexpansion
 REM Activate virtual environment
 call GPU_ODE_CUBIE_MLIR\venv\Scripts\activate.bat
 
+REM Pin cubie to the MLIR backend (single cubie install, backend chosen at
+REM import time via this env var).
+set CUBIE_CUDA_BACKEND=mlir
+
 REM Work-precision mode: `run_ode_cubie_mlir.bat wp` sweeps dt/tolerance at N=32768.
 if /i "%~1"=="wp" (
     python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 32768 wp

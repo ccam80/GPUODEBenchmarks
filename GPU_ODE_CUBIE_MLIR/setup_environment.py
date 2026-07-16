@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 """
-Cross-platform setup script for the CUBIE (MLIR backend) ODE benchmarking environment.
-Installs the `mlir` branch of cubie, which depends on numba-cuda-mlir instead of
-numba-cuda, so that the MLIR and non-MLIR compilation pipelines can be benchmarked
-side by side.
+Cross-platform setup script for the CUBIE (MLIR backend) ODE benchmarking
+environment.
+
+Installs cubie from its `main` branch. Since ccam80/cubie#617 the MLIR backend
+lives on `main` alongside the default numba-cuda backend; the active backend is
+chosen at import time by the ``CUBIE_CUDA_BACKEND`` environment variable
+(``numba-cuda`` | ``mlir``). This suite runs the MLIR pipeline, so the
+benchmark launchers export ``CUBIE_CUDA_BACKEND=mlir``.
+
+The patched ``numba-cuda-mlir`` build is bundled as a local wheel under
+``wheels/`` and installed first so the editable cubie install reuses it instead
+of pulling the stock build from PyPI. When no matching wheel is present (e.g. a
+different platform/Python), the ``dev-mlir13`` extra pulls numba-cuda-mlir from
+PyPI as a fallback.
+
 Works on Linux, Windows, and macOS.
 """
 import os
@@ -13,10 +24,10 @@ import shutil
 import platform
 from pathlib import Path
 
-CUBIE_BRANCH = "mlir"
+CUBIE_BRANCH = "main"
 
 
-def run_command(cmd, shell=False, check=True, cwd=None):
+def run_command(cmd, shell=False, check=True, cwd=None, env=None):
     """Run a command and handle errors, streaming output in real-time."""
     try:
         # Stream output directly to terminal for real-time feedback
@@ -25,6 +36,7 @@ def run_command(cmd, shell=False, check=True, cwd=None):
             shell=shell,
             check=check,
             cwd=cwd,
+            env=env,
             text=True,
             encoding='utf-8',
             errors='replace'  # Replace encoding errors instead of failing
@@ -92,11 +104,18 @@ def main():
         print("Please install git from https://git-scm.com/downloads")
         return 1
 
-    # Clone cubie source (mlir branch)
+    # Clone cubie source (main branch), or bring an existing clone onto main.
     cubie_dir = script_dir / "cubie"
     if cubie_dir.exists():
-        print("Cubie directory already exists, skipping clone...")
-        print("(To force re-clone, delete the 'cubie' directory first)")
+        print(f"Cubie directory already exists; ensuring it is on '{CUBIE_BRANCH}'...")
+        if not run_command(["git", "fetch", "origin"], cwd=cubie_dir):
+            print("Warning: git fetch failed; using the existing checkout as-is.")
+        elif not (run_command(["git", "checkout", CUBIE_BRANCH], cwd=cubie_dir)
+                  and run_command(["git", "pull", "--ff-only", "origin", CUBIE_BRANCH],
+                                  cwd=cubie_dir)):
+            print(f"Error: could not switch the existing clone to '{CUBIE_BRANCH}'.")
+            print("(Delete the 'cubie' directory to force a fresh clone.)")
+            return 1
     else:
         print(f"Cloning cubie repository (branch: {CUBIE_BRANCH})...")
         if not run_command(["git", "clone", "--branch", CUBIE_BRANCH,
@@ -104,16 +123,43 @@ def main():
             print("Error: Failed to clone cubie repository")
             return 1
 
-    # Install cubie from source using uv (pulls numba-cuda-mlir[cu12] from PyPI)
-    print("Installing cubie (mlir branch) and dependencies...")
-    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "-e", ".[dev]"], cwd=cubie_dir):
+    # Install the patched numba-cuda-mlir from the bundled local wheel first so
+    # the editable cubie install below reuses it rather than pulling the stock
+    # build from PyPI. The wheel is platform/Python-specific; when none matches,
+    # the dev-mlir13 extra installs numba-cuda-mlir from PyPI as a fallback.
+    wheels_dir = script_dir / "wheels"
+    patched_wheels = sorted(wheels_dir.glob("numba_cuda_mlir-*.whl")) if wheels_dir.exists() else []
+    if patched_wheels:
+        wheel = patched_wheels[-1]
+        print(f"Installing patched numba-cuda-mlir wheel: {wheel.name}")
+        if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), str(wheel)]):
+            print("Failed to install patched numba-cuda-mlir wheel")
+            return 1
+    else:
+        print("No bundled numba-cuda-mlir wheel found; installing from PyPI via the extra.")
+
+    # Install cubie (main) with the MLIR + test dependency set. numba-cuda-mlir
+    # is already satisfied by the patched wheel above when present; the backend
+    # is selected at runtime through CUBIE_CUDA_BACKEND, not at install time.
+    print("Installing cubie (main) and dependencies...")
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
+                        "-e", ".[dev-mlir13]"], cwd=cubie_dir):
         print("Failed to install cubie")
         return 1
 
-    # Verify installation
-    print("Verifying installation...")
-    if not run_command([str(venv_python), "-c", "import cubie; print('Cubie (mlir) installed successfully')"]):
-        print("Failed to import cubie")
+    # Verify the install and that cubie resolves to the MLIR backend when
+    # CUBIE_CUDA_BACKEND=mlir. The backend is read once at import time.
+    print("Verifying installation (MLIR backend)...")
+    verify_env = os.environ.copy()
+    verify_env["CUBIE_CUDA_BACKEND"] = "mlir"
+    verify_code = (
+        "import cubie; "
+        "from cubie.cuda_backend import CUDA_BACKEND, IS_MLIR; "
+        "assert IS_MLIR, 'resolved backend: ' + CUDA_BACKEND; "
+        "print('Cubie', cubie.__version__, 'installed; backend =', CUDA_BACKEND)"
+    )
+    if not run_command([str(venv_python), "-c", verify_code], env=verify_env):
+        print("Failed to import cubie or the MLIR backend did not activate")
         return 1
 
     if not run_command([str(venv_python), "-c",
@@ -121,6 +167,8 @@ def main():
         print("Warning: CUDA verification failed")
 
     print("\nCUBIE-MLIR environment setup complete!")
+    print("Backend is selected at runtime via CUBIE_CUDA_BACKEND=mlir "
+          "(the benchmark launchers set this automatically).")
     if is_windows:
         print(f"To activate: {venv_path / 'Scripts' / 'activate.bat'}")
         print(f"Or in PowerShell: {venv_path / 'Scripts' / 'Activate.ps1'}")

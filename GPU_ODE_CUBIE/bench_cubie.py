@@ -170,7 +170,7 @@ def solve_fixed(blocksize=64):
         parameters=parameter_array,
         blocksize=blocksize,
         results_type='raw',
-        duration=1.0 
+        duration=1.0
     )
     return solution
 

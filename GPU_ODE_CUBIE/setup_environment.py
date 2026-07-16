@@ -100,7 +100,7 @@ def main():
     
     # Install cubie from source using uv
     print("Installing cubie and dependencies...")
-    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "-e", ".[dev]"], cwd=cubie_dir):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "-e", ".[dev13]"], cwd=cubie_dir):
         print("Failed to install cubie")
         return 1
     
