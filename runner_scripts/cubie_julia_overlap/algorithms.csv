@@ -1,0 +1,6 @@
+cubie_alias,julia_constructor,order,family
+tsit5,GPUTsit5(),5,ERK
+vern7,GPUVern7(),7,ERK
+rosenbrock23_sciml,GPURosenbrock23(autodiff=Val(false)),2,Rosenbrock-W
+kvaerno3,GPUKvaerno3(autodiff=Val(false)),3,ESDIRK
+kvaerno5,GPUKvaerno5(autodiff=Val(false)),5,ESDIRK

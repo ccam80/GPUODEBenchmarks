@@ -1,0 +1,9 @@
+julia_algorithm,order,family,cubie_alias,status
+GPUTsit5,5,ERK,tsit5,overlap
+GPUVern7,7,ERK,vern7,overlap
+GPUVern9,9,ERK,,no_overlap
+GPURosenbrock23,2/3,Rosenbrock-W,rosenbrock23_sciml,overlap
+GPURodas4,4,Rosenbrock,,no_overlap
+GPURodas5P,5,Rosenbrock,,no_overlap
+GPUKvaerno3,3,ESDIRK,kvaerno3,overlap
+GPUKvaerno5,5,ESDIRK,kvaerno5,overlap
