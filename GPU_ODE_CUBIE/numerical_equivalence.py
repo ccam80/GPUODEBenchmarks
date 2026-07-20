@@ -114,12 +114,11 @@ def solve_finals(solver, initials_array, parameter_array):
         initial_values=initials_array,
         parameters=parameter_array,
         blocksize=64,
-        results_type='raw',
         duration=1.0,
     )
     # Copy: the returned array views cubie's output buffer, which the next
     # solve overwrites in place.
-    finals = np.array(solution['state'][-1, :, :].T, copy=True)
+    finals = np.array(solution.state[-1, :, :].T, copy=True)
     if finals.dtype != precision:
         raise TypeError("expected float32 output, got {0}"
                         .format(finals.dtype))
