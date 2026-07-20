@@ -74,30 +74,25 @@ parameters = {'rho': golden_rho}
 # With a fixed step controller cubie does not derive the inner Newton/Krylov
 # tolerances from atol/rtol (that path only runs for adaptive controllers),
 # so pin them to match what OrdinaryDiffEq enforces in the paired Julia run.
-# OrdinaryDiffEqNonlinearSolve's Newton accepts when eta*||dz|| < kappa with
+# Both stacks accept the Newton solve when eta*||dz|| < kappa with
 # kappa = 1/100, where ||dz|| scales the Newton update by
-# abstol_j + reltol_j*|u| (the run pins abstol_j=1e-6, reltol_j=1e-3, the
-# OrdinaryDiffEq defaults). Cubie's criterion instead scales the *residual*
-# by newton_atol + newton_rtol*|stage_increment|; since the increment is
-# much smaller than the state, the atol term dominates, so map Julia's
-# effective bound through the golden state scale (rms 5.85):
-#   newton_atol = kappa*(abstol_j + reltol_j*u_rms) ~= 6e-5
-#   newton_rtol = kappa*reltol_j                     = 1e-5
+# atol + rtol*max(|u_prev|, |u_stage|). The Julia run pins
+# abstol_j=1e-6, reltol_j=1e-3 (the OrdinaryDiffEq defaults), and kappa
+# is internal to both implementations, so identical inner enforcement is
+# simply Julia's own tolerances:
+#   newton_atol = abstol_j = 1e-6
+#   newton_rtol = reltol_j = 1e-3
 # Julia solves its 3x3 linear systems with a dense LU (exact), so cubie's
-# matrix-free Krylov tolerances sit 10x below the Newton bound to make the
-# linear-solve error negligible. A three-way sensitivity study (cubie
-# defaults 1e-6/1e-6, this mapping, and a 100x tighter pin) changed the
-# ensemble errors of the implicit algorithms by < 0.05%, so none of these
-# choices is binding; the mapping is kept because it makes "identical inner
-# enforcement" an explicit protocol invariant. Keys not used by an algorithm
+# matrix-free Krylov tolerances sit 10x below the Newton tolerances to
+# make the linear-solve error negligible. Keys not used by an algorithm
 # family (e.g. newton_* for explicit steps) are ignored. (In the adaptive
-# sweeps cubie derives these tolerances itself as atol/10, rtol/10 —
-# comparable to Julia's kappa = 1/100 — so no pin is applied there.)
+# sweeps cubie derives these tolerances itself as atol/10, rtol/10, so no
+# pin is applied there.)
 INNER_SOLVER_SETTINGS = {
-    "newton_atol": 6e-5,
-    "newton_rtol": 1e-5,
-    "krylov_atol": 6e-6,
-    "krylov_rtol": 1e-6,
+    "newton_atol": 1e-6,
+    "newton_rtol": 1e-3,
+    "krylov_atol": 1e-7,
+    "krylov_rtol": 1e-4,
 }
 
 failures = []
