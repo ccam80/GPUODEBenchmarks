@@ -207,9 +207,14 @@ if MODE in ("adaptive", "all"):
                 "deadband_max": 1.0 / c["qsteady_min"],
             }, None
         if c["controller"] == "PredictiveController":
+            # cubie's Gustafsson controller takes the step-size safety factor
+            # as `safety` (same as the PI path above); `gamma` is now an
+            # overloaded method/tableau coefficient and setting it corrupts
+            # the solve. Julia's PredictiveController gamma IS the safety
+            # factor, so map it to `safety`.
             return {
                 "step_controller": "gustafsson",
-                "gamma": c["gamma"],
+                "safety": c["gamma"],
             }, None
         return None, "unmapped julia controller {0}".format(c["controller"])
 
