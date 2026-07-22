@@ -110,6 +110,87 @@ def ensemble_error(final_states, golden_states):
     return float(np.sqrt(np.mean(diff ** 2)))
 
 
+def ensemble_error_masked(final_states, golden_states, mask):
+    """l2-at-final error over a masked subset of the ensemble, in float64.
+
+    ``mask`` is a boolean (N_NE,) array selecting the trajectories to include
+    (e.g. the trajectories both stacks converged on). Returns NaN when the
+    mask selects nothing, so a fully non-converged point drops out of the
+    comparison rather than contaminating it.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return float("nan")
+    diff = (np.asarray(final_states, dtype=np.float64)[mask]
+            - np.asarray(golden_states, dtype=np.float64)[mask])
+    return float(np.sqrt(np.mean(diff ** 2)))
+
+
+def _converged_from_rows(sel, arr):
+    """Per-trajectory converged mask for one dt/tol block.
+
+    A trajectory counts as converged iff it BOTH claims success and produced
+    a finite final state, so the two stacks are measured the same way. cubie
+    has no retcode column and signals a failed solve with NaN, so its flag is
+    pure finiteness. The Julia runner writes a ``converged`` column (1/0 from
+    each trajectory's SciML retcode); that is AND-ed with finiteness because an
+    explicit fixed step can overflow to NaN/Inf while still returning a
+    ``Success`` retcode — without the finite check those would be miscounted
+    as converged and inflate the cubie-vs-julia non-convergence gap.
+    """
+    finite = np.isfinite(arr).all(axis=1)
+    if sel and "converged" in sel[0] and sel[0]["converged"] not in ("", None):
+        flag = np.array([str(r.get("converged", "")).strip() == "1"
+                         for r in sel], dtype=bool)
+        return flag & finite
+    return finite
+
+
+def read_ne_csv_masked(path):
+    """Like :func:`read_ne_csv` but also returns a per-trajectory mask.
+
+    Returns dict {dt: (finals (N_NE, 3) float64, converged (N_NE,) bool)}.
+    """
+    out = {}
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    dts = sorted({float(row["dt"]) for row in rows}, reverse=True)
+    for dt in dts:
+        sel = [row for row in rows if float(row["dt"]) == dt]
+        sel.sort(key=lambda row: int(row["traj"]))
+        arr = np.array([[float(row["x"]), float(row["y"]), float(row["z"])]
+                        for row in sel], dtype=np.float64)
+        out[dt] = (arr, _converged_from_rows(sel, arr))
+    return out
+
+
+def read_ne_adaptive_csv_masked(path):
+    """Like :func:`read_ne_adaptive_csv` but also returns a converged mask.
+
+    Returns dict {tol: (finals (N_NE, 3) float64, converged (N_NE,) bool,
+    naccept, nreject)} with naccept/nreject as in :func:`read_ne_adaptive_csv`.
+    """
+    out = {}
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    tols = sorted({float(row["tol"]) for row in rows}, reverse=True)
+    for tol in tols:
+        sel = [row for row in rows if float(row["tol"]) == tol]
+        sel.sort(key=lambda row: int(row["traj"]))
+        arr = np.array([[float(row["x"]), float(row["y"]), float(row["z"])]
+                        for row in sel], dtype=np.float64)
+        conv = _converged_from_rows(sel, arr)
+
+        def counts(field):
+            vals = [row.get(field, "") for row in sel]
+            if any(v not in ("", None) for v in vals):
+                return np.array([float(v) if v not in ("", None) else np.nan
+                                 for v in vals])
+            return None
+        out[tol] = (arr, conv, counts("naccept"), counts("nreject"))
+    return out
+
+
 def julia_ne_file(alias):
     """Path of the machine-independent DifferentialEquations.jl output."""
     return os.path.join(JULIA_NE_DIR, "{0}.csv".format(alias))
