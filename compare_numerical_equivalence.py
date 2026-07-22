@@ -51,29 +51,28 @@ ORDER_CAP_REL = 3e-2
 
 # Equivalence: two implementations of the identical tableau differ only by
 # roundoff, so their mutual rms distance must stay well below the truncation
-# error (factor EQ_FRACTION) once above the roundoff floor allowance.
-EQ_FRACTION = 0.25
+# error (factor EQ_FRACTION) once above the roundoff floor allowance. Every
+# algorithm is judged the same way: either its trajectories match Julia's to
+# within EQ_FRACTION of the truncation error, or they do not. There is no
+# softer "same order / comparable magnitude" path for different-tableau pairs
+# (e.g. sdirk_2_2, whose Julia SDIRK22 aliases to Trapezoid) — a genuine
+# tableau difference is a real mismatch, not a pass.
+EQ_FRACTION = 0.05
 EQ_FLOOR_MULT = 3.0
 
-# Non-exact pairs (same method class, different tableau) are only required
-# to converge at the same order with errors of comparable magnitude.
-ORDER_TOL = 0.6
-RATIO_LIM = 4.0
-
-# Adaptive matched-controller tier: even with identical controller type,
-# gains and tolerances, a single float32-roundoff flip of one accept/reject
-# decision decouples the two stacks' dt sequences, after which their
-# per-trajectory difference is bounded below by the local truncation error
-# itself — an absolute divergence gate is unattainable here (it IS
-# attainable in the fixed-step suite, where the dt sequence is pinned). The
-# defensible gate is relative: the mutual rms distance must not exceed
-# ADAPTIVE_EQ_FRACTION times the Julia run's own error at that tolerance.
-# Healthy algorithms sit at ratio ~1; broken ones sit orders of magnitude
-# above.
-ADAPTIVE_EQ_FRACTION = 2.0
-# Default-controller curves reflect each stack's controller personality;
-# they are classified by the median error ratio rather than gated.
-ADAPTIVE_RATIO_LIM = 4.0
+# Adaptive tiers are compared on SIGNED accuracy, not trajectory distance: at
+# each tolerance take the ratio of cubie's error to Julia's error against the
+# golden (both over the mutually-converged trajectories). The mutual rms
+# distance is unsigned and penalises cubie even when it is *more* accurate than
+# Julia — a single float32 accept/reject flip decouples the dt sequences, yet
+# cubie can still land closer to golden — so the distance is reported in the
+# tables but never drives the verdict. A tier passes (cubie tracks or beats
+# Julia) when cubie's error is at most ADAPTIVE_TOL times Julia's at every
+# in-range tolerance; being more accurate always passes. The same rule and
+# tolerance apply to the matched tier (Julia's resolved controller) and the
+# default tier (cubie's own controller) — there is no separate default-tier
+# band.
+ADAPTIVE_TOL = 1.1
 
 
 def observed_orders(errs_by_dt, floor, cap):
@@ -186,15 +185,7 @@ def analyse_algorithm(row, key, golden_states, scale):
             if not (floor < emax):
                 continue
             checked += 1
-            if row["exact"]:
-                if rms_diff > max(EQ_FRACTION * emax, EQ_FLOOR_MULT * floor):
-                    ok = False
-            else:
-                r = err_c / err_j if err_j > 0 else float("inf")
-                if not (1.0 / RATIO_LIM < r < RATIO_LIM):
-                    ok = False
-        if not row["exact"] and np.isfinite(order_c) and np.isfinite(order_j):
-            if abs(order_c - order_j) > ORDER_TOL:
+            if rms_diff > max(EQ_FRACTION * emax, EQ_FLOOR_MULT * floor):
                 ok = False
         if checked < 2:
             # Julia produced sane in-region errors that cubie never matched
@@ -203,7 +194,7 @@ def analyse_algorithm(row, key, golden_states, scale):
             verdict = ("MISMATCH" if julia_valid >= 2
                        else "INSUFFICIENT OVERLAP")
         elif ok:
-            verdict = "EQUIVALENT" if row["exact"] else "CONSISTENT"
+            verdict = "EQUIVALENT"
         else:
             verdict = "MISMATCH"
 
@@ -212,6 +203,34 @@ def analyse_algorithm(row, key, golden_states, scale):
         "order_julia": order_j, "verdict": verdict, "nonconv": nonconv,
         "missing_cubie": cubie is None, "missing_julia": julia is None,
     }
+
+
+def signed_tier_verdict(points, err_field, floor, have_data):
+    """Signed accuracy verdict for one adaptive tier against Julia.
+
+    Uses the worst-case cubie/julia error ratio over the in-range tolerances
+    (both errors are already over the mutually-converged trajectories). Being
+    more accurate than Julia (ratio <= 1) always passes; a tier is LESS
+    ACCURATE only when cubie's error exceeds ADAPTIVE_TOL x Julia's somewhere.
+    """
+    if not have_data:
+        return "NO DATA"
+    worst = None
+    for entry in points:
+        err_j, err_c = entry["err_julia"], entry.get(err_field)
+        if (err_j is None or err_c is None or not np.isfinite(err_j)
+                or not np.isfinite(err_c) or err_j <= 0
+                or not (floor < max(err_j, err_c))):
+            continue
+        r = err_c / err_j
+        worst = r if worst is None else max(worst, r)
+    if worst is None:
+        return "INSUFFICIENT OVERLAP"
+    if worst > ADAPTIVE_TOL:
+        return "LESS ACCURATE (worst ratio {0:.3g})".format(worst)
+    if worst <= 1.0:
+        return "MORE ACCURATE (worst ratio {0:.2f})".format(worst)
+    return "TRACKING (worst ratio {0:.2f})".format(worst)
 
 
 def analyse_adaptive(row, key, golden_states, scale):
@@ -277,57 +296,16 @@ def analyse_adaptive(row, key, golden_states, scale):
             entry["p99_diff"] = None
         points.append(entry)
 
-    # Verdicts. Matched tier (the CI gate): the mutual rms distance must
-    # stay within ADAPTIVE_EQ_FRACTION of the julia run's own error at every
-    # tolerance where the julia solve is in a sane range. Default tier
-    # (informational): classify the controller personality by the median
-    # error ratio.
-    if tiers["matched"] is None or julia is None:
-        matched_verdict = "NO DATA"
-    else:
-        checked = 0
-        worst = 0.0
-        for entry in points:
-            err_j = entry["err_julia"]
-            if (err_j is None or not np.isfinite(err_j)
-                    or not (floor < err_j)):
-                continue
-            if entry["rms_diff"] is None:
-                continue
-            checked += 1
-            worst = max(worst,
-                        entry["rms_diff"] / max(err_j, EQ_FLOOR_MULT * floor))
-        if checked == 0:
-            matched_verdict = "INSUFFICIENT OVERLAP"
-        elif worst <= ADAPTIVE_EQ_FRACTION:
-            matched_verdict = "TRACKING (worst ratio {0:.2f})".format(worst)
-        else:
-            matched_verdict = "DIVERGENT (worst ratio {0:.3g})".format(worst)
-
-    if tiers["default"] is None or julia is None:
-        default_verdict = "NO DATA"
-    else:
-        ratios = []
-        for entry in points:
-            err_j, err_c = entry["err_julia"], entry["err_default"]
-            if (err_j is None or err_c is None
-                    or not np.isfinite(err_j) or not np.isfinite(err_c)
-                    or not (floor < max(err_j, err_c))
-                    or err_j <= 0):
-                continue
-            ratios.append(err_c / err_j)
-        if not ratios:
-            default_verdict = "INSUFFICIENT OVERLAP"
-        else:
-            med = float(np.median(ratios))
-            if 1.0 / ADAPTIVE_RATIO_LIM < med < ADAPTIVE_RATIO_LIM:
-                default_verdict = "TRACKING (median ratio {0:.2f})".format(med)
-            elif med <= 1.0 / ADAPTIVE_RATIO_LIM:
-                default_verdict = ("MORE ACCURATE (median ratio {0:.3g})"
-                                   .format(med))
-            else:
-                default_verdict = ("LESS ACCURATE (median ratio {0:.3g})"
-                                   .format(med))
+    # Verdicts (both tiers, same signed rule): worst-case cubie/julia error
+    # ratio over the in-range tolerances. <=1 means cubie is at least as
+    # accurate as Julia everywhere; <=ADAPTIVE_TOL means at most that factor
+    # worse; above it the tier is LESS ACCURATE.
+    matched_verdict = signed_tier_verdict(points, "err_matched", floor,
+                                          tiers["matched"] is not None
+                                          and julia is not None)
+    default_verdict = signed_tier_verdict(points, "err_default", floor,
+                                          tiers["default"] is not None
+                                          and julia is not None)
 
     return {
         "row": row, "points": points,
@@ -352,19 +330,17 @@ def adaptive_report_lines(adaptive_results):
                  "for that algorithm (constants exported by the Julia "
                  "runner).")
     lines.append("")
-    lines.append("Verdicts — matched (the CI gate): even under identical "
-                 "controller settings a single float32 accept/reject flip "
-                 "decouples the dt sequences, after which the mutual "
-                 "distance is bounded below by the local truncation error, "
-                 "so the gate is relative: TRACKING when the mutual rms "
-                 "distance stays within {0:g}x the Julia run's own error at "
-                 "every in-range tolerance (healthy algorithms sit at ratio "
-                 "~1; broken ones sit orders of magnitude above). default "
-                 "(informational): classified by the median error ratio "
-                 "cubie/julia — within a factor of {1:g} counts as "
-                 "TRACKING; outside it the tier reports which controller "
-                 "personality is more accurate at equal tolerance.".format(
-                     ADAPTIVE_EQ_FRACTION, ADAPTIVE_RATIO_LIM))
+    lines.append("Verdicts (both tiers, same signed rule): the worst-case "
+                 "cubie/julia error ratio (vs golden, over mutually-converged "
+                 "trajectories) across the in-range tolerances. MORE ACCURATE "
+                 "when cubie is at least as accurate as Julia at every "
+                 "tolerance (worst ratio <= 1); TRACKING when cubie is at most "
+                 "{0:g}x Julia's error; LESS ACCURATE above that. The `rms "
+                 "diff` / `p99 diff` / `max diff` columns are the unsigned "
+                 "cubie-vs-Julia trajectory distance — reported for context "
+                 "(a float32 accept/reject flip decouples the dt sequences) "
+                 "but not used for the verdict, since it penalises cubie even "
+                 "when cubie is more accurate.".format(ADAPTIVE_TOL))
     lines.append("")
     lines.append("| algorithm | order | default vs julia | matched vs julia |")
     lines.append("|---|---|---|---|")
@@ -417,12 +393,13 @@ def write_report(key, results, scale, outfile, adaptive_results=None):
                  "disagreement counts as a mismatch.".format(
                      scale, FLOOR_REL * scale, ORDER_CAP_REL * scale))
     lines.append("")
-    lines.append("Verdicts: EQUIVALENT — identical tableau on both sides and "
-                 "mutual rms difference stays below {0:.0%} of the truncation "
-                 "error at every in-region dt. CONSISTENT — different tableau "
-                 "of the same order (see notes); observed orders and error "
-                 "magnitudes agree. MISMATCH — neither holds; the offending "
-                 "rows are visible in the per-algorithm tables.".format(
+    lines.append("Verdicts: EQUIVALENT — the mutual rms difference stays below "
+                 "{0:.0%} of the truncation error at every in-region dt. Every "
+                 "algorithm is judged this way, including different-tableau "
+                 "pairs such as sdirk_2_2 (Julia's SDIRK22 aliases to "
+                 "Trapezoid) — a genuine tableau difference is a mismatch, not "
+                 "a pass. MISMATCH — it does not hold; the offending rows are "
+                 "visible in the per-algorithm tables.".format(
                      EQ_FRACTION))
     lines.append("")
     lines.append("Errors and the mutual rms distance use only the "
@@ -632,10 +609,10 @@ def main():
             aplot = os.path.join(
                 "plots", "numerical_equivalence_adaptive_{0}.png".format(key))
             write_adaptive_plot(key, adaptive_results, scale, aplot)
-            n_div = sum("DIVERGENT" in res["matched_verdict"]
+            n_div = sum("LESS ACCURATE" in res["matched_verdict"]
                         for res in adaptive_results)
-            print("[{0}] adaptive: {1} algorithms, {2} divergent under "
-                  "matched controllers; plot -> {3}".format(
+            print("[{0}] adaptive: {1} algorithms, {2} less accurate than "
+                  "julia under matched controllers; plot -> {3}".format(
                       key, len(adaptive_results), n_div, aplot))
             for res in adaptive_results:
                 print("  {0:22s} default={1:20s} matched={2}".format(

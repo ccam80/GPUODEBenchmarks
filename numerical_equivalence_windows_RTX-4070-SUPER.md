@@ -4,7 +4,7 @@ Fixed-step Float32 convergence study on the Lorenz ensemble (N=1024, rho in [0, 
 
 Golden-scale rms: 5.854. Order estimates use errors in (2.34e-05, 1.76e-01); equivalence verdicts use every point above the roundoff floor 2.34e-05 where both stacks converged — there is no upper cap, so a large converged disagreement counts as a mismatch.
 
-Verdicts: EQUIVALENT — identical tableau on both sides and mutual rms difference stays below 25% of the truncation error at every in-region dt. CONSISTENT — different tableau of the same order (see notes); observed orders and error magnitudes agree. MISMATCH — neither holds; the offending rows are visible in the per-algorithm tables.
+Verdicts: EQUIVALENT — the mutual rms difference stays below 5% of the truncation error at every in-region dt. Every algorithm is judged this way, including different-tableau pairs such as sdirk_2_2 (Julia's SDIRK22 aliases to Trapezoid) — a genuine tableau difference is a mismatch, not a pass. MISMATCH — it does not hold; the offending rows are visible in the per-algorithm tables.
 
 Errors and the mutual rms distance use only the trajectories both stacks converged on. `worst extra non-conv` is the largest per-dt excess of cubie's non-converged trajectory count over julia's (positive => cubie solved fewer than julia at some dt); the per-dt counts are in each algorithm's table.
 
@@ -447,25 +447,25 @@ _Kvaerno (2004) ESDIRK; cubie kvaerno5 tableau_
 
 Each adaptive algorithm ran at atol = rtol over the tolerance grid, in Float32, with pinned initial dt and dt bounds. `default` is cubie's own PI controller defaults; `matched` mirrors the controller type, gains, safety, gain clamps and deadband that DifferentialEquations.jl resolved for that algorithm (constants exported by the Julia runner).
 
-Verdicts — matched (the CI gate): even under identical controller settings a single float32 accept/reject flip decouples the dt sequences, after which the mutual distance is bounded below by the local truncation error, so the gate is relative: TRACKING when the mutual rms distance stays within 2x the Julia run's own error at every in-range tolerance (healthy algorithms sit at ratio ~1; broken ones sit orders of magnitude above). default (informational): classified by the median error ratio cubie/julia — within a factor of 4 counts as TRACKING; outside it the tier reports which controller personality is more accurate at equal tolerance.
+Verdicts (both tiers, same signed rule): the worst-case cubie/julia error ratio (vs golden, over mutually-converged trajectories) across the in-range tolerances. MORE ACCURATE when cubie is at least as accurate as Julia at every tolerance (worst ratio <= 1); TRACKING when cubie is at most 1.1x Julia's error; LESS ACCURATE above that. The `rms diff` / `p99 diff` / `max diff` columns are the unsigned cubie-vs-Julia trajectory distance — reported for context (a float32 accept/reject flip decouples the dt sequences) but not used for the verdict, since it penalises cubie even when cubie is more accurate.
 
 | algorithm | order | default vs julia | matched vs julia |
 |---|---|---|---|
-| bogacki-shampine-32 | 3 | TRACKING (median ratio 0.72) | TRACKING (worst ratio 0.12) |
-| dormand-prince-54 | 5 | MORE ACCURATE (median ratio 0.233) | TRACKING (worst ratio 1.33) |
-| cash-karp-54 | 5 | TRACKING (median ratio 0.62) | TRACKING (worst ratio 0.42) |
-| fehlberg-45 | 5 | TRACKING (median ratio 0.70) | TRACKING (worst ratio 0.67) |
-| dormand-prince-853 | 8 | MORE ACCURATE (median ratio 0.00416) | TRACKING (worst ratio 1.01) |
-| tsit5 | 5 | TRACKING (median ratio 0.55) | TRACKING (worst ratio 0.74) |
-| vern7 | 7 | TRACKING (median ratio 0.50) | TRACKING (worst ratio 1.44) |
-| crank_nicolson | 2 | MORE ACCURATE (median ratio 0.0153) | TRACKING (worst ratio 1.00) |
-| l_stable_sdirk_4 | 4 | MORE ACCURATE (median ratio 0.00879) | TRACKING (worst ratio 1.00) |
-| radau_iia_5 | 5 | TRACKING (median ratio 1.13) | TRACKING (worst ratio 0.93) |
-| ros3p | 3 | TRACKING (median ratio 0.32) | TRACKING (worst ratio 0.32) |
-| rodas3p | 3 | TRACKING (median ratio 2.27) | DIVERGENT (worst ratio 3.53) |
-| rosenbrock23_sciml | 2 | TRACKING (median ratio 0.47) | TRACKING (worst ratio 0.19) |
-| kvaerno3 | 3 | MORE ACCURATE (median ratio 0.00507) | TRACKING (worst ratio 1.00) |
-| kvaerno5 | 5 | MORE ACCURATE (median ratio 0.00968) | TRACKING (worst ratio 0.98) |
+| bogacki-shampine-32 | 3 | MORE ACCURATE (worst ratio 0.75) | TRACKING (worst ratio 1.01) |
+| dormand-prince-54 | 5 | MORE ACCURATE (worst ratio 0.43) | LESS ACCURATE (worst ratio 1.39) |
+| cash-karp-54 | 5 | MORE ACCURATE (worst ratio 0.67) | TRACKING (worst ratio 1.02) |
+| fehlberg-45 | 5 | MORE ACCURATE (worst ratio 0.84) | LESS ACCURATE (worst ratio 1.39) |
+| dormand-prince-853 | 8 | MORE ACCURATE (worst ratio 0.10) | MORE ACCURATE (worst ratio 0.38) |
+| tsit5 | 5 | MORE ACCURATE (worst ratio 0.64) | TRACKING (worst ratio 1.06) |
+| vern7 | 7 | MORE ACCURATE (worst ratio 0.61) | MORE ACCURATE (worst ratio 0.85) |
+| crank_nicolson | 2 | MORE ACCURATE (worst ratio 0.18) | MORE ACCURATE (worst ratio 0.07) |
+| l_stable_sdirk_4 | 4 | MORE ACCURATE (worst ratio 0.03) | MORE ACCURATE (worst ratio 0.09) |
+| radau_iia_5 | 5 | LESS ACCURATE (worst ratio 78.5) | MORE ACCURATE (worst ratio 0.91) |
+| ros3p | 3 | MORE ACCURATE (worst ratio 0.34) | MORE ACCURATE (worst ratio 0.98) |
+| rodas3p | 3 | LESS ACCURATE (worst ratio 2.79) | LESS ACCURATE (worst ratio 4.44) |
+| rosenbrock23_sciml | 2 | MORE ACCURATE (worst ratio 0.55) | TRACKING (worst ratio 1.02) |
+| kvaerno3 | 3 | MORE ACCURATE (worst ratio 0.02) | MORE ACCURATE (worst ratio 0.12) |
+| kvaerno5 | 5 | MORE ACCURATE (worst ratio 0.07) | MORE ACCURATE (worst ratio 0.17) |
 
 ### bogacki-shampine-32 (order 3, adaptive)
 
