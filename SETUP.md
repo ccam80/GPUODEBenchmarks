@@ -15,7 +15,8 @@ This master script will automatically:
 2. Set up the CUBIE-MLIR Python environment (cubie `mlir` branch on numba-cuda-mlir)
 3. Set up the JAX/Diffrax Python environment
 4. Set up the PyTorch/torchdiffeq Python environment
-5. Set up the Julia environment with all required packages
+5. Set up the Myokit-CUDA Python environment
+6. Set up the Julia environment with all required packages
 
 ## Individual Package Setup
 
@@ -92,6 +93,27 @@ To activate:
 - Windows (cmd): `GPU_ODE_PyTorch\venv\Scripts\activate.bat`
 - Windows (PowerShell): `GPU_ODE_PyTorch\venv\Scripts\Activate.ps1`
 
+### Myokit-CUDA
+
+```bash
+python3 GPU_ODE_MYOKIT_CUDA/setup_environment.py
+```
+
+This will:
+- Create a Python virtual environment in `GPU_ODE_MYOKIT_CUDA/venv`
+- Install Myokit and the CUDA runtime dependencies used by the adapter
+- Verify that the NVIDIA CUDA toolchain is available
+
+The benchmark imports a CellML Lorenz model and uses Myokit's CUDA exporter.
+The exporter generates float32 forward Euler device code only, so this
+environment contributes fixed-step results and does not provide an adaptive
+solver.
+
+To activate:
+- Linux/macOS: `source GPU_ODE_MYOKIT_CUDA/venv/bin/activate`
+- Windows (cmd): `GPU_ODE_MYOKIT_CUDA\venv\Scripts\activate.bat`
+- Windows (PowerShell): `GPU_ODE_MYOKIT_CUDA\venv\Scripts\Activate.ps1`
+
 ### Julia
 
 ```bash
@@ -128,6 +150,10 @@ JAX and PyTorch bundle their own CUDA runtime via pip wheels
 (`jax[cuda12]`, torch cu121), so they need only the driver. JAX has no CUDA
 wheels for native Windows; the JAX benchmark aborts on a CPU backend and
 should be run on Linux or WSL2.
+
+Myokit-CUDA requires an NVIDIA GPU and CUDA toolchain. Its setup and
+benchmark scripts expect the required NVIDIA tools and libraries to be
+available on `PATH`.
 
 ### Python Packages
 - Python 3.10 or higher (3.12 recommended; the numba stack may lag the newest CPython)
@@ -175,6 +201,13 @@ python -c "import torch, torchdiffeq; print('PyTorch OK')"
 deactivate
 ```
 
+### Myokit-CUDA
+```bash
+source GPU_ODE_MYOKIT_CUDA/venv/bin/activate
+python -c "import cupy, myokit; print('Myokit-CUDA OK')"
+deactivate
+```
+
 ### Julia
 ```bash
 julia --project=. -e 'using DiffEqGPU, CUDA; println("Julia OK")'
@@ -192,6 +225,7 @@ rm -rf GPU_ODE_CUBIE/venv GPU_ODE_CUBIE/cubie
 rm -rf GPU_ODE_CUBIE_MLIR/venv GPU_ODE_CUBIE_MLIR/cubie
 rm -rf GPU_ODE_JAX/venv
 rm -rf GPU_ODE_PyTorch/venv
+rm -rf GPU_ODE_MYOKIT_CUDA/venv
 ```
 
 **Windows (PowerShell):**
@@ -200,6 +234,7 @@ Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv, GPU_ODE_CUBIE\cubie
 Remove-Item -Recurse -Force GPU_ODE_CUBIE_MLIR\venv, GPU_ODE_CUBIE_MLIR\cubie
 Remove-Item -Recurse -Force GPU_ODE_JAX\venv
 Remove-Item -Recurse -Force GPU_ODE_PyTorch\venv
+Remove-Item -Recurse -Force GPU_ODE_MYOKIT_CUDA\venv
 ```
 
 Then re-run the appropriate setup script.
@@ -227,6 +262,7 @@ nvcc --version
 - All Python virtual environments are created with the name `venv` in their respective package directories
 - The CUBIE setup clones the repository into `GPU_ODE_CUBIE/cubie/`
 - The CUBIE-MLIR setup clones the `mlir` branch into `GPU_ODE_CUBIE_MLIR/cubie/`
+- Myokit-CUDA's generated CUDA export directory is excluded via `.gitignore`
 - Virtual environment and cloned repository directories are excluded from git via `.gitignore`
 - The `uv` package manager is used for faster Python package installation
 

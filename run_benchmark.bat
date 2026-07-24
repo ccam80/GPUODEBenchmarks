@@ -54,11 +54,13 @@ if "%has_n_option%"=="false" (
 )
 
 REM Work-precision mode (-w): pass "wp" to the runner instead of nmax; the
-REM runner sweeps dt/tolerance at N=32768 against the golden reference.
+REM runner sweeps its supported step size and/or tolerance controls at N=32768
+REM against the golden reference.
 if "%wp%"=="true" set nmax=wp
 
-REM Accept hyphenated alias for cubie_mlir
+REM Accept hyphenated aliases for underscore-separated language names
 if /i "%lang%"=="cubie-mlir" set lang=cubie_mlir
+if /i "%lang%"=="myokit-cuda" set lang=myokit_cuda
 
 REM Per-machine dataset key ("<os>_<gpu>"). Timing files are appended across the
 REM N-sweep, so we clear only *this machine's* files before a run; other machines'
@@ -93,8 +95,10 @@ if /i "%lang%"=="julia" (
     goto check_ode_gpu
 ) else if /i "%lang%"=="cubie_mlir" (
     goto check_ode_gpu
+) else if /i "%lang%"=="myokit_cuda" (
+    goto check_ode_gpu
 ) else (
-    echo Unknown language: %lang%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir.
+    echo Unknown language: %lang%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda.
     popd
     exit /b 1
 )
@@ -112,6 +116,7 @@ if /i "%lang%"=="pytorch" set data_lang=PYTORCH
 if /i "%lang%"=="cpp" set data_lang=CPP
 if /i "%lang%"=="cubie" set data_lang=CUBIE
 if /i "%lang%"=="cubie_mlir" set data_lang=CUBIE_MLIR
+if /i "%lang%"=="myokit_cuda" set data_lang=MYOKIT_CUDA
 
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
 if not exist "data\%data_lang%\" mkdir "data\%data_lang%"

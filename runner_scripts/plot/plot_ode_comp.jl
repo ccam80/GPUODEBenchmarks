@@ -27,11 +27,16 @@ frameworks = [
     ("PYTORCH", "PYTORCH", "Torch"),
     ("CUBIE", "CUBIE", "Cubie"),
     ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
+    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
 ]
 
 # color/marker choices per framework
-colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red, "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple)
-markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond, "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon)
+colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
+    "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple,
+    "MYOKIT CUDA"=>:Black)
+markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
+    "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon,
+    "MYOKIT CUDA"=>:rect)
 
 # One benchmark curve loaded from disk.
 struct Series

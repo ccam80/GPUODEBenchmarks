@@ -8,7 +8,12 @@
 # e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
 
 function Get-DatasetKey {
-    if ($IsWindows -or $env:OS -eq 'Windows_NT') { $os = 'windows' }
+    $platform = [System.Environment]::OSVersion.Platform
+    if ($IsWindows -or
+        $env:OS -eq 'Windows_NT' -or
+        $platform -eq [System.PlatformID]::Win32NT) {
+        $os = 'windows'
+    }
     elseif ($IsMacOS) { $os = 'macos' }
     elseif ($IsLinux) { $os = 'linux' }
     else { $os = 'unknown' }

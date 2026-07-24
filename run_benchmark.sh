@@ -18,7 +18,8 @@ if ! $has_n_option; then
     nmax=$((2**24))
 fi
 # Work-precision mode (-w): pass "wp" to the runner instead of nmax; the
-# runner sweeps dt/tolerance at N=32768 against the golden reference.
+# runner sweeps its supported step size and/or tolerance controls at N=32768
+# against the golden reference.
 if $wp; then
     nmax="wp"
 fi
@@ -52,7 +53,7 @@ if [ "$lang" == "julia" ]; then
         fi
         bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
     fi
-elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubie" || $lang == "cubie_mlir" ]]; then
+elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubie" || $lang == "cubie_mlir" || $lang == "myokit_cuda" ]]; then
     if [[ $model != "ode" || $dev != "gpu" ]]; then
         echo "The benchmarking of ensemble ${model^^} solvers on ${dev^^} with ${lang} is not supported. Please use -m flag with \"ode\" and -d with \"gpu\"."
         exit 1
@@ -67,6 +68,6 @@ elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubi
         bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
     fi
 else
-    echo "Unknown language: ${lang}. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir."
+    echo "Unknown language: ${lang}. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda."
     exit 1
 fi

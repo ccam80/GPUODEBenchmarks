@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Array of languages to benchmark
-languages=("julia" "cpp" "pytorch" "jax" "cubie" "cubie_mlir")
+languages=("julia" "cpp" "pytorch" "jax" "cubie" "cubie_mlir" "myokit_cuda")
 
 # Run timing benchmarks for each language
 for lang in "${languages[@]}"
