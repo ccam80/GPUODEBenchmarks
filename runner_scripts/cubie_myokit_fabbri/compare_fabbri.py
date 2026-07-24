@@ -41,6 +41,16 @@ FABBRI_REPAIRS = (
 )
 
 
+def positive_integer(value):
+    """Parse a strictly positive integer for command-line options."""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            "value must be a positive integer"
+        )
+    return parsed
+
+
 def normalized_fabbri_cellml(source, destination):
     """Write the metadata-only Myokit compatibility normalization.
 
@@ -621,6 +631,15 @@ def trajectory_counts(arguments):
     return counts
 
 
+def failed_trajectory_counts(reports):
+    """Return trajectory counts that failed numerical equivalence."""
+    return [
+        report["trajectories"]
+        for report in reports
+        if not report["allclose"]["result"]
+    ]
+
+
 def orchestrate(arguments):
     """Run both implementations and write the comparison artifacts."""
     cellml = Path(arguments.cellml).resolve()
@@ -724,6 +743,16 @@ def orchestrate(arguments):
 
     write_scaling_summary(output_dir, reports)
     print("Wrote comparison to {0}".format(output_dir))
+    failed_counts = failed_trajectory_counts(reports)
+    if failed_counts:
+        print(
+            "Numerical equivalence failed at trajectory counts: {0}"
+            .format(
+                ", ".join(str(count) for count in failed_counts)
+            ),
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -739,13 +768,13 @@ def orchestrator_parser():
     count_group = parser.add_mutually_exclusive_group()
     count_group.add_argument(
         "--trajectories",
-        type=int,
+        type=positive_integer,
         default=None,
         help="run one smoke/performance point",
     )
     count_group.add_argument(
         "--trajectory-counts",
-        type=int,
+        type=positive_integer,
         nargs="+",
         default=None,
         help=(
@@ -753,10 +782,16 @@ def orchestrator_parser():
         ),
     )
     parser.add_argument("--dt", type=float, default=DEFAULT_DT)
-    parser.add_argument("--steps", type=int, default=DEFAULT_STEPS)
-    parser.add_argument("--repeats", type=int, default=100)
-    parser.add_argument("--myokit-block-size", type=int, default=128)
-    parser.add_argument("--cubie-block-size", type=int, default=64)
+    parser.add_argument(
+        "--steps", type=positive_integer, default=DEFAULT_STEPS
+    )
+    parser.add_argument("--repeats", type=positive_integer, default=100)
+    parser.add_argument(
+        "--myokit-block-size", type=positive_integer, default=128
+    )
+    parser.add_argument(
+        "--cubie-block-size", type=positive_integer, default=64
+    )
     parser.add_argument("--rtol", type=float, default=1e-6)
     parser.add_argument("--atol", type=float, default=1e-8)
     return parser

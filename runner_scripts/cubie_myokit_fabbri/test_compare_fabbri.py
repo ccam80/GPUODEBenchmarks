@@ -1,5 +1,6 @@
 """Dependency-light tests for Fabbri comparison mapping and statistics."""
 
+import argparse
 import importlib.util
 import sys
 import tempfile
@@ -26,6 +27,11 @@ class ComparisonTests(unittest.TestCase):
             MODULE.canonical_state_name("Membrane.V_ode"),
             "Membrane_V_ode",
         )
+
+    def test_positive_integer_rejects_zero(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            MODULE.positive_integer("0")
+        self.assertEqual(MODULE.positive_integer("100"), 100)
 
     def test_cubie_columns_are_reordered_to_myokit_order(self):
         cubie = np.asarray([[30.0, 10.0, 20.0]], dtype=np.float32)
@@ -91,6 +97,16 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn("| 2048 |", markdown)
         self.assertIn("CuBIE speedup", markdown)
         self.assertIn("100 synchronized repeats", markdown)
+
+    def test_numerical_mismatch_is_reported_as_failure(self):
+        reports = [
+            {"trajectories": 512, "allclose": {"result": True}},
+            {"trajectories": 2048, "allclose": {"result": False}},
+        ]
+        self.assertEqual(
+            MODULE.failed_trajectory_counts(reports),
+            [2048],
+        )
 
     def test_fabbri_normalization_is_metadata_only(self):
         source_text = """<?xml version="1.0"?>
