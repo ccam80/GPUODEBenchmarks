@@ -27,9 +27,11 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "runner_scripts",
     "numerical_equivalence"))
 from ne_common import (DTS_NE, TOLS_NE, load_algorithms, load_golden_ne,
-                       ensemble_error, julia_ne_file, cubie_ne_file,
-                       julia_ne_adaptive_file, cubie_ne_adaptive_file,
-                       read_ne_csv, read_ne_adaptive_csv, CUBIE_NE_DIR)
+                       ensemble_error, ensemble_error_masked, julia_ne_file,
+                       cubie_ne_file, julia_ne_adaptive_file,
+                       cubie_ne_adaptive_file, read_ne_csv, read_ne_adaptive_csv,
+                       read_ne_csv_masked, read_ne_adaptive_csv_masked,
+                       CUBIE_NE_DIR)
 
 # Windows consoles default to a legacy codepage (cp1252) that cannot encode
 # the glyphs printed below; force UTF-8 where supported.
@@ -37,43 +39,40 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-# Error bounds (relative to the golden scale) delimiting where each check
-# applies. Below FLOOR_REL the error is float32 roundoff, not truncation.
-# Above ORDER_CAP_REL the solve has left the asymptotic regime and the
-# observed order is meaningless. The equivalence check tolerates a much
-# looser cap: two implementations of the same tableau still track each other
-# closely at coarse dt where the error is large but finite, and that
-# agreement is strong evidence — only outright divergence (error at the
-# scale of the attractor itself) is uninformative.
+# Error bounds (relative to the golden scale). Below FLOOR_REL the error is
+# float32 roundoff, not truncation, so nothing can be said. Above ORDER_CAP_REL
+# the solve has left the asymptotic regime, so the observed-ORDER estimate is
+# meaningless (order estimation only). The equivalence check has NO upper cap:
+# once genuinely non-converged trajectories are removed (mutual-convergence
+# masking), any point where both stacks converged but still disagree — however
+# large the error — is a real mismatch and must count toward the verdict.
 FLOOR_REL = 4e-6
 ORDER_CAP_REL = 3e-2
-EQ_CAP_REL = 5e-1
 
 # Equivalence: two implementations of the identical tableau differ only by
 # roundoff, so their mutual rms distance must stay well below the truncation
-# error (factor EQ_FRACTION) once above the roundoff floor allowance.
-EQ_FRACTION = 0.25
+# error (factor EQ_FRACTION) once above the roundoff floor allowance. Every
+# algorithm is judged the same way: either its trajectories match Julia's to
+# within EQ_FRACTION of the truncation error, or they do not. There is no
+# softer "same order / comparable magnitude" path for different-tableau pairs
+# (e.g. sdirk_2_2, whose Julia SDIRK22 aliases to Trapezoid) — a genuine
+# tableau difference is a real mismatch, not a pass.
+EQ_FRACTION = 0.05
 EQ_FLOOR_MULT = 3.0
 
-# Non-exact pairs (same method class, different tableau) are only required
-# to converge at the same order with errors of comparable magnitude.
-ORDER_TOL = 0.6
-RATIO_LIM = 4.0
-
-# Adaptive matched-controller tier: even with identical controller type,
-# gains and tolerances, a single float32-roundoff flip of one accept/reject
-# decision decouples the two stacks' dt sequences, after which their
-# per-trajectory difference is bounded below by the local truncation error
-# itself — an absolute divergence gate is unattainable here (it IS
-# attainable in the fixed-step suite, where the dt sequence is pinned). The
-# defensible gate is relative: the mutual rms distance must not exceed
-# ADAPTIVE_EQ_FRACTION times the Julia run's own error at that tolerance.
-# Healthy algorithms sit at ratio ~1; broken ones sit orders of magnitude
-# above.
-ADAPTIVE_EQ_FRACTION = 2.0
-# Default-controller curves reflect each stack's controller personality;
-# they are classified by the median error ratio rather than gated.
-ADAPTIVE_RATIO_LIM = 4.0
+# Adaptive tiers are compared on SIGNED accuracy, not trajectory distance: at
+# each tolerance take the ratio of cubie's error to Julia's error against the
+# golden (both over the mutually-converged trajectories). The mutual rms
+# distance is unsigned and penalises cubie even when it is *more* accurate than
+# Julia — a single float32 accept/reject flip decouples the dt sequences, yet
+# cubie can still land closer to golden — so the distance is reported in the
+# tables but never drives the verdict. A tier passes (cubie tracks or beats
+# Julia) when cubie's error is at most ADAPTIVE_TOL times Julia's at every
+# in-range tolerance; being more accurate always passes. The same rule and
+# tolerance apply to the matched tier (Julia's resolved controller) and the
+# default tier (cubie's own controller) — there is no separate default-tier
+# band.
+ADAPTIVE_TOL = 1.1
 
 
 def observed_orders(errs_by_dt, floor, cap):
@@ -117,26 +116,44 @@ def analyse_algorithm(row, key, golden_states, scale):
     alias = row["cubie_alias"]
     jfile = julia_ne_file(alias)
     cfile = cubie_ne_file(alias, key)
-    julia = read_ne_csv(jfile) if os.path.isfile(jfile) else None
-    cubie = read_ne_csv(cfile) if os.path.isfile(cfile) else None
+    julia = read_ne_csv_masked(jfile) if os.path.isfile(jfile) else None
+    cubie = read_ne_csv_masked(cfile) if os.path.isfile(cfile) else None
 
     floor = FLOOR_REL * scale
     order_cap = ORDER_CAP_REL * scale
-    eq_cap = EQ_CAP_REL * scale
 
+    # Errors and the mutual rms distance are computed over the trajectories
+    # BOTH stacks converged on (julia carries a per-trajectory retcode flag;
+    # cubie signals a failed solve with NaN). The per-dt non-converged counts
+    # are surfaced separately so a cubie stack that solves fewer trajectories
+    # than julia is visible rather than hidden by the intersection.
     points = []   # (dt, err_c, err_j, rms_diff, max_diff)
+    nonconv = {}  # dt -> (nonconv_cubie, nonconv_julia, mutual_n)
     for dt in DTS_NE:
         fc = cubie.get(dt) if cubie else None
         fj = julia.get(dt) if julia else None
-        err_c = ensemble_error(fc, golden_states) if fc is not None else None
-        err_j = ensemble_error(fj, golden_states) if fj is not None else None
-        rms_diff = max_diff = None
-        if fc is not None and fj is not None:
-            with np.errstate(invalid="ignore"):
-                d = fc - fj
-            rms_diff = float(np.sqrt(np.mean(d ** 2)))
-            max_diff = float(np.max(np.abs(d)))
+        c_arr, c_conv = fc if fc is not None else (None, None)
+        j_arr, j_conv = fj if fj is not None else (None, None)
+        err_c = err_j = rms_diff = max_diff = None
+        nc_c = int((~c_conv).sum()) if c_arr is not None else None
+        nc_j = int((~j_conv).sum()) if j_arr is not None else None
+        mutual_n = None
+        if c_arr is not None and j_arr is not None:
+            mutual = c_conv & j_conv
+            mutual_n = int(mutual.sum())
+            err_c = ensemble_error_masked(c_arr, golden_states, mutual)
+            err_j = ensemble_error_masked(j_arr, golden_states, mutual)
+            if mutual.any():
+                with np.errstate(invalid="ignore"):
+                    d = c_arr[mutual] - j_arr[mutual]
+                rms_diff = float(np.sqrt(np.mean(d ** 2)))
+                max_diff = float(np.max(np.abs(d)))
+        elif c_arr is not None:
+            err_c = ensemble_error_masked(c_arr, golden_states, c_conv)
+        elif j_arr is not None:
+            err_j = ensemble_error_masked(j_arr, golden_states, j_conv)
         points.append((dt, err_c, err_j, rms_diff, max_diff))
+        nonconv[dt] = (nc_c, nc_j, mutual_n)
 
     order_c = observed_orders(
         {dt: e for dt, e, _, _, _ in points if e is not None}, floor,
@@ -160,24 +177,15 @@ def analyse_algorithm(row, key, golden_states, scale):
         for dt, err_c, err_j, rms_diff, _ in points:
             if err_c is None or err_j is None:
                 continue
-            if err_j is not None and np.isfinite(err_j) and \
-                    floor < err_j < eq_cap:
+            if err_j is not None and np.isfinite(err_j) and floor < err_j:
                 julia_valid += 1
             if not np.isfinite(err_c) or not np.isfinite(err_j):
                 continue
             emax = max(err_c, err_j)
-            if not (floor < emax < eq_cap):
+            if not (floor < emax):
                 continue
             checked += 1
-            if row["exact"]:
-                if rms_diff > max(EQ_FRACTION * emax, EQ_FLOOR_MULT * floor):
-                    ok = False
-            else:
-                r = err_c / err_j if err_j > 0 else float("inf")
-                if not (1.0 / RATIO_LIM < r < RATIO_LIM):
-                    ok = False
-        if not row["exact"] and np.isfinite(order_c) and np.isfinite(order_j):
-            if abs(order_c - order_j) > ORDER_TOL:
+            if rms_diff > max(EQ_FRACTION * emax, EQ_FLOOR_MULT * floor):
                 ok = False
         if checked < 2:
             # Julia produced sane in-region errors that cubie never matched
@@ -186,26 +194,54 @@ def analyse_algorithm(row, key, golden_states, scale):
             verdict = ("MISMATCH" if julia_valid >= 2
                        else "INSUFFICIENT OVERLAP")
         elif ok:
-            verdict = "EQUIVALENT" if row["exact"] else "CONSISTENT"
+            verdict = "EQUIVALENT"
         else:
             verdict = "MISMATCH"
 
     return {
         "row": row, "points": points, "order_cubie": order_c,
-        "order_julia": order_j, "verdict": verdict,
+        "order_julia": order_j, "verdict": verdict, "nonconv": nonconv,
         "missing_cubie": cubie is None, "missing_julia": julia is None,
     }
+
+
+def signed_tier_verdict(points, err_field, floor, have_data):
+    """Signed accuracy verdict for one adaptive tier against Julia.
+
+    Uses the worst-case cubie/julia error ratio over the in-range tolerances
+    (both errors are already over the mutually-converged trajectories). Being
+    more accurate than Julia (ratio <= 1) always passes; a tier is LESS
+    ACCURATE only when cubie's error exceeds ADAPTIVE_TOL x Julia's somewhere.
+    """
+    if not have_data:
+        return "NO DATA"
+    worst = None
+    for entry in points:
+        err_j, err_c = entry["err_julia"], entry.get(err_field)
+        if (err_j is None or err_c is None or not np.isfinite(err_j)
+                or not np.isfinite(err_c) or err_j <= 0
+                or not (floor < max(err_j, err_c))):
+            continue
+        r = err_c / err_j
+        worst = r if worst is None else max(worst, r)
+    if worst is None:
+        return "INSUFFICIENT OVERLAP"
+    if worst > ADAPTIVE_TOL:
+        return "LESS ACCURATE (worst ratio {0:.3g})".format(worst)
+    if worst <= 1.0:
+        return "MORE ACCURATE (worst ratio {0:.2f})".format(worst)
+    return "TRACKING (worst ratio {0:.2f})".format(worst)
 
 
 def analyse_adaptive(row, key, golden_states, scale):
     """Per-tolerance metrics and verdict for one algorithm's adaptive runs."""
     alias = row["cubie_alias"]
     jfile = julia_ne_adaptive_file(alias)
-    julia = read_ne_adaptive_csv(jfile) if os.path.isfile(jfile) else None
+    julia = read_ne_adaptive_csv_masked(jfile) if os.path.isfile(jfile) else None
     tiers = {}
     for tier in ("default", "matched"):
         cfile = cubie_ne_adaptive_file(alias, tier, key)
-        tiers[tier] = (read_ne_adaptive_csv(cfile)
+        tiers[tier] = (read_ne_adaptive_csv_masked(cfile)
                        if os.path.isfile(cfile) else None)
     # Algorithms outside the mutual adaptive set (no cubie data) don't
     # belong in the adaptive report.
@@ -213,83 +249,63 @@ def analyse_adaptive(row, key, golden_states, scale):
         return None
 
     floor = FLOOR_REL * scale
-    eq_cap = EQ_CAP_REL * scale
 
+    # Masked-read blocks are (finals, converged, naccept, nreject). Errors and
+    # the matched-vs-julia distance use only trajectories converged across every
+    # present tier (julia + whichever cubie tiers exist); per-tier non-converged
+    # counts are reported separately.
     points = []
     for tol in TOLS_NE:
         j = julia.get(tol) if julia else None
-        err_j = ensemble_error(j[0], golden_states) if j else None
-        med_steps = (float(np.nanmedian(j[1])) if j is not None
-                     and j[1] is not None else None)
-        entry = {"tol": tol, "err_julia": err_j, "julia_steps": med_steps}
-        for tier in ("default", "matched"):
-            data = tiers[tier].get(tol) if tiers[tier] else None
-            err_c = ensemble_error(data[0], golden_states) if data else None
-            entry["err_" + tier] = err_c
-            if tier == "matched" and data is not None and j is not None:
-                with np.errstate(invalid="ignore"):
-                    d = data[0] - j[0]
-                dn = np.sqrt(np.sum(d ** 2, axis=1))
-                entry["rms_diff"] = float(np.sqrt(np.mean(d ** 2)))
-                entry["max_diff"] = float(np.nanmax(dn))
-                entry["p99_diff"] = float(np.nanpercentile(dn, 99))
-            else:
-                entry.setdefault("rms_diff", None)
-                entry.setdefault("max_diff", None)
-                entry.setdefault("p99_diff", None)
+        dflt = tiers["default"].get(tol) if tiers["default"] else None
+        mtch = tiers["matched"].get(tol) if tiers["matched"] else None
+
+        masks = [blk[1] for blk in (j, dflt, mtch) if blk is not None]
+        mutual = masks[0].copy() if masks else None
+        for m in masks[1:]:
+            mutual &= m
+
+        err_j = (ensemble_error_masked(j[0], golden_states, mutual)
+                 if j is not None else None)
+        med_steps = (float(np.nanmedian(j[2])) if j is not None
+                     and j[2] is not None else None)
+        entry = {
+            "tol": tol, "err_julia": err_j, "julia_steps": med_steps,
+            "nonconv_julia": int((~j[1]).sum()) if j is not None else None,
+            "nonconv_default": (int((~dflt[1]).sum())
+                                if dflt is not None else None),
+            "nonconv_matched": (int((~mtch[1]).sum())
+                                if mtch is not None else None),
+            "mutual_n": int(mutual.sum()) if mutual is not None else None,
+        }
+        for tier, data in (("default", dflt), ("matched", mtch)):
+            entry["err_" + tier] = (
+                ensemble_error_masked(data[0], golden_states, mutual)
+                if data is not None else None)
+        if mtch is not None and j is not None and mutual is not None \
+                and mutual.any():
+            with np.errstate(invalid="ignore"):
+                d = mtch[0][mutual] - j[0][mutual]
+            dn = np.sqrt(np.sum(d ** 2, axis=1))
+            entry["rms_diff"] = float(np.sqrt(np.mean(d ** 2)))
+            entry["max_diff"] = float(np.nanmax(dn))
+            entry["p99_diff"] = float(np.nanpercentile(dn, 99))
+        else:
+            entry["rms_diff"] = None
+            entry["max_diff"] = None
+            entry["p99_diff"] = None
         points.append(entry)
 
-    # Verdicts. Matched tier (the CI gate): the mutual rms distance must
-    # stay within ADAPTIVE_EQ_FRACTION of the julia run's own error at every
-    # tolerance where the julia solve is in a sane range. Default tier
-    # (informational): classify the controller personality by the median
-    # error ratio.
-    if tiers["matched"] is None or julia is None:
-        matched_verdict = "NO DATA"
-    else:
-        checked = 0
-        worst = 0.0
-        for entry in points:
-            err_j = entry["err_julia"]
-            if (err_j is None or not np.isfinite(err_j)
-                    or not (floor < err_j < eq_cap)):
-                continue
-            if entry["rms_diff"] is None:
-                continue
-            checked += 1
-            worst = max(worst,
-                        entry["rms_diff"] / max(err_j, EQ_FLOOR_MULT * floor))
-        if checked == 0:
-            matched_verdict = "INSUFFICIENT OVERLAP"
-        elif worst <= ADAPTIVE_EQ_FRACTION:
-            matched_verdict = "TRACKING (worst ratio {0:.2f})".format(worst)
-        else:
-            matched_verdict = "DIVERGENT (worst ratio {0:.3g})".format(worst)
-
-    if tiers["default"] is None or julia is None:
-        default_verdict = "NO DATA"
-    else:
-        ratios = []
-        for entry in points:
-            err_j, err_c = entry["err_julia"], entry["err_default"]
-            if (err_j is None or err_c is None
-                    or not np.isfinite(err_j) or not np.isfinite(err_c)
-                    or not (floor < max(err_j, err_c) < eq_cap)
-                    or err_j <= 0):
-                continue
-            ratios.append(err_c / err_j)
-        if not ratios:
-            default_verdict = "INSUFFICIENT OVERLAP"
-        else:
-            med = float(np.median(ratios))
-            if 1.0 / ADAPTIVE_RATIO_LIM < med < ADAPTIVE_RATIO_LIM:
-                default_verdict = "TRACKING (median ratio {0:.2f})".format(med)
-            elif med <= 1.0 / ADAPTIVE_RATIO_LIM:
-                default_verdict = ("MORE ACCURATE (median ratio {0:.3g})"
-                                   .format(med))
-            else:
-                default_verdict = ("LESS ACCURATE (median ratio {0:.3g})"
-                                   .format(med))
+    # Verdicts (both tiers, same signed rule): worst-case cubie/julia error
+    # ratio over the in-range tolerances. <=1 means cubie is at least as
+    # accurate as Julia everywhere; <=ADAPTIVE_TOL means at most that factor
+    # worse; above it the tier is LESS ACCURATE.
+    matched_verdict = signed_tier_verdict(points, "err_matched", floor,
+                                          tiers["matched"] is not None
+                                          and julia is not None)
+    default_verdict = signed_tier_verdict(points, "err_default", floor,
+                                          tiers["default"] is not None
+                                          and julia is not None)
 
     return {
         "row": row, "points": points,
@@ -314,19 +330,17 @@ def adaptive_report_lines(adaptive_results):
                  "for that algorithm (constants exported by the Julia "
                  "runner).")
     lines.append("")
-    lines.append("Verdicts — matched (the CI gate): even under identical "
-                 "controller settings a single float32 accept/reject flip "
-                 "decouples the dt sequences, after which the mutual "
-                 "distance is bounded below by the local truncation error, "
-                 "so the gate is relative: TRACKING when the mutual rms "
-                 "distance stays within {0:g}x the Julia run's own error at "
-                 "every in-range tolerance (healthy algorithms sit at ratio "
-                 "~1; broken ones sit orders of magnitude above). default "
-                 "(informational): classified by the median error ratio "
-                 "cubie/julia — within a factor of {1:g} counts as "
-                 "TRACKING; outside it the tier reports which controller "
-                 "personality is more accurate at equal tolerance.".format(
-                     ADAPTIVE_EQ_FRACTION, ADAPTIVE_RATIO_LIM))
+    lines.append("Verdicts (both tiers, same signed rule): the worst-case "
+                 "cubie/julia error ratio (vs golden, over mutually-converged "
+                 "trajectories) across the in-range tolerances. MORE ACCURATE "
+                 "when cubie is at least as accurate as Julia at every "
+                 "tolerance (worst ratio <= 1); TRACKING when cubie is at most "
+                 "{0:g}x Julia's error; LESS ACCURATE above that. The `rms "
+                 "diff` / `p99 diff` / `max diff` columns are the unsigned "
+                 "cubie-vs-Julia trajectory distance — reported for context "
+                 "(a float32 accept/reject flip decouples the dt sequences) "
+                 "but not used for the verdict, since it penalises cubie even "
+                 "when cubie is more accurate.".format(ADAPTIVE_TOL))
     lines.append("")
     lines.append("| algorithm | order | default vs julia | matched vs julia |")
     lines.append("|---|---|---|---|")
@@ -342,16 +356,20 @@ def adaptive_report_lines(adaptive_results):
         lines.append("")
         lines.append("| tol | err cubie (default) | err cubie (matched) | "
                      "err julia | rms diff | p99 diff | max diff | "
-                     "julia steps (med) |")
-        lines.append("|---|---|---|---|---|---|---|---|")
+                     "julia steps (med) | non-conv def/matched/julia |")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
         for entry in res["points"]:
+            nonconv = "{0}/{1}/{2}".format(
+                fmt(entry.get("nonconv_default"), "{0:d}"),
+                fmt(entry.get("nonconv_matched"), "{0:d}"),
+                fmt(entry.get("nonconv_julia"), "{0:d}"))
             lines.append(
-                "| {0:.0e} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |"
+                "| {0:.0e} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} |"
                 .format(entry["tol"], fmt(entry["err_default"]),
                         fmt(entry["err_matched"]), fmt(entry["err_julia"]),
                         fmt(entry["rms_diff"]), fmt(entry["p99_diff"]),
                         fmt(entry["max_diff"]),
-                        fmt(entry["julia_steps"], "{0:.0f}")))
+                        fmt(entry["julia_steps"], "{0:.0f}"), nonconv))
         lines.append("")
     return lines
 
@@ -369,33 +387,46 @@ def write_report(key, results, scale, outfile, adaptive_results=None):
                  "distance between the two implementations' final states.")
     lines.append("")
     lines.append("Golden-scale rms: {0:.4g}. Order estimates use errors in "
-                 "({1:.2e}, {2:.2e}); equivalence verdicts use errors in "
-                 "({1:.2e}, {3:.2e}).".format(
-                     scale, FLOOR_REL * scale, ORDER_CAP_REL * scale,
-                     EQ_CAP_REL * scale))
+                 "({1:.2e}, {2:.2e}); equivalence verdicts use every point "
+                 "above the roundoff floor {1:.2e} where both stacks "
+                 "converged — there is no upper cap, so a large converged "
+                 "disagreement counts as a mismatch.".format(
+                     scale, FLOOR_REL * scale, ORDER_CAP_REL * scale))
     lines.append("")
-    lines.append("Verdicts: EQUIVALENT — identical tableau on both sides and "
-                 "mutual rms difference stays below {0:.0%} of the truncation "
-                 "error at every in-region dt. CONSISTENT — different tableau "
-                 "of the same order (see notes); observed orders and error "
-                 "magnitudes agree. MISMATCH — neither holds; the offending "
-                 "rows are visible in the per-algorithm tables.".format(
+    lines.append("Verdicts: EQUIVALENT — the mutual rms difference stays below "
+                 "{0:.0%} of the truncation error at every in-region dt. Every "
+                 "algorithm is judged this way, including different-tableau "
+                 "pairs such as sdirk_2_2 (Julia's SDIRK22 aliases to "
+                 "Trapezoid) — a genuine tableau difference is a mismatch, not "
+                 "a pass. MISMATCH — it does not hold; the offending rows are "
+                 "visible in the per-algorithm tables.".format(
                      EQ_FRACTION))
+    lines.append("")
+    lines.append("Errors and the mutual rms distance use only the "
+                 "trajectories both stacks converged on. `worst extra "
+                 "non-conv` is the largest per-dt excess of cubie's "
+                 "non-converged trajectory count over julia's (positive => "
+                 "cubie solved fewer than julia at some dt); the per-dt counts "
+                 "are in each algorithm's table.")
     lines.append("")
     lines.append("## Summary")
     lines.append("")
     lines.append("| algorithm | family | order | obs. order (cubie) | "
-                 "obs. order (julia) | verdict |")
-    lines.append("|---|---|---|---|---|---|")
+                 "obs. order (julia) | verdict | worst extra non-conv "
+                 "(cubie-julia) |")
+    lines.append("|---|---|---|---|---|---|---|")
     for res in results:
         row = res["row"]
-        lines.append("| {0} | {1} | {2} | {3} | {4} | {5} |".format(
+        extras = [nc_c - nc_j for (nc_c, nc_j, _) in res.get(
+            "nonconv", {}).values() if nc_c is not None and nc_j is not None]
+        worst_extra = max(extras) if extras else None
+        lines.append("| {0} | {1} | {2} | {3} | {4} | {5} | {6} |".format(
             row["cubie_alias"], row["family"], row["order"],
             fmt(res["order_cubie"], "{0:.2f}") if np.isfinite(
                 res["order_cubie"]) else "-",
             fmt(res["order_julia"], "{0:.2f}") if np.isfinite(
                 res["order_julia"]) else "-",
-            res["verdict"]))
+            res["verdict"], fmt(worst_extra, "{0:+d}")))
     lines.append("")
 
     for res in results:
@@ -407,15 +438,19 @@ def write_report(key, results, scale, outfile, adaptive_results=None):
             lines.append("_{0}_".format(row["notes"]))
             lines.append("")
         lines.append("| dt | err cubie | err julia | ratio | rms diff | "
-                      "max diff |")
-        lines.append("|---|---|---|---|---|---|")
+                      "max diff | non-conv cubie | non-conv julia |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        nonconv = res.get("nonconv", {})
         for dt, err_c, err_j, rms_diff, max_diff in res["points"]:
             ratio = (err_c / err_j
                      if err_c is not None and err_j not in (None, 0.0)
                      else None)
-            lines.append("| {0:.10g} | {1} | {2} | {3} | {4} | {5} |".format(
-                dt, fmt(err_c), fmt(err_j), fmt(ratio, "{0:.3f}"),
-                fmt(rms_diff), fmt(max_diff)))
+            nc_c, nc_j, _ = nonconv.get(dt, (None, None, None))
+            lines.append(
+                "| {0:.10g} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |".format(
+                    dt, fmt(err_c), fmt(err_j), fmt(ratio, "{0:.3f}"),
+                    fmt(rms_diff), fmt(max_diff),
+                    fmt(nc_c, "{0:d}"), fmt(nc_j, "{0:d}")))
         lines.append("")
 
     if adaptive_results:
@@ -574,10 +609,10 @@ def main():
             aplot = os.path.join(
                 "plots", "numerical_equivalence_adaptive_{0}.png".format(key))
             write_adaptive_plot(key, adaptive_results, scale, aplot)
-            n_div = sum("DIVERGENT" in res["matched_verdict"]
+            n_div = sum("LESS ACCURATE" in res["matched_verdict"]
                         for res in adaptive_results)
-            print("[{0}] adaptive: {1} algorithms, {2} divergent under "
-                  "matched controllers; plot -> {3}".format(
+            print("[{0}] adaptive: {1} algorithms, {2} less accurate than "
+                  "julia under matched controllers; plot -> {3}".format(
                       key, len(adaptive_results), n_div, aplot))
             for res in adaptive_results:
                 print("  {0:22s} default={1:20s} matched={2}".format(

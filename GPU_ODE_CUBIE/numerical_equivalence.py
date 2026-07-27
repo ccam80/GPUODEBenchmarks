@@ -114,12 +114,11 @@ def solve_finals(solver, initials_array, parameter_array):
         initial_values=initials_array,
         parameters=parameter_array,
         blocksize=64,
-        results_type='raw',
         duration=1.0,
     )
     # Copy: the returned array views cubie's output buffer, which the next
     # solve overwrites in place.
-    finals = np.array(solution['state'][-1, :, :].T, copy=True)
+    finals = np.array(solution.state[-1, :, :].T, copy=True)
     if finals.dtype != precision:
         raise TypeError("expected float32 output, got {0}"
                         .format(finals.dtype))
@@ -208,9 +207,14 @@ if MODE in ("adaptive", "all"):
                 "deadband_max": 1.0 / c["qsteady_min"],
             }, None
         if c["controller"] == "PredictiveController":
+            # cubie's Gustafsson controller takes the step-size safety factor
+            # as `safety` (same as the PI path above); `gamma` is now an
+            # overloaded method/tableau coefficient and setting it corrupts
+            # the solve. Julia's PredictiveController gamma IS the safety
+            # factor, so map it to `safety`.
             return {
                 "step_controller": "gustafsson",
-                "gamma": c["gamma"],
+                "safety": c["gamma"],
             }, None
         return None, "unmapped julia controller {0}".format(c["controller"])
 
