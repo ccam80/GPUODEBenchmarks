@@ -136,6 +136,7 @@ function collect_finals(sim)
     finals = Matrix{Float32}(undef, N_NE, 3)
     naccept = Vector{Int}(undef, N_NE)
     nreject = Vector{Int}(undef, N_NE)
+    converged = Vector{Bool}(undef, N_NE)
     n_bad = 0
     for i in 1:N_NE
         u_end, retcode, na, nr = sim.u[i]
@@ -145,11 +146,13 @@ function collect_finals(sim)
         finals[i, :] .= u_end
         naccept[i] = na
         nreject[i] = nr
-        if retcode != SciMLBase.ReturnCode.Success
+        ok = retcode == SciMLBase.ReturnCode.Success
+        converged[i] = ok
+        if !ok
             n_bad += 1
         end
     end
-    return finals, naccept, nreject, n_bad
+    return finals, naccept, nreject, n_bad, converged
 end
 
 ensemble_err(finals) = sqrt(sum(abs2, Float64.(finals) .- golden_states) /
@@ -173,7 +176,7 @@ if MODE in ("fixed", "all")
         end
 
         io = IOBuffer()
-        println(io, "dt,traj,x,y,z")
+        println(io, "dt,traj,x,y,z,converged")
         wrote_any = false
         for dt in DTS_NE
             try
@@ -188,13 +191,14 @@ if MODE in ("fixed", "all")
                     trajectories = N_NE, dt = Float32(dt), adaptive = false,
                     abstol = 1.0f-6, reltol = 1.0f-3,
                     save_everystep = false, save_start = false, dense = false)
-                finals, _, _, n_bad = collect_finals(sim)
+                finals, _, _, n_bad, converged = collect_finals(sim)
                 err = ensemble_err(finals)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  dt=%-12g err=%.6e%s\n", dt, err, note)
                 for j in 1:N_NE
-                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g\n", dt, j - 1,
-                        finals[j, 1], finals[j, 2], finals[j, 3])
+                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g,%d\n", dt, j - 1,
+                        finals[j, 1], finals[j, 2], finals[j, 3],
+                        converged[j] ? 1 : 0)
                 end
                 wrote_any = true
             catch err
@@ -269,7 +273,7 @@ if MODE in ("adaptive", "all")
         end
 
         io = IOBuffer()
-        println(io, "tol,traj,x,y,z,naccept,nreject")
+        println(io, "tol,traj,x,y,z,naccept,nreject,converged")
         wrote_any = false
         for tol in TOLS_NE
             try
@@ -278,15 +282,15 @@ if MODE in ("adaptive", "all")
                     abstol = Float32(tol), reltol = Float32(tol),
                     dtmin = DT_MIN_NE, dtmax = DT_MAX_NE,
                     save_everystep = false, save_start = false, dense = false)
-                finals, naccept, nreject, n_bad = collect_finals(sim)
+                finals, naccept, nreject, n_bad, converged = collect_finals(sim)
                 err = ensemble_err(finals)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  tol=%-8g err=%.6e steps(med)=%d%s\n", tol, err,
                     Int(round(sum(naccept) / N_NE)), note)
                 for j in 1:N_NE
-                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g,%d,%d\n", tol, j - 1,
+                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g,%d,%d,%d\n", tol, j - 1,
                         finals[j, 1], finals[j, 2], finals[j, 3],
-                        naccept[j], nreject[j])
+                        naccept[j], nreject[j], converged[j] ? 1 : 0)
                 end
                 wrote_any = true
             catch err
