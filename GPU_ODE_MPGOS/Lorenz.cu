@@ -66,12 +66,20 @@ static std::string DatasetKey()
 	if (pipe)
 	{
 		char buf[256];
-		if (fgets(buf, sizeof(buf), pipe)) raw = buf;
+		std::string captured;
+		if (fgets(buf, sizeof(buf), pipe)) captured = buf;
 #ifdef _WIN32
-		_pclose(pipe);
+		int rc = _pclose(pipe);
 #else
-		pclose(pipe);
+		int rc = pclose(pipe);
 #endif
+		// Trust the output only when nvidia-smi actually succeeded. With a
+		// broken driver it prints its diagnostic ("Failed to initialize NVML:
+		// ...") on stdout, which would otherwise be sanitised into a bogus GPU
+		// name and silently key this framework's files differently from every
+		// other framework's. On failure fall through to "unknown-gpu",
+		// matching runner_scripts/bench_key.*.
+		if (rc == 0) raw = captured;
 	}
 
 	std::string gpu, tok;

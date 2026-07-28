@@ -14,7 +14,15 @@ case "$(uname -s)" in
     *)                    os=unknown ;;
 esac
 
-raw="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)"
+# Check nvidia-smi's exit status rather than just capturing its output: when
+# the driver is unusable it prints its diagnostic ("Failed to initialize NVML:
+# ...") on stdout, which would otherwise be sanitised into a bogus GPU name and
+# silently key the whole dataset to it. On failure fall through to
+# "unknown-gpu", matching bench_key.py.
+raw=""
+if out="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)"; then
+    raw="$(printf '%s\n' "$out" | head -n1)"
+fi
 gpu="$(printf '%s' "$raw" | tr -c 'A-Za-z0-9' ' ' \
       | awk '{for(i=1;i<=NF;i++) if($i!="NVIDIA" && $i!="GeForce") printf "%s%s", (n++?"-":""), $i}')"
 [ -z "$gpu" ] && gpu=unknown-gpu
