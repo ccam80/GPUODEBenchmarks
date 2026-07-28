@@ -4,6 +4,10 @@
 venv*/
 **/venv*/
 
+# The CUBIE_MLIR suite shares the CUBIE venv via a symlink/junction. Git sees a
+# symlink as a file, so the directory patterns above do not cover it.
+GPU_ODE_CUBIE_MLIR/venv
+
 # Ignore cubie clone directories in setup folders
 GPU_ODE_CUBIE/cubie/
 GPU_ODE_CUBIE_MLIR/cubie/
@@ -31,3 +35,6 @@ GPU_ODE_MYOKIT_CUDA/generated/
 # Local benchmark result sets
 /data/cubie_julia_overlap/
 /data/numerical_equivalence/cubie_pre626_jul16/
+
+# Orchestrator run logs
+/logs/

@@ -137,6 +137,38 @@ Two further optional flags extend the run:
   This delegates to `run_numerical_equivalence.sh`/`.bat`, which can also be
   run standalone.
 
+### Generating the complete dataset
+
+`run_full_dataset.sh` drives every suite in one set-and-forget run — the
+timing sweeps, the work-precision sweeps, the numerical-equivalence suite, the
+per-algorithm cubie vs. DiffEqGPU overlap comparison, and finally the plots
+and comparison reports:
+
+```bash
+    $ ./run_full_dataset.sh                     # everything, nmax = 2^30
+    $ ./run_full_dataset.sh -n $((2**24))       # smaller ceiling
+    $ ./run_full_dataset.sh --skip-ne           # drop a stage
+    $ ./run_full_dataset.sh --only overlap      # run a single stage
+    $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
+```
+
+At high trajectory counts some frameworks will exhaust GPU memory. Each
+framework runs as its own process tree, so an OOM ends only that framework's
+sweep: the smaller-N points already written to disk are kept, the remaining N
+values are left absent, and the run moves on to the next framework. Stages are
+independent in the same way — a failed stage never aborts the others.
+
+Every run writes a timestamped `logs/<dataset-key>_<stamp>/` directory holding
+a per-step log, a `run_manifest.txt` recording the git revision, GPU and
+parameters, and a `summary.tsv`. The run finishes by printing a summary table
+marking each step `OK`, `PARTIAL` (with the largest N reached), `FAILED`, or
+`SKIPPED`, so a truncated sweep is visible rather than looking like a plain
+failure. A non-zero exit is therefore expected when frameworks OOM at high N.
+
+The run refuses to start if `nvidia-smi` cannot identify the GPU, since every
+output file is keyed by `<os>_<gpu>` and the whole dataset would otherwise be
+mislabelled `unknown-gpu`; override with `--allow-unknown-gpu`.
+
 ### Benchmarking Julia (DiffEqGPU.jl) methods
 We will need to install CUDA.jl for benchmarking. It is the only backend
 compatible with the ODE solvers in JAX, PyTorch, and MPGOS. To do so,
@@ -300,10 +332,12 @@ Then run the benchmarks by:
 ### Benchmarking CUBIE ODE solvers
 
 CUBIE is benchmarked twice: once on the stock `numba-cuda` compilation
-pipeline (`cubie`, the `main` branch), and once on the `numba-cuda-mlir`
-pipeline (`cubie_mlir`, the `mlir` branch). The two suites use separate
-virtual environments (`GPU_ODE_CUBIE/venv` and `GPU_ODE_CUBIE_MLIR/venv`)
-because both branches install the same `cubie` package. Set them up with
+pipeline (`cubie`) and once on the `numba-cuda-mlir` pipeline (`cubie_mlir`).
+Both run from a **single shared virtual environment** holding one PyPI install
+of `cubie` with both backends present; the active backend is chosen at import
+time by the `CUBIE_CUDA_BACKEND` environment variable, which each launcher
+exports for you (`numba-cuda` and `mlir` respectively).
+`GPU_ODE_CUBIE_MLIR/venv` is a link to `GPU_ODE_CUBIE/venv`. Set it up with
 `setup_all_environments.py` or the individual `setup_environment.py`
 scripts (see [SETUP.md](SETUP.md)), then run:
 
