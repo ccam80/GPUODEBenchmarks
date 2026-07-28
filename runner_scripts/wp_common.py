@@ -1,11 +1,11 @@
 """Shared protocol constants and helpers for the work-precision (wp) sweeps.
 
 Every framework's `wp` mode runs the same Lorenz ensemble at N = 32768 (the
-numerical cross-check size) and sweeps:
+numerical cross-check size) and sweeps the controls it supports:
 
-* fixed-step:  dt in DTS (dyadic fractions of the t=1 duration, so save and
-  end boundaries are exact in binary floating point), and
-* adaptive:    rtol = atol in TOLS.
+* fixed-step frameworks use dt in DTS (dyadic fractions of the t=1 duration,
+  so save and end boundaries are exact in binary floating point), and
+* adaptive frameworks use rtol = atol in TOLS.
 
 For each setting the solve is timed with the established protocol (one
 untimed warmup, ``timeit.repeat(..., number=1)``, ``min * 1000`` ms) and the

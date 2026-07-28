@@ -49,7 +49,7 @@ exit /b 1
 :end_parse
 
 REM Array of languages to benchmark
-set languages=julia cpp pytorch jax cubie cubie_mlir
+set languages=julia cpp pytorch jax cubie cubie_mlir myokit_cuda
 
 REM Run timing benchmarks for each language
 for %%l in (%languages%) do (

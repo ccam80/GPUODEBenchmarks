@@ -1,0 +1,83 @@
+{
+  "cellml": "C:\\local_working_projects\\cubie\\tests\\fixtures\\cellml\\Fabbri_Linder.cellml",
+  "dataset_key": "windows_RTX-4070-SUPER",
+  "precision": "float32",
+  "algorithm": "forward_euler",
+  "dt": 1e-05,
+  "steps": 1000,
+  "duration": 0.01,
+  "trajectories": 8192,
+  "state_count": 35,
+  "state_names": [
+    "Membrane_V_ode",
+    "Nai_concentration_Nai_",
+    "i_f_y_gate_y",
+    "i_Na_m_gate_m",
+    "i_Na_h_gate_h",
+    "i_CaL_dL_gate_dL",
+    "i_CaL_fL_gate_fL",
+    "i_CaL_fCa_gate_fCa",
+    "i_CaT_dT_gate_dT",
+    "i_CaT_fT_gate_fT",
+    "Ca_SR_release_R",
+    "Ca_SR_release_O",
+    "Ca_SR_release_I",
+    "Ca_SR_release_RI",
+    "Ca_buffering_fTMM",
+    "Ca_buffering_fCMi",
+    "Ca_buffering_fCMs",
+    "Ca_buffering_fTC",
+    "Ca_buffering_fTMC",
+    "Ca_buffering_fCQ",
+    "Ca_dynamics_Cai",
+    "Ca_dynamics_Ca_nsr",
+    "Ca_dynamics_Ca_jsr",
+    "Ca_dynamics_Ca_sub",
+    "i_Kur_rKur_gate_r_Kur",
+    "i_Kur_sKur_gate_s_Kur",
+    "i_to_q_gate_q",
+    "i_to_r_gate_r",
+    "i_Kr_pa_gate_paS",
+    "i_Kr_pa_gate_paF",
+    "i_Kr_pi_gate_piy",
+    "i_Ks_n_gate_n",
+    "i_KACh_a_gate_a",
+    "cAMP_cAMP",
+    "PLBp_PLBp"
+  ],
+  "repeats": 100,
+  "timing_statistic": "minimum",
+  "block_size": {
+    "myokit_cuda": 128,
+    "cubie": 64
+  },
+  "warmup_excluded": true,
+  "synchronized": true,
+  "myokit_cellml_repairs": [
+    "Ca_buffering.kb_CM public_interface set to out",
+    "Ca_buffering.kf_CM public_interface set to out",
+    "Ca_buffering.fCMi public_interface set to out",
+    "duplicate ATPi/cAMP connections merged into cAMP-to-ATPi connection"
+  ],
+  "myokit_generated_source_adjustments": [
+    "removed exact unused #include <float.h> for NVRTC",
+    "appended ensemble launch kernel"
+  ],
+  "timing_milliseconds": {
+    "myokit_cuda_minimum": 6.39320001937449,
+    "cubie_minimum": 4.382599960081279,
+    "cubie_over_myokit_cuda": 0.6855095956328412,
+    "myokit_cuda_over_cubie": 1.4587687851062552
+  },
+  "accuracy": {
+    "maximum_absolute_error": 5.960464477539063e-08,
+    "mean_absolute_error": 6.042163129351051e-09,
+    "root_mean_square_error": 1.670976459010607e-08,
+    "maximum_relative_error": 7.129495068661939e-07
+  },
+  "allclose": {
+    "rtol": 1e-06,
+    "atol": 1e-08,
+    "result": true
+  }
+}

@@ -1,5 +1,7 @@
 # GPUODEBenchmarks
-Comparison of Julia's GPU-based ensemble ODE solvers with other open-source implementations in C++, JAX, and PyTorch. These artifacts are part of the paper:
+Comparison of Julia's GPU-based ensemble ODE solvers with other
+open-source implementations in C++, JAX, PyTorch, CUBIE, and Myokit
+CUDA. These artifacts are part of the paper:
 > Automated Translation and Accelerated Solving of Differential Equations on Multiple GPU Platforms
 
 **_NOTE:_**  This repository is meant to contain scripts for benchmarking existing ensemble ODE solvers. For external purposes, one can directly use the solvers from the respective libraries. 
@@ -27,7 +29,9 @@ For a streamlined setup experience on any platform, use the Python-based setup s
 python3 setup_all_environments.py
 ```
 
-This will set up all environments (CUBIE, CUBIE-MLIR, JAX, PyTorch, and Julia) automatically. For more details and individual package setup instructions, see [SETUP.md](SETUP.md).
+This will set up all environments (CUBIE, CUBIE-MLIR, JAX, PyTorch,
+Myokit-CUDA, and Julia) automatically. For more details and individual
+package setup instructions, see [SETUP.md](SETUP.md).
 
 ## Installing Julia
 
@@ -94,7 +98,8 @@ platforms and said features in the paper.
 
 ### Running All Benchmarks
 
-To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, CUBIE, and CUBIE-MLIR) sequentially in one command:
+To run all GPU ODE benchmarks (Julia, C++, JAX, PyTorch, CUBIE,
+CUBIE-MLIR, and Myokit-CUDA) sequentially in one command:
 
 **On Linux/macOS:**
 ```bash
@@ -318,6 +323,47 @@ Results are written to `data/CUBIE/` and `data/CUBIE_MLIR/` respectively,
 so the MLIR and non-MLIR pipelines appear as separate series in the
 comparison plots.
 
+### Benchmarking Myokit-CUDA ODE solvers
+
+The Myokit-CUDA benchmark imports the Lorenz CellML model, exports Myokit's
+CUDA device code, and launches the generated equations as a GPU ensemble.
+Myokit's CUDA exporter supports float32 forward Euler only, so this
+benchmark contributes fixed-step timing and work-precision curves only. It
+does not produce an adaptive series.
+
+Set up the environment with `setup_all_environments.py` or
+`GPU_ODE_MYOKIT_CUDA/setup_environment.py`, then run either accepted
+language spelling:
+
+**On Linux/macOS:**
+```bash
+    $ bash ./run_benchmark.sh -l myokit_cuda -d gpu -m ode
+    $ bash ./run_benchmark.sh -l myokit-cuda -d gpu -m ode
+```
+
+**On Windows:**
+```cmd
+    > run_benchmark.bat -l myokit_cuda -d gpu -m ode
+    > run_benchmark.bat -l myokit-cuda -d gpu -m ode
+```
+
+Results are written to `data/MYOKIT_CUDA/` with the `Myokit_cuda` filename
+prefix.
+
+For the Fabbri-Linder CellML comparison against CuBIE, run the dedicated
+two-environment harness with the Myokit-CUDA Python executable and point it
+at an installed CuBIE environment:
+
+```text
+GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe runner_scripts/cubie_myokit_fabbri/compare_fabbri.py --cellml <cubie>/tests/fixtures/cellml/Fabbri_Linder.cellml --cubie-python <cubie>/.venv/Scripts/python.exe --trajectory-counts 512 2048 8192 32768 131072
+```
+
+It compares synchronized float32 forward-Euler solves, checks all 35 final
+states, and writes per-count details plus an aggregate scaling table under
+`data/Fabbri_Myokit_CUDA/`. See
+[`runner_scripts/cubie_myokit_fabbri/README.md`](runner_scripts/cubie_myokit_fabbri/README.md)
+for the CellML compatibility normalization and timing protocol.
+
 ## Comparing GPU acceleration of ODEs with CPUs
 
 The benchmark suite can also be used to test the GPU acceleration of ODE
@@ -479,6 +525,11 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768
 deactivate
 
+# Myokit-CUDA (float32 forward Euler)
+source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
+python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 32768
+deactivate
+
 # JAX
 source ./GPU_ODE_JAX/venv/bin/activate
 python3 ./GPU_ODE_JAX/bench_diffrax.py 32768
@@ -538,16 +589,18 @@ artifact.
 
 ### Running the sweeps
 
-Each framework's `wp` mode sweeps the fixed step size (dyadic dt from 1/16 to
-1/8192) and the adaptive tolerance (rtol = atol from 1e-2 to 1e-8), timing
-each setting with the usual protocol (untimed warm-up, repeated solves, best
-time) and computing the ensemble l2 error of the final states against the
-golden reference. Protocol constants live in `runner_scripts/wp_common.py`
-(mirrored in the Julia and MPGOS writers).
+Each framework's `wp` mode sweeps the controls it supports: fixed-step
+frameworks use dyadic dt from 1/16 to 1/8192, while adaptive frameworks use
+rtol = atol from 1e-2 to 1e-8. Each setting uses the usual timing protocol
+(untimed warm-up, repeated solves, best time) and computes the ensemble l2
+error of the final states against the golden reference. Protocol constants
+live in `runner_scripts/wp_common.py` (mirrored in the Julia and MPGOS
+writers).
 
 ```bash
 ./run_benchmark.sh -l cubie      -d gpu -m ode -w
 ./run_benchmark.sh -l cubie-mlir -d gpu -m ode -w
+./run_benchmark.sh -l myokit-cuda -d gpu -m ode -w  # float32 forward Euler only
 ./run_benchmark.sh -l julia      -d gpu -m ode -w
 ./run_benchmark.sh -l pytorch    -d gpu -m ode -w   # fixed-dt only: torch.vmap cannot trace adaptive solvers
 ./run_benchmark.sh -l jax        -d gpu -m ode -w   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
@@ -567,6 +620,8 @@ Results are written per machine as
   N-sweep timings for those frameworks.
 * torchdiffeq has no adaptive sweep (data-dependent control flow cannot be
   `torch.vmap`ed — the same reason its N-sweep is fixed-step only).
+* Myokit-CUDA has no adaptive sweep because Myokit's CUDA exporter provides
+  float32 forward Euler only.
 
 ### Plotting
 

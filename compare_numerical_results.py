@@ -108,6 +108,7 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
 KNOWN_PACKAGES = [
     "cubie_adaptive", "cubie_unadaptive",
     "cubie_mlir_adaptive", "cubie_mlir_unadaptive",
+    "myokit_cuda",
     "jax", "pytorch", "julia_adaptive", "julia_fixed", "mpgos",
 ]
 

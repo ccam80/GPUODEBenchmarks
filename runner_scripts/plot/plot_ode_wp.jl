@@ -6,8 +6,8 @@ using Plots.PlotMeasures
 
 # Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768).
 #
-# Each framework's `wp` mode sweeps the fixed step size / adaptive tolerance
-# and writes rows "<setting> <time_ms> <error>" to
+# Each framework's `wp` mode sweeps its supported fixed step size and/or
+# adaptive tolerance and writes rows "<setting> <time_ms> <error>" to
 #   data/<DIR>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt
 # where the error is the ensemble l2 norm of the final-state difference
 # against the Float64 golden reference
@@ -33,11 +33,16 @@ frameworks = [
     ("PYTORCH", "PYTORCH", "Torch"),
     ("CUBIE", "CUBIE", "Cubie"),
     ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
+    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
 ]
 
 # color/marker choices per framework (same as plot_ode_comp.jl)
-colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red, "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple)
-markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond, "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon)
+colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
+    "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple,
+    "MYOKIT CUDA"=>:Black)
+markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
+    "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon,
+    "MYOKIT CUDA"=>:rect)
 
 # One work-precision curve loaded from disk.
 struct WPSeries
