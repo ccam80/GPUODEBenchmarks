@@ -94,12 +94,20 @@ def main():
     if args.dry_run:
         return 0
 
+    # The shared cubie venv carries both CUDA backends and resolves one at
+    # import time; state which so the run is reproducible. Respect an explicit
+    # CUBIE_CUDA_BACKEND from the caller.
+    worker_env = dict(os.environ)
+    worker_env.setdefault("CUBIE_CUDA_BACKEND", "numba-cuda")
+    print("Cubie backend: {}".format(worker_env["CUBIE_CUDA_BACKEND"]))
+
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SUITE / "diffeqgpu_ode_inventory.csv", output / "diffeqgpu_ode_inventory.csv")
     shutil.copy2(SUITE / "algorithms.csv", output / "overlap_algorithms.csv")
     manifest = {
         "dataset_key": key, "run_id": run_id, "profile": args.profile,
         "phase": args.phase, "framework": args.framework,
+        "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
         "nmax": args.nmax, "performance_repeats": args.performance_repeats,
         "work_repeats": args.work_repeats, "fixed_dt": args.fixed_dt,
         "adaptive_tol": args.adaptive_tol, "commands": [c for _, c in commands],
@@ -110,7 +118,8 @@ def main():
     for label, command in commands:
         print("\n=== {} ===".format(label), flush=True)
         try:
-            completed = subprocess.run(command, cwd=str(ROOT), check=False)
+            completed = subprocess.run(command, cwd=str(ROOT), check=False,
+                                       env=worker_env)
             code = completed.returncode
         except OSError as exc:
             code = 127
