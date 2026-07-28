@@ -132,11 +132,10 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
                 initial_values=initials_array,
                 parameters=parameter_array,
                 blocksize=64,
-                results_type='raw',
                 duration=1.0,
             )
         solution = run()  # warm-up (JIT compilation) + numerical result
-        final_states = solution['state'][-1, :, :].T
+        final_states = solution.state[-1, :, :].T
         err = ensemble_error(final_states, golden)
         res = timeit.repeat(run, setup='gc.enable()', repeat=repeats, number=1)
         return min(res) * 1000, err
@@ -176,7 +175,6 @@ def solve_fixed(blocksize=64):
         initial_values=initials_array,
         parameters=parameter_array,
         blocksize=blocksize,
-        results_type='raw',
         duration=1.0
     )
     return solution
@@ -187,7 +185,6 @@ def solve_adaptive(blocksize=64):
         initial_values=initials_array,
         parameters=parameter_array,
         blocksize=blocksize,
-        results_type='raw',
         duration=1.0
     )
     return solution
@@ -211,7 +208,7 @@ if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_fixed()
     # Extract final state values
-    final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
+    final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
     np.savetxt("./data/numerical/cubie_mlir_unadaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
 
 # ========================================
@@ -236,5 +233,5 @@ if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_adaptive()
     # Extract final state values
-    final_states = solution['state'][-1, :, :].T  # shape: (trajectories, states)
+    final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
     np.savetxt("./data/numerical/cubie_mlir_adaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
