@@ -4,6 +4,11 @@ setlocal enabledelayedexpansion
 REM Activate virtual environment
 call GPU_ODE_CUBIE\venv\Scripts\activate.bat
 
+REM Pin cubie to the stock numba-cuda backend. The venv is shared with the
+REM CUBIE_MLIR suite and holds both backends, so state it rather than relying
+REM on the default (backend is chosen at import time from this env var).
+set CUBIE_CUDA_BACKEND=numba-cuda
+
 REM Work-precision mode: `run_ode_cubie.bat wp` sweeps dt/tolerance at N=32768.
 if /i "%~1"=="wp" (
     python GPU_ODE_CUBIE\bench_cubie.py 32768 wp

@@ -18,10 +18,15 @@ function Get-DatasetKey {
     elseif ($IsLinux) { $os = 'linux' }
     else { $os = 'unknown' }
 
+    # Check the exit status rather than just capturing output: when the driver
+    # is unusable nvidia-smi prints its diagnostic on stdout, which would
+    # otherwise be sanitised into a bogus GPU name and silently key the whole
+    # dataset to it. On failure fall through to 'unknown-gpu'.
     $raw = ''
     try {
-        $raw = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null |
+        $out = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null |
                 Select-Object -First 1)
+        if ($LASTEXITCODE -eq 0) { $raw = $out }
     } catch { }
     if ($null -eq $raw) { $raw = '' }
 

@@ -116,8 +116,8 @@ def solve_once(solver, initials, parameters):
     sync()
     start = time.perf_counter()
     solution = solver.solve(initial_values=initials, parameters=parameters,
-                            blocksize=64, results_type="raw", duration=1.0)
-    finals = np.array(solution["state"][-1, :, :].T, dtype=np.float32, copy=True)
+                            blocksize=64, duration=1.0)
+    finals = np.array(solution.state[-1, :, :].T, dtype=np.float32, copy=True)
     sync()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     if finals.ndim != 2 or finals.shape[1] != 3:

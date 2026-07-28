@@ -46,6 +46,11 @@ else
     echo "✗ GPU_ODE_CUBIE venv not found; run setup_all_environments.py first"
     exit 1
 fi
+
+# The shared cubie venv carries both CUDA backends; the committed NE dataset is
+# the numba-cuda one. Override by exporting CUBIE_CUDA_BACKEND=mlir beforehand.
+export CUBIE_CUDA_BACKEND="${CUBIE_CUDA_BACKEND:-numba-cuda}"
+echo "    (cubie backend: $CUBIE_CUDA_BACKEND)"
 "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py "$mode" || {
     echo "✗ cubie sweeps failed"; exit 1; }
 

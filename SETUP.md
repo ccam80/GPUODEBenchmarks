@@ -28,10 +28,16 @@ You can also set up each package environment individually:
 python3 GPU_ODE_CUBIE/setup_environment.py
 ```
 
-This will:
+This builds the **single shared cubie environment used by both cubie suites**.
+It will:
 - Create a Python virtual environment in `GPU_ODE_CUBIE/venv`
 - Install `uv` package manager
-- Clone and install the CUBIE library from source
+- Install `cubie` from PyPI with *both* CUDA backends present in the one venv:
+  `numba-cuda` (via the `cuda13` extra) and `cubie-numba-cuda-mlir` (via the
+  `mlir-cuda13` extra), plus the test dependency set
+- Verify that cubie imports and resolves correctly under each backend
+
+Set `CUBIE_CUDA_MAJOR=12` to target CUDA 12 wheels instead of 13.
 
 To activate:
 - Linux/macOS: `source GPU_ODE_CUBIE/venv/bin/activate`
@@ -44,17 +50,27 @@ To activate:
 python3 GPU_ODE_CUBIE_MLIR/setup_environment.py
 ```
 
-This will:
-- Create a Python virtual environment in `GPU_ODE_CUBIE_MLIR/venv`
-- Install `uv` package manager
-- Clone the `mlir` branch of the CUBIE repository and install it from source
-  (pulls the `numba-cuda-mlir` compilation pipeline from PyPI instead of `numba-cuda`)
+There is no separate MLIR environment. Since ccam80/cubie#617 the MLIR backend
+ships alongside the default numba-cuda backend in a single cubie install, and
+the active backend is chosen at *import time* by the `CUBIE_CUDA_BACKEND`
+environment variable (`numba-cuda` | `mlir`). One install therefore serves both
+pipelines, and they are benchmarked side by side by launching each with a
+different value of that variable.
 
-This environment is intentionally separate from the CUBIE one: both branches
-install the same `cubie` package, so keeping them in separate venvs lets the
-MLIR and non-MLIR pipelines be benchmarked side by side.
+This script simply points `GPU_ODE_CUBIE_MLIR/venv` at the shared
+`GPU_ODE_CUBIE/venv` (a symlink, or a directory junction on Windows) and
+verifies that the MLIR backend activates. Run the CUBIE setup first; if the
+shared venv is missing this script builds it on demand.
 
-To activate:
+The benchmark launchers export the backend they need, so no manual switching is
+required:
+
+| Suite | Launcher sets |
+|---|---|
+| `GPU_ODE_CUBIE` | `CUBIE_CUDA_BACKEND=numba-cuda` |
+| `GPU_ODE_CUBIE_MLIR` | `CUBIE_CUDA_BACKEND=mlir` |
+
+To activate (either path reaches the same venv):
 - Linux/macOS: `source GPU_ODE_CUBIE_MLIR/venv/bin/activate`
 - Windows (cmd): `GPU_ODE_CUBIE_MLIR\venv\Scripts\activate.bat`
 - Windows (PowerShell): `GPU_ODE_CUBIE_MLIR\venv\Scripts\Activate.ps1`
@@ -219,10 +235,12 @@ julia --project=. -e 'using DiffEqGPU, CUDA; println("Julia OK")'
 
 If a setup fails, you can clean up and retry:
 
+Remove `GPU_ODE_CUBIE_MLIR/venv` (the link) before the shared venv it points at.
+
 **Linux/macOS:**
 ```bash
-rm -rf GPU_ODE_CUBIE/venv GPU_ODE_CUBIE/cubie
-rm -rf GPU_ODE_CUBIE_MLIR/venv GPU_ODE_CUBIE_MLIR/cubie
+rm -rf GPU_ODE_CUBIE_MLIR/venv   # link to the shared venv
+rm -rf GPU_ODE_CUBIE/venv        # the shared venv itself
 rm -rf GPU_ODE_JAX/venv
 rm -rf GPU_ODE_PyTorch/venv
 rm -rf GPU_ODE_MYOKIT_CUDA/venv
@@ -230,8 +248,8 @@ rm -rf GPU_ODE_MYOKIT_CUDA/venv
 
 **Windows (PowerShell):**
 ```powershell
-Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv, GPU_ODE_CUBIE\cubie
-Remove-Item -Recurse -Force GPU_ODE_CUBIE_MLIR\venv, GPU_ODE_CUBIE_MLIR\cubie
+Remove-Item -Recurse -Force GPU_ODE_CUBIE_MLIR\venv   # junction to the shared venv
+Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv        # the shared venv itself
 Remove-Item -Recurse -Force GPU_ODE_JAX\venv
 Remove-Item -Recurse -Force GPU_ODE_PyTorch\venv
 Remove-Item -Recurse -Force GPU_ODE_MYOKIT_CUDA\venv
@@ -260,10 +278,13 @@ nvcc --version
 ## Notes
 
 - All Python virtual environments are created with the name `venv` in their respective package directories
-- The CUBIE setup clones the repository into `GPU_ODE_CUBIE/cubie/`
-- The CUBIE-MLIR setup clones the `mlir` branch into `GPU_ODE_CUBIE_MLIR/cubie/`
+- `cubie` is installed from PyPI; no git checkout is made
+- The two cubie suites share one venv: `GPU_ODE_CUBIE_MLIR/venv` is a link to
+  `GPU_ODE_CUBIE/venv`, which holds both the `numba-cuda` and
+  `cubie-numba-cuda-mlir` backends. `CUBIE_CUDA_BACKEND` selects between them
+  at import time
 - Myokit-CUDA's generated CUDA export directory is excluded via `.gitignore`
-- Virtual environment and cloned repository directories are excluded from git via `.gitignore`
+- Virtual environment directories are excluded from git via `.gitignore`
 - The `uv` package manager is used for faster Python package installation
 
 ## Platform Compatibility
