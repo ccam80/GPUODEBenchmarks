@@ -89,7 +89,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
-# The overlap suite is slower per point, so its ceiling can be capped separately.
+# The overlap suite defaults to the same ceiling as the timing sweeps.
 if (-not $OverlapNMax) { $OverlapNMax = $NMax }
 
 $DatasetKey = Get-DatasetKey
