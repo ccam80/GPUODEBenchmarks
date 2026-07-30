@@ -140,9 +140,9 @@ int main(int argc, char *argv[])
 	// adaptive tolerance (RKCK45 build) at NT=32768 and records
 	// "<setting> <time_ms> <error-vs-golden>" per point. dt and tolerances are
 	// runtime SolverOptions, so only the solver family needs a rebuild. Grids
-	// and protocol mirror runner_scripts/wp_common.py — keep in sync. Unlike
-	// the N-sweep above (single clock() shot), wp times with steady_clock and
-	// takes the minimum of 10 repeats after one warm-up.
+	// and protocol mirror runner_scripts/wp_common.py — keep in sync. wp takes
+	// the minimum of 10 repeats after one warm-up; the N sweep below uses 20 per
+	// transfer variant.
 	if (argc > 2 && string(argv[2]) == string("wp"))
 	{
 		if (NT != 32768)
@@ -200,7 +200,9 @@ int main(int argc, char *argv[])
 				ScanLorenz.Solve();
 				ScanLorenz.InsertSynchronisationPoint();
 				ScanLorenz.SynchroniseSolver();
-				ScanLorenz.SynchroniseFromDeviceToHost(All);
+				// ActualState only: All would also copy the NDO dense-output
+				// registers, which no other package stores or transfers.
+				ScanLorenz.SynchroniseFromDeviceToHost(ActualState);
 				ScanLorenz.SynchroniseDevice();
 				auto T1 = std::chrono::steady_clock::now();
 
@@ -232,41 +234,80 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	clock_t SimulationStart;
-	clock_t SimulationEnd;
-	
-	FillSolverObject(ScanLorenz, Parameters_R_Values, NT);
-	
-	ScanLorenz.SynchroniseFromHostToDevice(All);
-	
-	SimulationStart = clock();
-	ScanLorenz.Solve();
-	ScanLorenz.InsertSynchronisationPoint();
-	ScanLorenz.SynchroniseSolver();
-	
+	// Minimum of repeated solves, discarding r == 0. The runners export
+	// CUDA_MODULE_LOADING=EAGER, which removes the lazy-load cost that otherwise
+	// lands on the first launches (1.14 ms decaying to 0.158 ms over three solves
+	// at NT=8). 20 matches every other framework in this suite.
+	const int TimingRepeats = 20;
+
+	// Device-only: the kernel with neither transfer. The h2d ahead of each run
+	// is untimed and also resets ActualTime, which Solve() advances in place.
+	double ElapsedDeviceMs = 1.0e300;
+	for (int r = 0; r <= TimingRepeats; r++)
+	{
+		FillSolverObject(ScanLorenz, Parameters_R_Values, NT);
+		ScanLorenz.SynchroniseFromHostToDevice(All);
+
+		auto T0 = std::chrono::steady_clock::now();
+		ScanLorenz.Solve();
+		ScanLorenz.InsertSynchronisationPoint();
+		ScanLorenz.SynchroniseSolver();
+		ScanLorenz.SynchroniseDevice();
+		auto T1 = std::chrono::steady_clock::now();
+
+		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
+	}
+
+	// End-to-end: h2d, kernel, d2h. Only ActualState returns, matching the
+	// final-state transfer every other package times.
+	double ElapsedMs = 1.0e300;
+	for (int r = 0; r <= TimingRepeats; r++)
+	{
+		FillSolverObject(ScanLorenz, Parameters_R_Values, NT);
+
+		auto T0 = std::chrono::steady_clock::now();
+		ScanLorenz.SynchroniseFromHostToDevice(All);
+		ScanLorenz.Solve();
+		ScanLorenz.InsertSynchronisationPoint();
+		ScanLorenz.SynchroniseSolver();
+		ScanLorenz.SynchroniseFromDeviceToHost(ActualState);
+		ScanLorenz.SynchroniseDevice();
+		auto T1 = std::chrono::steady_clock::now();
+
+		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
+	}
+
+	// Untimed: the ActualTime print and SaveData need the registers the timed
+	// d2h deliberately left on the device.
 	ScanLorenz.SynchroniseFromDeviceToHost(All);
 	ScanLorenz.SynchroniseDevice();
-	SimulationEnd = clock();
 		// Check for kernel launch errors
 	cudaError_t _lastErr = cudaGetLastError();
 	if (_lastErr != cudaSuccess) {
 		std::cerr << "CUDA launch error: " << cudaGetErrorString(_lastErr) << std::endl;
+		// Exit non-zero without recording. The timings above are meaningless
+		// after a failed launch, and a zero exit would let the runner continue
+		// the N sweep writing bogus rows instead of stopping at the ceiling.
+		std::cerr << "No timing recorded for NT = " << NT << "." << std::endl;
+		return 1;
 	}
 	std::cout << ScanLorenz.GetHost<PRECISION>(0, ActualTime) << std::endl;
-	cout << "Total simulation time:           " << 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC << "ms" << endl;
-	cout << "Simulation time / 1000 RK4 step: " << 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC << "ms" << endl;
+	cout << "Total simulation time:           " << ElapsedMs << "ms" << endl;
+	cout << "Device-only time (no h2d/d2h):   " << ElapsedDeviceMs << "ms" << endl;
 	cout << "Ensemble size:                   " << NT << endl << endl;
 		
 	
 	ofstream datafile;
 	if (SOLVER == RK4){
 		datafile.open (("./data/CPP/MPGOS_times_unadaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
-		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
+		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}else{
 		
 		datafile.open (("./data/CPP/MPGOS_times_adaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
-		datafile << NT << "\t"<< 1000.0*(SimulationEnd-SimulationStart) / CLOCKS_PER_SEC <<"\n";
+		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}
 	

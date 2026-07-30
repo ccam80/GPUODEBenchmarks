@@ -289,3 +289,37 @@ class MyokitCudaModel:
         )
         self._cupy.cuda.get_current_stream().synchronize()
         return self._cupy.asnumpy(device_states).T
+
+    def to_device(self, initial_states, diffusion_values):
+        """Upload the inputs once, for timing runs that exclude transfers."""
+        host_states = _validate_float32(initial_states, "initial_states")
+        cell_count = host_states.shape[1]
+        host_diffusion = _validate_float32(
+            diffusion_values, "diffusion_values", (cell_count,)
+        )
+        return (self._cupy.asarray(host_states),
+                self._cupy.asarray(host_diffusion))
+
+    def solve_on_device(self, dt, step_count, device_states, device_diffusion):
+        """Run the kernel on resident arrays with neither transfer.
+
+        ``device_states`` is integrated in place and returned; callers timing
+        repeated runs should restore it between them.
+        """
+        cell_count = int(device_states.shape[1])
+        grid_size = (
+            (cell_count + self.block_size - 1) // self.block_size
+        )
+        self._kernel(
+            (grid_size,),
+            (self.block_size,),
+            (
+                device_states,
+                device_diffusion,
+                np.int32(cell_count),
+                np.float32(dt),
+                np.int32(step_count),
+            ),
+        )
+        self._cupy.cuda.get_current_stream().synchronize()
+        return device_states

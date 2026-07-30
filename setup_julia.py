@@ -62,7 +62,9 @@ def main():
     
     # Group 1: Core utilities (less likely to conflict)
     print("Adding core utility packages...")
-    core_packages = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays"]
+    # Plots is required by runner_scripts/plot/*.jl.
+    core_packages = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays",
+                     "Plots"]
     pkg_list = ", ".join([f'"{p}"' for p in core_packages])
     julia_cmd = [
         "julia", "--project=.",

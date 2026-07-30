@@ -113,16 +113,35 @@ def make_solver(system, alias, mode, setting, order, tier):
 
 
 def solve_once(solver, initials, parameters):
+    """Time one solve including the h2d and d2h transfers."""
     sync()
     start = time.perf_counter()
     solution = solver.solve(initial_values=initials, parameters=parameters,
                             blocksize=64, duration=1.0)
-    finals = np.array(solution.state[-1, :, :].T, dtype=np.float32, copy=True)
+    # A view: solve() already returns host buffers, so a copy would be redundant.
+    finals = solution.state[-1, :, :].T
     sync()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     if finals.ndim != 2 or finals.shape[1] != 3:
         raise ValueError("unexpected final-state shape {!r}".format(finals.shape))
     return finals, elapsed_ms
+
+
+def solve_once_on_device(solver, d_initials, d_parameters):
+    """Time one solve with neither transfer: device arrays in, results left there."""
+    sync()
+    start = time.perf_counter()
+    solver.solve(initial_values=d_initials, parameters=d_parameters,
+                 blocksize=64, duration=1.0, on_device=True)
+    sync()
+    return (time.perf_counter() - start) * 1000.0
+
+
+def to_device_inputs(initials, parameters):
+    """Upload the grid once; None when no CUDA handle is available."""
+    if cuda is None:
+        return None
+    return cuda.to_device(initials), cuda.to_device(parameters)
 
 
 def write_finals(root, algorithm, mode, tier, setting_kind, setting, finals):
@@ -190,12 +209,16 @@ def main():
 
             for mode, tier, setting_kind, setting, n in points:
                 try:
+                    # Release the previous point before allocating this one.
+                    solver = initials = params = finals = device_inputs = None
                     solver = make_solver(system, alias, mode, setting, order, tier)
                     initials, params = solver.build_grid(
                         initial_values={"x": 1.0, "y": 0.0, "z": 0.0},
                         parameters={"rho": rho_grid(phase, n)})
+                    device_inputs = to_device_inputs(initials, params)
                     solve_once(solver, initials, params)  # JIT/allocation warmup
-                    finals = None
+                    if device_inputs is not None:
+                        solve_once_on_device(solver, *device_inputs)  # warmup
                     for sample in range(repeats):
                         finals, elapsed = solve_once(solver, initials, params)
                         finite, failed = finite_counts(finals)
@@ -214,10 +237,19 @@ def main():
                                 .format(finite, n))
                         append_csv(timing_file, TIMING_FIELDS, {
                             "framework": "cubie", "algorithm": alias, "phase": phase,
-                            "mode": mode, "tier": tier, "n": n,
+                            "mode": mode, "tier": tier, "transfers": "both", "n": n,
                             "setting_kind": setting_kind, "setting": setting,
                             "sample": sample, "time_ms": elapsed,
                         })
+                        if device_inputs is not None:
+                            append_csv(timing_file, TIMING_FIELDS, {
+                                "framework": "cubie", "algorithm": alias,
+                                "phase": phase, "mode": mode, "tier": tier,
+                                "transfers": "none", "n": n,
+                                "setting_kind": setting_kind, "setting": setting,
+                                "sample": sample,
+                                "time_ms": solve_once_on_device(solver, *device_inputs),
+                            })
                     finite, failed = finite_counts(finals)
                     if phase == "performance":
                         append_csv(metric_file, METRIC_FIELDS, {

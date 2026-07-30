@@ -68,7 +68,10 @@ function collect_series(base_path, frameworks)
             m = match(pat, fname)
             m === nothing && continue
             mode, os, gpu = m.captures
-            data = readdlm(joinpath(dpath, fname))
+            fpath = joinpath(dpath, fname)
+            # readdlm raises on a file with no data rows, so screen those out.
+            isempty(strip(read(fpath, String))) && continue
+            data = readdlm(fpath)
             isempty(data) && continue
             setting = Float64.(data[:, 1])
             err = Float64.(data[:, 3])

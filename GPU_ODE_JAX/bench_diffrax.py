@@ -20,6 +20,11 @@ import timeit
 import sys
 
 numberOfParameters = int(sys.argv[1])
+# Timed repeats per point; min is reported. Measured on an RTX 2060 SUPER at
+# N=32768, dropping 100 -> 20 costs a median 0.8% higher reported time
+# (worst 8% on cubie's transfer-path series) for a 5x shorter sweep.
+REPEATS = 20
+
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
@@ -39,6 +44,43 @@ if jax.default_backend() == "cpu":
     print("ERROR: JAX is running on the CPU backend; aborting so CPU "
           "timings are not recorded as GPU results.")
     sys.exit(1)
+
+
+def best_times_ms(solve, args, label):
+    """Best of 100 timed runs in ms as (with_transfers, device_only). Exits 1
+    without recording if the compiled solve does not fit in device memory."""
+    compiled = solve.lower(args).compile()
+    usage = compiled.memory_analysis()
+    limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
+    if usage is not None:
+        needed = (usage.temp_size_in_bytes + usage.argument_size_in_bytes
+                  + usage.output_size_in_bytes - usage.alias_size_in_bytes)
+        print("{0} at N={1}: needs {2:.2f} GiB, device limit {3:.2f} GiB".format(
+            label, numberOfParameters, needed / 2**30, limit / 2**30))
+        if needed > limit:
+            print("ERROR: the {0} solve does not fit in device memory at "
+                  "N={1}; no timing recorded.".format(label, numberOfParameters))
+            sys.exit(1)
+
+    host_args = np.asarray(jax.device_get(args))
+
+    def with_transfers():
+        # jnp.asarray is the h2d, device_get the d2h.
+        return jax.device_get(jax.block_until_ready(solve(jnp.asarray(host_args))))
+
+    def device_only():
+        # Args already resident, results left on device; block_until_ready only.
+        return jax.block_until_ready(solve(args))
+
+    try:
+        both = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
+        none = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
+    except Exception as err:
+        print("ERROR: the {0} solve failed at N={1} ({2}: {3}); no timing "
+              "recorded.".format(label, numberOfParameters,
+                                 type(err).__name__, err))
+        sys.exit(1)
+    return both, none
 
 
 # %%
@@ -147,17 +189,16 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
 
 # %%
 # Use jax.vmap to compute parallel solutions of the ODE
-res = timeit.repeat(lambda: main(parameterList),repeat = 100,number = 1)
-
-best_time  = min(res)*1000
-print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(numberOfParameters, best_time))
+best_time, best_time_dev = best_times_ms(main, parameterList, "fixed time-stepping")
+print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
+      "({:.1f} ms without transfers)".format(numberOfParameters, best_time, best_time_dev))
 
 
 # %%
 # Save the minimum time 
 os.makedirs("./data/JAX", exist_ok=True)
 file = open("./data/JAX/Jax_times_unadaptive_{0}.txt".format(DATASET_KEY),"a+")
-file.write('{0} {1}\n'.format(numberOfParameters, best_time))
+file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 
 # Save numerical output for 32768-trajectory run
@@ -205,19 +246,19 @@ import timeit
 # %%
 
 
-res = timeit.repeat(lambda: main(parameterList),repeat = 100,number = 1)
+best_time, best_time_dev = best_times_ms(main, parameterList, "adaptive time-stepping")
 
 
 # %%
 
-best_time  = min(res)*1000
-print("{:} ODE solves with adaptive time-stepping completed in {:.1f} ms".format(numberOfParameters, best_time))
+print("{:} ODE solves with adaptive time-stepping completed in {:.1f} ms "
+      "({:.1f} ms without transfers)".format(numberOfParameters, best_time, best_time_dev))
 
 
 # %%
 
 
 file = open("./data/JAX/Jax_times_adaptive_{0}.txt".format(DATASET_KEY),"a+")
-file.write('{0} {1}\n'.format(numberOfParameters, best_time))
+file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 

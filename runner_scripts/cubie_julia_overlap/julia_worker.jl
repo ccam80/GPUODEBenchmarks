@@ -72,7 +72,7 @@ function protocol()
 end
 const PROTOCOL = protocol()
 
-const TIMING_HEADER = "framework,algorithm,phase,mode,tier,n,setting_kind,setting,sample,time_ms"
+const TIMING_HEADER = "framework,algorithm,phase,mode,tier,transfers,n,setting_kind,setting,sample,time_ms"
 const METRIC_HEADER = "framework,algorithm,phase,mode,tier,n,setting_kind,setting,golden_rmse,finite_trajectories,failed_trajectories,finals_path"
 const FAILURE_HEADER = "framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message"
 const TIMING_FILE = joinpath(OUT, "julia_timings.csv")
@@ -134,33 +134,47 @@ function build_problems(kind, n)
     probs = map(eachindex(rhos)) do i
         DiffEqGPU.make_prob_compatible(remake(prob, p = @SVector [rhos[i]]))
     end
-    return cu(probs), prob
+    # Host vector is returned too so the end-to-end timing can re-upload it.
+    return probs, cu(probs), prob
 end
 
-function solve_once(probs, prob, alg, mode, setting)
-    CUDA.synchronize()
-    start = time_ns()
-    sol = if mode == "fixed"
-        DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = 1.0f0,
+function run_solve(probs, prob, alg, mode, setting)
+    if mode == "fixed"
+        return DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = 1.0f0,
             save_everystep = false, dt = Float32(setting))
     else
-        DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = 1.0f0,
+        return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = 1.0f0,
             save_everystep = false, dt = 0.01f0,
             abstol = Float32(setting), reltol = Float32(setting))
     end
-    # Array conversion is intentionally inside the timer: timings are
-    # synchronized, end-to-end solves including the result transfer.
+end
+
+"Time one solve including the h2d and d2h transfers; the reshape is untimed."
+function solve_end_to_end(probs_host, prob, alg, mode, setting)
+    CUDA.synchronize()
+    start = time_ns()
+    probs = cu(probs_host)
+    sol = run_solve(probs, prob, alg, mode, setting)
     host_us = Array(sol[2])
+    CUDA.synchronize()
+    elapsed_ms = (time_ns() - start) / 1.0e6
     final_vectors = host_us[end, :]
     finals = Matrix{Float32}(undef, length(final_vectors), 3)
     for i in eachindex(final_vectors)
         finals[i, :] .= final_vectors[i]
     end
-    size(finals) == (length(probs), 3) || error(
-        "unexpected final-state size $(size(finals)); expected ($(length(probs)), 3)")
-    CUDA.synchronize()
-    elapsed_ms = (time_ns() - start) / 1.0e6
+    size(finals) == (length(probs_host), 3) || error(
+        "unexpected final-state size $(size(finals)); expected ($(length(probs_host)), 3)")
     return finals, elapsed_ms
+end
+
+"Time one solve with neither transfer: probs already resident, results left there."
+function solve_device_only(probs, prob, alg, mode, setting)
+    CUDA.synchronize()
+    start = time_ns()
+    run_solve(probs, prob, alg, mode, setting)
+    CUDA.synchronize()
+    return (time_ns() - start) / 1.0e6
 end
 
 function finite_counts(finals)
@@ -231,22 +245,35 @@ for row in table
             repeats = PROTOCOL.work_repeats
         end
 
+        # Memory need is linear in N, so once a mode OOMs, larger N cannot run.
+        oom_ceiling = Dict{String, Int}()
+
         for (mode, setting_kind, setting, n) in points
             tier = mode == "fixed" ? "fixed" : "julia"
+            if haskey(oom_ceiling, mode) && n >= oom_ceiling[mode]
+                println("SKIPPED julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) " *
+                        "N=$(n): at or above the N=$(oom_ceiling[mode]) out-of-memory ceiling")
+                continue
+            end
             try
-                probs, prob = build_problems(phase, n)
-                solve_once(probs, prob, alg, mode, setting) # compilation/allocation warmup
+                probs_host, probs, prob = build_problems(phase, n)
+                # Warm both paths.
+                solve_end_to_end(probs_host, prob, alg, mode, setting)
+                solve_device_only(probs, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, 3)
                 for sample in 0:(repeats - 1)
-                    finals, elapsed = solve_once(probs, prob, alg, mode, setting)
+                    finals, elapsed = solve_end_to_end(probs_host, prob, alg, mode, setting)
                     finite, failed = finite_counts(finals)
                     if failed > 0 || finite != n
                         append_row(METRIC_FILE, "julia", alias, phase, mode, tier,
                             n, setting_kind, setting, "", finite, failed, "")
                         error("non-finite result: $(finite)/$(n) trajectories valid")
                     end
-                    append_row(TIMING_FILE, "julia", alias, phase, mode, tier, n,
-                        setting_kind, setting, sample, elapsed)
+                    append_row(TIMING_FILE, "julia", alias, phase, mode, tier,
+                        "both", n, setting_kind, setting, sample, elapsed)
+                    append_row(TIMING_FILE, "julia", alias, phase, mode, tier,
+                        "none", n, setting_kind, setting, sample,
+                        solve_device_only(probs, prob, alg, mode, setting))
                 end
                 finite, failed = finite_counts(finals)
                 if phase == "performance"
@@ -263,6 +290,9 @@ for row in table
                 println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
             catch err
                 record_failure(alias, phase, mode, tier, n, setting_kind, setting, err)
+                if phase == "performance" && err isa CUDA.OutOfGPUMemoryError
+                    oom_ceiling[mode] = n
+                end
             end
         end
     end
