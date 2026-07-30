@@ -220,7 +220,6 @@ d_parameters = cuda.to_device(parameter_array)
 _ = solve_fixed()
 _ = solve_fixed_on_device()
 
-# Benchmark with 100 repetitions
 res = timeit.repeat(lambda: solve_fixed(), setup='gc.enable()', repeat=REPEATS, number=1)
 res_dev = timeit.repeat(lambda: solve_fixed_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
 
@@ -251,7 +250,6 @@ print(f"Running {numberOfParameters} trajectories with adaptive time-stepping...
 _ = solve_adaptive()
 _ = solve_adaptive_on_device()
 
-# Benchmark with 100 repetitions
 res = timeit.repeat(lambda: solve_adaptive(), setup='gc.enable()', repeat=REPEATS, number=1)
 res_dev = timeit.repeat(lambda: solve_adaptive_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
 

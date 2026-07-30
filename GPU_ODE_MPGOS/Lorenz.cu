@@ -208,7 +208,14 @@ int main(int argc, char *argv[])
 
 				cudaError_t WpErr = cudaGetLastError();
 				if (WpErr != cudaSuccess)
+				{
+					// Same policy as the N sweep: a failed launch makes the
+					// timing and the error metric meaningless, so stop rather
+					// than record the row and exit 0.
 					cerr << "CUDA launch error: " << cudaGetErrorString(WpErr) << endl;
+					cerr << "No wp row recorded for setting = " << Setting << "." << endl;
+					return 1;
+				}
 
 				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
 				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up

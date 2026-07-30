@@ -47,8 +47,8 @@ if jax.default_backend() == "cpu":
 
 
 def best_times_ms(solve, args, label):
-    """Best of 100 timed runs in ms as (with_transfers, device_only). Exits 1
-    without recording if the compiled solve does not fit in device memory."""
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only). Exits
+    1 without recording if the compiled solve does not fit in device memory."""
     compiled = solve.lower(args).compile()
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
