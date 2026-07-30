@@ -22,8 +22,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, DT0, DT_MAX, DT_MIN, FAILURE_FIELDS, FIXED_DT, GOLDEN_NE,
-    GOLDEN_WP, METRIC_FIELDS, N_WP, TIMING_FIELDS, algorithms, append_csv,
-    ensure_csv, finite_counts, pi_controller, point_slug,
+    GOLDEN_WP, METRIC_FIELDS, N_WP, PHASES, TIMING_FIELDS, algorithms,
+    append_csv, ensure_csv, finite_counts, pi_controller, point_slug,
     profile_protocol, rmse, write_json,
 )
 
@@ -43,13 +43,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("smoke", "full"), default="smoke")
-    parser.add_argument("--phase", choices=("performance", "numerical", "work_precision", "all"), default="all")
+    parser.add_argument("--phase", choices=PHASES + ("all",), default="all")
     parser.add_argument("--nmax", type=int, default=16_777_216)
-    parser.add_argument("--performance-repeats", type=int, default=20)
-    parser.add_argument("--work-repeats", type=int, default=20)
-    parser.add_argument("--fixed-dt", type=float, default=FIXED_DT)
-    parser.add_argument("--adaptive-tol", type=float, default=ADAPTIVE_TOL)
-    parser.add_argument("--reset", action="store_true")
+    parser.add_argument("--from-n", type=int, default=0)
     return parser.parse_args()
 
 
@@ -160,17 +156,17 @@ def write_finals(root, algorithm, mode, tier, setting_kind, setting, finals):
 def main():
     args = parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    timing_file = ensure_csv(args.output / "cubie_timings.csv", TIMING_FIELDS, args.reset)
-    metric_file = ensure_csv(args.output / "cubie_metrics.csv", METRIC_FIELDS, args.reset)
-    failure_file = ensure_csv(args.output / "cubie_failures.csv", FAILURE_FIELDS, args.reset)
-    protocol = profile_protocol(args.profile, args.nmax, args.performance_repeats, args.work_repeats)
+    timing_file = ensure_csv(args.output / "cubie_timings.csv", TIMING_FIELDS)
+    metric_file = ensure_csv(args.output / "cubie_metrics.csv", METRIC_FIELDS)
+    failure_file = ensure_csv(args.output / "cubie_failures.csv", FAILURE_FIELDS)
+    protocol = profile_protocol(args.profile, args.nmax, args.from_n)
     write_json(args.output / "cubie_metadata.json", {
         "framework": "cubie", "cubie_version": package_version(),
         "python": sys.version, "platform": platform.platform(),
         "profile": args.profile, "protocol": protocol,
     })
     system = make_system()
-    phases = ("performance", "numerical", "work_precision") if args.phase == "all" else (args.phase,)
+    phases = PHASES if args.phase == "all" else (args.phase,)
     point_failure_count = 0
 
     def failure(algorithm, phase, mode, tier, n, setting_kind, setting, exc):
@@ -190,9 +186,9 @@ def main():
             if phase == "performance":
                 points = []
                 for n in protocol["performance_ns"]:
-                    points.extend([("fixed", "fixed", "dt", args.fixed_dt, n),
-                                   ("adaptive", "default", "tol", args.adaptive_tol, n),
-                                   ("adaptive", "pi", "tol", args.adaptive_tol, n)])
+                    points.extend([("fixed", "fixed", "dt", FIXED_DT, n),
+                                   ("adaptive", "default", "tol", ADAPTIVE_TOL, n),
+                                   ("adaptive", "pi", "tol", ADAPTIVE_TOL, n)])
                 repeats = protocol["performance_repeats"]
             elif phase == "numerical":
                 n = protocol["ne_n"]

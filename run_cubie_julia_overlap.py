@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Run the exhaustive direct Cubie ↔ DiffEqGPU GPU-ODE overlap benchmark.
+"""Run the direct Cubie <-> DiffEqGPU GPU-ODE overlap benchmark.
 
 Examples:
-  python run_cubie_julia_overlap.py --profile smoke
-  python run_cubie_julia_overlap.py --profile full --nmax 16777216
-  python run_cubie_julia_overlap.py --profile full --phase work_precision --work-repeats 20
+  python run_cubie_julia_overlap.py --profile full
+  python run_cubie_julia_overlap.py --phase numerical --framework cubie
+  python run_cubie_julia_overlap.py --phase performance --from-n 2048
 
-The launcher is platform-neutral and intentionally uses subprocess argument
-lists (no shell scripts).  Framework workers record point failures and keep
-going; the analyzer always runs after the selected workers finish.
+Results land in data/cubie_julia_overlap/<dataset-key>/. A run replaces the
+rows it regenerates and leaves the rest. Workers record point failures and
+keep going; the analyzer runs after the selected workers finish.
 """
 
 from __future__ import annotations
@@ -25,12 +25,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SUITE = ROOT / "runner_scripts" / "cubie_julia_overlap"
 sys.path.insert(0, str(ROOT / "runner_scripts"))
+sys.path.insert(0, str(SUITE))
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
+from common import (  # noqa: E402 - suite helper bootstrap
+    FAILURE_FIELDS, METRIC_FIELDS, PHASES, TIMING_FIELDS, prune_csv,
+)
+
+CSV_KINDS = (("timings", TIMING_FIELDS), ("metrics", METRIC_FIELDS),
+             ("failures", FAILURE_FIELDS))
 
 
-def existing_python(explicit=None):
-    if explicit:
-        return Path(explicit).resolve()
+def existing_python():
+    """The cubie interpreter: the repo venv when present, else this one."""
     candidates = [
         ROOT / "GPU_ODE_CUBIE" / "venv" / "Scripts" / "python.exe",
         ROOT / "GPU_ODE_CUBIE" / "venv" / "bin" / "python",
@@ -45,22 +51,13 @@ def parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--profile", choices=("smoke", "full"), default="smoke",
                    help="Smoke uses every algorithm with reduced N/grids; full uses the published protocol.")
-    p.add_argument("--phase", choices=("performance", "numerical", "work_precision", "all"), default="all")
+    p.add_argument("--phase", choices=PHASES + ("all",), default="all",
+                   help="Which leg to run; a leg not selected keeps its existing rows.")
     p.add_argument("--framework", choices=("both", "cubie", "julia"), default="both")
     p.add_argument("--nmax", type=int, default=16_777_216,
                    help="Largest performance N; values are 8*4^k not exceeding this value.")
-    p.add_argument("--performance-repeats", type=int, default=20)
-    p.add_argument("--work-repeats", type=int, default=20)
-    p.add_argument("--fixed-dt", type=float, default=2.0 ** -10)
-    p.add_argument("--adaptive-tol", type=float, default=1.0e-8)
-    p.add_argument("--dataset-key", help="Override the automatic <os>_<gpu> key.")
-    p.add_argument("--run-id", help="Output subdirectory; default is a UTC timestamp plus profile.")
-    p.add_argument("--output-root", type=Path, default=ROOT / "data" / "cubie_julia_overlap")
-    p.add_argument("--cubie-python", help="Python executable containing Cubie.")
-    p.add_argument("--analysis-python", help="Python executable containing NumPy and matplotlib.")
-    p.add_argument("--julia", default=os.environ.get("JULIA", "julia"))
-    p.add_argument("--skip-analyze", action="store_true")
-    p.add_argument("--dry-run", action="store_true", help="Print commands without creating outputs or running workers.")
+    p.add_argument("--from-n", type=int, default=0,
+                   help="Continue the performance leg at this N; rows below it are kept.")
     return p
 
 
@@ -68,35 +65,30 @@ def main():
     args = parser().parse_args()
     if args.nmax < 8:
         parser().error("--nmax must be at least 8")
-    if args.performance_repeats < 1 or args.work_repeats < 1:
-        parser().error("repeat counts must be positive")
-    key = args.dataset_key or dataset_key()
-    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_" + args.profile)
-    output = (args.output_root / key / run_id).resolve()
-    cubie_python = existing_python(args.cubie_python)
-    analysis_python = Path(args.analysis_python).resolve() if args.analysis_python else cubie_python
-    shared = ["--output", str(output), "--profile", args.profile, "--phase", args.phase,
-              "--nmax", str(args.nmax), "--performance-repeats", str(args.performance_repeats),
-              "--work-repeats", str(args.work_repeats), "--fixed-dt", repr(args.fixed_dt),
-              "--adaptive-tol", repr(args.adaptive_tol), "--reset"]
+    if args.from_n and args.phase != "performance":
+        parser().error("--from-n continues the performance leg; pass --phase performance")
+    key = dataset_key()
+    output = (ROOT / "data" / "cubie_julia_overlap" / key).resolve()
+    cubie_python = existing_python()
+    julia = os.environ.get("JULIA", "julia")
+    phases = PHASES if args.phase == "all" else (args.phase,)
+    frameworks = ("julia", "cubie") if args.framework == "both" else (args.framework,)
+    shared = ["--output", str(output), "--profile", args.profile,
+              "--phase", args.phase, "--nmax", str(args.nmax),
+              "--from-n", str(args.from_n)]
     commands = []
-    if args.framework in ("both", "julia"):
-        commands.append(("julia", [args.julia, "--startup-file=no", "-t", "auto",
+    if "julia" in frameworks:
+        commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
-    if args.framework in ("both", "cubie"):
+    if "cubie" in frameworks:
         commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
-    if not args.skip_analyze:
-        commands.append(("analysis", [str(analysis_python), str(SUITE / "analyze.py"), "--output", str(output)]))
+    commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"), "--output", str(output)]))
 
     print("Output: {}".format(output))
     for label, command in commands:
         print("{}: {}".format(label, subprocess.list2cmdline(command)))
-    if args.dry_run:
-        return 0
 
-    # The shared cubie venv carries both CUDA backends and resolves one at
-    # import time; state which so the run is reproducible. Respect an explicit
-    # CUBIE_CUDA_BACKEND from the caller.
+    # Cubie resolves its CUDA backend at import time from this variable.
     worker_env = dict(os.environ)
     worker_env.setdefault("CUBIE_CUDA_BACKEND", "numba-cuda")
     print("Cubie backend: {}".format(worker_env["CUBIE_CUDA_BACKEND"]))
@@ -104,13 +96,23 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SUITE / "diffeqgpu_ode_inventory.csv", output / "diffeqgpu_ode_inventory.csv")
     shutil.copy2(SUITE / "algorithms.csv", output / "overlap_algorithms.csv")
+
+    # Clear the rows this run replaces; the workers only append.
+    for framework in frameworks:
+        for kind, fields in CSV_KINDS:
+            dropped = prune_csv(output / "{}_{}.csv".format(framework, kind),
+                                fields, phases, args.from_n)
+            if dropped:
+                print("Replacing {} row(s) in {}_{}.csv".format(dropped, framework, kind))
+        if "numerical" in phases:
+            shutil.rmtree(output / "finals" / framework, ignore_errors=True)
+
     manifest = {
-        "dataset_key": key, "run_id": run_id, "profile": args.profile,
+        "dataset_key": key, "profile": args.profile,
         "phase": args.phase, "framework": args.framework,
         "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
-        "nmax": args.nmax, "performance_repeats": args.performance_repeats,
-        "work_repeats": args.work_repeats, "fixed_dt": args.fixed_dt,
-        "adaptive_tol": args.adaptive_tol, "commands": [c for _, c in commands],
+        "nmax": args.nmax, "from_n": args.from_n,
+        "commands": [c for _, c in commands],
         "started_utc": datetime.now(timezone.utc).isoformat(), "results": {},
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

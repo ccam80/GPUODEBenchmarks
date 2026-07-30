@@ -33,8 +33,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(common.performance_ns(512), [8, 32, 128, 512])
         self.assertEqual(common.performance_ns(7), [])
 
+    def test_from_n_continues_the_grid(self):
+        self.assertEqual(common.performance_ns(512, 128), [128, 512])
+        # Not a grid value: continue at the first point at or above it.
+        self.assertEqual(common.performance_ns(512, 100), [128, 512])
+        self.assertEqual(common.performance_ns(512, 0), [8, 32, 128, 512])
+        self.assertEqual(
+            common.profile_protocol("full", 512, 128)["performance_ns"],
+            [128, 512])
+
     def test_smoke_keeps_every_metric_family(self):
-        protocol = common.profile_protocol("smoke", 10_000, 100, 20)
+        protocol = common.profile_protocol("smoke", 10_000)
         self.assertTrue(protocol["performance_ns"])
         self.assertTrue(protocol["ne_dts"] and protocol["ne_tols"])
         self.assertTrue(protocol["wp_dts"] and protocol["wp_tols"])
@@ -46,6 +55,50 @@ class ProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(settings["min_gain"], 0.2)
         self.assertAlmostEqual(settings["max_gain"], 10.0)
         self.assertAlmostEqual(settings["safety"], 0.9)
+
+
+class PruneTests(unittest.TestCase):
+    FIELDS = ["framework", "phase", "n", "time_ms"]
+
+    def rows(self):
+        return [
+            {"framework": "cubie", "phase": "performance", "n": "8", "time_ms": "1"},
+            {"framework": "cubie", "phase": "performance", "n": "2048", "time_ms": "2"},
+            {"framework": "cubie", "phase": "numerical", "n": "1024", "time_ms": "3"},
+            {"framework": "cubie", "phase": "work_precision", "n": "32768", "time_ms": "4"},
+        ]
+
+    def prune(self, phases, from_n=0):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cubie_timings.csv"
+            with path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=self.FIELDS)
+                writer.writeheader()
+                writer.writerows(self.rows())
+            dropped = common.prune_csv(path, self.FIELDS, phases, from_n)
+            with path.open(newline="") as handle:
+                return dropped, list(csv.DictReader(handle))
+
+    def test_one_leg_leaves_the_others(self):
+        dropped, kept = self.prune(("performance",))
+        self.assertEqual(dropped, 2)
+        self.assertEqual([r["phase"] for r in kept], ["numerical", "work_precision"])
+
+    def test_all_legs_clear_every_row(self):
+        dropped, kept = self.prune(common.PHASES)
+        self.assertEqual(dropped, 4)
+        self.assertEqual(kept, [])
+
+    def test_from_n_keeps_the_smaller_n(self):
+        dropped, kept = self.prune(("performance",), from_n=2048)
+        self.assertEqual(dropped, 1)
+        self.assertEqual([r["n"] for r in kept], ["8", "1024", "32768"])
+
+    def test_missing_file_is_created_with_a_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "julia_timings.csv"
+            self.assertEqual(common.prune_csv(path, self.FIELDS, common.PHASES), 0)
+            self.assertEqual(path.read_text().strip(), ",".join(self.FIELDS))
 
 
 class AnalysisTests(unittest.TestCase):
