@@ -28,10 +28,12 @@ MODEL_PATH = Path(__file__).resolve().parent / "models" / "lorenz.cellml"
 DATASET_KEY = dataset_key()
 STANDARD_DT = 0.001
 STANDARD_STEPS = 1000
+# Timed repeats per point; min is reported.
+REPEATS = 20
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats):
-    """Warm up, then return the minimum synchronized solve time and finals."""
+    """Warm up, then return (with_transfers_ms, device_only_ms, finals)."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -49,7 +51,28 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
         repeat=repeats,
         number=1,
     )
-    return min(elapsed) * 1000.0, finals
+
+    device_states, device_diffusion = model.to_device(initial_states, rho)
+    pristine = device_states.copy()
+
+    def run_on_device():
+        return model.solve_on_device(
+            dt, step_count, device_states, device_diffusion
+        )
+
+    def restore():
+        # Untimed: reset the integrated-in-place state between timed runs.
+        device_states[...] = pristine
+
+    run_on_device()
+    restore()
+    elapsed_dev = timeit.repeat(
+        run_on_device,
+        setup=restore,
+        repeat=repeats,
+        number=1,
+    )
+    return min(elapsed) * 1000.0, min(elapsed_dev) * 1000.0, finals
 
 
 def run_work_precision(model, cell_count):
@@ -69,7 +92,7 @@ def run_work_precision(model, cell_count):
     with open(output, "w", encoding="utf-8") as handle:
         for dt in DTS:
             step_count = int(round(1.0 / dt))
-            elapsed_ms, finals = timed_solve(
+            elapsed_ms, _, finals = timed_solve(
                 model,
                 cell_count,
                 rho,
@@ -122,17 +145,18 @@ def main(argv=None):
     rho = np.linspace(
         0.0, 21.0, cell_count, dtype=np.float32
     )
-    elapsed_ms, finals = timed_solve(
+    elapsed_ms, elapsed_dev_ms, finals = timed_solve(
         model,
         cell_count,
         rho,
         STANDARD_DT,
         STANDARD_STEPS,
-        repeats=100,
+        repeats=REPEATS,
     )
     print(
-        "{0} ODE solves with Myokit-CUDA Euler completed in {1:.1f} ms"
-        .format(cell_count, elapsed_ms)
+        "{0} ODE solves with Myokit-CUDA Euler completed in {1:.1f} ms "
+        "({2:.1f} ms without transfers)"
+        .format(cell_count, elapsed_ms, elapsed_dev_ms)
     )
 
     timing_dir = REPO_ROOT / "data" / "MYOKIT_CUDA"
@@ -142,7 +166,7 @@ def main(argv=None):
         / "Myokit_cuda_times_unadaptive_{0}.txt".format(DATASET_KEY)
     )
     with timing_file.open("a", encoding="utf-8") as handle:
-        handle.write("{0} {1}\n".format(cell_count, elapsed_ms))
+        handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
 
     if cell_count == N_WP:
         numerical_dir = REPO_ROOT / "data" / "numerical"

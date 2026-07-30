@@ -24,8 +24,9 @@ DT0 = 0.01
 DT_MIN = 1.0e-12
 DT_MAX = 1.0e3
 
-TIMING_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
-                 "setting_kind", "setting", "sample", "time_ms"]
+# "transfers": "both" includes h2d and d2h, "none" includes neither.
+TIMING_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "transfers",
+                 "n", "setting_kind", "setting", "sample", "time_ms"]
 METRIC_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
                  "setting_kind", "setting", "golden_rmse", "finite_trajectories",
                  "failed_trajectories", "finals_path"]

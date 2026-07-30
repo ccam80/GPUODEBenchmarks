@@ -14,6 +14,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Load modules eagerly so the first-launch cubin load stays out of timed regions.
+$env:CUDA_MODULE_LOADING = 'EAGER'
+
 # Run from the repo root regardless of the caller's working directory
 Push-Location (Join-Path $PSScriptRoot '..\..')
 

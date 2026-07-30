@@ -64,13 +64,14 @@ def timing_summary(rows, metrics=None):
         if eligible is not None and validity_key not in eligible:
             continue
         key = (row["framework"], row["algorithm"], row["phase"], row["mode"],
-               row["tier"], row["n"], row["setting_kind"], row["setting"])
+               row["tier"], row.get("transfers", "both"), row["n"],
+               row["setting_kind"], row["setting"])
         groups[key].append(float(row["time_ms"]))
     out = []
     for key, values in sorted(groups.items()):
         a = np.asarray(values)
         out.append(dict(zip(("framework", "algorithm", "phase", "mode", "tier",
-                             "n", "setting_kind", "setting"), key),
+                             "transfers", "n", "setting_kind", "setting"), key),
                         samples=len(values), min_ms=float(np.min(a)),
                         p05_ms=float(np.percentile(a, 5)), median_ms=float(np.median(a)),
                         p95_ms=float(np.percentile(a, 95)), max_ms=float(np.max(a))))
@@ -122,21 +123,24 @@ def numerical_comparisons(root, metrics):
 
 
 def speedups(summaries):
+    # Keyed on transfers so end-to-end is never paired against device-only.
     julia = {}
     for row in summaries:
         if row["framework"] == "julia":
-            julia[(row["algorithm"], row["phase"], row["mode"], row["n"],
-                   row["setting_kind"], round(float(row["setting"]), 14))] = row
+            julia[(row["algorithm"], row["phase"], row["mode"], row["transfers"],
+                   row["n"], row["setting_kind"],
+                   round(float(row["setting"]), 14))] = row
     out = []
     for row in summaries:
         if row["framework"] != "cubie":
             continue
-        key = (row["algorithm"], row["phase"], row["mode"], row["n"],
-               row["setting_kind"], round(float(row["setting"]), 14))
+        key = (row["algorithm"], row["phase"], row["mode"], row["transfers"],
+               row["n"], row["setting_kind"], round(float(row["setting"]), 14))
         other = julia.get(key)
         if other:
             out.append({"algorithm": row["algorithm"], "phase": row["phase"],
-                        "mode": row["mode"], "cubie_tier": row["tier"], "n": row["n"],
+                        "mode": row["mode"], "cubie_tier": row["tier"],
+                        "transfers": row["transfers"], "n": row["n"],
                         "setting_kind": row["setting_kind"], "setting": row["setting"],
                         "cubie_median_ms": row["median_ms"],
                         "julia_median_ms": other["median_ms"],
@@ -160,7 +164,8 @@ def work_precision_rows(summaries, metrics):
             continue
         out.append({
             "framework": timing["framework"], "algorithm": timing["algorithm"],
-            "mode": timing["mode"], "tier": timing["tier"], "n": timing["n"],
+            "mode": timing["mode"], "tier": timing["tier"],
+            "transfers": timing["transfers"], "n": timing["n"],
             "setting_kind": timing["setting_kind"], "setting": timing["setting"],
             "samples": timing["samples"], "min_ms": timing["min_ms"],
             "p05_ms": timing["p05_ms"], "median_ms": timing["median_ms"],
@@ -191,13 +196,16 @@ def plots(root, summaries, metrics, work_rows):
             for framework, tier in (("julia", "fixed" if mode == "fixed" else "julia"),
                                     ("cubie", "fixed" if mode == "fixed" else "default"),
                                     ("cubie", "pi")):
-                vals = [r for r in summaries if r["phase"] == "performance" and
-                        r["algorithm"] == name and r["mode"] == mode and
-                        r["framework"] == framework and r["tier"] == tier]
-                if vals:
-                    vals.sort(key=lambda r: int(r["n"]))
-                    ax.loglog([int(r["n"]) for r in vals], [float(r["median_ms"]) for r in vals],
-                              marker="o", color=colors[(framework, tier)], label="{} {}".format(framework, tier))
+                for transfers, style in (("both", "-"), ("none", "--")):
+                    vals = [r for r in summaries if r["phase"] == "performance" and
+                            r["algorithm"] == name and r["mode"] == mode and
+                            r["framework"] == framework and r["tier"] == tier and
+                            r["transfers"] == transfers]
+                    if vals:
+                        vals.sort(key=lambda r: int(r["n"]))
+                        ax.loglog([int(r["n"]) for r in vals], [float(r["median_ms"]) for r in vals],
+                                  marker="o", linestyle=style, color=colors[(framework, tier)],
+                                  label="{} {} ({})".format(framework, tier, transfers))
             ax.set(title="{} — {}".format(name, mode), xlabel="trajectories", ylabel="median ms")
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
@@ -234,12 +242,15 @@ def plots(root, summaries, metrics, work_rows):
             for framework, tier in (("julia", "fixed" if mode == "fixed" else "julia"),
                                     ("cubie", "fixed" if mode == "fixed" else "default"),
                                     ("cubie", "pi")):
-                vals = [r for r in work_rows if r["algorithm"] == name and r["mode"] == mode and
-                        r["framework"] == framework and r["tier"] == tier]
-                if vals:
-                    vals.sort(key=lambda r: float(r["median_ms"]))
-                    ax.loglog([float(r["median_ms"]) for r in vals], [float(r["golden_rmse"]) for r in vals],
-                              marker="o", color=colors[(framework, tier)], label="{} {}".format(framework, tier))
+                for transfers, style in (("both", "-"), ("none", "--")):
+                    vals = [r for r in work_rows if r["algorithm"] == name and r["mode"] == mode and
+                            r["framework"] == framework and r["tier"] == tier and
+                            r["transfers"] == transfers]
+                    if vals:
+                        vals.sort(key=lambda r: float(r["median_ms"]))
+                        ax.loglog([float(r["median_ms"]) for r in vals], [float(r["golden_rmse"]) for r in vals],
+                                  marker="o", linestyle=style, color=colors[(framework, tier)],
+                                  label="{} {} ({})".format(framework, tier, transfers))
             ax.set(title="{} — {}".format(name, mode), xlabel="median runtime (ms)", ylabel="golden RMSE")
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
@@ -276,16 +287,17 @@ def main():
     orders = observed_orders(valid_metrics)
     boosts = speedups(summaries)
     work_rows = work_precision_rows(summaries, valid_metrics)
-    write_rows(root / "timing_summary.csv", ["framework", "algorithm", "phase", "mode", "tier", "n",
+    write_rows(root / "timing_summary.csv", ["framework", "algorithm", "phase", "mode", "tier", "transfers", "n",
                "setting_kind", "setting", "samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms"], summaries)
     write_rows(root / "numerical_comparisons.csv", ["algorithm", "mode", "cubie_tier", "n", "setting_kind",
                "setting", "mutual_rmse", "mutual_p99_abs", "mutual_max_abs", "finite_pairs", "failed_pairs"], comparisons)
     write_rows(root / "observed_orders.csv", ["framework", "algorithm", "tier", "observed_order", "usable_intervals"], orders)
-    write_rows(root / "speedups.csv", ["algorithm", "phase", "mode", "cubie_tier", "n", "setting_kind", "setting",
+    write_rows(root / "speedups.csv", ["algorithm", "phase", "mode", "cubie_tier", "transfers", "n",
+               "setting_kind", "setting",
                "cubie_median_ms", "julia_median_ms", "julia_over_cubie_speedup"], boosts)
-    write_rows(root / "work_precision.csv", ["framework", "algorithm", "mode", "tier", "n", "setting_kind",
-               "setting", "samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms", "golden_rmse",
-               "finite_trajectories", "failed_trajectories"], work_rows)
+    write_rows(root / "work_precision.csv", ["framework", "algorithm", "mode", "tier", "transfers", "n",
+               "setting_kind", "setting", "samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms",
+               "golden_rmse", "finite_trajectories", "failed_trajectories"], work_rows)
     try:
         plots(root, summaries, valid_metrics, work_rows)
         plot_note = "Plots: `plots/performance_scaling.png`, `plots/numerical_equivalence.png`, and `plots/work_precision.png`."

@@ -16,12 +16,16 @@ import sys
 import timeit
 import numpy as np
 import cubie as qb
+from numba import cuda
 from cubie.time_logger import default_timelogger
 
 default_timelogger.set_verbosity(None)
 
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
+# Timed repeats per point; min is reported.
+REPEATS = 20
+
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
@@ -179,6 +183,30 @@ def solve_fixed(blocksize=64):
     )
     return solution
 
+def solve_fixed_on_device(blocksize=64):
+    """Solve with neither transfer: device arrays in, results left on device."""
+    solution = fixed_solver.solve(
+        initial_values=d_initials,
+        parameters=d_parameters,
+        blocksize=blocksize,
+        duration=1.0,
+        on_device=True
+    )
+    cuda.synchronize()
+    return solution
+
+def solve_adaptive_on_device(blocksize=64):
+    """Solve with neither transfer: device arrays in, results left on device."""
+    solution = adaptive_solver.solve(
+        initial_values=d_initials,
+        parameters=d_parameters,
+        blocksize=blocksize,
+        duration=1.0,
+        on_device=True
+    )
+    cuda.synchronize()
+    return solution
+
 def solve_adaptive(blocksize=64):
     """Solve with adaptive time step."""
     solution = adaptive_solver.solve(
@@ -189,19 +217,26 @@ def solve_adaptive(blocksize=64):
     )
     return solution
 
-# Warm-up run (JIT compilation)
-_ = solve_fixed()
+# Uploaded once so the device-only timing excludes the h2d.
+d_initials = cuda.to_device(initials_array)
+d_parameters = cuda.to_device(parameter_array)
 
-# Benchmark with 100 repetitions
-res = timeit.repeat(lambda: solve_fixed(), setup='gc.enable()', repeat=100, number=1)
+# Warm-up runs (JIT compilation), one per timed path
+_ = solve_fixed()
+_ = solve_fixed_on_device()
+
+res = timeit.repeat(lambda: solve_fixed(), setup='gc.enable()', repeat=REPEATS, number=1)
+res_dev = timeit.repeat(lambda: solve_fixed_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
 
 best_time = min(res) * 1000  # Convert to milliseconds
-print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {best_time:.1f} ms")
+best_time_dev = min(res_dev) * 1000
+print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {best_time:.1f} ms "
+      f"({best_time_dev:.1f} ms without transfers)")
 
 # Save results
 os.makedirs("./data/CUBIE_MLIR", exist_ok=True)
 with open("./data/CUBIE_MLIR/Cubie_mlir_times_unadaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
-    file.write(f'{numberOfParameters} {best_time}\n')
+    file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
 
 # Save numerical output for 32768-trajectory run
 if numberOfParameters == 32768:
@@ -216,18 +251,21 @@ if numberOfParameters == 32768:
 # ========================================
 print(f"Running {numberOfParameters} trajectories with adaptive time-stepping...")
 
-# Warm-up run (JIT compilation)
+# Warm-up runs (JIT compilation), one per timed path
 _ = solve_adaptive()
+_ = solve_adaptive_on_device()
 
-# Benchmark with 100 repetitions
-res = timeit.repeat(lambda: solve_adaptive(), setup='gc.enable()', repeat=100, number=1)
+res = timeit.repeat(lambda: solve_adaptive(), setup='gc.enable()', repeat=REPEATS, number=1)
+res_dev = timeit.repeat(lambda: solve_adaptive_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
 
 best_time = min(res) * 1000  # Convert to milliseconds
-print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in {best_time:.1f} ms")
+best_time_dev = min(res_dev) * 1000
+print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in {best_time:.1f} ms "
+      f"({best_time_dev:.1f} ms without transfers)")
 
 # Save results
 with open("./data/CUBIE_MLIR/Cubie_mlir_times_adaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
-    file.write(f'{numberOfParameters} {best_time}\n')
+    file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
 
 if numberOfParameters == 32768:
     os.makedirs("./data/numerical", exist_ok=True)

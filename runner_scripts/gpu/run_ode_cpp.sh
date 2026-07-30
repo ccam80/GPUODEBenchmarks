@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Load modules eagerly so the first-launch cubin load stays out of timed regions.
+export CUDA_MODULE_LOADING=EAGER
+
 # Work-precision mode: `run_ode_cpp.sh wp` builds RK4 and RKCK45 once at
 # NT=32768 and runs the dt/tolerance sweeps ("Lorenz.exe 32768 wp") instead
 # of the N sweep.

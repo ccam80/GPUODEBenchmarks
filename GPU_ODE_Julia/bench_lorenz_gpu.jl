@@ -41,7 +41,8 @@ probs = map(I) do i
 
 
 
-probs = cu(probs)
+probs_host = probs      # kept so the h2d can be timed, not just the d2h
+probs = cu(probs_host)
 
 # ========================================
 # WORK-PRECISION (wp) MODE
@@ -115,7 +116,15 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     exit(0)
 end
 
+# Fixed sample count to match the other frameworks.
+const REPEATS = 20
+
 @info "Solving the problem on GPU (fixed dt)"
+# Device-only: probs already resident, results left there.
+data_dev = @benchmark begin
+    CUDA.@sync DiffEqGPU.vectorized_solve($probs, $prob, GPUTsit5(),
+                           saveat=1.0f0, save_everystep=false, dt = 0.001f0)
+end samples=REPEATS evals=1 seconds=1e9
 data = @benchmark begin
     # From my rookie reading of the DiffEqGPU "solve" wrapper, which causes 
     # the problem to run on CPU right now, the low-level function allocates
@@ -127,18 +136,20 @@ data = @benchmark begin
     # Let's assume that if it gets transferred earlier, it's made up for 
     # by Cubie pre-allocating the GPU array.
 
-    CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
+    probs_d = cu($probs_host)
+    CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs_d, $prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
                            dt = 0.001f0)
         ts = Array(sol[1])
         us = Array(sol[2])
-    end
+    end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive_$(DATASET_KEY).txt"),
          "a+") do io
-        println(io, numberOfParameters, " ", minimum(data.times) / 1e6)
+        println(io, numberOfParameters, " ", minimum(data.times) / 1e6,
+            " ", minimum(data_dev.times) / 1e6)
     end
 end
 
@@ -168,8 +179,15 @@ println("Minimum time: " * string(minimum(data.times) / 1e6) * " ms")
 println("Allocs: " * string(data.allocs))
 
 @info "Solving the problem on GPU (adaptive dt)"
+# Device-only: probs already resident, results left there.
+data_dev = @benchmark begin
+    CUDA.@sync DiffEqGPU.vectorized_asolve($probs, $prob, GPUTsit5(),
+        saveat=1.0f0, save_everystep=false,
+        reltol = 1.0f-8, abstol = 1.0f-8, dt = 0.001f0)
+end samples=REPEATS evals=1 seconds=1e9
 data = @benchmark begin 
-    CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+    probs_d = cu($probs_host)
+    CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs_d, $prob, GPUTsit5(),
         saveat=1.0f0,
         save_everystep=false,
         reltol = 1.0f-8,
@@ -179,12 +197,13 @@ data = @benchmark begin
     # to CPU, so we replicate that here to mirror the level of the other packages.
     ts = Array(sol[1])
     us = Array(sol[2])
-end
+end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
     open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(DATASET_KEY).txt"),
          "a+") do io
-        println(io, numberOfParameters, " ", minimum(data.times) / 1f6)
+        println(io, numberOfParameters, " ", minimum(data.times) / 1f6,
+            " ", minimum(data_dev.times) / 1f6)
     end
 end
 

@@ -41,7 +41,8 @@ markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
 # One benchmark curve loaded from disk.
 struct Series
     display::String
-    mode::String     # "fixed" or "adaptive"
+    mode::String       # "fixed" or "adaptive"
+    transfers::String  # "both" (h2d + kernel + d2h) or "none"
     os::String
     gpu::String
     key::String      # "<os>_<gpu>"
@@ -68,25 +69,33 @@ function collect_series(base_path, frameworks)
             data = readdlm(joinpath(dpath, fname))
             isempty(data) && continue
             order = sortperm(data[:, 1])
-            push!(series, Series(display, mode, os, gpu, "$(os)_$(gpu)",
-                                 Float64.(data[order, 1]), data[order, 2] .* 1e-3))
+            size(data, 2) == 3 || error(
+                "$(fname) has $(size(data, 2)) columns; expected 3 " *
+                "(N, time_with_transfers_ms, time_device_only_ms)")
+            ns = Float64.(data[order, 1])
+            push!(series, Series(display, mode, "both", os, gpu, "$(os)_$(gpu)",
+                                 ns, data[order, 2] .* 1e-3))
+            push!(series, Series(display, mode, "none", os, gpu, "$(os)_$(gpu)",
+                                 ns, data[order, 3] .* 1e-3))
         end
     end
     return series
 end
 
 # Draw and save one plot for the given series subset, or warn if it is empty.
-function render_plot(sel, group_label, mode_label, plots_dir, multikey)
+function render_plot(sel, group_label, mode_label, transfers_label, plots_dir, multikey)
     if isempty(sel)
-        println("Skipping empty plot: $(mode_label)_$(group_label)")
+        println("Skipping empty plot: $(mode_label)_$(transfers_label)_$(group_label)")
         return
     end
     xticks = 10 .^ round.(range(1, 7, length = 13), digits = 2)
     yticks = 10 .^ round.(range(2, -5, length = 15), digits = 2)
     gr(size = (810, 540))
     modeword = mode_label == "fixed" ? "Fixed" : mode_label == "adaptive" ? "Adaptive" : "Adaptive vs Fixed"
+    transferword = transfers_label == "both" ? "with h2d+d2h" : "device only"
     plt = plot(xaxis = :log, yaxis = :log, linewidth = 2, ylabel = "Time (s)", xlabel = "Trajectories",
-        title = "Lorenz Problem: $(modeword) time-steps ($(group_label))", legend = :topleft,
+        title = "Lorenz Problem: $(modeword) time-steps, $(transferword) ($(group_label))",
+        titlefontsize = 11, legend = :topleft,
         xticks = xticks, yticks = yticks, dpi = 600)
 
     for s in sel
@@ -98,7 +107,7 @@ function render_plot(sel, group_label, mode_label, plots_dir, multikey)
     end
 
     isdir(plots_dir) || mkpath(plots_dir)
-    outfile = joinpath(plots_dir, "Lorenz_$(mode_label)_$(group_label).png")
+    outfile = joinpath(plots_dir, "Lorenz_$(mode_label)_$(transfers_label)_$(group_label).png")
     savefig(plt, outfile)
     println("Saved $(outfile)")
 end
@@ -125,12 +134,15 @@ function main()
         push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
     end
 
-    # For each group, emit fixed-only, adaptive-only, and combined plots.
+    # Emit fixed, adaptive and combined plots per group and transfer variant.
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
-        render_plot(filter(s -> s.mode == "fixed", sel), label, "fixed", plots_dir, multikey)
-        render_plot(filter(s -> s.mode == "adaptive", sel), label, "adaptive", plots_dir, multikey)
-        render_plot(sel, label, "all", plots_dir, multikey)
+        for transfers in sort(unique(s.transfers for s in sel))
+            tsel = filter(s -> s.transfers == transfers, sel)
+            render_plot(filter(s -> s.mode == "fixed", tsel), label, "fixed", transfers, plots_dir, multikey)
+            render_plot(filter(s -> s.mode == "adaptive", tsel), label, "adaptive", transfers, plots_dir, multikey)
+            render_plot(tsel, label, "all", transfers, plots_dir, multikey)
+        end
     end
 end
 

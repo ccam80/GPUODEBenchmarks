@@ -257,9 +257,11 @@ $N = 2^{24}$, where the simulation runs for $n \in 8 \le n < N$, with
 the multiples of $4$.
 
 The data will be generated in the `data/Julia` directory, with two files
-for fixed and adaptive time-stepping simulations. The first column in
-the \".txt\" file will be the number of trajectories, and the section
-column will contain the time in milliseconds.
+for fixed and adaptive time-stepping simulations. Each \".txt\" row is
+`N time_ms time_device_only_ms`: the number of trajectories, the
+end-to-end time (h2d + solve + d2h) in milliseconds, and the same solve
+with the inputs already resident and the results left on the device.
+Every framework's timing files share this format.
 
 Additionally, to benchmark ODE solvers for other backends:
 

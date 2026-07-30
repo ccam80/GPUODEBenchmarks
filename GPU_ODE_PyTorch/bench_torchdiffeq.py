@@ -16,6 +16,9 @@ import sys
 import numpy as np
 
 numberOfParameters = int(sys.argv[1])
+# Timed repeats per point; min is reported.
+REPEATS = 20
+
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
@@ -126,14 +129,30 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
 # %%
 
 import timeit
-res = timeit.repeat(lambda: torch.vmap(solve)(parameters), repeat = 10, number = 1)
+
+parameters_host = parameters.cpu().numpy()
 
 
-# %%
-# Print the best result
+def with_transfers():
+    # .cuda() is the h2d, .cpu() the d2h.
+    p = torch.from_numpy(parameters_host).cuda()
+    out = torch.vmap(solve)(p).cpu()
+    torch.cuda.synchronize()
+    return out
 
-best_time  = min(res)*1000
-print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(numberOfParameters, best_time))
+
+def device_only():
+    # Params already resident, results left on device.
+    out = torch.vmap(solve)(parameters)
+    torch.cuda.synchronize()
+    return out
+
+
+torch.vmap(solve)(parameters); torch.cuda.synchronize()  # warmup
+best_time = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
+best_time_dev = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
+print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
+      "({:.1f} ms without transfers)".format(numberOfParameters, best_time, best_time_dev))
 
 
 # %%
@@ -141,7 +160,7 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms".format(nu
 
 os.makedirs("./data/PYTORCH", exist_ok=True)
 file = open("./data/PYTORCH/Torch_times_unadaptive_{0}.txt".format(DATASET_KEY),"a+")
-file.write('{0} {1}\n'.format(numberOfParameters, best_time))
+file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 
 # Save numerical output for 32768-trajectory run
