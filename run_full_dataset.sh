@@ -19,16 +19,24 @@
 # data files for the mode being run (see run_benchmark.sh) so a rerun starts
 # clean. Use --resume-from to continue a part-finished sweep instead.
 #
+# GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh) so a
+# framework's measured time does not depend on how hot the card was by its turn.
+# The lock needs passwordless root; without it the run proceeds unlocked and
+# reports any drift.
+#
 # Usage:
 #   ./run_full_dataset.sh                      # everything, nmax = 2^30
 #   ./run_full_dataset.sh -n 16777216          # smaller ceiling
 #   ./run_full_dataset.sh --skip-ne            # drop a stage
 #   ./run_full_dataset.sh --resume-from jax    # restart at a framework
 #   ./run_full_dataset.sh --only overlap       # a single stage
+#   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
+#   ./run_full_dataset.sh --no-lock-clocks     # sample clocks but do not pin
 #
 # Exit code: 0 if every stage and framework succeeded, 1 if any did not.
 # A non-zero exit is expected and fine when frameworks OOM at high N; read the
-# summary table to see how far each one got.
+# summary table to see how far each one got. Clock drift during a timed stage
+# also fails the run, because those timings are not comparable.
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -44,11 +52,15 @@ OVERLAP_NMAX=""
 COOLDOWN=15
 RESUME_FROM=""
 ALLOW_UNKNOWN_GPU=false
+LOCK_CLOCKS=true
+CLOCK_TARGET=""          # "SM[,MEM]"; empty means use the per-GPU table
 
 LANGUAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 
+source ./runner_scripts/clock_guard.sh
+
 usage() {
-    sed -n '2,32p' "$0" | sed 's/^# \?//'
+    sed -n '2,40p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -89,6 +101,11 @@ while [ $# -gt 0 ]; do
         --skip-overlap) DO_OVERLAP=false; shift;;
         --skip-plots) DO_PLOTS=false; shift;;
         --allow-unknown-gpu) ALLOW_UNKNOWN_GPU=true; shift;;
+        --lock-clocks) [ $# -ge 2 ] || { echo "$1 requires SM[,MEM]"; exit 1; }
+                   CLOCK_TARGET="$2"; LOCK_CLOCKS=true; shift 2;;
+        --no-lock-clocks) LOCK_CLOCKS=false; shift;;
+        --clock-tolerance) [ $# -ge 2 ] || { echo "$1 requires a value in MHz"; exit 1; }
+                   CLOCK_TOL_MHZ="$2"; shift 2;;
         -h|--help) usage 0;;
         *) echo "Unknown option $1"; usage 1;;
     esac
@@ -119,6 +136,24 @@ LOG_DIR="logs/${DATASET_KEY}_${STAMP}"
 mkdir -p "$LOG_DIR"
 RESULTS="$LOG_DIR/summary.tsv"
 : > "$RESULTS"
+
+# ------------------------------------------------------------------ GPU clocks
+# Pin before any GPU work starts, unpin however this script exits (including
+# Ctrl-C) -- otherwise the lock persists and holds the card at that clock idle.
+CLOCK_STATUS="off"
+if $LOCK_CLOCKS; then
+    if clocks_configure "$DATASET_KEY" "$CLOCK_TARGET"; then
+        if clocks_lock; then
+            CLOCK_STATUS="locked SM=$CLOCK_SM${CLOCK_MEM:+ MEM=$CLOCK_MEM}"
+        else
+            CLOCK_STATUS="unlocked (no root) — target was SM=$CLOCK_SM"
+        fi
+    else
+        CLOCK_STATUS="unlocked (no target configured)"
+    fi
+fi
+trap 'clocks_monitor_stop; clocks_reset' EXIT INT TERM
+clocks_monitor_start "$LOG_DIR/clocks.csv" || true
 
 # data/<dir>/<prefix>_times_*.txt per framework, for the progress report.
 data_dir_for() {
@@ -155,19 +190,36 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$RESULTS"; }
 
 hr() { printf '=%.0s' {1..60}; echo; }
 
+# CLOCK_CRITICAL: the step produces a published timing, so drift makes frameworks
+# incomparable and fails the run. False for accuracy-only stages, where a slow
+# clock costs wall time only. CLOCK_CHECK=false drops a step from the report, for
+# steps that touch no GPU.
+CLOCK_CRITICAL=true
+CLOCK_CHECK=true
+CLOCK_FAILURES=0
+STEP_LABEL=""
+
 # Run one labelled step, tee'd to its own log, never aborting the outer run.
 run_step() {
     local label="$1" logfile="$2"; shift 2
-    local start end status
+    local start end status cstart cend
     hr; echo "[$(date -u +%H:%M:%SZ)] $label"; hr
     start=$(date +%s)
+    cstart="$(clocks_stamp)"
     "$@" 2>&1 | tee "$LOG_DIR/$logfile"
     status=${PIPESTATUS[0]}
+    cend="$(clocks_stamp end)"
     end=$(date +%s)
     if [ "$status" -eq 0 ]; then
         echo "✓ $label  ($((end - start))s)"
     else
         echo "✗ $label failed with exit $status  ($((end - start))s) — continuing"
+    fi
+    # The sampler runs for the whole run; this reads back the slice this step
+    # occupied.
+    if $CLOCK_CHECK; then
+        clocks_check "$cstart" "$cend" "${STEP_LABEL:-$label}" "$CLOCK_CRITICAL" \
+            || CLOCK_FAILURES=$((CLOCK_FAILURES + 1))
     fi
     return "$status"
 }
@@ -177,6 +229,7 @@ echo "nmax        : $NMAX"
 echo "Overlap     : profile=$OVERLAP_PROFILE nmax=$OVERLAP_NMAX"
 echo "Log dir     : $LOG_DIR"
 echo "Stages      : perf=$DO_PERF wp=$DO_WP ne=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
+echo "Clocks      : $CLOCK_STATUS"
 [ -n "$RESUME_FROM" ] && echo "Resume from : $RESUME_FROM"
 echo
 
@@ -190,6 +243,10 @@ echo
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "git_dirty=$(test -n "$(git status --porcelain 2>/dev/null)" && echo yes || echo no)"
     echo "host=$(uname -a)"
+    echo "clocks=$CLOCK_STATUS"
+    echo "clock_target_sm=${CLOCK_SM:-none}"
+    echo "clock_target_mem=${CLOCK_MEM:-none}"
+    echo "clock_tolerance_mhz=$CLOCK_TOL_MHZ"
     nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null \
         | sed 's/^/gpu=/'
 } > "$LOG_DIR/run_manifest.txt"
@@ -207,6 +264,7 @@ if $DO_PERF; then
                 continue
             fi
         fi
+        CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
             bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -n "$NMAX"
         status=$?
@@ -232,6 +290,8 @@ if $DO_WP; then
     # a missing-file error, so generate it up front rather than failing seven
     # times over.
     if [ ! -f data/numerical/golden_lorenz_32768.csv ]; then
+        # Reference generation is scored on accuracy, not speed.
+        CLOCK_CRITICAL=false; STEP_LABEL="wp:golden"
         run_step "Golden reference for work-precision" "wp_golden.log" \
             julia -t auto --project=. ./runner_scripts/golden/generate_golden.jl
         status=$?
@@ -247,6 +307,7 @@ if $DO_WP; then
 
     skipping=false
     for lang in "${LANGUAGES[@]}"; do
+        CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
             bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w
         status=$?
@@ -258,6 +319,8 @@ fi
 
 # ------------------------------------------------------ numerical equivalence
 if $DO_NE; then
+    # Equivalence is a correctness check; its clock does not have to be stable.
+    CLOCK_CRITICAL=false; STEP_LABEL="ne"
     run_step "Numerical-equivalence suite (all)" "numerical_equivalence.log" \
         bash ./run_numerical_equivalence.sh all
     status=$?
@@ -274,6 +337,7 @@ fi
 if $DO_OVERLAP; then
     PY=./GPU_ODE_CUBIE/venv/bin/python
     [ -x "$PY" ] || PY=python3
+    CLOCK_CRITICAL=true; STEP_LABEL="overlap"
     run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$OVERLAP_NMAX)" \
         "cubie_julia_overlap.log" \
         "$PY" ./run_cubie_julia_overlap.py \
@@ -287,6 +351,8 @@ fi
 
 # ---------------------------------------------------------- plots and reports
 if $DO_PLOTS; then
+    # Plotting and reporting do no timed GPU work.
+    CLOCK_CRITICAL=false; CLOCK_CHECK=false; STEP_LABEL=""
     if $DO_PERF || $PLOT_ALL; then
         run_step "Timing comparison plot" "plot_ode_comp.log" \
             julia --project=. ./runner_scripts/plot/plot_ode_comp.jl
@@ -329,14 +395,23 @@ while IFS=$'\t' read -r stage status detail _; do
 done < "$RESULTS"
 hr
 
+clocks_monitor_stop
+clocks_report && hr
+
 failures=$(awk -F'\t' '$2=="FAILED"' "$RESULTS" | wc -l)
 partials=$(awk -F'\t' '$2=="PARTIAL"' "$RESULTS" | wc -l)
 echo "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG_DIR/run_manifest.txt"
 echo "Logs: $LOG_DIR"
 echo "Data: ./data    Plots: ./plots"
+echo "Clocks: $CLOCK_STATUS  (1 Hz log in $LOG_DIR/clocks.csv)"
 [ "$partials" -gt 0 ] && echo "$partials stage(s) partial — expected when frameworks OOM at high N."
+if [ "$CLOCK_FAILURES" -gt 0 ]; then
+    echo "✗ $CLOCK_FAILURES timed stage(s) drifted. Lower the lock in $CLOCK_CONF"
+    echo "  and re-run them with --resume-from."
+fi
 if [ "$failures" -gt 0 ]; then
     echo "$failures stage(s) failed outright."
     exit 1
 fi
+[ "$CLOCK_FAILURES" -gt 0 ] && exit 1
 exit 0

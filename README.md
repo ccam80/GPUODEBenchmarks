@@ -169,6 +169,56 @@ The run refuses to start if `nvidia-smi` cannot identify the GPU, since every
 output file is keyed by `<os>_<gpu>` and the whole dataset would otherwise be
 mislabelled `unknown-gpu`; override with `--allow-unknown-gpu`.
 
+#### Clock stability
+
+A GPU on its default boost policy runs fast while cold and slower once the
+heatsink saturates, which biases a multi-hour run towards whichever framework ran
+first. The run pins the SM and memory clocks to a rate from
+`runner_scripts/gpu_clocks.conf`:
+
+```bash
+    $ ./run_full_dataset.sh --lock-clocks 1470,6801  # override the target
+    $ ./run_full_dataset.sh --lock-clocks 1470       # SM only
+    $ ./run_full_dataset.sh --no-lock-clocks         # measure but do not pin
+    $ ./run_full_dataset.sh --clock-tolerance 30     # widen the drift threshold
+```
+
+Locking needs passwordless `sudo nvidia-smi`. Without it the run continues
+unlocked, still logs and reports drift, and prints these to run by hand:
+
+```bash
+    $ sudo nvidia-smi -pm 1                 # persistence mode
+    $ sudo nvidia-smi -lgc 1470,1470        # pin the SM clock
+    $ sudo nvidia-smi -lmc 6801,6801        # pin the memory clock
+    $ sudo nvidia-smi -rgc && sudo nvidia-smi -rmc   # release both afterwards
+```
+
+The lock is released on exit, including on Ctrl-C.
+
+Heat or the power cap can override a lock mid-run, so the run samples clocks at
+1 Hz into `logs/<dataset-key>_<stamp>/clocks.csv` and checks each stage against its
+own slice afterwards, ignoring samples taken while the GPU was idle. The final
+`CLOCK STABILITY` table marks each stage:
+
+| Verdict | Meaning |
+|---|---|
+| `OK` | every busy sample within tolerance of the target |
+| `BLIP` | a stray sample off target — noted, does not fail the run |
+| `DRIFT` | sustained deviation (>1% of samples) or a throttle reason asserted |
+
+`DRIFT` in a timed stage (timing, work-precision, overlap) fails the run; re-run
+those stages with `--resume-from` after lowering the target. In the accuracy-only
+stages it is a warning.
+
+#### Calibrating a new machine
+
+```bash
+    $ python3 runner_scripts/calibrate/calibrate_clocks.py
+```
+
+Runs a 15 minute load and prints the `gpu_clocks.conf` row to paste in; the 1 Hz
+log is kept in `data/clocks/`. Runs on Linux and Windows.
+
 ### Benchmarking Julia (DiffEqGPU.jl) methods
 We will need to install CUDA.jl for benchmarking. It is the only backend
 compatible with the ODE solvers in JAX, PyTorch, and MPGOS. To do so,
