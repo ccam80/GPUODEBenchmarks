@@ -152,6 +152,13 @@ and comparison reports:
     $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
 ```
 
+**On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper
+for `run_full_dataset.ps1`:
+
+```cmd
+    > run_full_dataset.bat -n 16777216 --skip-ne
+```
+
 At high trajectory counts some frameworks will exhaust GPU memory. Each
 framework runs as its own process tree, so an OOM ends only that framework's
 sweep: the smaller-N points already written to disk are kept, the remaining N
@@ -168,6 +175,40 @@ failure. A non-zero exit is therefore expected when frameworks OOM at high N.
 The run refuses to start if `nvidia-smi` cannot identify the GPU, since every
 output file is keyed by `<os>_<gpu>` and the whole dataset would otherwise be
 mislabelled `unknown-gpu`; override with `--allow-unknown-gpu`.
+
+#### Clock stability
+
+The run pins the SM and memory clocks to the per-GPU rate in
+`runner_scripts/gpu_clocks.conf` and releases the lock on any exit, Ctrl-C
+included:
+
+```bash
+    $ ./run_full_dataset.sh --lock-clocks 1470,6801  # override the target (SM[,MEM])
+    $ ./run_full_dataset.sh --no-lock-clocks         # measure but do not pin
+    $ ./run_full_dataset.sh --clock-tolerance 30     # widen the drift threshold (MHz)
+```
+
+Locking needs passwordless `sudo nvidia-smi` (an Administrator console on
+Windows). Without it the run continues unlocked, still logs and reports what
+the clocks did, and prints the `nvidia-smi` commands to lock by hand.
+
+Heat or the power cap can override a lock mid-run, so clocks are sampled at
+1 Hz into `logs/<dataset-key>_<stamp>/clocks.csv` and each stage is checked
+against its own slice of the log, ignoring idle samples. The final
+`CLOCK STABILITY` table marks each stage `OK`, `BLIP` (a stray sample off
+target), or `DRIFT` (sustained deviation or a throttle reason asserted).
+`DRIFT` in a timed stage (timing, work-precision, overlap) fails the run —
+lower the target and re-run those stages with `--resume-from`; in the
+accuracy-only stages it is only a warning.
+
+#### Calibrating a new machine
+
+```bash
+    $ python3 runner_scripts/calibrate/calibrate_clocks.py
+```
+
+Runs a 15 minute load (Linux or Windows) and prints the `gpu_clocks.conf` row
+to paste in; the 1 Hz log is kept in `data/clocks/`.
 
 ### Benchmarking Julia (DiffEqGPU.jl) methods
 We will need to install CUDA.jl for benchmarking. It is the only backend
