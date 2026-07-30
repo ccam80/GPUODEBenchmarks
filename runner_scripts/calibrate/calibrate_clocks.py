@@ -29,8 +29,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "runner_scripts"))
 from bench_key import dataset_key                                # noqa: E402
 
-# clocks_event_reasons.active bits. GpuIdle is expected; the ones below override
-# a lock, so those samples say nothing about a sustainable rate.
+# Reason-mask bits: GpuIdle is expected, the THROTTLES bits override a lock.
 BIT_GPU_IDLE = 0x1
 THROTTLES = {0x4: "SwPowerCap", 0x8: "HwSlowdown", 0x20: "SwThermalSlowdown",
              0x40: "HwThermalSlowdown", 0x80: "HwPowerBrakeSlowdown"}
@@ -71,8 +70,6 @@ def build():
     cmd += [os.path.join(HERE, "clock_burn.cu"), "-lcublas", "-o", exe]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        # On Windows the usual cause is nvcc without cl.exe on PATH (needs a
-        # VS developer shell), which only the compiler output reveals.
         sys.exit("✗ build failed: {}\n{}".format(
             " ".join(cmd), (proc.stderr or proc.stdout).strip()))
     return exe
@@ -81,8 +78,7 @@ def build():
 def run_load(exe, csv_path):
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     with open(csv_path, "w", encoding="utf-8") as fh:
-        # One long-lived sampler, not a query per second: it cannot fall behind
-        # and leave gaps in the record.
+        # One sampler process for the whole load.
         sampler = subprocess.Popen(
             ["nvidia-smi", f"--query-gpu={FIELDS}", "--format=csv,nounits",
              "-lms", "1000"], stdout=fh, stderr=subprocess.STDOUT)
@@ -98,11 +94,7 @@ def run_load(exe, csv_path):
 
 
 def analyse(csv_path):
-    """Plateau statistics from a 1 Hz log.
-
-    Idle samples are excluded: a clock drop with no kernel running says nothing
-    about what the card sustains under load.
-    """
+    """Plateau statistics from a 1 Hz log, idle samples excluded."""
     rows = []
     with open(csv_path, newline="", encoding="utf-8", errors="replace") as fh:
         for r in csv.reader(fh):
@@ -130,9 +122,8 @@ def analyse(csv_path):
 
 
 def recommend(res):
-    """The plateau clock if it never varied and never throttled, otherwise
-    HEADROOM_PCT below the lowest sample, rounded down to a clock the card
-    offers."""
+    """Plateau clock if flat and unthrottled, else HEADROOM_PCT below the
+    minimum, rounded down to an offered clock."""
     if res["sm_min"] == res["sm_max"] and not res["throttles"]:
         return res["sm_min"], "flat plateau, no throttling — taken as-is"
     offered = sorted({int(v) for v in smi("supported-clocks=gr") if v.isdigit()},

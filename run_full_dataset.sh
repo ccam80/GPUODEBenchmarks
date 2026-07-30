@@ -19,10 +19,8 @@
 # data files for the mode being run (see run_benchmark.sh) so a rerun starts
 # clean. Use --resume-from to continue a part-finished sweep instead.
 #
-# GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh) so a
-# framework's measured time does not depend on how hot the card was by its turn.
-# The lock needs passwordless root; without it the run proceeds unlocked and
-# reports any drift.
+# GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh);
+# without passwordless root the run proceeds unlocked and reports any drift.
 #
 # Usage:
 #   ./run_full_dataset.sh                      # everything, nmax = 2^30
@@ -40,7 +38,7 @@
 # Exit code: 0 if every stage and framework succeeded, 1 if any did not.
 # A non-zero exit is expected and fine when frameworks OOM at high N; read the
 # summary table to see how far each one got. Clock drift during a timed stage
-# also fails the run, because those timings are not comparable.
+# also fails the run.
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -64,7 +62,7 @@ LANGUAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,44p' "$0" | sed 's/^# \?//'
+    sed -n '2,42p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -142,8 +140,7 @@ RESULTS="$LOG_DIR/summary.tsv"
 : > "$RESULTS"
 
 # ------------------------------------------------------------------ GPU clocks
-# Pin before any GPU work starts, unpin however this script exits (including
-# Ctrl-C) -- otherwise the lock persists and holds the card at that clock idle.
+# Pin before any GPU work starts; unpin on every exit path, including Ctrl-C.
 CLOCK_STATUS="off"
 if $LOCK_CLOCKS; then
     if clocks_configure "$DATASET_KEY" "$CLOCK_TARGET"; then
@@ -194,10 +191,7 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$RESULTS"; }
 
 hr() { printf '=%.0s' {1..60}; echo; }
 
-# CLOCK_CRITICAL: the step produces a published timing, so drift makes frameworks
-# incomparable and fails the run. False for accuracy-only stages, where a slow
-# clock costs wall time only. CLOCK_CHECK=false drops a step from the report, for
-# steps that touch no GPU.
+# CLOCK_CRITICAL: drift fails the step. CLOCK_CHECK=false skips non-GPU steps.
 CLOCK_CRITICAL=true
 CLOCK_CHECK=true
 CLOCK_FAILURES=0
@@ -219,8 +213,7 @@ run_step() {
     else
         echo "✗ $label failed with exit $status  ($((end - start))s) — continuing"
     fi
-    # The sampler runs for the whole run; this reads back the slice this step
-    # occupied.
+    # Check this step's slice of the whole-run clock log.
     if $CLOCK_CHECK; then
         clocks_check "$cstart" "$cend" "${STEP_LABEL:-$label}" "$CLOCK_CRITICAL" \
             || CLOCK_FAILURES=$((CLOCK_FAILURES + 1))

@@ -1,9 +1,6 @@
-# Clock stability guard for timed benchmarks - Windows port of clock_guard.sh.
-#
-# A GPU boosts while cold and slows once the heatsink saturates, so whichever
-# framework runs first measures faster. Pinning the clocks removes that bias, and
-# because heat or the power cap can override a lock mid-run, the run is sampled at
-# 1 Hz and each timed step checked against its own slice of the log.
+# Clock stability guard for timed benchmarks - Windows port of clock_guard.sh:
+# pin the GPU clocks, sample them at 1 Hz, and check each timed step against
+# its own slice of the log.
 #
 # Dot-sourced, not executed:
 #
@@ -16,9 +13,8 @@
 #   Test-ClockSlice <from> <to> <label> <crit>  drift verdict for one time window
 #   Show-ClockReport                          final per-step stability table
 #
-# Locking and resetting need an elevated (Administrator) console. Sampling,
-# checking and reporting do not, so an unlocked run still records what the
-# clocks did.
+# Locking and resetting need an elevated (Administrator) console; sampling,
+# checking and reporting do not.
 
 $script:ClockSm = ''             # target SM/graphics clock, MHz ('' = not configured)
 $script:ClockMem = ''            # target memory clock, MHz ('' = not locked/checked)
@@ -37,11 +33,7 @@ function Test-ClockAdmin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Apply a setting, returning $false if it did not take.
-#
-# nvidia-smi exits 0 for "Setting locked Memory clocks is not supported", printing
-# the refusal and then "All done." Trusting the exit status would leave the drift
-# check comparing every sample against a target nothing is holding.
+# Apply a setting; fail when the output shows it did not take despite exit 0.
 function Invoke-ClockApply {
     param([string[]]$SmiArgs)
     $out = (& nvidia-smi @SmiArgs 2>&1 | Out-String)
@@ -60,9 +52,7 @@ function Test-ClockSupported {
     return $false
 }
 
-# Resolve the target clocks for this machine. An explicit "sm,mem" wins over the
-# per-GPU table. Both are validated against the clocks the card offers: -lgc/-lmc
-# silently reject an unsupported value, leaving the run unlocked.
+# Resolve and validate target clocks; explicit "sm,mem" beats the per-GPU table.
 function Set-ClockTargets {
     param([string]$DatasetKey, [string]$Explicit = '')
     $gpu = $DatasetKey -replace '^[^_]*_', ''
@@ -109,9 +99,7 @@ function Set-ClockTargets {
     return $true
 }
 
-# Pin the clocks. Persistence mode goes on first so the settings survive the gap
-# between one framework's process exiting and the next one starting; on the
-# Windows WDDM driver it is not supported, and the lock alone persists anyway.
+# Pin the clocks; persistence mode first (not supported on the WDDM driver).
 function Lock-GpuClocks {
     if (-not $script:ClockSm) { return $false }
 
@@ -127,7 +115,7 @@ function Lock-GpuClocks {
 
     $script:ClockPmRestore = (& nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>$null | Select-Object -First 1)
     if (-not (Invoke-ClockApply @('-pm', '1'))) {
-        Write-Warning "Could not enable persistence mode (expected on Windows/WDDM)."
+        Write-Warning "Could not enable persistence mode."
     }
 
     if (-not (Invoke-ClockApply @('-lgc', "$($script:ClockSm),$($script:ClockSm)"))) {
@@ -136,12 +124,10 @@ function Lock-GpuClocks {
     }
     $script:ClockLocked = $true
 
-    # Some cards expose only the coarse P-state memory clocks, and some drivers
-    # refuse -lmc outright. Drop the memory clock from the drift check rather
-    # than failing the run over something that was never pinned.
+    # Drop an unlockable memory clock from the drift check instead of failing.
     if ($script:ClockMem) {
         if (-not (Invoke-ClockApply @('-lmc', "$($script:ClockMem),$($script:ClockMem)"))) {
-            Write-Warning "Could not lock the memory clock to $($script:ClockMem) MHz; left on the driver default and excluded from drift checks."
+            Write-Warning "Could not lock the memory clock to $($script:ClockMem) MHz; excluded from drift checks."
             $script:ClockMem = ''
         }
     }
@@ -167,14 +153,13 @@ function Reset-GpuClocks {
     }
 }
 
+# One sampler process for the whole run.
 function Start-ClockMonitor {
     param([string]$Csv)
     $script:ClockCsv = $Csv
     $script:ClockReportTsv = Join-Path (Split-Path -Parent $Csv) 'clock_stability.tsv'
     New-Item -ItemType File -Force -Path $script:ClockReportTsv | Out-Null
     $fields = 'timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu,clocks_event_reasons.active'
-    # One process for the whole run rather than a per-second nvidia-smi: cheaper,
-    # and it cannot fall behind and leave gaps in the record.
     try {
         $script:ClockMonitor = Start-Process -FilePath 'nvidia-smi' `
             -ArgumentList @("--query-gpu=$fields", '--format=csv,nounits', '-lms', '1000') `
@@ -202,8 +187,7 @@ function Stop-ClockMonitor {
     }
 }
 
-# Window edges for Test-ClockSlice, at whole-second resolution to bracket every
-# sample nvidia-smi stamped inside the step.
+# Whole-second window edges for Test-ClockSlice.
 function Get-ClockStamp {
     param([switch]$End)
     $now = Get-Date
@@ -212,11 +196,7 @@ function Get-ClockStamp {
     return $base
 }
 
-# Test-ClockSlice <from> <to> <label> <critical>
-#
-# Verdict for one step's slice of the log. "critical" says whether drift here
-# invalidates a published number - timed sweeps yes, accuracy-only stages no -
-# which sets warning versus error. Returns $false only for critical drift.
+# Window verdict for one step; returns $false only for critical DRIFT.
 function Test-ClockSlice {
     param([datetime]$From, [datetime]$To, [string]$Label, [bool]$Critical = $true)
     if (-not $script:ClockCsv -or -not (Test-Path $script:ClockCsv)) { return $true }
@@ -241,21 +221,18 @@ function Test-ClockSlice {
         $smNow = 0
         if (-not [int]::TryParse($f[1].Trim(), [ref]$smNow)) { continue }   # header / error text
 
-        # The event reasons are a 64-bit hex mask. 0x02 ApplicationsClocksSetting
-        # belongs to the deprecated -ac mechanism and is not asserted by -lgc;
-        # the bits below override a lock.
+        # Reason mask: 0x01 is GpuIdle; the 0xEC bits override a lock.
         $reasons = [uint64]0
         try { $reasons = [Convert]::ToUInt64(($f[6].Trim() -replace '^0[xX]', ''), 16) } catch { }
         $idle = ($reasons -band 0x1) -ne 0
-        $bad = ($reasons -band 0xEC) -ne 0   # 0x04|0x08|0x20|0x40|0x80
+        $bad = ($reasons -band 0xEC) -ne 0
 
         $n++
         $t = 0.0; $p = 0.0
         if ([double]::TryParse($f[3].Trim(), [ref]$t) -and $t -gt $tmax) { $tmax = $t }
         if ([double]::TryParse($f[4].Trim(), [ref]$p) -and $p -gt $pmax) { $pmax = $p }
 
-        # A clock drop with no kernel running cannot affect a timing, and the
-        # lock restores it before the next one. Busy samples only.
+        # Busy samples only.
         if ($idle) { continue }
         $busy++
 
@@ -273,8 +250,7 @@ function Test-ClockSlice {
 
     if ($n -eq 0) { return $true }
 
-    # Escalate on >ClockDriftPct of busy samples, and at least 3 of them: a
-    # short step has few samples, so one stray reading would otherwise fail it.
+    # DRIFT needs >ClockDriftPct of busy samples off target, and at least 3.
     $pct = 0
     if ($busy -gt 0) { $pct = [int][math]::Ceiling($drift * 100.0 / $busy) }
     $verdict = 'OK'
@@ -306,13 +282,11 @@ function Test-ClockSlice {
         }
     }
 
-    # Only a critical step fails the run.
     if ($verdict -eq 'DRIFT' -and $Critical) { return $false }
     return $true
 }
 
-# Final table, printed whether or not anything drifted. Returns $false when
-# there was nothing to report, so the caller can leave out the surrounding rule.
+# Final per-step table; returns $false when there is nothing to report.
 function Show-ClockReport {
     if (-not $script:ClockReportTsv -or -not (Test-Path $script:ClockReportTsv)) { return $false }
     $rows = Get-Content $script:ClockReportTsv

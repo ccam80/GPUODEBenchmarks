@@ -1,14 +1,8 @@
-// Sustained-load generator for GPU clock calibration.
-//
-// Built and driven by calibrate_clocks.py. A cuBLAS SGEMM loop keeps the FP32
-// pipelines busy, so the clock it settles at is a floor for lighter workloads.
-//
-// To build by hand:
+// Sustained-load generator for GPU clock calibration; built and driven by
+// calibrate_clocks.py. To build by hand:
 //   nvcc -O3 -arch=sm_75 clock_burn.cu -lcublas -o clock_burn
 //   ./clock_burn <seconds> [matrix_n]
-//
-// A small matrix_n (e.g. 256) gives a light load instead -- many tiny kernels with
-// launch gaps -- to check whether the card boosts when lightly loaded.
+// A small matrix_n (e.g. 256) gives a light load with launch gaps instead.
 
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -58,8 +52,7 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     while (elapsed < seconds) {
-        // Several GEMMs per sync so the GPU never idles waiting on the host:
-        // an idle gap would let the clock drop and pollute the measurement.
+        // Several GEMMs per sync so the GPU never idles between launches.
         for (int k = 0; k < 8; ++k) {
             cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dA, n,
                         dB, n, &beta, dC, n);

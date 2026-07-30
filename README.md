@@ -178,10 +178,8 @@ mislabelled `unknown-gpu`; override with `--allow-unknown-gpu`.
 
 #### Clock stability
 
-A GPU on its default boost policy runs fast while cold and slower once the
-heatsink saturates, biasing a multi-hour run towards whichever framework ran
-first. The run therefore pins the SM and memory clocks to the per-GPU rate in
-`runner_scripts/gpu_clocks.conf`, and releases the lock on any exit, Ctrl-C
+The run pins the SM and memory clocks to the per-GPU rate in
+`runner_scripts/gpu_clocks.conf` and releases the lock on any exit, Ctrl-C
 included:
 
 ```bash

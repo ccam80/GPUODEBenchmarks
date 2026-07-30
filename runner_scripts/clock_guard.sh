@@ -1,10 +1,6 @@
 #!/bin/bash
-# Clock stability guard for timed benchmarks.
-#
-# A GPU boosts while cold and slows once the heatsink saturates, so whichever
-# framework runs first measures faster. Pinning the clocks removes that bias, and
-# because heat or the power cap can override a lock mid-run, the run is sampled at
-# 1 Hz and each timed step checked against its own slice of the log.
+# Clock stability guard for timed benchmarks: pin the GPU clocks, sample them
+# at 1 Hz, and check each timed step against its own slice of the log.
 #
 # Sourced, not executed:
 #
@@ -17,8 +13,7 @@
 #   clocks_check <from> <to> <label> <crit>   drift report for one time window
 #   clocks_report                             final per-step stability table
 #
-# Locking and resetting need root. Sampling, checking and reporting do not, so an
-# unlocked run still records what the clocks did.
+# Locking and resetting need root; sampling, checking and reporting do not.
 
 CLOCK_SM=""              # target SM/graphics clock, MHz ("" = not configured)
 CLOCK_MEM=""             # target memory clock, MHz ("" = not locked/checked)
@@ -31,8 +26,7 @@ CLOCK_MONITOR_PID=""
 CLOCK_REPORT_TSV=""
 CLOCK_CONF="${CLOCK_CONF:-runner_scripts/gpu_clocks.conf}"
 
-# nvidia-smi for the write operations. Passwordless sudo only: a password prompt
-# halfway into an unattended run would hang it.
+# Privileged nvidia-smi; passwordless sudo only, never a password prompt.
 _clock_smi_priv() {
     if [ "$(id -u)" = 0 ]; then
         nvidia-smi "$@"
@@ -46,11 +40,7 @@ _clock_supported() {   # _clock_supported gr|mem <mhz>
         | tr -d ' ' | grep -qx "$2"
 }
 
-# Apply a setting, returning failure if it did not take.
-#
-# nvidia-smi exits 0 for "Setting locked Memory clocks is not supported", printing
-# the refusal and then "All done." Trusting the exit status would leave the drift
-# check comparing every sample against a target nothing is holding.
+# Apply a setting; fail when the output shows it did not take despite exit 0.
 _clock_apply() {
     local out rc
     out="$(_clock_smi_priv "$@" 2>&1)"; rc=$?
@@ -61,9 +51,7 @@ _clock_apply() {
     return 0
 }
 
-# Resolve the target clocks for this machine. An explicit "sm,mem" wins over the
-# per-GPU table. Both are validated against the clocks the card offers: -lgc/-lmc
-# silently reject an unsupported value, leaving the run unlocked.
+# Resolve and validate target clocks; explicit "sm,mem" beats the per-GPU table.
 clocks_configure() {
     local key="$1" explicit="${2:-}" gpu sm mem
     gpu="${key#*_}"
@@ -102,8 +90,7 @@ clocks_configure() {
     return 0
 }
 
-# Pin the clocks. Persistence mode goes on first so the settings survive the gap
-# between one framework's process exiting and the next one starting.
+# Pin the clocks; persistence mode first so settings survive between processes.
 clocks_lock() {
     [ -n "$CLOCK_SM" ] || return 1
 
@@ -126,9 +113,7 @@ clocks_lock() {
     fi
     CLOCK_LOCKED=true
 
-    # Some cards expose only the coarse P-state memory clocks, and some drivers
-    # refuse -lmc outright. Drop the memory clock from the drift check rather
-    # than failing the run over something that was never pinned.
+    # Drop an unlockable memory clock from the drift check instead of failing.
     if [ -n "$CLOCK_MEM" ]; then
         if ! _clock_apply -lmc "$CLOCK_MEM,$CLOCK_MEM"; then
             echo "⚠ Could not lock the memory clock to $CLOCK_MEM MHz; left on the" >&2
@@ -158,17 +143,13 @@ clocks_monitor_start() {
     CLOCK_CSV="$1"
     CLOCK_REPORT_TSV="$(dirname "$1")/clock_stability.tsv"
     : > "$CLOCK_REPORT_TSV"
-    # stdbuf keeps the log line-buffered: clocks_check reads it back mid-run,
-    # and a block-buffered nvidia-smi could hold a short stage's samples in
-    # memory, leaving that stage silently unchecked.
+    # Line-buffer the log so a step's slice is on disk when checked mid-run.
     local smi=(nvidia-smi
         --query-gpu=timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu,clocks_event_reasons.active
         --format=csv,nounits -lms 1000)
     command -v stdbuf >/dev/null 2>&1 && smi=(stdbuf -oL "${smi[@]}")
     "${smi[@]}" > "$CLOCK_CSV" 2>&1 &
     CLOCK_MONITOR_PID=$!
-    # One process for the whole run rather than a per-second nvidia-smi: cheaper,
-    # and it cannot fall behind and leave gaps in the record.
     sleep 1
     if ! kill -0 "$CLOCK_MONITOR_PID" 2>/dev/null; then
         echo "⚠ Clock monitor died immediately; drift will not be checked." >&2
@@ -185,10 +166,7 @@ clocks_monitor_stop() {
     CLOCK_MONITOR_PID=""
 }
 
-# nvidia-smi stamps its samples in local time as "YYYY/MM/DD HH:MM:SS.mmm",
-# which is zero-padded and therefore sorts chronologically as a plain string.
-# That is what lets the window filter below be a string comparison -- mawk has
-# no mktime(), so parsing these into epoch seconds is not portably available.
+# Zero-padded local timestamps sort chronologically as plain strings.
 clocks_stamp() {
     if [ "${1:-}" = end ]; then
         date +'%Y/%m/%d %H:%M:%S.999'
@@ -197,11 +175,7 @@ clocks_stamp() {
     fi
 }
 
-# clocks_check <from> <to> <label> <critical>
-#
-# Verdict for one step's slice of the log. "critical" (true/false) says whether
-# drift here invalidates a published number -- timed sweeps yes, accuracy-only
-# stages no -- which sets warning versus error.
+# clocks_check <from> <to> <label> <critical>: window verdict; critical DRIFT returns 1.
 clocks_check() {
     local from="$1" to="$2" label="$3" critical="${4:-true}"
     [ -n "$CLOCK_CSV" ] && [ -s "$CLOCK_CSV" ] || return 0
@@ -210,9 +184,7 @@ clocks_check() {
     local line
     line="$(awk -v from="$from" -v to="$to" -v sm="$CLOCK_SM" -v mem="$CLOCK_MEM" \
                 -v tol="$CLOCK_TOL_MHZ" -F',' '
-        # nvidia-smi reports the reasons as a 64-bit hex mask. Decode it by hand:
-        # mawk has no and()/rshift(), so take the low hex digits into an integer
-        # and test bits with integer division.
+        # Decode the low 8 hex digits of the reason mask by hand.
         function hex2dec(s,   i, n, c, d, v, start) {
             sub(/^[ \t]*0[xX]/, "", s)
             n = length(s); start = (n > 8 ? n - 7 : 1); v = 0
@@ -233,9 +205,7 @@ clocks_check() {
         {
             reasons = hex2dec($7)
             idle    = bit(reasons, 1)                  # 0x01 GpuIdle
-            # 0x02 ApplicationsClocksSetting belongs to the deprecated -ac
-            # mechanism and is not asserted by -lgc (driver 595); ignored either
-            # way. The bits below override a lock:
+            # Bits that override a lock; 0x02 (deprecated -ac) is ignored.
             bad = bit(reasons, 4) || bit(reasons, 8) \
                || bit(reasons, 32) || bit(reasons, 64) || bit(reasons, 128)
 
@@ -243,8 +213,7 @@ clocks_check() {
             if ($4 + 0 > tmax) tmax = $4 + 0
             if ($5 + 0 > pmax) pmax = $5 + 0
 
-            # A clock drop with no kernel running cannot affect a timing, and
-            # the lock restores it before the next one. Busy samples only.
+            # Busy samples only.
             if (idle) next
             busy++
 
@@ -266,8 +235,7 @@ clocks_check() {
 
     [ "${n:-0}" -gt 0 ] || return 0
 
-    # Escalate on >CLOCK_DRIFT_PCT of busy samples, and at least 3 of them: a
-    # short step has few samples, so one stray reading would otherwise fail it.
+    # DRIFT needs >CLOCK_DRIFT_PCT of busy samples off target, and at least 3.
     local pct=0 verdict="OK"
     [ "$busy" -gt 0 ] && pct=$(( (drift * 100 + busy - 1) / busy ))
     if [ "$throttled" -gt 0 ] || { [ "$pct" -gt "$CLOCK_DRIFT_PCT" ] && [ "$drift" -ge 3 ]; }; then
@@ -307,8 +275,7 @@ clocks_check() {
     return 0
 }
 
-# Final table, printed whether or not anything drifted. Returns non-zero when
-# there was nothing to report, so the caller can leave out the surrounding rule.
+# Final per-step table; returns non-zero when there is nothing to report.
 clocks_report() {
     [ -n "$CLOCK_REPORT_TSV" ] && [ -s "$CLOCK_REPORT_TSV" ] || return 1
     echo

@@ -1,8 +1,6 @@
 # Windows counterpart of run_full_dataset.sh: drive the complete benchmark
 # dataset in one set-and-forget run. Same stages, flags, failure policy, logs
-# and outputs; see run_full_dataset.sh for the full description. PowerShell
-# rather than plain batch because releasing the GPU clock lock on Ctrl-C needs
-# try/finally, which cmd cannot express.
+# and outputs; see run_full_dataset.sh for the full description.
 #
 # Usage (run_full_dataset.bat forwards to this script):
 #   run_full_dataset.bat                      # everything, nmax = 2^30
@@ -15,9 +13,9 @@
 #   run_full_dataset.bat --clock-tolerance 30 # widen the drift threshold (MHz)
 #
 # Exit code: 0 if every stage and framework succeeded, 1 if any did not.
-# A non-zero exit is expected and fine when frameworks OOM at high N; read the
-# summary table to see how far each one got. Clock drift during a timed stage
-# also fails the run, because those timings are not comparable.
+# A non-zero exit is expected when frameworks OOM at high N; read the summary
+# table to see how far each one got. Clock drift during a timed stage also
+# fails the run.
 
 Set-Location $PSScriptRoot
 
@@ -43,14 +41,12 @@ $Languages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myokit_
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 21 |
+    Get-Content $PSCommandPath -TotalCount 18 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
 
-# Which plots to draw. Normally a plot is drawn only if this run regenerated
-# the data behind it, so the plot steps track DoPerf/DoWp -- except under
-# `--only plots`, which redraws everything from whatever is on disk.
+# Under --only plots, redraw everything from disk; otherwise plots track DoPerf/DoWp.
 function Set-OnlyStage {
     param([string]$Stage)
     $script:DoPerf = $false; $script:DoWp = $false; $script:DoNe = $false
@@ -93,16 +89,12 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
-# The overlap suite defaults to the same ceiling as the timing sweeps unless
-# told otherwise; it is far slower per point, so it is often worth capping.
+# The overlap suite is slower per point, so its ceiling can be capped separately.
 if (-not $OverlapNMax) { $OverlapNMax = $NMax }
 
 $DatasetKey = Get-DatasetKey
 
-# Every output file is keyed by "<os>_<gpu>". An unidentifiable GPU means
-# nvidia-smi could not talk to the driver, so the benchmarks would fail anyway
-# and the whole dataset would be mislabelled "unknown-gpu". Stop before doing
-# hours of work that has to be thrown away.
+# Refuse to key hours of output to an unidentifiable GPU.
 if ($DatasetKey -match '_unknown-gpu$' -and -not $AllowUnknownGpu) {
     Write-Host "X Could not identify the GPU - dataset key would be '$DatasetKey'."
     Write-Host "  Fix the driver, or pass --allow-unknown-gpu to run anyway."
@@ -115,10 +107,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $Results = Join-Path $LogDir 'summary.tsv'
 New-Item -ItemType File -Force -Path $Results | Out-Null
 
-# ------------------------------------------------------------------ GPU clocks
-# Pin before any GPU work starts, unpin however this script exits (including
-# Ctrl-C, via the finally below) -- otherwise the lock persists and holds the
-# card at that clock idle.
+# Pin before any GPU work starts; unpin on every exit path via the finally below.
 $ClockStatus = 'off'
 if ($LockClocks) {
     if (Set-ClockTargets $DatasetKey $ClockTarget) {
@@ -151,8 +140,7 @@ function Get-DataPrefixFor {
     }
 }
 
-# Largest N actually recorded for a framework, so a truncated sweep is visible
-# in the summary rather than silently looking like a plain failure.
+# Largest N actually recorded, so a truncated sweep is visible in the summary.
 function Get-MaxNReached {
     param([string]$Lang)
     $dir = Join-Path 'data' (Get-DataDirFor $Lang)
@@ -177,18 +165,13 @@ function Add-Record {
 
 function Write-Rule { Write-Host ('=' * 60) }
 
-# ClockCritical: the step produces a published timing, so drift makes frameworks
-# incomparable and fails the run. False for accuracy-only stages, where a slow
-# clock costs wall time only. ClockCheck=$false drops a step from the report,
-# for steps that touch no GPU.
+# ClockCritical: drift fails the step. ClockCheck=$false skips non-GPU steps.
 $ClockCritical = $true
 $ClockCheck = $true
 $ClockFailures = 0
 $StepLabel = ''
 
-# Run one labelled step, tee'd to its own log, never aborting the outer run.
-# The command line runs under cmd so .bat runners and stderr merging behave
-# identically to the bash version.
+# Run one labelled step under cmd, tee'd to its own log, never aborting the run.
 function Invoke-Step {
     param([string]$Label, [string]$LogFile, [string]$CommandLine)
     Write-Rule
@@ -205,8 +188,7 @@ function Invoke-Step {
     } else {
         Write-Host "X $Label failed with exit $status  (${elapsed}s) - continuing"
     }
-    # The sampler runs for the whole run; this reads back the slice this step
-    # occupied.
+    # Check this step's slice of the whole-run clock log.
     if ($script:ClockCheck) {
         $stepName = $Label
         if ($script:StepLabel) { $stepName = $script:StepLabel }
@@ -284,11 +266,7 @@ try {
 
     # --------------------------------------------------------- work-precision
     if ($DoWp) {
-        # The work-precision sweeps score every point against a Float64 golden
-        # reference. It is machine independent and generated once, but nothing
-        # else creates it -- without it *every* framework's wp run aborts
-        # immediately on a missing-file error, so generate it up front rather
-        # than failing seven times over.
+        # The golden reference is generated once up front; every wp sweep needs it.
         if (-not (Test-Path 'data\numerical\golden_lorenz_32768.csv')) {
             # Reference generation is scored on accuracy, not speed.
             $ClockCritical = $false; $StepLabel = 'wp:golden'
@@ -316,13 +294,11 @@ try {
 
     # -------------------------------------------------- numerical equivalence
     if ($DoNe) {
-        # Equivalence is a correctness check; its clock does not have to be
-        # stable.
+        # Equivalence is a correctness check; its clock does not have to be stable.
         $ClockCritical = $false; $StepLabel = 'ne'
         $status = Invoke-Step 'Numerical-equivalence suite (all)' 'numerical_equivalence.log' `
             'run_numerical_equivalence.bat all'
-        # Exit 2 means the suite ran but found a mismatching/divergent
-        # algorithm: a real result to inspect, not an infrastructure failure.
+        # Exit 2 means a mismatching algorithm, not an infrastructure failure.
         switch ($status) {
             0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
             2 { Add-Record 'ne' 'MISMATCH' 'see numerical_equivalence_*.md' "$status" }
@@ -338,9 +314,7 @@ try {
         $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$OverlapNMax)" `
             'cubie_julia_overlap.log' `
             "$py run_cubie_julia_overlap.py --profile $OverlapProfile --phase all --nmax $OverlapNMax"
-        # The launcher already records per-framework failures and keeps going,
-        # so a non-zero exit here means at least one worker died, not that all
-        # did.
+        # A non-zero exit means at least one worker died, not that all did.
         if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
         else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }
     }
@@ -363,8 +337,7 @@ try {
             else { Add-Record 'plot:wp' 'FAILED' '-' "$status" }
         }
 
-        # Pairwise numerical comparison needs >=2 keyed datasets; on a fresh
-        # single-machine run it will legitimately have nothing to compare.
+        # Pairwise numerical comparison needs >=2 keyed datasets.
         $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
         if (Test-Path $py) {
             $status = Invoke-Step 'Pairwise numerical comparison' 'compare_numerical.log' `
