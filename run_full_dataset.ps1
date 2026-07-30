@@ -179,7 +179,8 @@ function Invoke-Step {
     Write-Rule
     $start = Get-Date
     $cstart = Get-ClockStamp
-    cmd /c "$CommandLine 2>&1" | Tee-Object -FilePath (Join-Path $LogDir $LogFile)
+    # Out-Host keeps the tee'd lines out of the function's return value.
+    cmd /c "$CommandLine 2>&1" | Tee-Object -FilePath (Join-Path $LogDir $LogFile) | Out-Host
     $status = $LASTEXITCODE
     $cend = Get-ClockStamp -End
     $elapsed = [int]((Get-Date) - $start).TotalSeconds
@@ -249,7 +250,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                "run_benchmark.bat -l $lang -d gpu -m ode -n $NMax"
+                ".\run_benchmark.bat -l $lang -d gpu -m ode -n $NMax"
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -285,7 +286,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                "run_benchmark.bat -l $lang -d gpu -m ode -w"
+                ".\run_benchmark.bat -l $lang -d gpu -m ode -w"
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
@@ -297,7 +298,7 @@ try {
         # Equivalence is a correctness check; its clock does not have to be stable.
         $ClockCritical = $false; $StepLabel = 'ne'
         $status = Invoke-Step 'Numerical-equivalence suite (all)' 'numerical_equivalence.log' `
-            'run_numerical_equivalence.bat all'
+            '.\run_numerical_equivalence.bat all'
         # Exit 2 means a mismatching algorithm, not an infrastructure failure.
         switch ($status) {
             0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
