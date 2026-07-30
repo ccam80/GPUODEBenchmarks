@@ -337,13 +337,14 @@ try {
             else { Add-Record 'plot:wp' 'FAILED' '-' "$status" }
         }
 
-        # Pairwise numerical comparison needs >=2 keyed datasets.
+        # Exit 3 is "nothing to compare"; any other non-zero is a real failure.
         $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
         if (Test-Path $py) {
             $status = Invoke-Step 'Pairwise numerical comparison' 'compare_numerical.log' `
                 "$py compare_numerical_results.py"
             if ($status -eq 0) { Add-Record 'compare:pairwise' 'OK' '-' "$status" }
-            else { Add-Record 'compare:pairwise' 'SKIPPED/FAILED' 'needs >=2 datasets' "$status" }
+            elseif ($status -eq 3) { Add-Record 'compare:pairwise' 'SKIPPED' 'needs >=2 keyed datasets' "$status" }
+            else { Add-Record 'compare:pairwise' 'FAILED' '-' "$status" }
         } else {
             Add-Record 'compare:pairwise' 'SKIPPED' 'cubie venv missing' '-'
         }

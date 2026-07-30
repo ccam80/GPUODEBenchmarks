@@ -216,9 +216,10 @@ def main():
         print(f"✓ Loaded {fname} - package={package}, os={os_name}, gpu={gpu}, shape: {arr.shape}")
 
     if len(datasets) < 2:
-        print(f"\nERROR: Need at least 2 keyed datasets to compare. Found {len(datasets)}.")
+        # Exit 3, not 1, so callers can tell this from a real failure.
+        print(f"\nNothing to compare: found {len(datasets)} keyed dataset(s), need at least 2.")
         print("Expected files like <package>_<os>_<gpu>.csv (run benchmarks with 32768 trajectories).")
-        sys.exit(1)
+        sys.exit(3)
 
     # Build the analysis groups: everything combined, one per os, one per gpu.
     oses = sorted({d["os"] for d in datasets})
