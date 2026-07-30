@@ -5,14 +5,21 @@
 # make, this script enters the Visual Studio developer environment (located
 # via vswhere) and invokes nvcc directly with the Makefile's flags.
 param(
-    [Parameter(Mandatory=$true)]
-    [int]$MaxA,
-    # Work-precision mode: build RK4 and RKCK45 once at NT=32768 and run the
-    # dt/tolerance sweeps ("Lorenz.exe 32768 wp") instead of the N sweep.
+    # Upper bound of the N sweep, or the literal "wp" for work-precision mode.
+    [Parameter(Position=0)]
+    [string]$MaxA,
+    # Work-precision mode: build RK4 and RKCK45 at NT=32768 and sweep dt/tolerance.
     [switch]$Wp
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($MaxA -eq 'wp') { $Wp = $true }
+
+[int]$MaxTrajectories = 0
+if (-not $Wp -and -not [int]::TryParse($MaxA, [ref]$MaxTrajectories)) {
+    Write-Error "Usage: run_ode_cpp.ps1 <max-trajectories> | wp"
+}
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 $env:CUDA_MODULE_LOADING = 'EAGER'
@@ -79,7 +86,7 @@ if ($Wp) {
 
 $a = 8
 
-while ($a -le $MaxA) {
+while ($a -le $MaxTrajectories) {
     Write-Host $a
 
     # Read the file content
