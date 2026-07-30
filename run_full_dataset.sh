@@ -32,6 +32,10 @@
 #   ./run_full_dataset.sh --only overlap       # a single stage
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
 #   ./run_full_dataset.sh --no-lock-clocks     # sample clocks but do not pin
+#   ./run_full_dataset.sh --clock-tolerance 30 # widen the drift threshold (MHz)
+#
+# On Windows, run_full_dataset.bat (a wrapper for run_full_dataset.ps1) takes
+# the same flags.
 #
 # Exit code: 0 if every stage and framework succeeded, 1 if any did not.
 # A non-zero exit is expected and fine when frameworks OOM at high N; read the
@@ -60,7 +64,7 @@ LANGUAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,40p' "$0" | sed 's/^# \?//'
+    sed -n '2,44p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
