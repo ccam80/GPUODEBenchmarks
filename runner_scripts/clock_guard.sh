@@ -158,9 +158,14 @@ clocks_monitor_start() {
     CLOCK_CSV="$1"
     CLOCK_REPORT_TSV="$(dirname "$1")/clock_stability.tsv"
     : > "$CLOCK_REPORT_TSV"
-    nvidia-smi \
-        --query-gpu=timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu,clocks_event_reasons.active \
-        --format=csv,nounits -lms 1000 > "$CLOCK_CSV" 2>&1 &
+    # stdbuf keeps the log line-buffered: clocks_check reads it back mid-run,
+    # and a block-buffered nvidia-smi could hold a short stage's samples in
+    # memory, leaving that stage silently unchecked.
+    local smi=(nvidia-smi
+        --query-gpu=timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu,clocks_event_reasons.active
+        --format=csv,nounits -lms 1000)
+    command -v stdbuf >/dev/null 2>&1 && smi=(stdbuf -oL "${smi[@]}")
+    "${smi[@]}" > "$CLOCK_CSV" 2>&1 &
     CLOCK_MONITOR_PID=$!
     # One process for the whole run rather than a per-second nvidia-smi: cheaper,
     # and it cannot fall behind and leave gaps in the record.
@@ -313,6 +318,6 @@ clocks_report() {
     local label verdict n busy drift devworst minsm memdrift throttled peak
     while IFS=$'\t' read -r label verdict n busy drift devworst minsm memdrift throttled peak; do
         printf '%-26s %-7s %8s %8s %9s %10s\n' \
-            "$label" "$verdict" "$busy" "$drift" "-${devworst}MHz" "$peak"
+            "$label" "$verdict" "$busy" "$drift" "${devworst}MHz" "$peak"
     done < "$CLOCK_REPORT_TSV"
 }

@@ -69,8 +69,12 @@ def build():
     if cap and re.match(r"\d+\.\d+", cap[0]):
         cmd.append("-arch=sm_" + cap[0].replace(".", ""))
     cmd += [os.path.join(HERE, "clock_burn.cu"), "-lcublas", "-o", exe]
-    if subprocess.run(cmd, capture_output=True, text=True).returncode != 0:
-        sys.exit(f"✗ build failed: {' '.join(cmd)}")
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        # On Windows the usual cause is nvcc without cl.exe on PATH (needs a
+        # VS developer shell), which only the compiler output reveals.
+        sys.exit("✗ build failed: {}\n{}".format(
+            " ".join(cmd), (proc.stderr or proc.stdout).strip()))
     return exe
 
 
