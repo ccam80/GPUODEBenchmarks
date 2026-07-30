@@ -116,9 +116,7 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     exit(0)
 end
 
-# Fixed sample count so the statistical basis matches the other frameworks;
-# BenchmarkTools otherwise runs to a 5 s budget, over-sampling at small N and
-# collapsing to a couple of samples at large N.
+# Fixed sample count to match the other frameworks.
 const REPEATS = 20
 
 @info "Solving the problem on GPU (fixed dt)"

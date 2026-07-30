@@ -28,9 +28,7 @@ MODEL_PATH = Path(__file__).resolve().parent / "models" / "lorenz.cellml"
 DATASET_KEY = dataset_key()
 STANDARD_DT = 0.001
 STANDARD_STEPS = 1000
-# Timed repeats per point; min is reported. Measured on an RTX 2060 SUPER at
-# N=32768, dropping 100 -> 20 costs a median 0.8% higher reported time
-# (worst 8% on cubie's transfer-path series) for a 5x shorter sweep.
+# Timed repeats per point; min is reported.
 REPEATS = 20
 
 
@@ -63,8 +61,7 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
         )
 
     def restore():
-        # Untimed: solve_on_device integrates in place, so every timed run has
-        # to start from the same state the host path starts from.
+        # Untimed: reset the integrated-in-place state between timed runs.
         device_states[...] = pristine
 
     run_on_device()

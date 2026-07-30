@@ -134,9 +134,7 @@ function main()
         push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
     end
 
-    # For each group and each transfer variant, emit fixed-only, adaptive-only
-    # and combined plots. The two variants never share a figure: mixing an
-    # end-to-end curve with a device-only one invites reading it as one series.
+    # Emit fixed, adaptive and combined plots per group and transfer variant.
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
         for transfers in sort(unique(s.transfers for s in sel))

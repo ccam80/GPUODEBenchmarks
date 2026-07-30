@@ -200,8 +200,7 @@ int main(int argc, char *argv[])
 				ScanLorenz.Solve();
 				ScanLorenz.InsertSynchronisationPoint();
 				ScanLorenz.SynchroniseSolver();
-				// ActualState only: All would also copy the NDO dense-output
-				// registers, which no other package stores or transfers.
+				// ActualState only: All would also copy the NDO dense-output registers.
 				ScanLorenz.SynchroniseFromDeviceToHost(ActualState);
 				ScanLorenz.SynchroniseDevice();
 				auto T1 = std::chrono::steady_clock::now();
@@ -209,9 +208,6 @@ int main(int argc, char *argv[])
 				cudaError_t WpErr = cudaGetLastError();
 				if (WpErr != cudaSuccess)
 				{
-					// Same policy as the N sweep: a failed launch makes the
-					// timing and the error metric meaningless, so stop rather
-					// than record the row and exit 0.
 					cerr << "CUDA launch error: " << cudaGetErrorString(WpErr) << endl;
 					cerr << "No wp row recorded for setting = " << Setting << "." << endl;
 					return 1;
@@ -241,14 +237,10 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Minimum of repeated solves, discarding r == 0. The runners export
-	// CUDA_MODULE_LOADING=EAGER, which removes the lazy-load cost that otherwise
-	// lands on the first launches (1.14 ms decaying to 0.158 ms over three solves
-	// at NT=8). 20 matches every other framework in this suite.
+	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
 	const int TimingRepeats = 20;
 
-	// Device-only: the kernel with neither transfer. The h2d ahead of each run
-	// is untimed and also resets ActualTime, which Solve() advances in place.
+	// Device-only timing: the untimed h2d resets the in-place solver state.
 	double ElapsedDeviceMs = 1.0e300;
 	for (int r = 0; r <= TimingRepeats; r++)
 	{
@@ -266,8 +258,7 @@ int main(int argc, char *argv[])
 		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
 	}
 
-	// End-to-end: h2d, kernel, d2h. Only ActualState returns, matching the
-	// final-state transfer every other package times.
+	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
 	for (int r = 0; r <= TimingRepeats; r++)
 	{
@@ -286,17 +277,13 @@ int main(int argc, char *argv[])
 		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
 	}
 
-	// Untimed: the ActualTime print and SaveData need the registers the timed
-	// d2h deliberately left on the device.
+	// Untimed full d2h for the ActualTime print and SaveData.
 	ScanLorenz.SynchroniseFromDeviceToHost(All);
 	ScanLorenz.SynchroniseDevice();
 		// Check for kernel launch errors
 	cudaError_t _lastErr = cudaGetLastError();
 	if (_lastErr != cudaSuccess) {
 		std::cerr << "CUDA launch error: " << cudaGetErrorString(_lastErr) << std::endl;
-		// Exit non-zero without recording. The timings above are meaningless
-		// after a failed launch, and a zero exit would let the runner continue
-		// the N sweep writing bogus rows instead of stopping at the ceiling.
 		std::cerr << "No timing recorded for NT = " << NT << "." << std::endl;
 		return 1;
 	}

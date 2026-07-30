@@ -1,10 +1,7 @@
 #!/bin/bash
 set -e
 
-# CUDA defaults to lazy module loading, so the first kernel launch in a process
-# pays the cubin load: measured 1.14 ms against a 0.158 ms steady state at NT=8,
-# not settling until the third solve. Loading eagerly moves that cost to context
-# creation, ahead of any timed region.
+# Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
 # Work-precision mode: `run_ode_cpp.sh wp` builds RK4 and RKCK45 once at

@@ -118,7 +118,7 @@ def solve_once(solver, initials, parameters):
     start = time.perf_counter()
     solution = solver.solve(initial_values=initials, parameters=parameters,
                             blocksize=64, duration=1.0)
-    # A view: solve() already returns host buffers, so a copy would be redundant.
+    # solve() already returns host buffers; this is a host-side view.
     finals = solution.state[-1, :, :].T
     sync()
     elapsed_ms = (time.perf_counter() - start) * 1000.0

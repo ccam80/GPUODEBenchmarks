@@ -16,9 +16,7 @@ import sys
 import numpy as np
 
 numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported. Measured on an RTX 2060 SUPER at
-# N=32768, dropping 100 -> 20 costs a median 0.8% higher reported time
-# (worst 8% on cubie's transfer-path series) for a 5x shorter sweep.
+# Timed repeats per point; min is reported.
 REPEATS = 20
 
 
