@@ -366,15 +366,18 @@ if $DO_PLOTS; then
                             || record "plot:wp" "FAILED" "-" "$status"
     fi
 
-    # Pairwise numerical comparison needs >=2 keyed datasets; on a fresh
-    # single-machine run it will legitimately have nothing to compare.
+    # Exit 3 is "nothing to compare", normal on a single machine. Any other
+    # non-zero is a real failure and must count.
     PY=./GPU_ODE_CUBIE/venv/bin/python
     if [ -x "$PY" ]; then
         run_step "Pairwise numerical comparison" "compare_numerical.log" \
             "$PY" compare_numerical_results.py
         status=$?
-        [ "$status" -eq 0 ] && record "compare:pairwise" "OK" "-" "$status" \
-                            || record "compare:pairwise" "SKIPPED/FAILED" "needs >=2 datasets" "$status"
+        case "$status" in
+            0) record "compare:pairwise" "OK" "-" "$status";;
+            3) record "compare:pairwise" "SKIPPED" "needs >=2 keyed datasets" "$status";;
+            *) record "compare:pairwise" "FAILED" "-" "$status";;
+        esac
     else
         record "compare:pairwise" "SKIPPED" "cubie venv missing" "-"
     fi
