@@ -3,9 +3,15 @@
 
 Examples:
   python run_cubie_julia_overlap.py --profile full
+<<<<<<< HEAD
   python run_cubie_julia_overlap.py -a numerical -p cubie
   python run_cubie_julia_overlap.py -a performance --from-n 2048
   python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
+=======
+  python run_cubie_julia_overlap.py --phase numerical --framework cubie
+  python run_cubie_julia_overlap.py --phase performance --from-n 2048
+  python run_cubie_julia_overlap.py --algorithm kvaerno5 --framework cubie
+>>>>>>> chore/overlap-suite-cli
 
 Results land in data/cubie_julia_overlap/<dataset-key>/. A run replaces the
 rows it regenerates and leaves the rest. Workers record point failures and
@@ -29,8 +35,13 @@ sys.path.insert(0, str(ROOT / "runner_scripts"))
 sys.path.insert(0, str(SUITE))
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
+<<<<<<< HEAD
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
     phases_for, prune_csv,
+=======
+    FAILURE_FIELDS, METRIC_FIELDS, PHASES, TIMING_FIELDS, algorithm_names,
+    prune_csv,
+>>>>>>> chore/overlap-suite-cli
 )
 
 CSV_KINDS = (("timings", TIMING_FIELDS), ("metrics", METRIC_FIELDS),
@@ -59,7 +70,11 @@ def parser():
     p.add_argument("-n", "--nmax", type=int, default=16_777_216,
                    help="Largest performance N; values are 8*4^k not exceeding this value.")
     p.add_argument("--from-n", type=int, default=0,
+<<<<<<< HEAD
                    help="Continue the performance analysis at this N; rows below it are kept.")
+=======
+                   help="Continue the performance leg at this N; rows below it are kept.")
+>>>>>>> chore/overlap-suite-cli
     p.add_argument("--algorithm", choices=algorithm_names(), default="all",
                    help="Run one algorithm; the others keep their existing rows.")
     return p
@@ -78,7 +93,11 @@ def main():
     phases = phases_for(args.analysis)
     packages = ("julia", "cubie") if args.package == "all" else (args.package,)
     shared = ["--output", str(output), "--profile", args.profile,
+<<<<<<< HEAD
               "--analysis", args.analysis, "--nmax", str(args.nmax),
+=======
+              "--phase", args.phase, "--nmax", str(args.nmax),
+>>>>>>> chore/overlap-suite-cli
               "--from-n", str(args.from_n), "--algorithm", args.algorithm]
     commands = []
     if "julia" in packages:

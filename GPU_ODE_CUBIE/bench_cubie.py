@@ -7,6 +7,7 @@ The Lorenz ODE is integrated with fixed and adaptive time-stepping.
 Created for GPUODEBenchmarks integration
 """
 
+import gc
 import os
 import sys
 import timeit
@@ -88,24 +89,6 @@ fixed_solver = qb.Solver(
     time_logging_level=None,
 )
 
-adaptive_solver = qb.Solver(
-    lorenz_system,
-    algorithm='tsit5',
-    atol=1e-08,
-    rtol=1e-08,
-    save_every=1.0,
-    dt_min=1e-12,
-    dt_max=1e3,
-    step_controller='pid',
-    kp=6/5,
-    kd=0.0,
-    ki=0.0,
-    max_gain=5.0,
-    min_gain=0.1,
-    output_types=['state'],
-    time_logging_level=None,
-)
-
 initials_array, parameter_array = fixed_solver.build_grid(
         initial_values=initial_conditions, parameters=parameters)
 
@@ -122,6 +105,8 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
     if numberOfParameters != N_WP:
         sys.exit("wp mode must be run with N = {0}".format(N_WP))
     golden = load_golden()
+    # Grid built; one solver at a time from here.
+    fixed_solver.close()
 
     def bench_solver(solver, repeats=20):
         def run():
@@ -146,6 +131,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
             t_ms, err = bench_solver(solver)
             print(f"wp fixed dt={dt:g}: {t_ms:.2f} ms, err={err:.3e}")
             f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
+            solver.close()
 
     with open(wp_outfile("CUBIE", "Cubie", "adaptive", DATASET_KEY), "w") as f:
         for tol in TOLS:
@@ -158,6 +144,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
             t_ms, err = bench_solver(solver)
             print(f"wp adaptive tol={tol:g}: {t_ms:.2f} ms, err={err:.3e}")
             f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
+            solver.close()
 
     sys.exit(0)
 
@@ -186,28 +173,6 @@ def solve_fixed_on_device(blocksize=64):
         on_device=True
     )
     cuda.synchronize()
-    return solution
-
-def solve_adaptive_on_device(blocksize=64):
-    """Solve with neither transfer: device arrays in, results left on device."""
-    solution = adaptive_solver.solve(
-        initial_values=d_initials,
-        parameters=d_parameters,
-        blocksize=blocksize,
-        duration=1.0,
-        on_device=True
-    )
-    cuda.synchronize()
-    return solution
-
-def solve_adaptive(blocksize=64):
-    """Solve with adaptive time step."""
-    solution = adaptive_solver.solve(
-        initial_values=initials_array,
-        parameters=parameter_array,
-        blocksize=blocksize,
-        duration=1.0
-    )
     return solution
 
 # Uploaded once so the device-only timing excludes the h2d.
@@ -242,6 +207,52 @@ if numberOfParameters == 32768:
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
 # ========================================
+
+# One solver at a time: the fixed solver is released first.
+fixed_solver.close()
+del fixed_solver
+gc.collect()
+
+adaptive_solver = qb.Solver(
+    lorenz_system,
+    algorithm='tsit5',
+    atol=1e-08,
+    rtol=1e-08,
+    save_every=1.0,
+    dt_min=1e-12,
+    dt_max=1e3,
+    step_controller='pid',
+    kp=6/5,
+    kd=0.0,
+    ki=0.0,
+    max_gain=5.0,
+    min_gain=0.1,
+    output_types=['state'],
+    time_logging_level=None,
+)
+
+def solve_adaptive(blocksize=64):
+    """Solve with adaptive time step."""
+    solution = adaptive_solver.solve(
+        initial_values=initials_array,
+        parameters=parameter_array,
+        blocksize=blocksize,
+        duration=1.0
+    )
+    return solution
+
+def solve_adaptive_on_device(blocksize=64):
+    """Solve with neither transfer: device arrays in, results left on device."""
+    solution = adaptive_solver.solve(
+        initial_values=d_initials,
+        parameters=d_parameters,
+        blocksize=blocksize,
+        duration=1.0,
+        on_device=True
+    )
+    cuda.synchronize()
+    return solution
+
 print(f"Running {numberOfParameters} trajectories with adaptive time-stepping...")
 
 # Warm-up runs (JIT compilation), one per timed path
