@@ -7,6 +7,7 @@ python run_cubie_julia_overlap.py --profile full
 python run_cubie_julia_overlap.py --phase performance --nmax 16777216
 python run_cubie_julia_overlap.py --phase numerical --framework cubie
 python run_cubie_julia_overlap.py --phase performance --from-n 2048
+python run_cubie_julia_overlap.py --algorithm kvaerno5 --framework cubie
 ```
 
 Results are written to `data/cubie_julia_overlap/<dataset-key>/`, one
@@ -15,13 +16,12 @@ the rest:
 
 - `--phase` selects the leg: `performance`, `numerical`, `work_precision`, `all`.
 - `--framework` selects the package: `cubie`, `julia`, `both`.
-- `--from-n` continues the performance leg at that N, keeping the rows below it.
-- `--profile smoke` runs a reduced protocol across all five algorithms and every
-  metric family; `--profile full` runs the published protocol.
+- `--from-n` restarts the performance leg at that N; lower-N rows stay.
+- `--algorithm` runs one row of `algorithms.csv`; other rows stay.
+- `--profile` picks the protocol size: `smoke` or `full`.
 - `--nmax` caps the performance leg.
 
-`manifest.json` records the commands of the last run. Protocol settings — dt,
-tolerance, repeat counts, and the dt/tolerance grids — are constants in
+`manifest.json` records the commands of the last run. Protocol settings live in
 `common.py`, mirrored in `julia_worker.jl`.
 
 The executable overlap table is `algorithms.csv`. The complete eight-method

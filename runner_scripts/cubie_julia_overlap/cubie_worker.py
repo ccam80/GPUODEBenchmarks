@@ -46,6 +46,7 @@ def parse_args():
     parser.add_argument("--phase", choices=PHASES + ("all",), default="all")
     parser.add_argument("--nmax", type=int, default=16_777_216)
     parser.add_argument("--from-n", type=int, default=0)
+    parser.add_argument("--algorithm", default="all")
     return parser.parse_args()
 
 
@@ -180,7 +181,7 @@ def main():
         })
         print("FAILED cubie {} {} {} {}={}: {}".format(algorithm, phase, mode, setting_kind, setting, exc), flush=True)
 
-    for row in algorithms():
+    for row in algorithms(args.algorithm):
         alias, order = row["cubie_alias"], row["order"]
         for phase in phases:
             if phase == "performance":
