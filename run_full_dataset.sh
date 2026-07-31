@@ -113,6 +113,8 @@ else
     echo "Unknown package '$PACKAGE' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
     exit 1
 fi
+# The overlap suite defaults to the same ceiling as the timing sweeps.
+[ -n "$OVERLAP_NMAX" ] || OVERLAP_NMAX="$NMAX"
 
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
 

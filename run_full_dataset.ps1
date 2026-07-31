@@ -94,6 +94,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
+<<<<<<< HEAD
 if ($Package -eq 'all') {
     $Languages = $AllPackages
 } elseif ($AllPackages -contains $Package) {
@@ -102,6 +103,10 @@ if ($Package -eq 'all') {
     Write-Host "Unknown package '$Package' (all|$($AllPackages -join '|'))"
     exit 1
 }
+=======
+# The overlap suite defaults to the same ceiling as the timing sweeps.
+if (-not $OverlapNMax) { $OverlapNMax = $NMax }
+>>>>>>> chore/overlap-suite-cli
 
 $DatasetKey = Get-DatasetKey
 
