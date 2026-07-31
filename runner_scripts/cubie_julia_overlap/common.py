@@ -39,12 +39,20 @@ FAILURE_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
                   "setting_kind", "setting", "error_type", "message"]
 
 
-def algorithms():
+def algorithms(name="all"):
     with ALGORITHMS_CSV.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
         row["order"] = int(row["order"])
+    if name != "all":
+        rows = [row for row in rows if row["cubie_alias"] == name]
+        if not rows:
+            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
     return rows
+
+
+def algorithm_names():
+    return ["all"] + [row["cubie_alias"] for row in algorithms()]
 
 
 def performance_ns(nmax, from_n=0):
@@ -91,8 +99,10 @@ def ensure_csv(path, fields):
     return path
 
 
-def regenerated(row, phases, from_n=0):
+def regenerated(row, phases, from_n=0, algorithm="all"):
     """True when a run over `phases` will produce this row again."""
+    if algorithm != "all" and row.get("algorithm") != algorithm:
+        return False
     if row.get("phase") not in phases:
         return False
     if not from_n or row.get("phase") != "performance":
@@ -103,15 +113,16 @@ def regenerated(row, phases, from_n=0):
         return True
 
 
-def prune_csv(path, fields, phases, from_n=0):
+def prune_csv(path, fields, phases, from_n=0, algorithm="all"):
     """Drop the rows a run over `phases` regenerates; keep the rest.
 
-    With from_n set, only performance rows at N >= from_n are dropped.
+    With from_n set, only performance rows at N >= from_n are dropped. With
+    algorithm set, only that algorithm's rows are dropped.
     """
     path = ensure_csv(path, fields)
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    kept = [row for row in rows if not regenerated(row, phases, from_n)]
+    kept = [row for row in rows if not regenerated(row, phases, from_n, algorithm)]
     if len(kept) == len(rows):
         return 0
     with path.open("w", newline="", encoding="utf-8") as handle:

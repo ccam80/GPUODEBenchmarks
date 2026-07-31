@@ -7,6 +7,7 @@ python run_cubie_julia_overlap.py --profile full
 python run_cubie_julia_overlap.py --phase performance --nmax 16777216
 python run_cubie_julia_overlap.py --phase numerical --framework cubie
 python run_cubie_julia_overlap.py --phase performance --from-n 2048
+python run_cubie_julia_overlap.py --algorithm kvaerno5 --framework cubie
 ```
 
 Results are written to `data/cubie_julia_overlap/<dataset-key>/`, one
@@ -16,6 +17,7 @@ the rest:
 - `--phase` selects the leg: `performance`, `numerical`, `work_precision`, `all`.
 - `--framework` selects the package: `cubie`, `julia`, `both`.
 - `--from-n` continues the performance leg at that N, keeping the rows below it.
+- `--algorithm` runs one row of `algorithms.csv`; the others keep their rows.
 - `--profile smoke` runs a reduced protocol across all five algorithms and every
   metric family; `--profile full` runs the published protocol.
 - `--nmax` caps the performance leg.

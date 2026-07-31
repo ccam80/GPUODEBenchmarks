@@ -40,6 +40,7 @@ const PROFILE = get(OPT, "profile", "smoke")
 const PHASE = get(OPT, "phase", "all")
 const NMAX = parse(Int, get(OPT, "nmax", "16777216"))
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
+const ALGORITHM = get(OPT, "algorithm", "all")
 
 mkpath(OUT)
 
@@ -209,6 +210,10 @@ end
 const POINT_FAILURE_COUNT = Ref(0)
 
 table = collect(CSV.File(joinpath(HERE, "algorithms.csv")))
+if ALGORITHM != "all"
+    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
+    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+end
 phases = PHASE == "all" ? ("performance", "numerical", "work_precision") : (PHASE,)
 
 for row in table
