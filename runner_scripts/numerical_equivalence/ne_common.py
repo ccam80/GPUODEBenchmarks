@@ -66,7 +66,7 @@ JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
 CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
 
 
-def load_algorithms():
+def load_algorithms(name="all"):
     """Return the mutual algorithm table as a list of dicts.
 
     Keys: ``cubie_alias``, ``julia_expr``, ``order`` (int), ``family``,
@@ -79,7 +79,15 @@ def load_algorithms():
     for row in rows:
         row["order"] = int(row["order"])
         row["exact"] = row["exact"].strip().lower() == "true"
+    if name != "all":
+        rows = [row for row in rows if row["cubie_alias"] == name]
+        if not rows:
+            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
     return rows
+
+
+def algorithm_names():
+    return ["all"] + [row["cubie_alias"] for row in load_algorithms()]
 
 
 def load_golden_ne():

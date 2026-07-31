@@ -6,11 +6,13 @@ REM DifferentialEquations.jl Float32 reference sweeps, cubie Float32 sweeps,
 REM and the comparison report + plots.
 REM   -p, --package     all (default) | julia | cubie
 REM   --controller      all (default) | fixed | adaptive
+REM   --algorithm       all (default) | a cubie alias from algorithms.csv
 
 pushd "%~dp0"
 
 set PACKAGE=all
 set CONTROLLER=all
+set ALGORITHM=all
 
 :parse_loop
 if "%~1"=="" goto parse_done
@@ -32,6 +34,12 @@ if /i "%~1"=="--controller" (
     shift
     goto parse_loop
 )
+if /i "%~1"=="--algorithm" (
+    set ALGORITHM=%~2
+    shift
+    shift
+    goto parse_loop
+)
 echo Unknown option %~1
 popd
 exit /b 1
@@ -49,7 +57,7 @@ if /i not "%CONTROLLER%"=="all" if /i not "%CONTROLLER%"=="fixed" if /i not "%CO
 )
 
 echo =========================================
-echo Numerical equivalence (package: %PACKAGE%, controller: %CONTROLLER%)
+echo Numerical equivalence (package: %PACKAGE%, controller: %CONTROLLER%, algorithm: %ALGORITHM%)
 echo =========================================
 
 if not exist "GPU_ODE_CUBIE\venv\Scripts\python.exe" (
