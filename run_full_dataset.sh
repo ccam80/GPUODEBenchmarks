@@ -113,8 +113,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# The overlap suite defaults to the same ceiling as the timing sweeps unless
-# told otherwise; it is far slower per point, so it is often worth capping.
+# The overlap suite defaults to the same ceiling as the timing sweeps.
 [ -n "$OVERLAP_NMAX" ] || OVERLAP_NMAX="$NMAX"
 
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
