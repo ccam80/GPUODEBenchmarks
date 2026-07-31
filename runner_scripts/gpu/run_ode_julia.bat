@@ -1,8 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
 
-REM Work-precision mode: `run_ode_julia.bat wp` sweeps dt/tolerance at N=32768.
-if /i "%~1"=="wp" (
+if /i "%ANALYSIS%"=="work-precision" (
     julia --project=. GPU_ODE_Julia\bench_lorenz_gpu.jl 32768 wp
     if errorlevel 1 exit /b 1
     endlocal
@@ -10,17 +11,13 @@ if /i "%~1"=="wp" (
 )
 
 set a=8
-set max_a=%1
-
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
-REM Print the values
-echo %a%
+echo No. of trajectories = %a%
 julia --project=. GPU_ODE_Julia\bench_lorenz_gpu.jl %a%
 if errorlevel 1 exit /b 1
 
-REM Increment the value
 set /a a=%a%*4
 goto loop
 

@@ -1,11 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
 
 call GPU_ODE_MYOKIT_CUDA\venv\Scripts\activate.bat
 
-REM Myokit CUDA exposes float32 forward Euler only. Its work-precision mode
-REM therefore writes only the fixed-step sweep.
-if /i "%~1"=="wp" (
+REM Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if /i "%ANALYSIS%"=="work-precision" (
     python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py 32768 wp
     if errorlevel 1 exit /b 1
     call deactivate
@@ -14,10 +15,8 @@ if /i "%~1"=="wp" (
 )
 
 set a=8
-set max_a=%1
-
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
 echo No. of trajectories = %a%
 python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py %a%

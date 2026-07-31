@@ -1,51 +1,45 @@
 #!/bin/bash
 set -e
+. "$(dirname "$0")/../parse_args.sh" "$@"
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
-# Work-precision mode: `run_ode_cpp.sh wp` builds RK4 and RKCK45 once at
-# NT=32768 and runs the dt/tolerance sweeps ("Lorenz.exe 32768 wp") instead
-# of the N sweep.
-if [ "$1" == "wp" ]; then
+# Solver and trajectory count are compile-time constants, so each point is a rebuild.
+set_solver() {
+	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
+	sed -i "15 i #define SOLVER $1" ./GPU_ODE_MPGOS/Lorenz.cu
+}
+set_nt() {
 	sed -i "17d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "17 i const int NT = 32768;" ./GPU_ODE_MPGOS/Lorenz.cu
-
-	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "15 i #define SOLVER RK4" ./GPU_ODE_MPGOS/Lorenz.cu
+	sed -i "17 i const int NT = $1;" ./GPU_ODE_MPGOS/Lorenz.cu
+}
+rebuild() {
 	make clean --directory=./GPU_ODE_MPGOS/
 	make --directory=./GPU_ODE_MPGOS/
-	./GPU_ODE_MPGOS/Lorenz.exe 32768 wp
+}
 
-	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "15 i #define SOLVER RKCK45" ./GPU_ODE_MPGOS/Lorenz.cu
-	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/
-	./GPU_ODE_MPGOS/Lorenz.exe 32768 wp
+if [ "$ANALYSIS" == "work-precision" ]; then
+	set_nt 32768
+	for solver in RK4 RKCK45
+	do
+		set_solver "$solver"
+		rebuild
+		./GPU_ODE_MPGOS/Lorenz.exe 32768 wp
+	done
 	exit 0
 fi
 
 a=8
-# max_a=$((2**24))
-max_a=$1
-while [ $a -le $max_a ]
+while [ $a -le $NMAX ]
 do
-    echo $a
-	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "15 i #define SOLVER RK4" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "17d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "17 i const int NT = $a;" ./GPU_ODE_MPGOS/Lorenz.cu
-
-	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/
-	./GPU_ODE_MPGOS/Lorenz.exe $a
-
-	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "15 i #define SOLVER RKCK45" ./GPU_ODE_MPGOS/Lorenz.cu
-
-	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/
-	./GPU_ODE_MPGOS/Lorenz.exe $a
-	# increment the value
+	echo "No. of trajectories = $a"
+	set_nt "$a"
+	for solver in RK4 RKCK45
+	do
+		set_solver "$solver"
+		rebuild
+		./GPU_ODE_MPGOS/Lorenz.exe $a
+	done
 	a=$((a*4))
 done

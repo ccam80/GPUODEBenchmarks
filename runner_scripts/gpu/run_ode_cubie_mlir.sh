@@ -1,27 +1,23 @@
 #!/bin/bash
 set -e
-# Activate venv
+. "$(dirname "$0")/../parse_args.sh" "$@"
 source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 
-# Pin cubie to the MLIR backend (single cubie install, backend chosen at
-# import time via this env var).
+# Cubie picks its backend from this at import time.
 export CUBIE_CUDA_BACKEND=mlir
 
-# Work-precision mode: `run_ode_cubie_mlir.sh wp` sweeps dt/tolerance at N=32768.
-if [ "$1" == "wp" ]; then
+if [ "$ANALYSIS" == "work-precision" ]; then
     python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp
     deactivate
     exit 0
 fi
 
 a=8
-max_a=$1
-while [ $a -le $max_a ]
+while [ $a -le $NMAX ]
 do
     echo "No. of trajectories = $a"
     python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py $a
     a=$((a*4))
 done
 
-# Deactivate venv
 deactivate

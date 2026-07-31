@@ -1,131 +1,75 @@
 #!/bin/bash
-
-# Script to run all GPU ODE benchmarks in sequence
-# This allows for set-and-forget benchmarking while the GPU is available
+# Generate benchmark data for every package, or one, across one or more analyses.
+#
+# Usage: ./run_all_benchmarks.sh [-p <package>] [-a <analysis>] [-n <nmax>]
+#   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+#   -a, --analysis  performance (default) | work-precision | numerical | all
+#   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
 
 # Run from the repo root regardless of the caller's working directory
 cd "$(dirname "$0")" || exit 1
 
-echo "========================================="
-echo "Starting All GPU ODE Benchmarks"
-echo "========================================="
-echo ""
+PACKAGE=all
+ANALYSIS=performance
+NMAX=16777216
 
-# Optional: Parse command line arguments for custom nmax, work-precision and
-# numerical-precision modes.
-# -w also runs the work-precision (error-vs-time) sweeps and their plot.
-# -np/--numerical-precision also runs the numerical-equivalence suite: the
-# fixed-step error-vs-dt sweeps of every algorithm mutually supported by
-# cubie and DifferentialEquations.jl (both in Float32) plus their comparison
-# report. Parsed manually because getopts cannot distinguish -np from -n.
-nmax_arg=""
-wp=false
-np=false
 while [ $# -gt 0 ]; do
     case "$1" in
-        -n) if [ $# -lt 2 ]; then echo "-n requires a value"; exit 1; fi
-            nmax_arg="-n $2"; shift 2;;
-        -w) wp=true; shift;;
-        -np|--numerical-precision) np=true; shift;;
-        *) echo "Unknown option $1"
-           echo "Usage: $0 [-n nmax] [-w] [-np|--numerical-precision]"; exit 1;;
+        -p|--package)  PACKAGE=$2; shift 2;;
+        -a|--analysis) ANALYSIS=$2; shift 2;;
+        -n|--nmax)     NMAX=$2; shift 2;;
+        -h|--help)     sed -n '2,7p' "$0" | sed 's/^# \?//'; exit 0;;
+        *) echo "Unknown option $1" >&2; exit 1;;
     esac
 done
+case "$ANALYSIS" in
+    performance|work-precision|numerical|all) ;;
+    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|numerical|all)" >&2; exit 1;;
+esac
 
-# Array of languages to benchmark
-languages=("julia" "cpp" "pytorch" "jax" "cubie" "cubie_mlir" "myokit_cuda")
+ALL_PACKAGES="julia cpp pytorch jax cubie cubie_mlir myokit_cuda"
+if [ "$PACKAGE" == "all" ]; then
+    PACKAGES="$ALL_PACKAGES"
+else
+    PACKAGES="$PACKAGE"
+fi
 
-# Run timing benchmarks for each language
-for lang in "${languages[@]}"
-do
-    echo "========================================="
-    echo "Benchmarking: $lang"
-    echo "========================================="
-
-    if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode $nmax_arg; then
-        echo ""
-        echo "✓ Successfully completed benchmarking for $lang"
-        echo ""
-    else
-        echo ""
-        echo "✗ Error occurred while benchmarking $lang"
-        echo "Continuing with next language..."
-        echo ""
-    fi
-done
-
-# Optionally run the work-precision sweeps for each language (-w).
-if $wp; then
-    for lang in "${languages[@]}"
-    do
+run_sweep() {
+    local analysis=$1
+    for pkg in $PACKAGES; do
         echo "========================================="
-        echo "Work-precision benchmarking: $lang"
+        echo "$analysis: $pkg"
         echo "========================================="
-
-        if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w; then
-            echo ""
-            echo "✓ Successfully completed work-precision benchmarking for $lang"
-            echo ""
+        if bash ./run_benchmark.sh -p "$pkg" -a "$analysis" -n "$NMAX" -d gpu -m ode; then
+            echo "Completed $analysis for $pkg"
         else
-            echo ""
-            echo "✗ Error occurred while work-precision benchmarking $lang"
-            echo "Continuing with next language..."
-            echo ""
+            echo "Error during $analysis for $pkg; continuing with the next package"
         fi
+        echo ""
     done
+}
+
+if [ "$ANALYSIS" == "performance" ] || [ "$ANALYSIS" == "all" ]; then
+    run_sweep performance
+    echo "--- Timing comparison plot ---"
+    julia --project=. ./runner_scripts/plot/plot_ode_comp.jl || echo "Timing plot failed"
 fi
 
-# Optionally run the numerical-equivalence suite (-np/--numerical-precision):
-# Float32 fixed-step error-vs-dt sweeps of every mutually supported algorithm,
-# for DifferentialEquations.jl (CPU reference) and cubie (GPU), then the
-# comparison report + plot.
-if $np; then
-    if bash ./run_numerical_equivalence.sh; then
-        echo "✓ Numerical-equivalence suite completed (all algorithms equivalent/tracking)"
-    else
-        echo "✗ Numerical-equivalence suite reported problems (see numerical_equivalence_<os>_<gpu>.md)"
-    fi
-    echo ""
+if [ "$ANALYSIS" == "work-precision" ] || [ "$ANALYSIS" == "all" ]; then
+    run_sweep work-precision
+    echo "--- Work-precision plot ---"
+    julia --project=. ./runner_scripts/plot/plot_ode_wp.jl || echo "Work-precision plot failed"
 fi
 
-echo "========================================="
-echo "All Benchmarks Completed"
-echo "========================================="
-echo ""
+if [ "$ANALYSIS" == "numerical" ] || [ "$ANALYSIS" == "all" ]; then
+    bash ./run_numerical_equivalence.sh || echo "Numerical equivalence reported problems"
+fi
 
-echo "========================================="
-echo "Generating timing comparison plot"
-echo "========================================="
-if julia --project=. ./runner_scripts/plot/plot_ode_comp.jl; then
-    echo "✓ Plot saved to ./plots"
+echo "--- Pairwise numerical comparison ---"
+if [ -f ./GPU_ODE_CUBIE/venv/bin/python3 ]; then
+    ./GPU_ODE_CUBIE/venv/bin/python3 compare_numerical_results.py || echo "Pairwise comparison failed"
+elif [ -f ./GPU_ODE_CUBIE/venv/Scripts/python.exe ]; then
+    ./GPU_ODE_CUBIE/venv/Scripts/python.exe compare_numerical_results.py || echo "Pairwise comparison failed"
 else
-    echo "✗ Error occurred while generating the timing comparison plot"
-fi
-echo ""
-
-# Work-precision plot (only meaningful when -w regenerated the wp data).
-if $wp; then
-    echo "========================================="
-    echo "Generating work-precision plot"
-    echo "========================================="
-    if julia --project=. ./runner_scripts/plot/plot_ode_wp.jl; then
-        echo "✓ Plot saved to ./plots"
-    else
-        echo "✗ Error occurred while generating the work-precision plot"
-    fi
-    echo ""
-fi
-
-echo "========================================="
-echo "Comparing numerical results"
-echo "========================================="
-if source ./GPU_ODE_CUBIE/venv/bin/activate 2>/dev/null; then
-    if python3 compare_numerical_results.py; then
-        echo "✓ Numerical comparison written to ./pairwise_comparisons.md"
-    else
-        echo "✗ Error occurred while comparing numerical results"
-    fi
-    deactivate
-else
-    echo "✗ Could not activate ./GPU_ODE_CUBIE/venv; skipping numerical comparison"
+    echo "GPU_ODE_CUBIE venv not found; skipping pairwise comparison"
 fi
