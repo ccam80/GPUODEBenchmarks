@@ -207,7 +207,8 @@ if numberOfParameters == 32768:
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
 # ========================================
-# One solver at a time: release the fixed solver before adaptive allocates.
+
+# One solver at a time: the fixed solver is released first.
 fixed_solver.close()
 del fixed_solver
 gc.collect()
