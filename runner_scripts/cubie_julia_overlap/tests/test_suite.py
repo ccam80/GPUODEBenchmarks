@@ -64,41 +64,54 @@ class ProtocolTests(unittest.TestCase):
 
 
 class PruneTests(unittest.TestCase):
-    FIELDS = ["framework", "phase", "n", "time_ms"]
+    FIELDS = ["framework", "algorithm", "phase", "n", "time_ms"]
 
     def rows(self):
         return [
-            {"framework": "cubie", "phase": "performance", "n": "8", "time_ms": "1"},
-            {"framework": "cubie", "phase": "performance", "n": "2048", "time_ms": "2"},
-            {"framework": "cubie", "phase": "numerical", "n": "1024", "time_ms": "3"},
-            {"framework": "cubie", "phase": "work_precision", "n": "32768", "time_ms": "4"},
+            {"framework": "cubie", "algorithm": "tsit5", "phase": "performance", "n": "8", "time_ms": "1"},
+            {"framework": "cubie", "algorithm": "tsit5", "phase": "performance", "n": "2048", "time_ms": "2"},
+            {"framework": "cubie", "algorithm": "tsit5", "phase": "numerical", "n": "1024", "time_ms": "3"},
+            {"framework": "cubie", "algorithm": "tsit5", "phase": "work_precision", "n": "32768", "time_ms": "4"},
+            {"framework": "cubie", "algorithm": "vern7", "phase": "performance", "n": "2048", "time_ms": "5"},
         ]
 
-    def prune(self, phases, from_n=0):
+    def prune(self, phases, from_n=0, algorithm="all"):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cubie_timings.csv"
             with path.open("w", newline="") as handle:
                 writer = csv.DictWriter(handle, fieldnames=self.FIELDS)
                 writer.writeheader()
                 writer.writerows(self.rows())
-            dropped = common.prune_csv(path, self.FIELDS, phases, from_n)
+            dropped = common.prune_csv(path, self.FIELDS, phases, from_n, algorithm)
             with path.open(newline="") as handle:
                 return dropped, list(csv.DictReader(handle))
 
     def test_one_leg_leaves_the_others(self):
         dropped, kept = self.prune(("performance",))
-        self.assertEqual(dropped, 2)
+        self.assertEqual(dropped, 3)
         self.assertEqual([r["phase"] for r in kept], ["numerical", "work_precision"])
 
     def test_all_legs_clear_every_row(self):
         dropped, kept = self.prune(common.PHASES)
-        self.assertEqual(dropped, 4)
+        self.assertEqual(dropped, 5)
         self.assertEqual(kept, [])
 
     def test_from_n_keeps_the_smaller_n(self):
         dropped, kept = self.prune(("performance",), from_n=2048)
-        self.assertEqual(dropped, 1)
+        self.assertEqual(dropped, 2)
         self.assertEqual([r["n"] for r in kept], ["8", "1024", "32768"])
+
+    def test_algorithm_filter_spares_other_algorithms(self):
+        dropped, kept = self.prune(common.PHASES, algorithm="tsit5")
+        self.assertEqual(dropped, 4)
+        self.assertEqual([r["algorithm"] for r in kept], ["vern7"])
+
+    def test_algorithm_filter_combines_with_from_n(self):
+        dropped, kept = self.prune(("performance",), from_n=2048, algorithm="tsit5")
+        self.assertEqual(dropped, 1)
+        self.assertEqual([(r["algorithm"], r["n"]) for r in kept],
+                         [("tsit5", "8"), ("tsit5", "1024"), ("tsit5", "32768"),
+                          ("vern7", "2048")])
 
     def test_missing_file_is_created_with_a_header(self):
         with tempfile.TemporaryDirectory() as tmp:
