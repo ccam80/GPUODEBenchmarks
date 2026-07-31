@@ -120,11 +120,7 @@ def regenerated(row, phases, from_n=0, algorithm="all"):
 
 
 def prune_csv(path, fields, phases, from_n=0, algorithm="all"):
-    """Drop the rows a run over `phases` regenerates; keep the rest.
-
-    With from_n set, only performance rows at N >= from_n are dropped. With
-    algorithm set, only that algorithm's rows are dropped.
-    """
+    """Drop the rows a run regenerates; from_n and algorithm narrow which."""
     path = ensure_csv(path, fields)
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))

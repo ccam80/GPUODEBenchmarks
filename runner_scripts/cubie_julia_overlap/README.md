@@ -17,13 +17,11 @@ the rest:
 - `-a, --analysis` selects the analysis: `performance`, `numerical`, `work-precision`, `all`.
 - `-p, --package` selects the package: `cubie`, `julia`, `all`.
 - `-n, --nmax` caps the performance analysis.
-- `--from-n` continues the performance analysis at that N, keeping the rows below it.
-- `--algorithm` runs one row of `algorithms.csv`; the others keep their rows.
-- `--profile smoke` runs a reduced protocol across all five algorithms and every
-  metric family; `--profile full` runs the published protocol.
+- `--from-n` restarts the performance analysis at that N; lower-N rows stay.
+- `--algorithm` runs one row of `algorithms.csv`; other rows stay.
+- `--profile` picks the protocol size: `smoke` or `full`.
 
-`manifest.json` records the commands of the last run. Protocol settings — dt,
-tolerance, repeat counts, and the dt/tolerance grids — are constants in
+`manifest.json` records the commands of the last run. Protocol settings live in
 `common.py`, mirrored in `julia_worker.jl`. The CSVs record the analysis in a
 `phase` column, where `work-precision` is written `work_precision`.
 
