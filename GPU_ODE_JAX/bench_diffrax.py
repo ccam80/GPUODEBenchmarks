@@ -28,7 +28,7 @@ REPEATS = 20
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 DATASET_KEY = dataset_key()
 
 # %%
@@ -194,18 +194,16 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
 
 # %%
 # Save the minimum time 
-os.makedirs("./data/JAX", exist_ok=True)
-file = open("./data/JAX/Jax_times_unadaptive_{0}.txt".format(DATASET_KEY),"a+")
+file = open(os.path.join(data_dir("JAX", DATASET_KEY), "Jax_times_unadaptive.txt"), "a+")
 file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 
 # Save numerical output for 32768-trajectory run
 if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
     sol = main(parameterList)
     # Extract final state values (last time point for each trajectory)
     final_states = np.array(sol.ys[:, -1, :])  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/jax_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "jax.csv"), final_states, delimiter=',')
 
 
 # %%
@@ -256,7 +254,7 @@ print("{:} ODE solves with adaptive time-stepping completed in {:.1f} ms "
 # %%
 
 
-file = open("./data/JAX/Jax_times_adaptive_{0}.txt".format(DATASET_KEY),"a+")
+file = open(os.path.join(data_dir("JAX", DATASET_KEY), "Jax_times_adaptive.txt"), "a+")
 file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 

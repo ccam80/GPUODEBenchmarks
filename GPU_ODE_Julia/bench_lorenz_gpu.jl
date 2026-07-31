@@ -71,10 +71,9 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     DTS = [2.0^-k for k in 4:13]     # 1/16 .. 1/8192
     TOLS = [10.0^-k for k in 2:8]    # 1e-2 .. 1e-8
 
-    outdir = joinpath(dirname(@__DIR__), "data", "Julia")
-    mkpath(outdir)
+    outdir = data_dir(dirname(@__DIR__), "Julia", DATASET_KEY)
 
-    open(joinpath(outdir, "Julia_wp_fixed_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_fixed.txt"), "w") do io
         for dt in DTS
             dt32 = Float32(dt)
             CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5();
@@ -93,7 +92,7 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
         end
     end
 
-    open(joinpath(outdir, "Julia_wp_adaptive_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_adaptive.txt"), "w") do io
         for tol in TOLS
             tol32 = Float32(tol)
             CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
@@ -146,7 +145,7 @@ data = @benchmark begin
     end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive_$(DATASET_KEY).txt"),
+    open(joinpath(data_dir(dirname(@__DIR__), "Julia", DATASET_KEY), "Julia_times_unadaptive.txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1e6,
             " ", minimum(data_dev.times) / 1e6)
@@ -169,7 +168,7 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed_$(DATASET_KEY).csv"), df2, header=false)
+    CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_fixed.csv"), df2, header=false)
     # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
     #           DataFrame(final_states, :auto), header=false)
 end
@@ -200,7 +199,7 @@ data = @benchmark begin
 end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(DATASET_KEY).txt"),
+    open(joinpath(data_dir(dirname(@__DIR__), "Julia", DATASET_KEY), "Julia_times_adaptive.txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1f6,
             " ", minimum(data_dev.times) / 1f6)
@@ -231,5 +230,5 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive_$(DATASET_KEY).csv"), df2, header=false)
+    CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_adaptive.csv"), df2, header=false)
 end

@@ -58,7 +58,7 @@ def ensemble_error(final_states, golden):
 
 
 def wp_outfile(framework_dir, prefix, mode, dataset_key):
-    """Path of the keyed wp output file; ensures the directory exists."""
-    d = os.path.join("data", framework_dir)
+    """Path of the wp output file under data/<package>/<key>; creates the directory."""
+    d = os.path.join("data", framework_dir, dataset_key)
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, "{0}_wp_{1}_{2}.txt".format(prefix, mode, dataset_key))
+    return os.path.join(d, "{0}_wp_{1}.txt".format(prefix, mode))
