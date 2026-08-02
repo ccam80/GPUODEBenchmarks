@@ -32,7 +32,7 @@ REPEATS = 20
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 DATASET_KEY = dataset_key()
 
 # ========================================
@@ -199,17 +199,15 @@ print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {b
       f"({best_time_dev:.1f} ms without transfers)")
 
 # Save results
-os.makedirs("./data/CUBIE_MLIR", exist_ok=True)
-with open("./data/CUBIE_MLIR/Cubie_mlir_times_unadaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
+with open(os.path.join(data_dir("CUBIE_MLIR", DATASET_KEY), "Cubie_mlir_times_unadaptive.txt"), "a+") as file:
     file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
 
 # Save numerical output for 32768-trajectory run
 if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_fixed()
     # Extract final state values
     final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_mlir_unadaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "cubie_mlir_unadaptive.csv"), final_states, delimiter=',')
 
 # ========================================
 # ADAPTIVE TIME-STEPPING BENCHMARK
@@ -275,12 +273,11 @@ print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in
       f"({best_time_dev:.1f} ms without transfers)")
 
 # Save results
-with open("./data/CUBIE_MLIR/Cubie_mlir_times_adaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
+with open(os.path.join(data_dir("CUBIE_MLIR", DATASET_KEY), "Cubie_mlir_times_adaptive.txt"), "a+") as file:
     file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
 
 if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
     solution = solve_adaptive()
     # Extract final state values
     final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_mlir_adaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "cubie_mlir_adaptive.csv"), final_states, delimiter=',')

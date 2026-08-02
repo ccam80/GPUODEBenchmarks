@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <algorithm>
 
 #include "Lorenz_SystemDefinition.cuh"
 #include "SingleSystem_PerThread_Interface.cuh"
@@ -107,6 +108,21 @@ static std::string DatasetKey()
 	return cached;
 }
 
+// Directory holding this machine's files for a package; creates it.
+static std::string DataDir(const std::string& package)
+{
+	std::string dir = "./data/" + package + "/" + DatasetKey();
+#ifdef _WIN32
+	// cmd needs backslashes and creates intermediate directories itself.
+	std::string win = dir;
+	std::replace(win.begin(), win.end(), '/', '\\');
+	system(("if not exist \"" + win + "\" mkdir \"" + win + "\"").c_str());
+#else
+	system(("mkdir -p \"" + dir + "\"").c_str());
+#endif
+	return dir + "/";
+}
+
 int main(int argc, char *argv[])
 {
 	int NumberOfProblems = NT;
@@ -172,7 +188,7 @@ int main(int argc, char *argv[])
 			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
 
 		string Mode = FixedMode ? "fixed" : "adaptive";
-		ofstream wpfile(("./data/CPP/MPGOS_wp_" + Mode + "_" + DatasetKey() + ".txt").c_str());
+		ofstream wpfile((DataDir("CPP") + "MPGOS_wp_" + Mode + ".txt").c_str());
 		wpfile.precision(12);
 
 		const int Repeats = 10;
@@ -295,12 +311,12 @@ int main(int argc, char *argv[])
 	
 	ofstream datafile;
 	if (SOLVER == RK4){
-		datafile.open (("./data/CPP/MPGOS_times_unadaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
+		datafile.open ((DataDir("CPP") + "MPGOS_times_unadaptive.txt").c_str(),ios::app);
 		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}else{
 		
-		datafile.open (("./data/CPP/MPGOS_times_adaptive_" + DatasetKey() + ".txt").c_str(),ios::app);
+		datafile.open ((DataDir("CPP") + "MPGOS_times_adaptive.txt").c_str(),ios::app);
 		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}
@@ -363,8 +379,7 @@ void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& 
 {
 	ofstream DataFile;
 	// Create directory if it doesn't exist (assumes unix-like system)
-	system("mkdir -p ./data/numerical");
-	DataFile.open ( ("./data/numerical/mpgos_internalsave_" + DatasetKey() + ".csv").c_str() );
+	DataFile.open ( (DataDir("numerical") + "mpgos_internalsave.csv").c_str() );
 	
 	int Width = 18;
 	DataFile.precision(10);
@@ -386,8 +401,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 {
 	ofstream DataFile;
 	// Create directory if it doesn't exist (assumes unix-like system)
-	system("mkdir -p ./data/numerical");
-	DataFile.open ( ("./data/numerical/mpgos_" + DatasetKey() + ".csv").c_str() );
+	DataFile.open ( (DataDir("numerical") + "mpgos.csv").c_str() );
 	
 	DataFile.precision(10);
 	DataFile.flags(ios::scientific);

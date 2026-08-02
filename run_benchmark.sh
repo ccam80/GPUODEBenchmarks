@@ -67,11 +67,11 @@ echo "Benchmarking ${PACKAGE} ${DEVICE} ensemble ${MODEL} solvers (${ANALYSIS}).
 # for the analysis being run; other machines' keyed files stay.
 if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ]; then
     DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
-    mkdir -p "./data/${DATA_DIR}"
+    mkdir -p "./data/${DATA_DIR}/${DATASET_KEY}"
     if [ "$ANALYSIS" == "work-precision" ]; then
-        rm -f "./data/${DATA_DIR}"/*_wp_*_"${DATASET_KEY}".txt
+        rm -f "./data/${DATA_DIR}/${DATASET_KEY}"/*_wp_*.txt
     else
-        rm -f "./data/${DATA_DIR}"/*_times_*_"${DATASET_KEY}".txt
+        rm -f "./data/${DATA_DIR}/${DATASET_KEY}"/*_times_*.txt
     fi
 fi
 

@@ -178,7 +178,7 @@ max_n_reached() {
     dir="data/$(data_dir_for "$1")"
     prefix="$(data_prefix_for "$1")"
     [ -d "$dir" ] || { echo 0; return; }
-    for f in "$dir/${prefix}"_times_*_"${DATASET_KEY}".txt; do
+    for f in "$dir/${DATASET_KEY}/${prefix}"_times_*.txt; do
         [ -f "$f" ] || continue
         n=$(awk 'NF{print $1}' "$f" | sort -n | tail -1)
         [ -n "$n" ] && [ "${n%.*}" -gt "$best" ] 2>/dev/null && best="${n%.*}"

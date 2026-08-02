@@ -158,7 +158,7 @@ function Get-MaxNReached {
     $prefix = Get-DataPrefixFor $Lang
     $best = [long]0
     if (-not (Test-Path $dir)) { return 0 }
-    $files = Get-ChildItem -Path $dir -Filter "${prefix}_times_*_$DatasetKey.txt" -ErrorAction SilentlyContinue
+    $files = Get-ChildItem -Path (Join-Path $dir $DatasetKey) -Filter "${prefix}_times_*.txt" -ErrorAction SilentlyContinue
     foreach ($file in $files) {
         foreach ($line in Get-Content $file.FullName -ErrorAction SilentlyContinue) {
             $tok = ($line.Trim() -split '\s+')[0] -replace '\..*$', ''

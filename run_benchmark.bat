@@ -125,11 +125,11 @@ REM Timing files are appended across the N sweep, so clear this machine's files
 REM for the analysis being run; other machines' keyed files stay.
 if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
     for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
-    if not exist "data\%DATA_DIR%\" mkdir "data\%DATA_DIR%"
+    if not exist "data\%DATA_DIR%\!DATASET_KEY!\" mkdir "data\%DATA_DIR%\!DATASET_KEY!"
     if /i "%ANALYSIS%"=="work-precision" (
-        del /q "data\%DATA_DIR%\*_wp_*_!DATASET_KEY!.txt" 2>nul
+        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_wp_*.txt" 2>nul
     ) else (
-        del /q "data\%DATA_DIR%\*_times_*_!DATASET_KEY!.txt" 2>nul
+        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_times_*.txt" 2>nul
     )
 )
 

@@ -55,36 +55,41 @@ struct WPSeries
     time_s::Vector{Float64}
 end
 
-# Discover every keyed wp file and load it into a WPSeries.
+# Discover every wp file under data/<package>/<key>/ and load it.
 function collect_series(base_path, frameworks)
     series = WPSeries[]
     for (display, dir, prefix) in frameworks
         dpath = joinpath(base_path, dir)
         isdir(dpath) || continue
-        # "<prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt"; gpu contains no
-        # underscores, so os and gpu are the last two fields.
-        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)_([^_]+)_([^_]+)\\.txt\$")
-        for fname in sort(readdir(dpath))
-            m = match(pat, fname)
-            m === nothing && continue
-            mode, os, gpu = m.captures
-            fpath = joinpath(dpath, fname)
-            # readdlm raises on a file with no data rows, so screen those out.
-            isempty(strip(read(fpath, String))) && continue
-            data = readdlm(fpath)
-            isempty(data) && continue
-            setting = Float64.(data[:, 1])
-            err = Float64.(data[:, 3])
-            time_s = Float64.(data[:, 2]) .* 1e-3
-            # Drop non-positive errors (log axis). Order points along the
-            # sweep (loose -> tight setting) so the float32 roundoff U-turn
-            # in the fixed curves is traced rather than folded onto itself.
-            keep = err .> 0
-            setting, err, time_s = setting[keep], err[keep], time_s[keep]
-            isempty(err) && continue
-            order = sortperm(setting, rev = true)
-            push!(series, WPSeries(display, String(mode), String(os),
-                String(gpu), "$(os)_$(gpu)", err[order], time_s[order]))
+        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)[.]txt" * "\$")
+        for key in sort(readdir(dpath))
+            kpath = joinpath(dpath, key)
+            isdir(kpath) || continue
+            parts = split(key, '_')
+            length(parts) == 2 || continue
+            os, gpu = String(parts[1]), String(parts[2])
+            for fname in sort(readdir(kpath))
+                m = match(pat, fname)
+                m === nothing && continue
+                mode = String(m.captures[1])
+                fpath = joinpath(kpath, fname)
+                # readdlm raises on a file with no data rows, so screen those out.
+                isempty(strip(read(fpath, String))) && continue
+                data = readdlm(fpath)
+                isempty(data) && continue
+                setting = Float64.(data[:, 1])
+                err = Float64.(data[:, 3])
+                time_s = Float64.(data[:, 2]) .* 1e-3
+                # Drop non-positive errors (log axis). Order points along the
+                # sweep (loose -> tight setting) so the float32 roundoff U-turn
+                # in the fixed curves is traced rather than folded onto itself.
+                keep = err .> 0
+                setting, err, time_s = setting[keep], err[keep], time_s[keep]
+                isempty(err) && continue
+                order = sortperm(setting, rev = true)
+                push!(series, WPSeries(display, mode, os, gpu, key,
+                                       err[order], time_s[order]))
+            end
         end
     end
     return series
@@ -113,8 +118,9 @@ function render_plot(sel, group_label, mode_label, plots_dir, multikey)
             marker = markers[s.display], linestyle = ls)
     end
 
-    isdir(plots_dir) || mkpath(plots_dir)
-    outfile = joinpath(plots_dir, "Lorenz_wp_$(mode_label)_$(group_label).png")
+    outdir = joinpath(plots_dir, group_label)
+    isdir(outdir) || mkpath(outdir)
+    outfile = joinpath(outdir, "Lorenz_wp_$(mode_label).png")
     savefig(plt, outfile)
     println("Saved $(outfile)")
 end
@@ -123,23 +129,32 @@ function main()
     series = collect_series(base_path, frameworks)
     if isempty(series)
         println("Warning: no keyed wp files found under $(base_path). Nothing to plot.")
-        println("Expected files like <Prefix>_wp_adaptive_<os>_<gpu>.txt (run the wp benchmarks first).")
+        println("Expected files like <package>/<os>_<gpu>/<Prefix>_wp_adaptive.txt (run the wp benchmarks first).")
         return
     end
 
     plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
 
-    oses = sort(unique(s.os for s in series))
-    gpus = sort(unique(s.gpu for s in series))
+    # Most specific first; a group repeating an earlier group's keys is dropped.
     groups = Tuple{String, Vector{WPSeries}}[]
-    push!(groups, ("all", series))
-    for os in oses
-        push!(groups, (os, filter(s -> s.os == os, series)))
+    seen = Set{Set{String}}()
+    function add_group!(label, sel)
+        isempty(sel) && return
+        ks = Set(s.key for s in sel)
+        ks in seen && return
+        push!(seen, ks)
+        push!(groups, (label, sel))
     end
-    for gpu in gpus
-        push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
+    for key in sort(unique(s.key for s in series))
+        add_group!(key, filter(s -> s.key == key, series))
     end
-
+    for os in sort(unique(s.os for s in series))
+        add_group!(os, filter(s -> s.os == os, series))
+    end
+    for gpu in sort(unique(s.gpu for s in series))
+        add_group!(gpu, filter(s -> s.gpu == gpu, series))
+    end
+    add_group!("all", series)
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
         render_plot(filter(s -> s.mode == "fixed", sel), label, "fixed", plots_dir, multikey)

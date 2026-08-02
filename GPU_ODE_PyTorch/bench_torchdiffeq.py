@@ -24,7 +24,7 @@ REPEATS = 20
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 DATASET_KEY = dataset_key()
 
 # %%
@@ -159,7 +159,7 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
 # Save the result
 
 os.makedirs("./data/PYTORCH", exist_ok=True)
-file = open("./data/PYTORCH/Torch_times_unadaptive_{0}.txt".format(DATASET_KEY),"a+")
+file = open(os.path.join(data_dir("PYTORCH", DATASET_KEY), "Torch_times_unadaptive.txt"), "a+")
 file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 
@@ -169,7 +169,7 @@ if numberOfParameters == 32768:
     traj = torch.vmap(solve)(parameters)
     # Extract final state values (last time point for each trajectory)
     final_states = traj[:, -1, :].cpu().numpy()  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/pytorch_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "pytorch.csv"), final_states, delimiter=',')
 
 
 # %%

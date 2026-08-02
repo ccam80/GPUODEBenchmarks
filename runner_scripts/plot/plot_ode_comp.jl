@@ -50,33 +50,35 @@ struct Series
     y::Vector{Float64}
 end
 
-# Discover every keyed timing file and load it into a Series.
+# Discover every timing file under data/<package>/<key>/ and load it.
 function collect_series(base_path, frameworks)
     series = Series[]
     for (display, dir, prefix) in frameworks
         dpath = joinpath(base_path, dir)
         isdir(dpath) || continue
-        # Match "<prefix>_times_<adaptive|unadaptive>_<os>_<gpu>.txt". The key is
-        # "<os>_<gpu>" where gpu contains no underscores, so os and gpu are the
-        # last two underscore-separated fields.
-        pat = Regex("^" * prefix * "_times_(adaptive|unadaptive)_([^_]+)_([^_]+)\\.txt\$")
-        for fname in sort(readdir(dpath))
-            m = match(pat, fname)
-            m === nothing && continue
-            mode = m.captures[1] == "adaptive" ? "adaptive" : "fixed"
-            os = m.captures[2]
-            gpu = m.captures[3]
-            data = readdlm(joinpath(dpath, fname))
-            isempty(data) && continue
-            order = sortperm(data[:, 1])
-            size(data, 2) == 3 || error(
-                "$(fname) has $(size(data, 2)) columns; expected 3 " *
-                "(N, time_with_transfers_ms, time_device_only_ms)")
-            ns = Float64.(data[order, 1])
-            push!(series, Series(display, mode, "both", os, gpu, "$(os)_$(gpu)",
-                                 ns, data[order, 2] .* 1e-3))
-            push!(series, Series(display, mode, "none", os, gpu, "$(os)_$(gpu)",
-                                 ns, data[order, 3] .* 1e-3))
+        pat = Regex("^" * prefix * "_times_(adaptive|unadaptive)[.]txt" * "\$")
+        for key in sort(readdir(dpath))
+            kpath = joinpath(dpath, key)
+            isdir(kpath) || continue
+            parts = split(key, '_')
+            length(parts) == 2 || continue
+            os, gpu = String(parts[1]), String(parts[2])
+            for fname in sort(readdir(kpath))
+                m = match(pat, fname)
+                m === nothing && continue
+                mode = m.captures[1] == "adaptive" ? "adaptive" : "fixed"
+                data = readdlm(joinpath(kpath, fname))
+                isempty(data) && continue
+                order = sortperm(data[:, 1])
+                size(data, 2) == 3 || error(
+                    "$(fname) has $(size(data, 2)) columns; expected 3 " *
+                    "(N, time_with_transfers_ms, time_device_only_ms)")
+                ns = Float64.(data[order, 1])
+                push!(series, Series(display, mode, "both", os, gpu, key,
+                                     ns, data[order, 2] .* 1e-3))
+                push!(series, Series(display, mode, "none", os, gpu, key,
+                                     ns, data[order, 3] .* 1e-3))
+            end
         end
     end
     return series
@@ -106,8 +108,9 @@ function render_plot(sel, group_label, mode_label, transfers_label, plots_dir, m
         plot!(plt, s.x, s.y, label = label, color = colors[s.display], marker = markers[s.display], linestyle = ls)
     end
 
-    isdir(plots_dir) || mkpath(plots_dir)
-    outfile = joinpath(plots_dir, "Lorenz_$(mode_label)_$(transfers_label)_$(group_label).png")
+    outdir = joinpath(plots_dir, group_label)
+    isdir(outdir) || mkpath(outdir)
+    outfile = joinpath(outdir, "Lorenz_$(mode_label)_$(transfers_label).png")
     savefig(plt, outfile)
     println("Saved $(outfile)")
 end
@@ -116,25 +119,33 @@ function main()
     series = collect_series(base_path, frameworks)
     if isempty(series)
         println("Warning: no keyed timing files found under $(base_path). Nothing to plot.")
-        println("Expected files like <Prefix>_times_adaptive_<os>_<gpu>.txt (run the benchmarks first).")
+        println("Expected files like <package>/<os>_<gpu>/<Prefix>_times_adaptive.txt (run the benchmarks first).")
         return
     end
 
     plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
 
     # Build the output groups: everything combined, one per os, one per gpu.
-    oses = sort(unique(s.os for s in series))
-    gpus = sort(unique(s.gpu for s in series))
+    # Most specific first; a group repeating an earlier group's keys is dropped.
     groups = Tuple{String, Vector{Series}}[]
-    push!(groups, ("all", series))
-    for os in oses
-        push!(groups, (os, filter(s -> s.os == os, series)))
+    seen = Set{Set{String}}()
+    function add_group!(label, sel)
+        isempty(sel) && return
+        ks = Set(s.key for s in sel)
+        ks in seen && return
+        push!(seen, ks)
+        push!(groups, (label, sel))
     end
-    for gpu in gpus
-        push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
+    for key in sort(unique(s.key for s in series))
+        add_group!(key, filter(s -> s.key == key, series))
     end
-
-    # Emit fixed, adaptive and combined plots per group and transfer variant.
+    for os in sort(unique(s.os for s in series))
+        add_group!(os, filter(s -> s.os == os, series))
+    end
+    for gpu in sort(unique(s.gpu for s in series))
+        add_group!(gpu, filter(s -> s.gpu == gpu, series))
+    end
+    add_group!("all", series)
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
         for transfers in sort(unique(s.transfers for s in sel))

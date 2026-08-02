@@ -75,6 +75,9 @@ EQ_FLOOR_MULT = 3.0
 ADAPTIVE_TOL = 1.1
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
+from bench_key import group_dir  # noqa: E402
+
 def observed_orders(errs_by_dt, floor, cap):
     """Median log2 error ratio between successive dt halvings in-region."""
     orders = []
@@ -93,21 +96,9 @@ def discover_keys(aliases):
     keys = set()
     if not os.path.isdir(CUBIE_NE_DIR):
         return keys
-    for fname in os.listdir(CUBIE_NE_DIR):
-        if not fname.endswith(".csv"):
-            continue
-        stem = fname[:-4]
-        # Alias may itself contain '_', so match against the known aliases.
-        for alias in aliases:
-            if not stem.startswith(alias + "_"):
-                continue
-            rest = stem[len(alias) + 1:]
-            # Adaptive outputs carry an extra "adaptive_<tier>_" infix.
-            for prefix in ("adaptive_default_", "adaptive_matched_"):
-                if rest.startswith(prefix):
-                    rest = rest[len(prefix):]
-                    break
-            keys.add(rest)
+    for name in os.listdir(CUBIE_NE_DIR):
+        if os.path.isdir(os.path.join(CUBIE_NE_DIR, name)):
+            keys.add(name)
     return keys
 
 
@@ -586,9 +577,9 @@ def main():
             res for res in (analyse_adaptive(row, key, golden_states, scale)
                             for row in algorithms)
             if res is not None]
-        report = "numerical_equivalence_{0}.md".format(key)
-        plot = os.path.join("plots", "numerical_equivalence_{0}.png"
-                            .format(key))
+        outdir = group_dir(key)
+        report = os.path.join(outdir, "numerical_equivalence.md")
+        plot = os.path.join(outdir, "numerical_equivalence.png")
         write_report(key, results, scale, report,
                      adaptive_results=adaptive_results)
         write_plot(key, results, scale, plot)
@@ -606,8 +597,7 @@ def main():
             status = 2
 
         if adaptive_results:
-            aplot = os.path.join(
-                "plots", "numerical_equivalence_adaptive_{0}.png".format(key))
+            aplot = os.path.join(group_dir(key), "numerical_equivalence_adaptive.png")
             write_adaptive_plot(key, adaptive_results, scale, aplot)
             n_div = sum("LESS ACCURATE" in res["matched_verdict"]
                         for res in adaptive_results)
