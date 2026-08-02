@@ -91,27 +91,43 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    pairs = moves(args.root.resolve())
+    root = args.root.resolve()
+    pairs = moves(root)
     if not pairs:
         print("Nothing to move.")
         return 0
-    moved = skipped = 0
+
+    # A populated destination with different content needs a human decision;
+    # refuse before moving anything so the tree stays consistent.
+    conflicts = [(s, d) for s, d in pairs
+                 if d.exists() and d.read_bytes() != s.read_bytes()]
+    if conflicts:
+        for src, dst in conflicts:
+            print("CONFLICT: {0} and {1} differ".format(
+                src.relative_to(root), dst.relative_to(root)))
+        print("{0} conflict(s); nothing moved. Delete one copy of each and re-run."
+              .format(len(conflicts)))
+        return 1
+
+    moved = removed = 0
     for src, dst in pairs:
-        rel_src = src.relative_to(args.root.resolve())
-        rel_dst = dst.relative_to(args.root.resolve())
-        # Never overwrite: a populated destination means newer keyed output.
+        rel_src = src.relative_to(root)
+        rel_dst = dst.relative_to(root)
         if dst.exists():
-            print("{0}  -x  {1} exists; kept both".format(rel_src, rel_dst))
-            skipped += 1
+            print("{0}  ==  {1}; identical legacy copy".format(rel_src, rel_dst))
+            if not args.dry_run:
+                src.unlink()
+            removed += 1
             continue
         print("{0}  ->  {1}".format(rel_src, rel_dst))
         if not args.dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
         moved += 1
+    verb = "would be removed" if args.dry_run else "removed"
     print("{0} file(s){1}{2}".format(
         moved, " (dry run)" if args.dry_run else " moved",
-        ", {0} skipped (destination exists)".format(skipped) if skipped else ""))
+        ", {0} identical legacy file(s) {1}".format(removed, verb) if removed else ""))
     return 0
 
 
