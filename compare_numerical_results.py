@@ -102,9 +102,7 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
     }
     return stats
 
-# Packages we compare. CSVs live at data/numerical/<os>_<gpu>/<package>.csv (the
-# key directory comes from the benchmark writers, see runner_scripts/bench_key.*).
-# Anything not in this set (e.g. mpgos_internalsave) is ignored.
+# Packages we compare; CSVs live at data/numerical/<os>_<gpu>/<package>.csv.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
 from bench_key import build_groups, group_dir  # noqa: E402
 
