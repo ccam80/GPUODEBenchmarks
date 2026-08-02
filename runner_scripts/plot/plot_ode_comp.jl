@@ -4,15 +4,8 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz timing benchmarks from the keyed data layout
-# data/<package>/<os>_<gpu>/<Prefix>_times_<adaptive|unadaptive>.txt
-# (see plot_common.jl). One plot per (group, mode, transfers):
-#   * groups: every dataset key, every os, every gpu, "all" (deduplicated)
-#   * modes:  "fixed" (unadaptive only), "adaptive" (adaptive only), "all"
-#   * transfers: "both" (h2d + kernel + d2h) or "none" (device only)
-# written to plots/<group>/Lorenz_<mode>_<transfers>.png.
-#
-# Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+# Plot the Lorenz timing benchmarks: one plot per (group, mode, transfers)
+# at plots/<group>/Lorenz_<mode>_<transfers>.png. ARGS[1] overrides "data".
 include(joinpath(@__DIR__, "plot_common.jl"))
 
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"

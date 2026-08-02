@@ -68,14 +68,8 @@ def group_dir(group):
 
 
 def build_groups(items, key, os_name, gpu):
-    """Output groups over keyed items: (label, subset) pairs.
-
-    ``key``, ``os_name`` and ``gpu`` are callables mapping an item to its
-    dataset key, os and gpu. Groups are every dataset key, every os, every
-    gpu, then "all" — most specific first, and a group covering the same key
-    set as an earlier group is dropped. The same grouping is implemented for
-    the Julia plot scripts in runner_scripts/plot/plot_common.jl.
-    """
+    """(label, subset) groups per key, os, gpu and "all"; most specific
+    first, dropping a group that repeats an earlier group's key set."""
     groups, seen = [], set()
 
     def add_group(label, sel):

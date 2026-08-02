@@ -124,9 +124,7 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
-// The shared benchmark protocol (repeat count, sweep grids, solver settings)
-// from runner_scripts/protocol.csv — the same file the Python and Julia
-// consumers read. Rows are "name,value value ...".
+// Read one protocol.csv row ("name,value value ...") as doubles.
 static std::vector<double> ProtocolValues(const std::string& name)
 {
 	ifstream file("./runner_scripts/protocol.csv");
@@ -189,8 +187,7 @@ int main(int argc, char *argv[])
 
 	ScanLorenz.SolverOption(ThreadsPerBlock, BlockSize);
 	ScanLorenz.SolverOption(InitialTimeStep, PerfFixedDt);
-	// Explicitly pin the adaptive tolerances to the protocol value (this also
-	// happens to be the MPGOS default); RK4 ignores them.
+	// Pin the adaptive tolerances to the protocol value; RK4 ignores them.
 	for (int c = 0; c < SD; c++)
 	{
 		ScanLorenz.SolverOption(RelativeTolerance, c, PerfAdaptiveTol);

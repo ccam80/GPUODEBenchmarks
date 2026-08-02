@@ -673,8 +673,7 @@ frameworks use dyadic dt from 1/16 to 1/8192, while adaptive frameworks use
 rtol = atol from 1e-2 to 1e-8. Each setting uses the usual timing protocol
 (untimed warm-up, repeated solves, best time) and computes the ensemble l2
 error of the final states against the golden reference. Protocol constants
-live in `runner_scripts/protocol.csv`, read by the Python writers (via
-`protocol.py`), the Julia writers (via `protocol.jl`) and the MPGOS binary.
+live in `runner_scripts/protocol.csv`.
 
 ```bash
 ./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision

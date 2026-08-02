@@ -14,8 +14,7 @@ CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
-# Shared protocol values come from runner_scripts/protocol.csv, the same file
-# common.py reads; suite-specific pins stay here (mirrored in common.py).
+# Shared values come from runner_scripts/protocol.csv; suite pins stay here.
 include(joinpath(dirname(HERE), "protocol.jl"))
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8

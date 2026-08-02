@@ -1,9 +1,4 @@
-# The benchmark protocol, loaded from runner_scripts/protocol.csv — the single
-# source of truth shared with runner_scripts/protocol.py and the MPGOS binary.
-# Include with:
-#   include(joinpath(<repo root>, "runner_scripts", "protocol.jl"))
-# which defines the same names as protocol.py.
-
+# Shared benchmark protocol constants, loaded from protocol.csv.
 let path = joinpath(@__DIR__, "protocol.csv")
     table = Dict{String, Vector{Float64}}()
     for line in readlines(path)[2:end]

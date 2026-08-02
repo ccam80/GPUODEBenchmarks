@@ -12,13 +12,11 @@ using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays
 CUDA.allowscalar(false)
 numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 
-# Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
-# additively populated across machines without clobbering each other.
+# Dataset key ("<os>_<gpu>") keys output files per machine.
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
 
-# Shared protocol: repeat count, sweep grids and solver settings, from the
-# same runner_scripts/protocol.csv every other framework reads.
+# Shared protocol constants from runner_scripts/protocol.csv.
 include(joinpath(dirname(@__DIR__), "runner_scripts", "protocol.jl"))
 const REPEATS = PROTOCOL_REPEATS
 const DT32 = Float32(PROTOCOL_PERF_FIXED_DT)
@@ -209,8 +207,7 @@ println("Allocs: " * string(data.allocs))
 
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
-    # A fresh top-level solve: `sol` still holds the fixed-dt solution saved
-    # above, and assignments inside @benchmark blocks never escape.
+    # Assignments inside @benchmark blocks do not escape; solve at top level.
     CUDA.@sync asol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,

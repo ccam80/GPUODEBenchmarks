@@ -19,9 +19,7 @@ DiffEqDevTools.WorkPrecisionSet.
 Rows ``<setting> <time_ms> <error>`` are written (mode "w" — a wp file always
 holds exactly one full sweep) to
 ``data/<FRAMEWORK>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>.txt``.
-
-Grids and the repeat count come from ``runner_scripts/protocol.csv`` (via
-``protocol.py``), the same file the Julia writers and the MPGOS binary read.
+Grids and repeat count come from ``runner_scripts/protocol.csv``.
 """
 
 import os

@@ -58,10 +58,7 @@ MODE in ("fixed", "adaptive", "all") ||
     error("--controller must be fixed, adaptive or all")
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
-# Grids come from runner_scripts/protocol.csv, the same file ne_common.py
-# reads: a dyadic dt grid with coarse steps included so high-order methods
-# have truncation error above the float32 floor somewhere in the sweep, and
-# the adaptive tolerance grid.
+# Grids come from runner_scripts/protocol.csv.
 include(joinpath(dirname(@__DIR__), "protocol.jl"))
 const N_NE = PROTOCOL_N_NE
 const DTS_NE = PROTOCOL_NE_DTS

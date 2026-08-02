@@ -28,13 +28,7 @@ Protocol:
   - cubie (GPU, keyed per machine like every other benchmark output):
       ``data/numerical_equivalence/cubie/<os>_<gpu>/<alias>.csv``
 
-The grids come from ``runner_scripts/protocol.csv`` (via ``protocol.py``),
-the same file the Julia runner (ne_diffeq.jl) reads. The dt grid extends the
-wp fixed-step grid with coarser steps: order >= 5 methods hit the float32
-error floor by dt ~ 1/32 on this problem, so the convergence region is only
-observable at coarse dt. The tolerance grid stops at 1e-6: below that a
-float32 solve cannot honor the request, so tighter points would only measure
-the floor.
+Grids come from ``runner_scripts/protocol.csv``.
 """
 
 import csv
@@ -48,10 +42,7 @@ from protocol import N_NE  # noqa: E402,F401 - re-exported protocol names
 from protocol import NE_DTS as DTS_NE  # noqa: E402,F401
 from protocol import NE_TOLS as TOLS_NE  # noqa: E402,F401
 
-# Suite-specific adaptive-run pins (both stacks): initial dt and the dt
-# clamps. The initial dt is pinned because OrdinaryDiffEq otherwise
-# auto-selects it (Hairer's algorithm) while cubie starts from the
-# configured dt.
+# Suite-specific adaptive-run pins (both stacks): initial dt and the clamps.
 DT0_NE = 0.01
 DT_MIN_NE = 1e-6
 DT_MAX_NE = 0.5

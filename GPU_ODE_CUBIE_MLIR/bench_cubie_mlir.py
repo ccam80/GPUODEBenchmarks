@@ -25,8 +25,7 @@ default_timelogger.set_verbosity(None)
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
 
-# Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
-# additively populated across machines without clobbering each other.
+# Dataset key ("<os>_<gpu>") keys output files per machine.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key, data_dir

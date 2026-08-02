@@ -4,20 +4,8 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768)
-# from the keyed data layout
-# data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>.txt
-# (see plot_common.jl), where the error is the ensemble l2 norm of the
-# final-state difference against the Float64 golden reference
-# (data/numerical/golden_lorenz_32768.csv — see
-# runner_scripts/golden/generate_golden.jl and runner_scripts/wp_common.py).
-#
-# One error-vs-time plot per (group, mode):
-#   * groups: every dataset key, every os, every gpu, "all" (deduplicated)
-#   * modes:  "fixed", "adaptive", "all" (both)
-# written to plots/<group>/Lorenz_wp_<mode>.png.
-#
-# Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+# Plot the Lorenz work-precision benchmarks (error vs runtime, N = 32768):
+# one plot per (group, mode) at plots/<group>/Lorenz_wp_<mode>.png. ARGS[1] overrides "data".
 include(joinpath(@__DIR__, "plot_common.jl"))
 
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"

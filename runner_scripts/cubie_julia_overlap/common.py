@@ -22,8 +22,7 @@ PHASES = ("performance", "numerical", "work_precision")
 def phases_for(analysis):
     return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
-# Shared protocol values come from runner_scripts/protocol.csv, the same
-# file julia_worker.jl reads; suite-specific pins stay here.
+# Shared values come from runner_scripts/protocol.csv; suite pins stay here.
 from protocol import (  # noqa: E402 - path bootstrap above
     N_NE, N_WP, NE_DTS, NE_TOLS, WP_DTS, WP_TOLS)
 from protocol import REPEATS as PERFORMANCE_REPEATS  # noqa: E402
