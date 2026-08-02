@@ -14,8 +14,11 @@ CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
+# Protocol constants; mirrored in common.py.
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
+const PERFORMANCE_REPEATS = 20
+const WORK_REPEATS = 20
 const N_WP = 32768
 
 function cli_args(args)
@@ -24,15 +27,9 @@ function cli_args(args)
     while i <= length(args)
         startswith(args[i], "--") || error("unexpected argument $(args[i])")
         key = args[i][3:end]
-        if key == "reset"
-            out[key] = "true"
-            i += 1
-        elseif i < length(args)
-            out[key] = args[i + 1]
-            i += 2
-        else
-            error("--$(key) requires a value")
-        end
+        i < length(args) || error("--$(key) requires a value")
+        out[key] = args[i + 1]
+        i += 2
     end
     return out
 end
@@ -42,11 +39,8 @@ const OUT = abspath(haskey(OPT, "output") ? OPT["output"] : error("--output is r
 const PROFILE = get(OPT, "profile", "smoke")
 const PHASE = get(OPT, "phase", "all")
 const NMAX = parse(Int, get(OPT, "nmax", "16777216"))
-const PERF_REPEATS = parse(Int, get(OPT, "performance-repeats", "20"))
-const WORK_REPEATS = parse(Int, get(OPT, "work-repeats", "20"))
-const PERF_FIXED_DT = parse(Float64, get(OPT, "fixed-dt", string(FIXED_DT)))
-const PERF_ADAPTIVE_TOL = parse(Float64, get(OPT, "adaptive-tol", string(ADAPTIVE_TOL)))
-const RESET = get(OPT, "reset", "false") == "true"
+const FROM_N = parse(Int, get(OPT, "from-n", "0"))
+const ALGORITHM = get(OPT, "algorithm", "all")
 
 mkpath(OUT)
 
@@ -55,16 +49,16 @@ function protocol()
     n = 8
     limit = PROFILE == "smoke" ? min(NMAX, 32) : NMAX
     while n <= limit
-        push!(ns, n)
+        n >= FROM_N && push!(ns, n)
         n *= 4
     end
     if PROFILE == "smoke"
-        return (performance_ns = ns, performance_repeats = min(PERF_REPEATS, 2),
+        return (performance_ns = ns, performance_repeats = 2,
             ne_n = 32, ne_dts = [2.0^-4, 2.0^-8], ne_tols = [1.0e-3],
             wp_n = 256, wp_dts = [2.0^-6], wp_tols = [1.0e-4],
-            work_repeats = min(WORK_REPEATS, 2))
+            work_repeats = 2)
     end
-    return (performance_ns = ns, performance_repeats = PERF_REPEATS,
+    return (performance_ns = ns, performance_repeats = PERFORMANCE_REPEATS,
         ne_n = 1024, ne_dts = [2.0^-k for k in 1:13],
         ne_tols = [10.0^-k for k in 2:6], wp_n = N_WP,
         wp_dts = [2.0^-k for k in 4:13], wp_tols = [10.0^-k for k in 2:8],
@@ -79,8 +73,9 @@ const TIMING_FILE = joinpath(OUT, "julia_timings.csv")
 const METRIC_FILE = joinpath(OUT, "julia_metrics.csv")
 const FAILURE_FILE = joinpath(OUT, "julia_failures.csv")
 
+# Append-only: the launcher clears the rows a run replaces.
 function init_csv(path, header)
-    if RESET || !isfile(path)
+    if !isfile(path)
         open(path, "w") do io
             println(io, header)
         end
@@ -215,6 +210,10 @@ end
 const POINT_FAILURE_COUNT = Ref(0)
 
 table = collect(CSV.File(joinpath(HERE, "algorithms.csv")))
+if ALGORITHM != "all"
+    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
+    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+end
 phases = PHASE == "all" ? ("performance", "numerical", "work_precision") : (PHASE,)
 
 for row in table
@@ -232,8 +231,8 @@ for row in table
         repeats = 1
         if phase == "performance"
             for n in PROTOCOL.performance_ns
-                push!(points, ("fixed", "dt", PERF_FIXED_DT, n))
-                push!(points, ("adaptive", "tol", PERF_ADAPTIVE_TOL, n))
+                push!(points, ("fixed", "dt", FIXED_DT, n))
+                push!(points, ("adaptive", "tol", ADAPTIVE_TOL, n))
             end
             repeats = PROTOCOL.performance_repeats
         elseif phase == "numerical"
