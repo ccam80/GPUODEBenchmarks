@@ -97,8 +97,7 @@ def main():
         print("Nothing to move.")
         return 0
 
-    # A populated destination with different content needs a human decision;
-    # refuse before moving anything so the tree stays consistent.
+    # Refuse to move anything while any destination differs from its source.
     conflicts = [(s, d) for s, d in pairs
                  if d.exists() and d.read_bytes() != s.read_bytes()]
     if conflicts:
