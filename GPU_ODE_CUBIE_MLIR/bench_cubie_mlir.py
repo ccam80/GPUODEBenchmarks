@@ -24,15 +24,14 @@ default_timelogger.set_verbosity(None)
 
 # Get number of trajectories from command line
 numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported.
-REPEATS = 20
-
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key, data_dir
+# Timed repeats per point (min is reported) and the shared solver settings.
+from protocol import PERF_ADAPTIVE_TOL, PERF_FIXED_DT, REPEATS
 DATASET_KEY = dataset_key()
 
 # ========================================
@@ -89,7 +88,7 @@ initial_conditions = {
 fixed_solver = qb.Solver(
     lorenz_system,
     algorithm='classical-rk4',
-    dt=0.001,
+    dt=PERF_FIXED_DT,
     save_every=1.0,
     step_controller='fixed',
     output_types=['state'],
@@ -115,7 +114,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
     # Grid built; one solver at a time from here.
     fixed_solver.close()
 
-    def bench_solver(solver, repeats=20):
+    def bench_solver(solver, repeats=REPEATS):
         def run():
             return solver.solve(
                 initial_values=initials_array,
@@ -221,8 +220,8 @@ gc.collect()
 adaptive_solver = qb.Solver(
     lorenz_system,
     algorithm='tsit5',
-    atol=1e-08,
-    rtol=1e-08,
+    atol=PERF_ADAPTIVE_TOL,
+    rtol=PERF_ADAPTIVE_TOL,
     save_every=1.0,
     dt_min=1e-12,
     dt_max=1e3,

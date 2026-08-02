@@ -18,6 +18,8 @@ from bench_key import dataset_key, data_dir  # noqa: E402
 from wp_common import (  # noqa: E402
     DTS,
     N_WP,
+    PERF_FIXED_DT,
+    REPEATS,
     ensemble_error,
     load_golden,
     wp_outfile,
@@ -26,10 +28,8 @@ from wp_common import (  # noqa: E402
 
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "lorenz.cellml"
 DATASET_KEY = dataset_key()
-STANDARD_DT = 0.001
-STANDARD_STEPS = 1000
-# Timed repeats per point; min is reported.
-REPEATS = 20
+STANDARD_DT = PERF_FIXED_DT
+STANDARD_STEPS = int(round(1.0 / PERF_FIXED_DT))
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats):
@@ -98,7 +98,7 @@ def run_work_precision(model, cell_count):
                 rho,
                 dt,
                 step_count,
-                repeats=20,
+                repeats=REPEATS,
             )
             error = ensemble_error(finals, golden)
             print(

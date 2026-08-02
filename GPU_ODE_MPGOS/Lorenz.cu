@@ -35,6 +35,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 // dataset-key helper below the forward declarations.
 #include <cstdio>
 #include <cctype>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 
@@ -123,6 +124,42 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
+// The shared benchmark protocol (repeat count, sweep grids, solver settings)
+// from runner_scripts/protocol.csv — the same file the Python and Julia
+// consumers read. Rows are "name,value value ...".
+static std::vector<double> ProtocolValues(const std::string& name)
+{
+	ifstream file("./runner_scripts/protocol.csv");
+	if (!file)
+	{
+		cerr << "runner_scripts/protocol.csv not found - run from the repo root" << endl;
+		exit(1);
+	}
+	std::string line;
+	while (std::getline(file, line))
+	{
+		size_t comma = line.find(',');
+		if (comma == std::string::npos || line.substr(0, comma) != name) continue;
+		std::vector<double> values;
+		size_t pos = comma + 1;
+		while (pos < line.size())
+		{
+			size_t next = line.find(' ', pos);
+			if (next == std::string::npos) next = line.size();
+			if (next > pos) values.push_back(atof(line.substr(pos, next - pos).c_str()));
+			pos = next + 1;
+		}
+		return values;
+	}
+	cerr << "protocol.csv has no '" << name << "' row" << endl;
+	exit(1);
+}
+
+static double ProtocolValue(const std::string& name)
+{
+	return ProtocolValues(name)[0];
+}
+
 int main(int argc, char *argv[])
 {
 	int NumberOfProblems = NT;
@@ -146,8 +183,19 @@ int main(int argc, char *argv[])
 	
 	ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> ScanLorenz(SelectedDevice);
 	
+	const double PerfFixedDt = ProtocolValue("perf_fixed_dt");
+	const double PerfAdaptiveTol = ProtocolValue("perf_adaptive_tol");
+	const int ProtocolRepeats = (int)ProtocolValue("repeats");
+
 	ScanLorenz.SolverOption(ThreadsPerBlock, BlockSize);
-	ScanLorenz.SolverOption(InitialTimeStep, 1.0e-3);
+	ScanLorenz.SolverOption(InitialTimeStep, PerfFixedDt);
+	// Explicitly pin the adaptive tolerances to the protocol value (this also
+	// happens to be the MPGOS default); RK4 ignores them.
+	for (int c = 0; c < SD; c++)
+	{
+		ScanLorenz.SolverOption(RelativeTolerance, c, PerfAdaptiveTol);
+		ScanLorenz.SolverOption(AbsoluteTolerance, c, PerfAdaptiveTol);
+	}
 
 	// ========================================
 	// WORK-PRECISION (wp) MODE
@@ -156,14 +204,12 @@ int main(int argc, char *argv[])
 	// adaptive tolerance (RKCK45 build) at NT=32768 and records
 	// "<setting> <time_ms> <error-vs-golden>" per point. dt and tolerances are
 	// runtime SolverOptions, so only the solver family needs a rebuild. Grids
-	// and protocol mirror runner_scripts/wp_common.py — keep in sync. wp takes
-	// the minimum of 10 repeats after one warm-up; the N sweep below uses 20 per
-	// transfer variant.
+	// and the repeat count come from runner_scripts/protocol.csv.
 	if (argc > 2 && string(argv[2]) == string("wp"))
 	{
-		if (NT != 32768)
+		if (NT != (int)ProtocolValue("n_wp"))
 		{
-			cerr << "wp mode must be built with NT = 32768" << endl;
+			cerr << "wp mode must be built with NT = " << (int)ProtocolValue("n_wp") << endl;
 			return 1;
 		}
 		vector<double> gx(NT), gy(NT), gz(NT);
@@ -181,21 +227,17 @@ int main(int argc, char *argv[])
 		}
 
 		const bool FixedMode = (SOLVER == RK4);
-		vector<double> Settings;
-		if (FixedMode)
-			for (int k = 4; k <= 13; k++) Settings.push_back(pow(2.0, -k));
-		else
-			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
+		vector<double> Settings = ProtocolValues(FixedMode ? "wp_dts" : "wp_tols");
 
 		string Mode = FixedMode ? "fixed" : "adaptive";
 		ofstream wpfile((DataDir("CPP") + "MPGOS_wp_" + Mode + ".txt").c_str());
 		wpfile.precision(12);
 
-		const int Repeats = 10;
+		const int Repeats = ProtocolRepeats;
 		for (size_t si = 0; si < Settings.size(); si++)
 		{
 			double Setting = Settings[si];
-			ScanLorenz.SolverOption(InitialTimeStep, FixedMode ? Setting : 1.0e-3);
+			ScanLorenz.SolverOption(InitialTimeStep, FixedMode ? Setting : PerfFixedDt);
 			if (!FixedMode)
 			{
 				for (int c = 0; c < SD; c++)
@@ -254,7 +296,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
-	const int TimingRepeats = 20;
+	const int TimingRepeats = ProtocolRepeats;
 
 	// Device-only timing: the untimed h2d resets the in-place solver state.
 	double ElapsedDeviceMs = 1.0e300;

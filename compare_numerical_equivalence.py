@@ -11,8 +11,8 @@ Float64 golden reference is tabulated by dt, the observed convergence order
 is estimated, and the two implementations are checked for equivalence.
 
 Outputs, per dataset key found in the cubie directory:
-  numerical_equivalence_<os>_<gpu>.md      (report, repo root)
-  plots/numerical_equivalence_<os>_<gpu>.png (error-vs-dt grid)
+  plots/<os>_<gpu>/numerical_equivalence.md   (report)
+  plots/<os>_<gpu>/numerical_equivalence.png  (error-vs-dt grid)
 
 Run from the repo root (inside the GPU_ODE_CUBIE venv):
     python compare_numerical_equivalence.py

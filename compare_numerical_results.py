@@ -106,7 +106,7 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
 # key directory comes from the benchmark writers, see runner_scripts/bench_key.*).
 # Anything not in this set (e.g. mpgos_internalsave) is ignored.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
-from bench_key import group_dir  # noqa: E402
+from bench_key import build_groups, group_dir  # noqa: E402
 
 KNOWN_PACKAGES = [
     "cubie_adaptive", "cubie_unadaptive",
@@ -220,24 +220,8 @@ def main():
         sys.exit(3)
 
     # Most specific first; a group repeating an earlier group's keys is dropped.
-    groups, seen = [], set()
-
-    def add_group(label, sel):
-        if not sel:
-            return
-        ks = frozenset(d["key"] for d in sel)
-        if ks in seen:
-            return
-        seen.add(ks)
-        groups.append((label, sel))
-
-    for key in sorted({d["key"] for d in datasets}):
-        add_group(key, [d for d in datasets if d["key"] == key])
-    for os_name in sorted({d["os"] for d in datasets}):
-        add_group(os_name, [d for d in datasets if d["os"] == os_name])
-    for gpu in sorted({d["gpu"] for d in datasets}):
-        add_group(gpu, [d for d in datasets if d["gpu"] == gpu])
-    add_group("all", datasets)
+    groups = build_groups(datasets, key=lambda d: d["key"],
+                          os_name=lambda d: d["os"], gpu=lambda d: d["gpu"])
 
     print("Groups: " + ", ".join(g[0] for g in groups))
 

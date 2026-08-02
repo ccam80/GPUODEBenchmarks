@@ -16,15 +16,14 @@ import sys
 import numpy as np
 
 numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported.
-REPEATS = 20
-
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key, data_dir
+# Timed repeats per point (min is reported) and the shared fixed step size.
+from protocol import PERF_FIXED_DT, REPEATS
 DATASET_KEY = dataset_key()
 
 # %%
@@ -74,7 +73,7 @@ class LorenzODE(torch.nn.Module):
 # Note: I was't able to JIT compile the code with this application, torchdiffeq + vmap
 def solve(p):
     with torch.no_grad():
-        traj = odeint(LorenzODE(rho = p), u0, t, method='rk4', options=dict(step_size=0.001))
+        traj = odeint(LorenzODE(rho = p), u0, t, method='rk4', options=dict(step_size=PERF_FIXED_DT))
         return traj
 
 # Define the initial conditions and timepoints to save
@@ -118,7 +117,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
 
             traj = run()  # warm-up + numerical result
             err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
-            res = timeit.repeat(run, repeat=5, number=1)
+            res = timeit.repeat(run, repeat=REPEATS, number=1)
             t_ms = min(res) * 1000
             print("wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}".format(dt, t_ms, err))
             f.write("{0:.10g} {1} {2:.10e}\n".format(dt, t_ms, err))
@@ -158,14 +157,12 @@ print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
 # %%
 # Save the result
 
-os.makedirs("./data/PYTORCH", exist_ok=True)
 file = open(os.path.join(data_dir("PYTORCH", DATASET_KEY), "Torch_times_unadaptive.txt"), "a+")
 file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
 file.close()
 
 # Save numerical output for 32768-trajectory run
 if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
     traj = torch.vmap(solve)(parameters)
     # Extract final state values (last time point for each trajectory)
     final_states = traj[:, -1, :].cpu().numpy()  # shape: (trajectories, states)

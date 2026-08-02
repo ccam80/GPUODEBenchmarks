@@ -18,21 +18,20 @@ DiffEqDevTools.WorkPrecisionSet.
 
 Rows ``<setting> <time_ms> <error>`` are written (mode "w" — a wp file always
 holds exactly one full sweep) to
-``data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt``.
+``data/<FRAMEWORK>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>.txt``.
 
-The Julia writer mirrors these constants; keep them in sync.
+Grids and the repeat count come from ``runner_scripts/protocol.csv`` (via
+``protocol.py``), the same file the Julia writers and the MPGOS binary read.
 """
 
 import os
 
 import numpy as np
 
-# Sweep grids (canonical — mirrored in bench_lorenz_gpu.jl and the MPGOS
-# runner; keep in sync).
-DTS = [2.0 ** -k for k in range(4, 14)]        # 1/16 .. 1/8192, 10 points
-TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
-
-N_WP = 32768
+from protocol import (  # noqa: F401 - re-exported protocol names
+    N_WP, PERF_ADAPTIVE_TOL, PERF_FIXED_DT, REPEATS)
+from protocol import WP_DTS as DTS  # noqa: F401
+from protocol import WP_TOLS as TOLS  # noqa: F401
 
 GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_32768.csv")
 

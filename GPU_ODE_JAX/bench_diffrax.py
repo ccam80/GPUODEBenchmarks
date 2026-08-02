@@ -20,15 +20,14 @@ import timeit
 import sys
 
 numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported.
-REPEATS = 20
-
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key, data_dir
+# Timed repeats per point (min is reported) and the shared solver settings.
+from protocol import PERF_ADAPTIVE_TOL, PERF_FIXED_DT, REPEATS
 DATASET_KEY = dataset_key()
 
 # %%
@@ -103,10 +102,9 @@ def main(k1):
     t0 = 0.0
     t1 = 1.0
     y0 = jnp.array([1.0, 0.0, 0.0])
-    dt0 = 0.001
+    dt0 = PERF_FIXED_DT
     solver = diffrax.Tsit5()
     saveat = diffrax.SaveAt(ts = jnp.array([t0,t1]))
-    stepsize_controller = diffrax.PIDController(rtol=1e-6, atol=1e-3)
     sol = diffrax.diffeqsolve(
         terms,
         solver,
@@ -158,7 +156,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
             lorenz = Lorenz(k1)
             terms = diffrax.ODETerm(lorenz)
             return diffrax.diffeqsolve(
-                terms, diffrax.Tsit5(), 0.0, 1.0, 0.001,
+                terms, diffrax.Tsit5(), 0.0, 1.0, PERF_FIXED_DT,
                 jnp.array([1.0, 0.0, 0.0]), max_steps=65536,
                 stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
         return m
@@ -170,7 +168,7 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
         err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
         res = timeit.repeat(
             lambda: jax.block_until_ready(m(parameterList).ys),
-            repeat=20, number=1)
+            repeat=REPEATS, number=1)
         t_ms = min(res) * 1000
         print("wp setting={0:g}: {1:.2f} ms, err={2:.3e}".format(
             setting, t_ms, err))
@@ -216,10 +214,11 @@ def main(k1):
     t0 = 0.0
     t1 = 1.0
     y0 = jnp.array([1.0, 0.0, 0.0])
-    dt0 = 0.001
+    dt0 = PERF_FIXED_DT
     solver = diffrax.Tsit5()
     saveat = diffrax.SaveAt(ts = jnp.array([t0,t1]))
-    stepsize_controller = diffrax.PIDController(rtol=1e-8, atol=1e-8)
+    stepsize_controller = diffrax.PIDController(
+        rtol=PERF_ADAPTIVE_TOL, atol=PERF_ADAPTIVE_TOL)
     sol = diffrax.diffeqsolve(
         terms,
         solver,

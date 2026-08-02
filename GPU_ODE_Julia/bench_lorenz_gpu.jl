@@ -17,6 +17,13 @@ numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
 
+# Shared protocol: repeat count, sweep grids and solver settings, from the
+# same runner_scripts/protocol.csv every other framework reads.
+include(joinpath(dirname(@__DIR__), "runner_scripts", "protocol.jl"))
+const REPEATS = PROTOCOL_REPEATS
+const DT32 = Float32(PROTOCOL_PERF_FIXED_DT)
+const TOL32 = Float32(PROTOCOL_PERF_ADAPTIVE_TOL)
+
 function lorenz(u, p, t)
     du1 = 10.0f0 * (u[2] - u[1])
     du2 = p[1] * u[1] - u[2] - u[1] * u[3]
@@ -49,11 +56,12 @@ probs = cu(probs_host)
 # ========================================
 # `bench_lorenz_gpu.jl 32768 wp` sweeps fixed dt / adaptive tolerance at
 # N=32768 and records "<setting> <time_ms> <error-vs-golden>" per point.
-# Grids and protocol mirror runner_scripts/wp_common.py — keep in sync.
+# Grids and repeat count come from runner_scripts/protocol.csv.
 if length(ARGS) > 1 && ARGS[2] == "wp"
     using DelimitedFiles
 
-    numberOfParameters == 32768 || error("wp mode must be run with N = 32768")
+    numberOfParameters == PROTOCOL_N_WP ||
+        error("wp mode must be run with N = $(PROTOCOL_N_WP)")
     golden = readdlm(
         joinpath(dirname(@__DIR__), "data", "numerical",
             "golden_lorenz_32768.csv"), ',', Float64)
@@ -68,13 +76,10 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
         return sqrt(sum(abs2, m .- golden) / length(m))
     end
 
-    DTS = [2.0^-k for k in 4:13]     # 1/16 .. 1/8192
-    TOLS = [10.0^-k for k in 2:8]    # 1e-2 .. 1e-8
-
     outdir = data_dir(dirname(@__DIR__), "Julia", DATASET_KEY)
 
     open(joinpath(outdir, "Julia_wp_fixed.txt"), "w") do io
-        for dt in DTS
+        for dt in PROTOCOL_WP_DTS
             dt32 = Float32(dt)
             CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5();
                 saveat = 1.0f0, save_everystep = false, dt = dt32)
@@ -85,7 +90,7 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
                     dt = $dt32)
                 ts = Array(sol[1])
                 us = Array(sol[2])
-            end
+            end samples=REPEATS evals=1 seconds=1e9
             t_ms = minimum(data.times) / 1e6
             println(io, dt, " ", t_ms, " ", err)
             println("wp fixed dt=$(dt): $(t_ms) ms, err=$(err)")
@@ -93,19 +98,19 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     end
 
     open(joinpath(outdir, "Julia_wp_adaptive.txt"), "w") do io
-        for tol in TOLS
+        for tol in PROTOCOL_WP_TOLS
             tol32 = Float32(tol)
             CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
                 GPUTsit5(); saveat = 1.0f0, save_everystep = false,
-                reltol = tol32, abstol = tol32, dt = 0.001f0)
+                reltol = tol32, abstol = tol32, dt = DT32)
             err = ensemble_error(sol[2])
             data = @benchmark begin
                 CUDA.@sync sol = DiffEqGPU.vectorized_asolve($probs, $prob,
                     GPUTsit5(); saveat = 1.0f0, save_everystep = false,
-                    reltol = $tol32, abstol = $tol32, dt = 0.001f0)
+                    reltol = $tol32, abstol = $tol32, dt = $DT32)
                 ts = Array(sol[1])
                 us = Array(sol[2])
-            end
+            end samples=REPEATS evals=1 seconds=1e9
             t_ms = minimum(data.times) / 1e6
             println(io, tol, " ", t_ms, " ", err)
             println("wp adaptive tol=$(tol): $(t_ms) ms, err=$(err)")
@@ -115,14 +120,11 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     exit(0)
 end
 
-# Fixed sample count to match the other frameworks.
-const REPEATS = 20
-
 @info "Solving the problem on GPU (fixed dt)"
 # Device-only: probs already resident, results left there.
 data_dev = @benchmark begin
     CUDA.@sync DiffEqGPU.vectorized_solve($probs, $prob, GPUTsit5(),
-                           saveat=1.0f0, save_everystep=false, dt = 0.001f0)
+                           saveat=1.0f0, save_everystep=false, dt = $DT32)
 end samples=REPEATS evals=1 seconds=1e9
 data = @benchmark begin
     # From my rookie reading of the DiffEqGPU "solve" wrapper, which causes 
@@ -139,7 +141,7 @@ data = @benchmark begin
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs_d, $prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
-                           dt = 0.001f0)
+                           dt = $DT32)
         ts = Array(sol[1])
         us = Array(sol[2])
     end samples=REPEATS evals=1 seconds=1e9
@@ -154,23 +156,17 @@ end
 
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
-  
-    # Create directory
-    mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
-                           dt = 0.001f0)
+                           dt = DT32)
     # Extract final state values for each trajectory
     using CSV, DataFrames
-    # final_states = zeros(Float32, numberOfParameters, 3)
     final_states = Array(sol[2][end,:]) #convert to CPU Array
-    
+
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
     CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_fixed.csv"), df2, header=false)
-    # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
-    #           DataFrame(final_states, :auto), header=false)
 end
 
 println("Parameter number: " * string(numberOfParameters))
@@ -182,16 +178,16 @@ println("Allocs: " * string(data.allocs))
 data_dev = @benchmark begin
     CUDA.@sync DiffEqGPU.vectorized_asolve($probs, $prob, GPUTsit5(),
         saveat=1.0f0, save_everystep=false,
-        reltol = 1.0f-8, abstol = 1.0f-8, dt = 0.001f0)
+        reltol = $TOL32, abstol = $TOL32, dt = $DT32)
 end samples=REPEATS evals=1 seconds=1e9
-data = @benchmark begin 
+data = @benchmark begin
     probs_d = cu($probs_host)
     CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs_d, $prob, GPUTsit5(),
         saveat=1.0f0,
         save_everystep=false,
-        reltol = 1.0f-8,
-        abstol = 1.0f-8,
-        dt = 0.001f0)
+        reltol = $TOL32,
+        abstol = $TOL32,
+        dt = $DT32)
     # The low-level function returns an array of CuArrays. Their higher-level "solve" function calls Array(ts), Array(us) to transfer back 
     # to CPU, so we replicate that here to mirror the level of the other packages.
     ts = Array(sol[1])
@@ -211,23 +207,20 @@ println("Parameter number: " * string(numberOfParameters))
 println("Minimum time: " * string(minimum(data.times) / 1f6) * " ms")
 println("Allocs: " * string(data.allocs))
 
-results = Vector{Any}(undef, 2)
-
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
-    CUDA.@sync copyto!(results, DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
+    # A fresh top-level solve: `sol` still holds the fixed-dt solution saved
+    # above, and assignments inside @benchmark blocks never escape.
+    CUDA.@sync asol = DiffEqGPU.vectorized_asolve(probs, prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
-                           reltol = 1.0f-8,
-                           abstol = 1.0f-8,
-                           dt = 0.001f0))
-    # Create directory
-    mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
-    
+                           reltol = TOL32,
+                           abstol = TOL32,
+                           dt = DT32)
     # Extract final state values for each trajectory
     using CSV, DataFrames
-    final_states = Array(sol[2][end,:]) #convert to CPU Array
-    
+    final_states = Array(asol[2][end,:]) #convert to CPU Array
+
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
     CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_adaptive.csv"), df2, header=false)

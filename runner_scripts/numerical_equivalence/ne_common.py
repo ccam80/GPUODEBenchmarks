@@ -26,36 +26,35 @@ Protocol:
   - DifferentialEquations.jl (CPU, machine independent):
       ``data/numerical_equivalence/julia/<alias>.csv``
   - cubie (GPU, keyed per machine like every other benchmark output):
-      ``data/numerical_equivalence/cubie/<alias>_<os>_<gpu>.csv``
+      ``data/numerical_equivalence/cubie/<os>_<gpu>/<alias>.csv``
 
-The Julia runner (ne_diffeq.jl) mirrors these constants; keep in sync.
+The grids come from ``runner_scripts/protocol.csv`` (via ``protocol.py``),
+the same file the Julia runner (ne_diffeq.jl) reads. The dt grid extends the
+wp fixed-step grid with coarser steps: order >= 5 methods hit the float32
+error floor by dt ~ 1/32 on this problem, so the convergence region is only
+observable at coarse dt. The tolerance grid stops at 1e-6: below that a
+float32 solve cannot honor the request, so tighter points would only measure
+the floor.
 """
 
 import csv
 import os
+import sys
 
 import numpy as np
 
-# Dyadic dt grid, 2^-1 .. 2^-13. Extends the wp fixed-step grid (2^-4 ..
-# 2^-13) with coarser steps: order >= 5 methods hit the float32 error floor
-# by dt ~ 1/32 on this problem, so the convergence region is only observable
-# at coarse dt. Low-order/explicit methods simply diverge there, which the
-# comparison excludes via its error cap.
-DTS_NE = [2.0 ** -k for k in range(1, 14)]
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from protocol import N_NE  # noqa: E402,F401 - re-exported protocol names
+from protocol import NE_DTS as DTS_NE  # noqa: E402,F401
+from protocol import NE_TOLS as TOLS_NE  # noqa: E402,F401
 
-# Adaptive sweep: atol = rtol tolerance grid, 1e-2 .. 1e-6. Below 1e-6 a
-# float32 solve cannot honor the request (the error floor is ~1e-6 relative),
-# so tighter points would only measure the floor.
-TOLS_NE = [10.0 ** -k for k in range(2, 7)]
-
-# Shared adaptive-run pins (both stacks): initial dt and the dt clamps.
-# The initial dt is pinned because OrdinaryDiffEq otherwise auto-selects it
-# (Hairer's algorithm) while cubie starts from the configured dt.
+# Suite-specific adaptive-run pins (both stacks): initial dt and the dt
+# clamps. The initial dt is pinned because OrdinaryDiffEq otherwise
+# auto-selects it (Hairer's algorithm) while cubie starts from the
+# configured dt.
 DT0_NE = 0.01
 DT_MIN_NE = 1e-6
 DT_MAX_NE = 0.5
-
-N_NE = 1024
 
 GOLDEN_NE_PATH = os.path.join("data", "numerical", "golden_ne_lorenz_1024.csv")
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import json
 import math
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
 GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_32768.csv"
@@ -20,17 +22,15 @@ PHASES = ("performance", "numerical", "work_precision")
 def phases_for(analysis):
     return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
-# Protocol constants; mirrored in julia_worker.jl.
+# Shared protocol values come from runner_scripts/protocol.csv, the same
+# file julia_worker.jl reads; suite-specific pins stay here.
+from protocol import (  # noqa: E402 - path bootstrap above
+    N_NE, N_WP, NE_DTS, NE_TOLS, WP_DTS, WP_TOLS)
+from protocol import REPEATS as PERFORMANCE_REPEATS  # noqa: E402
+from protocol import REPEATS as WORK_REPEATS  # noqa: E402
+
 FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
-PERFORMANCE_REPEATS = 20
-WORK_REPEATS = 20
-NE_DTS = [2.0 ** -k for k in range(1, 14)]
-NE_TOLS = [10.0 ** -k for k in range(2, 7)]
-WP_DTS = [2.0 ** -k for k in range(4, 14)]
-WP_TOLS = [10.0 ** -k for k in range(2, 9)]
-N_NE = 1024
-N_WP = 32768
 DT0 = 0.01
 DT_MIN = 1.0e-12
 DT_MAX = 1.0e3

@@ -14,12 +14,14 @@ CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
-# Protocol constants; mirrored in common.py.
+# Shared protocol values come from runner_scripts/protocol.csv, the same file
+# common.py reads; suite-specific pins stay here (mirrored in common.py).
+include(joinpath(dirname(HERE), "protocol.jl"))
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
-const PERFORMANCE_REPEATS = 20
-const WORK_REPEATS = 20
-const N_WP = 32768
+const PERFORMANCE_REPEATS = PROTOCOL_REPEATS
+const WORK_REPEATS = PROTOCOL_REPEATS
+const N_WP = PROTOCOL_N_WP
 
 function cli_args(args)
     out = Dict{String, String}()
@@ -59,9 +61,9 @@ function protocol()
             work_repeats = 2)
     end
     return (performance_ns = ns, performance_repeats = PERFORMANCE_REPEATS,
-        ne_n = 1024, ne_dts = [2.0^-k for k in 1:13],
-        ne_tols = [10.0^-k for k in 2:6], wp_n = N_WP,
-        wp_dts = [2.0^-k for k in 4:13], wp_tols = [10.0^-k for k in 2:8],
+        ne_n = PROTOCOL_N_NE, ne_dts = PROTOCOL_NE_DTS,
+        ne_tols = PROTOCOL_NE_TOLS, wp_n = N_WP,
+        wp_dts = PROTOCOL_WP_DTS, wp_tols = PROTOCOL_WP_TOLS,
         work_repeats = WORK_REPEATS)
 end
 const PROTOCOL = protocol()

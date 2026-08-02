@@ -58,13 +58,15 @@ MODE in ("fixed", "adaptive", "all") ||
     error("--controller must be fixed, adaptive or all")
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
-const N_NE = 1024
-# Dyadic dt grid, 2^-1 .. 2^-13 (same as ne_common.DTS_NE): coarse steps
-# included so high-order methods have truncation error above the float32
-# floor somewhere in the sweep.
-const DTS_NE = [2.0^-k for k in 1:13]
-# Adaptive protocol (same as ne_common): tolerance grid and pinned dt bounds.
-const TOLS_NE = [10.0^-k for k in 2:6]
+# Grids come from runner_scripts/protocol.csv, the same file ne_common.py
+# reads: a dyadic dt grid with coarse steps included so high-order methods
+# have truncation error above the float32 floor somewhere in the sweep, and
+# the adaptive tolerance grid.
+include(joinpath(dirname(@__DIR__), "protocol.jl"))
+const N_NE = PROTOCOL_N_NE
+const DTS_NE = PROTOCOL_NE_DTS
+const TOLS_NE = PROTOCOL_NE_TOLS
+# Suite-specific pins (same as ne_common): initial dt and the dt bounds.
 const DT0_NE = 0.01f0
 const DT_MIN_NE = 1.0f-6
 const DT_MAX_NE = 0.5f0

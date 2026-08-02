@@ -4,45 +4,24 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768).
-#
-# Each framework's `wp` mode sweeps its supported fixed step size and/or
-# adaptive tolerance and writes rows "<setting> <time_ms> <error>" to
-#   data/<DIR>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt
-# where the error is the ensemble l2 norm of the final-state difference
-# against the Float64 golden reference
+# Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768)
+# from the keyed data layout
+# data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>.txt
+# (see plot_common.jl), where the error is the ensemble l2 norm of the
+# final-state difference against the Float64 golden reference
 # (data/numerical/golden_lorenz_32768.csv — see
 # runner_scripts/golden/generate_golden.jl and runner_scripts/wp_common.py).
 #
-# This script discovers those keyed files exactly like plot_ode_comp.jl and
-# emits one error-vs-time plot per (group, mode):
-#   * groups: "all" (everything combined), one per distinct os, one per distinct gpu
+# One error-vs-time plot per (group, mode):
+#   * groups: every dataset key, every os, every gpu, "all" (deduplicated)
 #   * modes:  "fixed", "adaptive", "all" (both)
-# giving e.g. Lorenz_wp_fixed_windows.png, Lorenz_wp_all_RTX-4070-SUPER.png.
+# written to plots/<group>/Lorenz_wp_<mode>.png.
 #
 # Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+include(joinpath(@__DIR__, "plot_common.jl"))
+
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
-
-# display name => (subdirectory, filename prefix)
-# Note: MPGOS data files are stored under `CPP/` in the repo's `data/` folder.
-frameworks = [
-    ("Julia", "Julia", "Julia"),
-    ("MPGOS", "CPP", "MPGOS"),
-    ("JAX", "JAX", "Jax"),
-    ("PYTORCH", "PYTORCH", "Torch"),
-    ("CUBIE", "CUBIE", "Cubie"),
-    ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
-    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
-]
-
-# color/marker choices per framework (same as plot_ode_comp.jl)
-colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
-    "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple,
-    "MYOKIT CUDA"=>:Black)
-markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
-    "PYTORCH"=>:xcross, "CUBIE"=>:star5, "CUBIE_MLIR"=>:hexagon,
-    "MYOKIT CUDA"=>:rect)
 
 # One work-precision curve loaded from disk.
 struct WPSeries
@@ -56,41 +35,25 @@ struct WPSeries
 end
 
 # Discover every wp file under data/<package>/<key>/ and load it.
-function collect_series(base_path, frameworks)
+function collect_series(base_path)
     series = WPSeries[]
-    for (display, dir, prefix) in frameworks
-        dpath = joinpath(base_path, dir)
-        isdir(dpath) || continue
-        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)[.]txt" * "\$")
-        for key in sort(readdir(dpath))
-            kpath = joinpath(dpath, key)
-            isdir(kpath) || continue
-            parts = split(key, '_')
-            length(parts) == 2 || continue
-            os, gpu = String(parts[1]), String(parts[2])
-            for fname in sort(readdir(kpath))
-                m = match(pat, fname)
-                m === nothing && continue
-                mode = String(m.captures[1])
-                fpath = joinpath(kpath, fname)
-                # readdlm raises on a file with no data rows, so screen those out.
-                isempty(strip(read(fpath, String))) && continue
-                data = readdlm(fpath)
-                isempty(data) && continue
-                setting = Float64.(data[:, 1])
-                err = Float64.(data[:, 3])
-                time_s = Float64.(data[:, 2]) .* 1e-3
-                # Drop non-positive errors (log axis). Order points along the
-                # sweep (loose -> tight setting) so the float32 roundoff U-turn
-                # in the fixed curves is traced rather than folded onto itself.
-                keep = err .> 0
-                setting, err, time_s = setting[keep], err[keep], time_s[keep]
-                isempty(err) && continue
-                order = sortperm(setting, rev = true)
-                push!(series, WPSeries(display, mode, os, gpu, key,
-                                       err[order], time_s[order]))
-            end
-        end
+    eachkeyedfile(base_path, "_wp_(fixed|adaptive)[.]txt") do display, key, os, gpu, path, mode
+        # readdlm raises on a file with no data rows, so screen those out.
+        isempty(strip(read(path, String))) && return
+        data = readdlm(path)
+        isempty(data) && return
+        setting = Float64.(data[:, 1])
+        err = Float64.(data[:, 3])
+        time_s = Float64.(data[:, 2]) .* 1e-3
+        # Drop non-positive errors (log axis). Order points along the
+        # sweep (loose -> tight setting) so the float32 roundoff U-turn
+        # in the fixed curves is traced rather than folded onto itself.
+        keep = err .> 0
+        setting, err, time_s = setting[keep], err[keep], time_s[keep]
+        isempty(err) && return
+        order = sortperm(setting, rev = true)
+        push!(series, WPSeries(display, mode, os, gpu, key,
+                               err[order], time_s[order]))
     end
     return series
 end
@@ -114,8 +77,8 @@ function render_plot(sel, group_label, mode_label, plots_dir, multikey)
         label = multikey ? "$(s.display) ($(stepword)) [$(s.key)]" :
             "$(s.display) ($(stepword))"
         ls = s.mode == "adaptive" ? :dash : :solid
-        plot!(plt, s.err, s.time_s, label = label, color = colors[s.display],
-            marker = markers[s.display], linestyle = ls)
+        plot!(plt, s.err, s.time_s, label = label, color = COLORS[s.display],
+            marker = MARKERS[s.display], linestyle = ls)
     end
 
     outdir = joinpath(plots_dir, group_label)
@@ -126,7 +89,7 @@ function render_plot(sel, group_label, mode_label, plots_dir, multikey)
 end
 
 function main()
-    series = collect_series(base_path, frameworks)
+    series = collect_series(base_path)
     if isempty(series)
         println("Warning: no keyed wp files found under $(base_path). Nothing to plot.")
         println("Expected files like <package>/<os>_<gpu>/<Prefix>_wp_adaptive.txt (run the wp benchmarks first).")
@@ -135,27 +98,7 @@ function main()
 
     plots_dir = joinpath(dirname(dirname(@__DIR__)), "plots")
 
-    # Most specific first; a group repeating an earlier group's keys is dropped.
-    groups = Tuple{String, Vector{WPSeries}}[]
-    seen = Set{Set{String}}()
-    function add_group!(label, sel)
-        isempty(sel) && return
-        ks = Set(s.key for s in sel)
-        ks in seen && return
-        push!(seen, ks)
-        push!(groups, (label, sel))
-    end
-    for key in sort(unique(s.key for s in series))
-        add_group!(key, filter(s -> s.key == key, series))
-    end
-    for os in sort(unique(s.os for s in series))
-        add_group!(os, filter(s -> s.os == os, series))
-    end
-    for gpu in sort(unique(s.gpu for s in series))
-        add_group!(gpu, filter(s -> s.gpu == gpu, series))
-    end
-    add_group!("all", series)
-    for (label, sel) in groups
+    for (label, sel) in build_groups(series)
         multikey = length(unique(s.key for s in sel)) > 1
         render_plot(filter(s -> s.mode == "fixed", sel), label, "fixed", plots_dir, multikey)
         render_plot(filter(s -> s.mode == "adaptive", sel), label, "adaptive", plots_dir, multikey)
