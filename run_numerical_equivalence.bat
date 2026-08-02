@@ -79,7 +79,7 @@ if not exist "data\numerical\golden_ne_lorenz_1024.csv" (
 )
 
 echo --- DifferentialEquations.jl Float32 sweeps ^(CPU, machine independent^) ---
-julia -t auto --project=. runner_scripts\numerical_equivalence\ne_diffeq.jl %CONTROLLER%
+julia -t auto --project=. runner_scripts\numerical_equivalence\ne_diffeq.jl --controller %CONTROLLER% --algorithm %ALGORITHM%
 if errorlevel 1 (
     echo DifferentialEquations.jl sweeps failed
     popd
@@ -90,7 +90,7 @@ if errorlevel 1 (
 if /i "%PACKAGE%"=="julia" goto compare
 
 echo --- cubie Float32 sweeps ^(GPU, keyed per machine^) ---
-call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py %CONTROLLER%
+call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py --controller %CONTROLLER% --algorithm %ALGORITHM%
 if errorlevel 1 (
     echo cubie sweeps failed
     popd
