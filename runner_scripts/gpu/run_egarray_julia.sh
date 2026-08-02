@@ -1,19 +1,16 @@
 #!/bin/bash
-a=8
-max_a=$1
+set -e
+. "$(dirname "$0")/../parse_args.sh" "$@"
+[ "$ANALYSIS" == "performance" ] || { echo "EnsembleGPUArray supports -a performance only" >&2; exit 1; }
+
 path="EnsembleGPUArray"
-if [ -d "./data/${path}" ] 
-then
-	rm -rf "./data/${path}"
-	mkdir -p "./data/${path}"
-else
-	mkdir -p "./data/${path}"
-fi
-while [ $a -le $max_a ]
+rm -rf "./data/${path}"
+mkdir -p "./data/${path}"
+
+a=8
+while [ $a -le $NMAX ]
 do
-    	# Print the values
-    	echo $a
-		julia --project="./GPU_ODE_Julia/" ./GPU_ODE_Julia/bench_ensemblegpuarray.jl $a
-    	# increment the value
-    	a=$((a*4))
+    echo "No. of trajectories = $a"
+    julia --project="./GPU_ODE_Julia/" ./GPU_ODE_Julia/bench_ensemblegpuarray.jl $a
+    a=$((a*4))
 done

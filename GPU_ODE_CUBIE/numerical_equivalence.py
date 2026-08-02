@@ -23,6 +23,7 @@ Run from the repo root (inside the GPU_ODE_CUBIE venv):
 """
 
 import os
+import argparse
 import sys
 
 import numpy as np
@@ -38,14 +39,17 @@ sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts",
                                 "numerical_equivalence"))
 from bench_key import dataset_key
 from ne_common import (DTS_NE, TOLS_NE, DT0_NE, DT_MIN_NE, DT_MAX_NE, N_NE,
-                       load_algorithms, load_golden_ne, ensemble_error,
+                       algorithm_names, load_algorithms, load_golden_ne, ensemble_error,
                        load_controller_constants, cubie_ne_file,
                        cubie_ne_adaptive_file, write_ne_csv,
                        write_ne_adaptive_csv)
 
-MODE = sys.argv[1].lower() if len(sys.argv) > 1 else "all"
-if MODE not in ("fixed", "adaptive", "all"):
-    sys.exit("usage: numerical_equivalence.py [fixed|adaptive|all]")
+_parser = argparse.ArgumentParser(description="cubie Float32 equivalence sweeps.")
+_parser.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
+_parser.add_argument("--algorithm", choices=algorithm_names(), default="all")
+_args = _parser.parse_args()
+MODE = _args.controller
+ALGORITHM = _args.algorithm
 
 DATASET_KEY = dataset_key()
 
@@ -132,7 +136,7 @@ def solve_finals(solver, initials_array, parameter_array):
 # Fixed-step error-vs-dt sweep
 # ---------------------------------------------------------------------------
 if MODE in ("fixed", "all"):
-    for row in load_algorithms():
+    for row in load_algorithms(ALGORITHM):
         alias = row["cubie_alias"]
         print("=== fixed {0} (order {1}) ===".format(alias, row["order"]))
         solver = qb.Solver(
@@ -218,7 +222,7 @@ if MODE in ("adaptive", "all"):
             }, None
         return None, "unmapped julia controller {0}".format(c["controller"])
 
-    for row in load_algorithms():
+    for row in load_algorithms(ALGORITHM):
         alias = row["cubie_alias"]
         if not cubie_is_adaptive(alias):
             print("=== adaptive {0}: skipped (no embedded error estimate "

@@ -42,6 +42,12 @@ class ProtocolTests(unittest.TestCase):
             common.profile_protocol("full", 512, 128)["performance_ns"],
             [128, 512])
 
+    def test_analysis_names_map_to_phase_names(self):
+        self.assertEqual(common.phases_for("work-precision"), ("work_precision",))
+        self.assertEqual(common.phases_for("performance"), ("performance",))
+        self.assertEqual(common.phases_for("all"), common.PHASES)
+        self.assertEqual(len(common.ANALYSES), len(common.PHASES))
+
     def test_smoke_keeps_every_metric_family(self):
         protocol = common.profile_protocol("smoke", 10_000)
         self.assertTrue(protocol["performance_ns"])

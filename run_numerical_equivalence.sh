@@ -1,65 +1,74 @@
 #!/bin/bash
-# Run the full numerical-equivalence (ne) suite: golden reference (if
-# missing), DifferentialEquations.jl Float32 reference sweeps, cubie Float32
-# sweeps, and the comparison report + plots.
+# Run the numerical-equivalence analysis: golden reference (if missing),
+# DifferentialEquations.jl Float32 reference sweeps, cubie Float32 sweeps, and
+# the comparison report + plots.
 #
-# Usage: ./run_numerical_equivalence.sh [fixed|adaptive|all]
-#   fixed    - error-vs-dt convergence sweeps only
-#   adaptive - error-vs-tolerance sweeps only (default + matched controllers)
-#   all      - both (default)
+# Usage: ./run_numerical_equivalence.sh [-p <package>] [--controller <c>] [--algorithm <a>]
+#   -p, --package     all (default) | julia | cubie
+#   --controller      all (default) | fixed | adaptive
+#   --algorithm       all (default) | a cubie alias from algorithms.csv
 #
 # Exit code: non-zero if any step fails or the comparison finds a MISMATCH /
-# DIVERGENT algorithm (compare_numerical_equivalence.py exits 2) — suitable
-# as a CI gate. The Julia outputs are machine independent; if
-# data/numerical_equivalence/julia/ is committed and Julia is unavailable,
-# run the last two steps by hand instead.
+# DIVERGENT algorithm (compare_numerical_equivalence.py exits 2).
 
 # Run from the repo root regardless of the caller's working directory
 cd "$(dirname "$0")" || exit 1
 
-mode="${1:-all}"
-case "$mode" in
-    fixed|adaptive|all) ;;
-    *) echo "Usage: $0 [fixed|adaptive|all]"; exit 1;;
-esac
+PACKAGE=all
+CONTROLLER=all
+ALGORITHM=all
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--package)    PACKAGE=$2; shift 2;;
+        --controller)    CONTROLLER=$2; shift 2;;
+        --algorithm)     ALGORITHM=$2; shift 2;;
+        -h|--help)       sed -n '2,12p' "$0" | sed 's/^# \?//'; exit 0;;
+        *) echo "Unknown option $1" >&2; exit 1;;
+    esac
+done
+case "$PACKAGE" in all|julia|cubie) ;; *) echo "Unknown package '$PACKAGE' (all|julia|cubie)" >&2; exit 1;; esac
+case "$CONTROLLER" in all|fixed|adaptive) ;; *) echo "Unknown controller '$CONTROLLER' (all|fixed|adaptive)" >&2; exit 1;; esac
 
 echo "========================================="
-echo "Numerical-equivalence suite (mode: $mode)"
+echo "Numerical equivalence (package: $PACKAGE, controller: $CONTROLLER, algorithm: $ALGORITHM)"
 echo "========================================="
 
-if [ ! -f ./data/numerical/golden_ne_lorenz_1024.csv ]; then
-    echo "--- Generating golden reference (Float64 Vern9, machine independent) ---"
-    julia -t auto --project=. ./runner_scripts/numerical_equivalence/generate_golden_ne.jl || {
-        echo "✗ golden generation failed"; exit 1; }
-fi
-
-echo "--- DifferentialEquations.jl Float32 sweeps (CPU, machine independent) ---"
-julia -t auto --project=. ./runner_scripts/numerical_equivalence/ne_diffeq.jl "$mode" || {
-    echo "✗ DifferentialEquations.jl sweeps failed"; exit 1; }
-
-echo "--- cubie Float32 sweeps (GPU, keyed per machine) ---"
 if [ -x ./GPU_ODE_CUBIE/venv/bin/python3 ] || [ -f ./GPU_ODE_CUBIE/venv/bin/python3 ]; then
     PYTHON=./GPU_ODE_CUBIE/venv/bin/python3
 elif [ -f ./GPU_ODE_CUBIE/venv/Scripts/python.exe ]; then
     PYTHON=./GPU_ODE_CUBIE/venv/Scripts/python.exe
 else
-    echo "✗ GPU_ODE_CUBIE venv not found; run setup_all_environments.py first"
+    echo "GPU_ODE_CUBIE venv not found; run setup_all_environments.py first" >&2
     exit 1
 fi
 
-# The shared cubie venv carries both CUDA backends; the committed NE dataset is
-# the numba-cuda one. Override by exporting CUBIE_CUDA_BACKEND=mlir beforehand.
-export CUBIE_CUDA_BACKEND="${CUBIE_CUDA_BACKEND:-numba-cuda}"
-echo "    (cubie backend: $CUBIE_CUDA_BACKEND)"
-"$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py "$mode" || {
-    echo "✗ cubie sweeps failed"; exit 1; }
+if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "julia" ]; then
+    if [ ! -f ./data/numerical/golden_ne_lorenz_1024.csv ]; then
+        echo "--- Golden reference (Float64 Vern9, machine independent) ---"
+        julia -t auto --project=. ./runner_scripts/numerical_equivalence/generate_golden_ne.jl || {
+            echo "golden generation failed" >&2; exit 1; }
+    fi
+    echo "--- DifferentialEquations.jl Float32 sweeps (CPU, machine independent) ---"
+    julia -t auto --project=. ./runner_scripts/numerical_equivalence/ne_diffeq.jl --controller "$CONTROLLER" --algorithm "$ALGORITHM" || {
+        echo "DifferentialEquations.jl sweeps failed" >&2; exit 1; }
+fi
+
+if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "cubie" ]; then
+    echo "--- cubie Float32 sweeps (GPU, keyed per machine) ---"
+    # The venv carries both CUDA backends; the committed dataset is the numba-cuda one.
+    export CUBIE_CUDA_BACKEND="${CUBIE_CUDA_BACKEND:-numba-cuda}"
+    echo "    (cubie backend: $CUBIE_CUDA_BACKEND)"
+    "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py --controller "$CONTROLLER" --algorithm "$ALGORITHM" || {
+        echo "cubie sweeps failed" >&2; exit 1; }
+fi
 
 echo "--- Comparison report + plots ---"
 "$PYTHON" compare_numerical_equivalence.py
 status=$?
 if [ $status -eq 0 ]; then
-    echo "✓ All algorithms equivalent/tracking"
+    echo "All algorithms equivalent/tracking"
 else
-    echo "✗ Comparison found mismatching algorithms (see numerical_equivalence_<os>_<gpu>.md)"
+    echo "Comparison found mismatching algorithms (see numerical_equivalence_<os>_<gpu>.md)"
 fi
 exit $status

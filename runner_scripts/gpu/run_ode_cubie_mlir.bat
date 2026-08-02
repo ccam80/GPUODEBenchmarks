@@ -1,15 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
 
-REM Activate virtual environment
 call GPU_ODE_CUBIE_MLIR\venv\Scripts\activate.bat
 
-REM Pin cubie to the MLIR backend (single cubie install, backend chosen at
-REM import time via this env var).
+REM Cubie picks its backend from this at import time.
 set CUBIE_CUDA_BACKEND=mlir
 
-REM Work-precision mode: `run_ode_cubie_mlir.bat wp` sweeps dt/tolerance at N=32768.
-if /i "%~1"=="wp" (
+if /i "%ANALYSIS%"=="work-precision" (
     python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 32768 wp
     if errorlevel 1 exit /b 1
     call deactivate
@@ -18,21 +17,16 @@ if /i "%~1"=="wp" (
 )
 
 set a=8
-set max_a=%1
-
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
 echo No. of trajectories = %a%
 python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py %a%
 if errorlevel 1 exit /b 1
 
-REM Increment the value
 set /a a=%a%*4
 goto loop
 
 :end
-REM Deactivate virtual environment
 call deactivate
-
 endlocal

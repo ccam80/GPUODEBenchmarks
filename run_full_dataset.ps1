@@ -1,63 +1,73 @@
-# Windows counterpart of run_full_dataset.sh: drive the complete benchmark
-# dataset in one set-and-forget run. Same stages, flags, failure policy, logs
-# and outputs; see run_full_dataset.sh for the full description.
+# Drive the complete benchmark dataset in one run; flags match run_full_dataset.sh.
 #
 # Usage (run_full_dataset.bat forwards to this script):
-#   run_full_dataset.bat                      # everything, nmax = 2^30
-#   run_full_dataset.bat -n 16777216          # smaller ceiling
-#   run_full_dataset.bat --skip-ne            # drop a stage
-#   run_full_dataset.bat --resume-from jax    # restart at a framework
-#   run_full_dataset.bat --only overlap       # a single stage
+#   run_full_dataset.bat                           # every analysis, every package
+#   run_full_dataset.bat -n 33554432               # larger ceiling
+#   run_full_dataset.bat -p cpp                    # one package
+#   run_full_dataset.bat -a overlap                # one analysis
+#   run_full_dataset.bat -a performance,numerical  # several analyses
+#   run_full_dataset.bat --resume-from jax         # restart at a package
 #   run_full_dataset.bat --lock-clocks 1470,6801   # override the clock target
-#   run_full_dataset.bat --no-lock-clocks     # sample clocks but do not pin
-#   run_full_dataset.bat --clock-tolerance 30 # widen the drift threshold (MHz)
+#   run_full_dataset.bat --no-lock-clocks          # sample clocks but do not pin
+#   run_full_dataset.bat --clock-tolerance 30      # widen the drift threshold (MHz)
 #
-# Exit code: 0 if every stage and framework succeeded, 1 if any did not.
-# A non-zero exit is expected when frameworks OOM at high N; read the summary
-# table to see how far each one got. Clock drift during a timed stage also
-# fails the run.
+#   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+#   -a, --analysis  all (default) | performance | work-precision | numerical | overlap | plots
+#   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
+#
+# Exit code: 0 if every analysis and package succeeded, 1 if any did not.
+# Clock drift in a timed analysis also fails the run.
 
 Set-Location $PSScriptRoot
 
-$NMax = [long][math]::Pow(2, 30)
+$NMax = [long]16777216
 $DoPerf = $true
 $DoWp = $true
 $DoNe = $true
 $DoOverlap = $true
 $DoPlots = $true
 $OverlapProfile = 'full'
-$OverlapNMax = ''
 $Cooldown = 15
 $ResumeFrom = ''
 $AllowUnknownGpu = $false
 $LockClocks = $true
 $ClockTarget = ''        # "SM[,MEM]"; empty means use the per-GPU table
 $PlotAll = $false
+$Package = 'all'
 
-$Languages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myokit_cuda')
+$AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myokit_cuda')
 
 . .\runner_scripts\clock_guard.ps1
 . .\runner_scripts\bench_key.ps1
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 18 |
+    Get-Content $PSCommandPath -TotalCount 19 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
 
-# Under --only plots, redraw everything from disk; otherwise plots track DoPerf/DoWp.
-function Set-OnlyStage {
-    param([string]$Stage)
+# Selecting plots alone redraws everything on disk; otherwise plots track perf/wp.
+function Set-Analyses {
+    param([string]$List)
     $script:DoPerf = $false; $script:DoWp = $false; $script:DoNe = $false
     $script:DoOverlap = $false; $script:DoPlots = $false
-    switch ($Stage) {
-        { $_ -in 'perf', 'performance' } { $script:DoPerf = $true; $script:DoPlots = $true }
-        { $_ -in 'wp', 'work-precision' } { $script:DoWp = $true; $script:DoPlots = $true }
-        { $_ -in 'ne', 'numerical-equivalence' } { $script:DoNe = $true }
-        'overlap' { $script:DoOverlap = $true }
-        'plots' { $script:DoPlots = $true; $script:PlotAll = $true }
-        default { Write-Host "Unknown stage '$Stage' (perf|wp|ne|overlap|plots)"; exit 1 }
+    foreach ($item in $List.Split(',')) {
+        switch ($item.Trim()) {
+            'all' {
+                $script:DoPerf = $true; $script:DoWp = $true; $script:DoNe = $true
+                $script:DoOverlap = $true; $script:DoPlots = $true
+            }
+            'performance' { $script:DoPerf = $true; $script:DoPlots = $true }
+            'work-precision' { $script:DoWp = $true; $script:DoPlots = $true }
+            'numerical' { $script:DoNe = $true }
+            'overlap' { $script:DoOverlap = $true }
+            'plots' { $script:DoPlots = $true; $script:PlotAll = $true }
+            default {
+                Write-Host "Unknown analysis '$item' (all|performance|work-precision|numerical|overlap|plots)"
+                exit 1
+            }
+        }
     }
 }
 
@@ -70,16 +80,11 @@ function Get-RequiredValue {
 for ($i = 0; $i -lt $args.Count; $i++) {
     switch -Regex ([string]$args[$i]) {
         '^(-n|--nmax)$' { $NMax = [long](Get-RequiredValue $args $i $args[$i]); $i++ }
-        '^--overlap-nmax$' { $OverlapNMax = Get-RequiredValue $args $i $args[$i]; $i++ }
-        '^--overlap-profile$' { $OverlapProfile = Get-RequiredValue $args $i $args[$i]; $i++ }
+        '^(-p|--package)$' { $Package = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
+        '^(-a|--analysis)$' { Set-Analyses (Get-RequiredValue $args $i $args[$i]); $i++ }
+        '^--profile$' { $OverlapProfile = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^--resume-from$' { $ResumeFrom = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^--cooldown$' { $Cooldown = [int](Get-RequiredValue $args $i $args[$i]); $i++ }
-        '^--only$' { Set-OnlyStage (Get-RequiredValue $args $i $args[$i]); $i++ }
-        '^--skip-perf$' { $DoPerf = $false }
-        '^--skip-wp$' { $DoWp = $false }
-        '^--skip-ne$' { $DoNe = $false }
-        '^--skip-overlap$' { $DoOverlap = $false }
-        '^--skip-plots$' { $DoPlots = $false }
         '^--allow-unknown-gpu$' { $AllowUnknownGpu = $true }
         '^--lock-clocks$' { $ClockTarget = Get-RequiredValue $args $i $args[$i]; $LockClocks = $true; $i++ }
         '^--no-lock-clocks$' { $LockClocks = $false }
@@ -89,8 +94,14 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
-# The overlap suite defaults to the same ceiling as the timing sweeps.
-if (-not $OverlapNMax) { $OverlapNMax = $NMax }
+if ($Package -eq 'all') {
+    $Languages = $AllPackages
+} elseif ($AllPackages -contains $Package) {
+    $Languages = @($Package)
+} else {
+    Write-Host "Unknown package '$Package' (all|$($AllPackages -join '|'))"
+    exit 1
+}
 
 $DatasetKey = Get-DatasetKey
 
@@ -202,9 +213,10 @@ function Invoke-Step {
 
 Write-Host "Dataset key : $DatasetKey"
 Write-Host "nmax        : $NMax"
-Write-Host "Overlap     : profile=$OverlapProfile nmax=$OverlapNMax"
+Write-Host "Overlap     : profile=$OverlapProfile"
+Write-Host "Packages    : $($Languages -join ', ')"
 Write-Host "Log dir     : $LogDir"
-Write-Host "Stages      : perf=$DoPerf wp=$DoWp ne=$DoNe overlap=$DoOverlap plots=$DoPlots"
+Write-Host "Analyses    : performance=$DoPerf work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
 Write-Host "Clocks      : $ClockStatus"
 if ($ResumeFrom) { Write-Host "Resume from : $ResumeFrom" }
 Write-Host ''
@@ -219,7 +231,7 @@ $manifest = @(
     "started_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
     "nmax=$NMax"
     "overlap_profile=$OverlapProfile"
-    "overlap_nmax=$OverlapNMax"
+    "packages=$($Languages -join ',')"
     "git_rev=$gitRev"
     "git_dirty=$gitDirty"
     "host=$env:COMPUTERNAME $([System.Environment]::OSVersion.VersionString)"
@@ -250,7 +262,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                ".\run_benchmark.bat -l $lang -d gpu -m ode -n $NMax"
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n $NMax"
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -286,7 +298,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                ".\run_benchmark.bat -l $lang -d gpu -m ode -w"
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision"
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
@@ -295,29 +307,38 @@ try {
 
     # -------------------------------------------------- numerical equivalence
     if ($DoNe) {
-        # Equivalence is a correctness check; its clock does not have to be stable.
-        $ClockCritical = $false; $StepLabel = 'ne'
-        $status = Invoke-Step 'Numerical-equivalence suite (all)' 'numerical_equivalence.log' `
-            '.\run_numerical_equivalence.bat all'
-        # Exit 2 means a mismatching algorithm, not an infrastructure failure.
-        switch ($status) {
-            0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
-            2 { Add-Record 'ne' 'MISMATCH' 'see numerical_equivalence_*.md' "$status" }
-            default { Add-Record 'ne' 'FAILED' '-' "$status" }
+        if ($Package -notin @('all', 'cubie', 'julia')) {
+            Add-Record 'ne' 'SKIPPED' "$Package is not in the ne suite" '-'
+        } else {
+            # Equivalence is a correctness check; its clock does not have to be stable.
+            $ClockCritical = $false; $StepLabel = 'ne'
+            $status = Invoke-Step "Numerical equivalence ($Package)" 'numerical_equivalence.log' `
+                ".\run_numerical_equivalence.bat -p $Package"
+            # Exit 2 means a mismatching algorithm, not an infrastructure failure.
+            switch ($status) {
+                0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
+                2 { Add-Record 'ne' 'MISMATCH' 'see numerical_equivalence_*.md' "$status" }
+                default { Add-Record 'ne' 'FAILED' '-' "$status" }
+            }
         }
     }
 
     # ----------------------------------------------- cubie vs DiffEqGPU overlap
     if ($DoOverlap) {
-        $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
-        if (-not (Test-Path $py)) { $py = 'python' }
-        $ClockCritical = $true; $StepLabel = 'overlap'
-        $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$OverlapNMax)" `
-            'cubie_julia_overlap.log' `
-            "$py run_cubie_julia_overlap.py --profile $OverlapProfile --phase all --nmax $OverlapNMax"
-        # A non-zero exit means at least one worker died, not that all did.
-        if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
-        else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }
+        # Only cubie and julia have an algorithm-for-algorithm mapping.
+        if ($Package -notin @('all', 'cubie', 'julia')) {
+            Add-Record 'overlap' 'SKIPPED' "$Package is not in the overlap suite" '-'
+        } else {
+            $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
+            if (-not (Test-Path $py)) { $py = 'python' }
+            $ClockCritical = $true; $StepLabel = 'overlap'
+            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$NMax)" `
+                'cubie_julia_overlap.log' `
+                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $Package -n $NMax"
+            # A non-zero exit means at least one worker died, not that all did.
+            if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
+            else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }
+        }
     }
 
     # ------------------------------------------------------ plots and reports

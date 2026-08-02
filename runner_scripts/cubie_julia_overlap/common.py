@@ -12,7 +12,13 @@ ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
 GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_32768.csv"
 
+# CLI analysis names; the CSVs record the underscored form.
+ANALYSES = ("performance", "numerical", "work-precision")
 PHASES = ("performance", "numerical", "work_precision")
+
+
+def phases_for(analysis):
+    return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
 # Protocol constants; mirrored in julia_worker.jl.
 FIXED_DT = 2.0 ** -10

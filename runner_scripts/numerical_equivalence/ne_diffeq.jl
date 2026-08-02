@@ -40,9 +40,22 @@ using CSV
 using DelimitedFiles
 using Printf
 
-const MODE = isempty(ARGS) ? "all" : lowercase(ARGS[1])
+function cli_args(args)
+    out = Dict{String, String}()
+    i = 1
+    while i <= length(args)
+        startswith(args[i], "--") || error("unexpected argument $(args[i])")
+        i < length(args) || error("$(args[i]) requires a value")
+        out[args[i][3:end]] = args[i + 1]
+        i += 2
+    end
+    return out
+end
+const NE_OPT = cli_args(ARGS)
+const MODE = lowercase(get(NE_OPT, "controller", "all"))
+const ALGORITHM = get(NE_OPT, "algorithm", "all")
 MODE in ("fixed", "adaptive", "all") ||
-    error("usage: ne_diffeq.jl [fixed|adaptive|all]")
+    error("--controller must be fixed, adaptive or all")
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
 const N_NE = 1024
@@ -129,7 +142,11 @@ eprob = EnsembleProblem(prob;
 outdir = joinpath(REPO_ROOT, "data", "numerical_equivalence", "julia")
 mkpath(outdir)
 
-table = CSV.File(joinpath(@__DIR__, "algorithms.csv"))
+table = collect(CSV.File(joinpath(@__DIR__, "algorithms.csv")))
+if ALGORITHM != "all"
+    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
+    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+end
 failures = Tuple{String, Float64, String}[]
 
 function collect_finals(sim)

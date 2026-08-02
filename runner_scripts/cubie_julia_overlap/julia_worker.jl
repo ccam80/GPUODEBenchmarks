@@ -37,7 +37,7 @@ end
 const OPT = cli_args(ARGS)
 const OUT = abspath(haskey(OPT, "output") ? OPT["output"] : error("--output is required"))
 const PROFILE = get(OPT, "profile", "smoke")
-const PHASE = get(OPT, "phase", "all")
+const ANALYSIS = get(OPT, "analysis", "all")
 const NMAX = parse(Int, get(OPT, "nmax", "16777216"))
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
 const ALGORITHM = get(OPT, "algorithm", "all")
@@ -214,7 +214,8 @@ if ALGORITHM != "all"
     table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
     isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
 end
-phases = PHASE == "all" ? ("performance", "numerical", "work_precision") : (PHASE,)
+phases = ANALYSIS == "all" ? ("performance", "numerical", "work_precision") :
+    (replace(ANALYSIS, "-" => "_"),)
 
 for row in table
     alias = String(row.cubie_alias)

@@ -3,9 +3,9 @@
 
 Examples:
   python run_cubie_julia_overlap.py --profile full
-  python run_cubie_julia_overlap.py --phase numerical --framework cubie
-  python run_cubie_julia_overlap.py --phase performance --from-n 2048
-  python run_cubie_julia_overlap.py --algorithm kvaerno5 --framework cubie
+  python run_cubie_julia_overlap.py -a numerical -p cubie
+  python run_cubie_julia_overlap.py -a performance --from-n 2048
+  python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
 
 Results land in data/cubie_julia_overlap/<dataset-key>/. A run replaces the
 rows it regenerates and leaves the rest. Workers record point failures and
@@ -29,8 +29,8 @@ sys.path.insert(0, str(ROOT / "runner_scripts"))
 sys.path.insert(0, str(SUITE))
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
-    FAILURE_FIELDS, METRIC_FIELDS, PHASES, TIMING_FIELDS, algorithm_names,
-    prune_csv,
+    ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
+    phases_for, prune_csv,
 )
 
 CSV_KINDS = (("timings", TIMING_FIELDS), ("metrics", METRIC_FIELDS),
@@ -53,13 +53,13 @@ def parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--profile", choices=("smoke", "full"), default="smoke",
                    help="Smoke uses every algorithm with reduced N/grids; full uses the published protocol.")
-    p.add_argument("--phase", choices=PHASES + ("all",), default="all",
-                   help="Which leg to run; a leg not selected keeps its existing rows.")
-    p.add_argument("--framework", choices=("both", "cubie", "julia"), default="both")
-    p.add_argument("--nmax", type=int, default=16_777_216,
+    p.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all",
+                   help="Which analysis to run; one not selected keeps its existing rows.")
+    p.add_argument("-p", "--package", choices=("all", "cubie", "julia"), default="all")
+    p.add_argument("-n", "--nmax", type=int, default=16_777_216,
                    help="Largest performance N; values are 8*4^k not exceeding this value.")
     p.add_argument("--from-n", type=int, default=0,
-                   help="Continue the performance leg at this N; rows below it are kept.")
+                   help="Continue the performance analysis at this N; rows below it are kept.")
     p.add_argument("--algorithm", choices=algorithm_names(), default="all",
                    help="Run one algorithm; the others keep their existing rows.")
     return p
@@ -69,22 +69,22 @@ def main():
     args = parser().parse_args()
     if args.nmax < 8:
         parser().error("--nmax must be at least 8")
-    if args.from_n and args.phase != "performance":
-        parser().error("--from-n continues the performance leg; pass --phase performance")
+    if args.from_n and args.analysis != "performance":
+        parser().error("--from-n continues the performance analysis; pass -a performance")
     key = dataset_key()
     output = (ROOT / "data" / "cubie_julia_overlap" / key).resolve()
     cubie_python = existing_python()
     julia = os.environ.get("JULIA", "julia")
-    phases = PHASES if args.phase == "all" else (args.phase,)
-    frameworks = ("julia", "cubie") if args.framework == "both" else (args.framework,)
+    phases = phases_for(args.analysis)
+    packages = ("julia", "cubie") if args.package == "all" else (args.package,)
     shared = ["--output", str(output), "--profile", args.profile,
-              "--phase", args.phase, "--nmax", str(args.nmax),
+              "--analysis", args.analysis, "--nmax", str(args.nmax),
               "--from-n", str(args.from_n), "--algorithm", args.algorithm]
     commands = []
-    if "julia" in frameworks:
+    if "julia" in packages:
         commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
-    if "cubie" in frameworks:
+    if "cubie" in packages:
         commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
     commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"), "--output", str(output)]))
 
@@ -102,7 +102,7 @@ def main():
     shutil.copy2(SUITE / "algorithms.csv", output / "overlap_algorithms.csv")
 
     # Clear the rows this run replaces; the workers only append.
-    for framework in frameworks:
+    for framework in packages:
         for kind, fields in CSV_KINDS:
             dropped = prune_csv(output / "{}_{}.csv".format(framework, kind),
                                 fields, phases, args.from_n, args.algorithm)
@@ -116,7 +116,7 @@ def main():
 
     manifest = {
         "dataset_key": key, "profile": args.profile,
-        "phase": args.phase, "framework": args.framework,
+        "analysis": args.analysis, "package": args.package,
         "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
         "nmax": args.nmax, "from_n": args.from_n, "algorithm": args.algorithm,
         "commands": [c for _, c in commands],
