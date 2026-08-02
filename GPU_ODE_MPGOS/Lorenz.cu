@@ -115,7 +115,7 @@ static std::string DataDir(const std::string& package)
 #ifdef _WIN32
 	// cmd needs backslashes and creates intermediate directories itself.
 	std::string win = dir;
-	std::replace(win.begin(), win.end(), '/', '\');
+	std::replace(win.begin(), win.end(), '/', '\\');
 	system(("if not exist \"" + win + "\" mkdir \"" + win + "\"").c_str());
 #else
 	system(("mkdir -p \"" + dir + "\"").c_str());
