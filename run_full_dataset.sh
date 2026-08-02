@@ -315,11 +315,13 @@ if $DO_WP; then
 fi
 
 # ------------------------------------------------------ numerical equivalence
-if $DO_NE; then
+if $DO_NE && [[ ! " all cubie julia " == *" $PACKAGE "* ]]; then
+    record "ne" "SKIPPED" "$PACKAGE is not in the ne suite" "-"
+elif $DO_NE; then
     # Equivalence is a correctness check; its clock does not have to be stable.
     CLOCK_CRITICAL=false; STEP_LABEL="ne"
-    run_step "Numerical-equivalence suite (all)" "numerical_equivalence.log" \
-        bash ./run_numerical_equivalence.sh
+    run_step "Numerical-equivalence suite ($PACKAGE)" "numerical_equivalence.log" \
+        bash ./run_numerical_equivalence.sh -p "$PACKAGE"
     status=$?
     # Exit 2 means the suite ran but found a mismatching/divergent algorithm:
     # a real result to inspect, not an infrastructure failure.

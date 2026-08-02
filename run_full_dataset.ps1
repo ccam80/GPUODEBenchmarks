@@ -307,15 +307,19 @@ try {
 
     # -------------------------------------------------- numerical equivalence
     if ($DoNe) {
-        # Equivalence is a correctness check; its clock does not have to be stable.
-        $ClockCritical = $false; $StepLabel = 'ne'
-        $status = Invoke-Step 'Numerical equivalence' 'numerical_equivalence.log' `
-            '.\run_numerical_equivalence.bat'
-        # Exit 2 means a mismatching algorithm, not an infrastructure failure.
-        switch ($status) {
-            0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
-            2 { Add-Record 'ne' 'MISMATCH' 'see numerical_equivalence_*.md' "$status" }
-            default { Add-Record 'ne' 'FAILED' '-' "$status" }
+        if ($Package -notin @('all', 'cubie', 'julia')) {
+            Add-Record 'ne' 'SKIPPED' "$Package is not in the ne suite" '-'
+        } else {
+            # Equivalence is a correctness check; its clock does not have to be stable.
+            $ClockCritical = $false; $StepLabel = 'ne'
+            $status = Invoke-Step "Numerical equivalence ($Package)" 'numerical_equivalence.log' `
+                ".\run_numerical_equivalence.bat -p $Package"
+            # Exit 2 means a mismatching algorithm, not an infrastructure failure.
+            switch ($status) {
+                0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
+                2 { Add-Record 'ne' 'MISMATCH' 'see numerical_equivalence_*.md' "$status" }
+                default { Add-Record 'ne' 'FAILED' '-' "$status" }
+            }
         }
     }
 
