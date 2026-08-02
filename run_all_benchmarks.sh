@@ -62,7 +62,13 @@ if [ "$ANALYSIS" == "work-precision" ] || [ "$ANALYSIS" == "all" ]; then
 fi
 
 if [ "$ANALYSIS" == "numerical" ] || [ "$ANALYSIS" == "all" ]; then
-    bash ./run_numerical_equivalence.sh || echo "Numerical equivalence reported problems"
+    # The numerical-equivalence suite only covers julia and cubie.
+    case "$PACKAGE" in
+        all|julia|cubie)
+            bash ./run_numerical_equivalence.sh -p "$PACKAGE" || echo "Numerical equivalence reported problems";;
+        *)
+            echo "Numerical equivalence skipped: $PACKAGE is not in the suite (all|julia|cubie)";;
+    esac
 fi
 
 echo "--- Pairwise numerical comparison ---"

@@ -74,8 +74,8 @@ if /i "%ANALYSIS%"=="all" call :run_sweep work-precision
 if /i "%ANALYSIS%"=="work-precision" call :plot plot_ode_wp.jl
 if /i "%ANALYSIS%"=="all" call :plot plot_ode_wp.jl
 
-if /i "%ANALYSIS%"=="numerical" call "%~dp0run_numerical_equivalence.bat"
-if /i "%ANALYSIS%"=="all" call "%~dp0run_numerical_equivalence.bat"
+if /i "%ANALYSIS%"=="numerical" call :run_numerical
+if /i "%ANALYSIS%"=="all" call :run_numerical
 
 echo --- Pairwise numerical comparison ---
 if exist "GPU_ODE_CUBIE\venv\Scripts\python.exe" (
@@ -108,4 +108,15 @@ exit /b 0
 echo --- Plot: %~1 ---
 julia --project=. runner_scripts\plot\%~1
 if errorlevel 1 echo Plot %~1 failed
+exit /b 0
+
+:run_numerical
+REM The numerical-equivalence suite only covers julia and cubie.
+if /i "%PACKAGE%"=="all" goto run_numerical_go
+if /i "%PACKAGE%"=="julia" goto run_numerical_go
+if /i "%PACKAGE%"=="cubie" goto run_numerical_go
+echo Numerical equivalence skipped: %PACKAGE% is not in the suite (all^|julia^|cubie)
+exit /b 0
+:run_numerical_go
+call "%~dp0run_numerical_equivalence.bat" -p %PACKAGE%
 exit /b 0
