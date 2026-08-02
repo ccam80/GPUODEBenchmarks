@@ -95,14 +95,23 @@ def main():
     if not pairs:
         print("Nothing to move.")
         return 0
+    moved = skipped = 0
     for src, dst in pairs:
         rel_src = src.relative_to(args.root.resolve())
         rel_dst = dst.relative_to(args.root.resolve())
+        # Never overwrite: a populated destination means newer keyed output.
+        if dst.exists():
+            print("{0}  -x  {1} exists; kept both".format(rel_src, rel_dst))
+            skipped += 1
+            continue
         print("{0}  ->  {1}".format(rel_src, rel_dst))
         if not args.dry_run:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
-    print("{0} file(s){1}".format(len(pairs), " (dry run)" if args.dry_run else " moved"))
+        moved += 1
+    print("{0} file(s){1}{2}".format(
+        moved, " (dry run)" if args.dry_run else " moved",
+        ", {0} skipped (destination exists)".format(skipped) if skipped else ""))
     return 0
 
 

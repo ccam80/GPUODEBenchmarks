@@ -102,9 +102,9 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
     }
     return stats
 
-# Package prefixes we compare. CSVs are named "<package>_<os>_<gpu>.csv" (the key
-# is appended by the benchmark writers, see runner_scripts/bench_key.*). Anything
-# not in this set (e.g. mpgos_internalsave) is ignored.
+# Packages we compare. CSVs live at data/numerical/<os>_<gpu>/<package>.csv (the
+# key directory comes from the benchmark writers, see runner_scripts/bench_key.*).
+# Anything not in this set (e.g. mpgos_internalsave) is ignored.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
 from bench_key import group_dir  # noqa: E402
 
@@ -211,12 +211,12 @@ def main():
                 continue
             datasets.append({"package": package, "os": os_name, "gpu": gpu,
                              "key": key, "arr": arr})
-        print(f"✓ Loaded {fname} - package={package}, os={os_name}, gpu={gpu}, shape: {arr.shape}")
+            print(f"✓ Loaded {key}/{fname} - package={package}, os={os_name}, gpu={gpu}, shape: {arr.shape}")
 
     if len(datasets) < 2:
         # Exit 3, not 1, so callers can tell this from a real failure.
         print(f"\nNothing to compare: found {len(datasets)} keyed dataset(s), need at least 2.")
-        print("Expected files like <package>_<os>_<gpu>.csv (run benchmarks with 32768 trajectories).")
+        print("Expected files like <os>_<gpu>/<package>.csv (run benchmarks with 32768 trajectories).")
         sys.exit(3)
 
     # Most specific first; a group repeating an earlier group's keys is dropped.
