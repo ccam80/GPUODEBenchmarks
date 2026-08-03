@@ -15,6 +15,7 @@ Import from a benchmark script with::
     from bench_key import dataset_key
 """
 
+import os
 import platform
 import re
 import subprocess
@@ -50,6 +51,20 @@ def _os_key():
 def dataset_key():
     """Return "<os>_<gpu>" for this machine."""
     return "{0}_{1}".format(_os_key(), _sanitize_gpu(_gpu_name_raw()))
+
+
+def data_dir(package, key=None, root=""):
+    """Directory holding one machine's files for a package; creates it."""
+    d = os.path.join(root, "data", package, key or dataset_key())
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def group_dir(group):
+    """Directory holding one group's plots and reports; creates it."""
+    d = os.path.join("plots", group)
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 if __name__ == "__main__":

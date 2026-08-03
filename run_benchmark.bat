@@ -1,156 +1,185 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Run from the repo root regardless of the caller's working directory
+REM Generate benchmark data for one package and one analysis.
+REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+REM   -a, --analysis  performance (default) | work-precision
+REM   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
+REM   -g, --algorithm all (default) | euler | classical-rk4 | tsit5 | cash-karp-54
+REM   -d, --device    gpu (default) | cpu
+REM   -m, --model     ode (default) | sde
+
 pushd "%~dp0"
 
-REM Parse command line arguments
-set lang=
-set dev=
-set model=
-set nmax=
-set has_n_option=false
-set wp=false
-set alg=all
+set PACKAGE=
+set ANALYSIS=performance
+set NMAX=16777216
+set ALGORITHM=all
+set DEVICE=gpu
+set MODEL=ode
 
 :parse_loop
-if "%~1"=="" goto end_parse_loop
-if /i "%~1"=="-l" (
-    set lang=%~2
+if "%~1"=="" goto parse_done
+if /i "%~1"=="-p" (
+    set "PACKAGE=%~2"
     shift
     shift
     goto parse_loop
 )
-if /i "%~1"=="-d" (
-    set dev=%~2
+if /i "%~1"=="--package" (
+    set "PACKAGE=%~2"
     shift
     shift
     goto parse_loop
 )
-if /i "%~1"=="-m" (
-    set model=%~2
+if /i "%~1"=="-a" (
+    set "ANALYSIS=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--analysis" (
+    set "ANALYSIS=%~2"
     shift
     shift
     goto parse_loop
 )
 if /i "%~1"=="-n" (
-    set nmax=%~2
-    set has_n_option=true
+    set "NMAX=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--nmax" (
+    set "NMAX=%~2"
     shift
     shift
     goto parse_loop
 )
 if /i "%~1"=="-g" (
-    set alg=%~2
+    set "ALGORITHM=%~2"
     shift
     shift
     goto parse_loop
 )
-if /i "%~1"=="-w" (
-    set wp=true
+if /i "%~1"=="--algorithm" (
+    set "ALGORITHM=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="-d" (
+    set "DEVICE=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--device" (
+    set "DEVICE=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="-m" (
+    set "MODEL=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--model" (
+    set "MODEL=%~2"
+    shift
     shift
     goto parse_loop
 )
 echo Unknown option %~1
+popd
 exit /b 1
-:end_parse_loop
+:parse_done
 
-REM Set default nmax if not specified
-if "%has_n_option%"=="false" (
-    set /a nmax=16777216
+REM Accept hyphenated aliases for underscore-separated package names
+if /i "%PACKAGE%"=="cubie-mlir" set PACKAGE=cubie_mlir
+if /i "%PACKAGE%"=="myokit-cuda" set PACKAGE=myokit_cuda
+
+if "%PACKAGE%"=="" (
+    echo -p/--package is required
+    popd
+    exit /b 1
 )
-
-REM Work-precision mode (-w): pass "wp" to the runner instead of nmax; the
-REM runner sweeps its supported step size and/or tolerance controls at N=32768
-REM against the golden reference.
-if "%wp%"=="true" set nmax=wp
-
-REM Accept hyphenated aliases for underscore-separated language names
-if /i "%lang%"=="cubie-mlir" set lang=cubie_mlir
-if /i "%lang%"=="myokit-cuda" set lang=myokit_cuda
-
-REM Per-machine dataset key ("<os>_<gpu>"). Timing files are appended across the
-REM N-sweep, so we clear only *this machine's* files before a run; other machines'
-REM keyed files are left in place so data accumulates additively across machines.
-set "DATASET_KEY="
-for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
-
-REM -g runs one algorithm (default "all"); the pre-run wipe narrows to match.
-if /i "%alg%"=="all" (
-    set "times_glob=*_times_*_%DATASET_KEY%.txt"
-    set "wp_glob=*_wp_*_%DATASET_KEY%.txt"
-) else (
-    set "times_glob=*_times_*_%alg%_%DATASET_KEY%.txt"
-    set "wp_glob=*_wp_*_%alg%_%DATASET_KEY%.txt"
-)
-
-echo %lang%
-
-if /i "%lang%"=="julia" (
-    echo Benchmarking Julia %dev% accelerated ensemble %model% solvers...
-    if /i "%dev%"=="cpu" (
-        call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
-    ) else if /i "%model%"=="sde" (
-        call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
-    ) else (
-        if not exist "data\Julia\" mkdir "data\Julia"
-        if "%wp%"=="true" (
-            del /q "data\Julia\%wp_glob%" 2>nul
-        ) else (
-            del /q "data\Julia\%times_glob%" 2>nul
-        )
-        call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax% %alg%
-    )
-) else if /i "%lang%"=="jax" (
-    goto check_ode_gpu
-) else if /i "%lang%"=="pytorch" (
-    goto check_ode_gpu
-) else if /i "%lang%"=="cpp" (
-    goto check_ode_gpu
-) else if /i "%lang%"=="cubie" (
-    goto check_ode_gpu
-) else if /i "%lang%"=="cubie_mlir" (
-    goto check_ode_gpu
-) else if /i "%lang%"=="myokit_cuda" (
-    goto check_ode_gpu
-) else (
-    echo Unknown language: %lang%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda.
+if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
+    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^)
     popd
     exit /b 1
 )
 
-goto end_script
-
-:check_ode_gpu
-if /i not "%model%"=="ode" goto unsupported
-if /i not "%dev%"=="gpu" goto unsupported
-
-REM Convert language name to uppercase for data folder
-set data_lang=%lang%
-if /i "%lang%"=="jax" set data_lang=JAX
-if /i "%lang%"=="pytorch" set data_lang=PYTORCH
-if /i "%lang%"=="cpp" set data_lang=CPP
-if /i "%lang%"=="cubie" set data_lang=CUBIE
-if /i "%lang%"=="cubie_mlir" set data_lang=CUBIE_MLIR
-if /i "%lang%"=="myokit_cuda" set data_lang=MYOKIT_CUDA
-
-echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
-if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
-if "%wp%"=="true" (
-    del /q "data\%data_lang%\%wp_glob%" 2>nul
-) else (
-    del /q "data\%data_lang%\%times_glob%" 2>nul
+set ALG_OK=
+if "%ALGORITHM%"=="all" set ALG_OK=1
+if "%ALGORITHM%"=="euler" set ALG_OK=1
+if "%ALGORITHM%"=="classical-rk4" set ALG_OK=1
+if "%ALGORITHM%"=="tsit5" set ALG_OK=1
+if "%ALGORITHM%"=="cash-karp-54" set ALG_OK=1
+if "%ALG_OK%"=="" (
+    echo Unknown algorithm "%ALGORITHM%" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
+    popd
+    exit /b 1
 )
-call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax% %alg%
-goto end_script
 
-:unsupported
-echo The benchmarking of ensemble %model% solvers on %dev% with %lang% is not supported.
-echo Please use -m flag with "ode" and -d with "gpu".
-popd
-exit /b 1
+if "!NMAX!"=="" (
+    echo -n/--nmax must be a positive integer
+    popd
+    exit /b 1
+)
+REM Sentinel keeps the variable defined when every digit is stripped.
+set "NMAX_CHECK=x!NMAX!"
+for %%d in (0 1 2 3 4 5 6 7 8 9) do set "NMAX_CHECK=!NMAX_CHECK:%%d=!"
+if not "!NMAX_CHECK!"=="x" (
+    echo -n/--nmax must be a positive integer, got "!NMAX!"
+    popd
+    exit /b 1
+)
 
-:end_script
+set DATA_DIR=
+if /i "%PACKAGE%"=="julia" set DATA_DIR=Julia
+if /i "%PACKAGE%"=="cpp" set DATA_DIR=CPP
+if /i "%PACKAGE%"=="jax" set DATA_DIR=JAX
+if /i "%PACKAGE%"=="pytorch" set DATA_DIR=PYTORCH
+if /i "%PACKAGE%"=="cubie" set DATA_DIR=CUBIE
+if /i "%PACKAGE%"=="cubie_mlir" set DATA_DIR=CUBIE_MLIR
+if /i "%PACKAGE%"=="myokit_cuda" set DATA_DIR=MYOKIT_CUDA
+if "%DATA_DIR%"=="" (
+    echo Unknown package: %PACKAGE%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda.
+    popd
+    exit /b 1
+)
+
+set RUNNER=runner_scripts\%DEVICE%\run_%MODEL%_%PACKAGE%.bat
+if not exist "%RUNNER%" (
+    echo Ensemble %MODEL% on %DEVICE% with %PACKAGE% is not supported.
+    popd
+    exit /b 1
+)
+
+echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %ALGORITHM%^)...
+
+REM Timing files are appended across the N sweep, so clear this machine's files
+REM for the analysis being run; other machines' keyed files stay. -g narrows
+REM the wipe to the one algorithm being rerun.
+if "%ALGORITHM%"=="all" (
+    set "ALG_GLOB=*"
+) else (
+    set "ALG_GLOB=*_%ALGORITHM%"
+)
+if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
+    if not exist "data\%DATA_DIR%\!DATASET_KEY!\" mkdir "data\%DATA_DIR%\!DATASET_KEY!"
+    if /i "%ANALYSIS%"=="work-precision" (
+        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_wp_!ALG_GLOB!.txt" 2>nul
+    ) else (
+        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_times_!ALG_GLOB!.txt" 2>nul
+    )
+)
+
+call "%RUNNER%" -a %ANALYSIS% -n %NMAX% -g %ALGORITHM%
 set benchmark_exit=%errorlevel%
 popd
 endlocal & exit /b %benchmark_exit%

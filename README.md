@@ -125,19 +125,21 @@ This script will execute all benchmarks one after another, allowing for set-and-
 
 Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
 
-Two further optional flags extend the run:
+`-a` selects which analysis to run:
 
-* `-w` — also run the work-precision (error vs. runtime) sweeps for every
-  framework and generate their plot (see
+* `-a work-precision` — the work-precision (error vs. runtime) sweeps for every
+  package and their plot (see
   [Work-Precision Benchmarks](#work-precision-error-vs-runtime-benchmarks)).
-* `-g <algorithm>` — narrow the run to a single integration algorithm (see
-  [Algorithm-matched subsets](#algorithm-matched-subsets) below).
-* `-np` / `--numerical-precision` — also run the numerical-equivalence
-  suite (cubie vs. DifferentialEquations.jl, error vs. dt and vs. tolerance
-  per algorithm; see
+* `-a numerical` — the numerical-equivalence suite (cubie vs.
+  DifferentialEquations.jl, error vs. dt and vs. tolerance per algorithm; see
   [Numerical Equivalence](#numerical-equivalence-error-vs-dt--cubie-vs-differentialequationsjl)).
   This delegates to `run_numerical_equivalence.sh`/`.bat`, which can also be
   run standalone.
+* `-a all` — every analysis above, plus the timing sweeps.
+
+`-p` restricts any of them to one package; `-g <algorithm>` restricts the
+timing and work-precision sweeps to a single integration algorithm (see
+[Algorithm-matched subsets](#algorithm-matched-subsets) below).
 
 ### Algorithm-matched subsets
 
@@ -166,20 +168,15 @@ every algorithm the framework supports); a framework that does not support
 the requested algorithm skips cleanly:
 
 ```bash
-    $ bash ./run_benchmark.sh -l cubie -d gpu -m ode -g tsit5
+    $ bash ./run_benchmark.sh -p cubie -g tsit5
     $ bash ./run_all_benchmarks.sh -g classical-rk4
     $ ./run_full_dataset.sh --algorithm euler
 ```
 
 Timing files are named
-`data/<FRAMEWORK>/<Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt`
+`data/<package>/<os>_<gpu>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
 (work-precision files use `_wp_` in place of `_times_`). Data without the
-algorithm field renames into this layout with
-
-```bash
-    $ python3 runner_scripts/migrate_data_layout.py --dry-run   # preview
-    $ python3 runner_scripts/migrate_data_layout.py             # rename
-```
+algorithm field is regenerated fresh rather than migrated.
 
 ### Generating the complete dataset
 
@@ -189,10 +186,10 @@ per-algorithm cubie vs. DiffEqGPU overlap comparison, and finally the plots
 and comparison reports:
 
 ```bash
-    $ ./run_full_dataset.sh                     # everything, nmax = 2^30
-    $ ./run_full_dataset.sh -n $((2**24))       # smaller ceiling
-    $ ./run_full_dataset.sh --skip-ne           # drop a stage
-    $ ./run_full_dataset.sh --only overlap      # run a single stage
+    $ ./run_full_dataset.sh                     # everything, nmax = 2^24
+    $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
+    $ ./run_full_dataset.sh -a performance      # one analysis
+    $ ./run_full_dataset.sh -p cpp              # one package
     $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
 ```
 
@@ -200,7 +197,7 @@ and comparison reports:
 for `run_full_dataset.ps1`:
 
 ```cmd
-    > run_full_dataset.bat -n 16777216 --skip-ne
+    > run_full_dataset.bat -n 16777216 -a performance,work-precision
 ```
 
 At high trajectory counts some frameworks will exhaust GPU memory. Each
@@ -287,12 +284,12 @@ timings can be generated through the following:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l julia -d gpu -m ode
+    $ bash ./run_benchmark.sh -p julia -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l julia -d gpu -m ode
+    > run_benchmark.bat -p julia -d gpu -m ode
 ```
 
 It might take around 20 minutes to finish. The flag `-n N` can be used
@@ -345,12 +342,12 @@ programs can be run with the same script by changing the arguments as:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l cpp -d gpu -m ode
+    $ bash ./run_benchmark.sh -p cpp -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l cpp -d gpu -m ode
+    > run_benchmark.bat -p cpp -d gpu -m ode
 ```
 
 It will generate the data files in the `data/cpp` folder.
@@ -375,12 +372,12 @@ For our purposes, we can benchmark the solvers by:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l jax -d gpu -m ode
+    $ bash ./run_benchmark.sh -p jax -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l jax -d gpu -m ode
+    > run_benchmark.bat -p jax -d gpu -m ode
 ```
 
 #### A note on JIT ordering in JAX
@@ -408,12 +405,12 @@ Then run the benchmarks by:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l pytorch -d gpu -m ode
+    $ bash ./run_benchmark.sh -p pytorch -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l pytorch -d gpu -m ode
+    > run_benchmark.bat -p pytorch -d gpu -m ode
 ```
 
 ### Benchmarking CUBIE ODE solvers
@@ -430,14 +427,14 @@ scripts (see [SETUP.md](SETUP.md)), then run:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l cubie -d gpu -m ode
-    $ bash ./run_benchmark.sh -l cubie_mlir -d gpu -m ode
+    $ bash ./run_benchmark.sh -p cubie -d gpu -m ode
+    $ bash ./run_benchmark.sh -p cubie_mlir -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l cubie -d gpu -m ode
-    > run_benchmark.bat -l cubie_mlir -d gpu -m ode
+    > run_benchmark.bat -p cubie -d gpu -m ode
+    > run_benchmark.bat -p cubie_mlir -d gpu -m ode
 ```
 
 Results are written to `data/CUBIE/` and `data/CUBIE_MLIR/` respectively,
@@ -458,14 +455,14 @@ language spelling:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l myokit_cuda -d gpu -m ode
-    $ bash ./run_benchmark.sh -l myokit-cuda -d gpu -m ode
+    $ bash ./run_benchmark.sh -p myokit_cuda -d gpu -m ode
+    $ bash ./run_benchmark.sh -p myokit-cuda -d gpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l myokit_cuda -d gpu -m ode
-    > run_benchmark.bat -l myokit-cuda -d gpu -m ode
+    > run_benchmark.bat -p myokit_cuda -d gpu -m ode
+    > run_benchmark.bat -p myokit-cuda -d gpu -m ode
 ```
 
 Results are written to `data/MYOKIT_CUDA/` with the `Myokit_cuda` filename
@@ -494,12 +491,12 @@ allows the generation of CPU simulation times for ODEs:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l julia -d cpu -m ode
+    $ bash ./run_benchmark.sh -p julia -d cpu -m ode
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l julia -d cpu -m ode
+    > run_benchmark.bat -p julia -d cpu -m ode
 ```
 
 The simulation times will be generated in `data/CPU`. Each of the
@@ -514,24 +511,24 @@ section. To generate simulation times for GPU, do the following:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l julia -d gpu -m sde
+    $ bash ./run_benchmark.sh -p julia -d gpu -m sde
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l julia -d gpu -m sde
+    > run_benchmark.bat -p julia -d gpu -m sde
 ```
 
 We can generate the simulation times for CPU-accelerated codes through the following:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -l julia -d cpu -m sde
+    $ bash ./run_benchmark.sh -p julia -d cpu -m sde
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -l julia -d cpu -m sde
+    > run_benchmark.bat -p julia -d cpu -m sde
 ```
 
 The results will get generated in `data/SDE` and `data/CPU/SDE`, taking
@@ -721,21 +718,21 @@ live in `runner_scripts/wp_common.py` (mirrored in the Julia and MPGOS
 writers).
 
 ```bash
-./run_benchmark.sh -l cubie      -d gpu -m ode -w
-./run_benchmark.sh -l cubie-mlir -d gpu -m ode -w
-./run_benchmark.sh -l myokit-cuda -d gpu -m ode -w  # float32 forward Euler only
-./run_benchmark.sh -l julia      -d gpu -m ode -w
-./run_benchmark.sh -l pytorch    -d gpu -m ode -w   # fixed-dt only: torch.vmap cannot trace adaptive solvers
-./run_benchmark.sh -l jax        -d gpu -m ode -w   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
-./run_benchmark.sh -l cpp        -d gpu -m ode -w   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=32768
+./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision
+./run_benchmark.sh -p cubie-mlir -d gpu -m ode -a work-precision
+./run_benchmark.sh -p myokit-cuda -d gpu -m ode -a work-precision  # float32 forward Euler only
+./run_benchmark.sh -p julia      -d gpu -m ode -a work-precision
+./run_benchmark.sh -p pytorch    -d gpu -m ode -a work-precision   # fixed-dt only: torch.vmap cannot trace adaptive solvers
+./run_benchmark.sh -p jax        -d gpu -m ode -a work-precision   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
+./run_benchmark.sh -p cpp        -d gpu -m ode -a work-precision   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=32768
 ```
 
-(`run_benchmark.bat -l <lang> -d gpu -m ode -w` on Windows.) To run every
-framework's wp sweeps and the wp plot in one go, pass `-w` to the all-in-one
-script: `./run_all_benchmarks.sh -w` (`run_all_benchmarks.bat -w`).
+(`run_benchmark.bat -p <package> -d gpu -m ode -a work-precision` on Windows.) To run every
+package's work-precision sweeps and the plot in one go:
+`./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 
 Results are written per machine as
-`data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt`
+`data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
 with rows `<setting> <time_ms> <error>`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
@@ -753,9 +750,9 @@ julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
 ```
 
 discovers all keyed wp files and writes one algorithm-matched figure per
-(mode, algorithm), `plots/Lorenz_wp_<mode>_<algorithm>_<group>.png`, plus an
-`plots/Lorenz_wp_all_<group>.png` overview, for the same
-(all / per-os / per-gpu) groups as `plot_ode_comp.jl`.
+(mode, algorithm), `plots/<group>/Lorenz_wp_<mode>_<algorithm>.png`, plus a
+`plots/<group>/Lorenz_wp_all.png` overview, for the same groups as
+`plot_ode_comp.jl`.
 
 ## Numerical Equivalence (error vs. dt) — cubie vs. DifferentialEquations.jl
 
@@ -786,12 +783,12 @@ sweeps, both cubie sweeps, comparison report + plots):
 run_numerical_equivalence.bat               # Windows
 ```
 
-Both take an optional `fixed|adaptive|all` mode argument (default `all`) to
-run just one of the two sweep types, and exit non-zero when any step fails
-or the comparison finds a MISMATCH / DIVERGENT algorithm — so the exit code
-is directly usable as a CI gate. Alternatively, `-np` /
-`--numerical-precision` on `run_all_benchmarks.sh`/`.bat` appends the same
-suite to a full benchmark run.
+Both take `--controller fixed|adaptive|all` (default `all`) to run just one
+of the two sweep types, `-p julia|cubie|all` to run one side of the
+comparison, and exit non-zero when any step fails or the comparison finds a
+MISMATCH / DIVERGENT algorithm — so the exit code is directly usable as a CI
+gate. `run_all_benchmarks.sh -a numerical` appends the same suite to a full
+benchmark run.
 
 Reproducibility: the golden reference and the DifferentialEquations.jl
 outputs under `data/numerical_equivalence/julia/` are machine-independent

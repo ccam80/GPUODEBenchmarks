@@ -1,26 +1,24 @@
 @echo off
 setlocal enabledelayedexpansion
-
-set a=8
-set max_a=%1
-set path=EnsembleGPUArray
-
-REM Create or clear data directory
-if exist "data\%path%\" (
-    rmdir /s /q "data\%path%" 2>nul
-    mkdir "data\%path%"
-) else (
-    mkdir "data\%path%"
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
+if /i not "%ANALYSIS%"=="performance" (
+    echo EnsembleGPUArray supports -a performance only
+    exit /b 1
 )
 
+REM Clear this run's data directory.
+if exist "data\EnsembleGPUArray\" rmdir /s /q "data\EnsembleGPUArray"
+mkdir "data\EnsembleGPUArray" 2>nul
+
+set a=8
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
-REM Print the values
-echo %a%
+echo No. of trajectories = %a%
 julia --project=GPU_ODE_Julia GPU_ODE_Julia\bench_ensemblegpuarray.jl %a%
+if errorlevel 1 exit /b 1
 
-REM Increment the value
 set /a a=%a%*4
 goto loop
 

@@ -1,24 +1,21 @@
 #!/bin/bash
 set -e
-a=8
-max_a=$1
+. "$(dirname "$0")/../parse_args.sh" "$@"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
-
-# Algorithm filter; "all" runs every algorithm this framework supports.
-ALG=${2:-all}
 source ./GPU_ODE_JAX/venv/bin/activate
-# Work-precision mode: `run_ode_jax.sh wp` sweeps dt/tolerance at N=32768.
-if [ "$1" == "wp" ]; then
-    python3 ./GPU_ODE_JAX/bench_diffrax.py 32768 wp "$ALG"
+
+if [ "$ANALYSIS" == "work-precision" ]; then
+    python3 ./GPU_ODE_JAX/bench_diffrax.py 32768 wp "$ALGORITHM"
     deactivate
     exit 0
 fi
-while [ $a -le $max_a ]
+
+a=8
+while [ $a -le $NMAX ]
 do
-    	# Print the values
-    	echo "No. of trajectories = $a"
-		python3 ./GPU_ODE_JAX/bench_diffrax.py $a "$ALG"	
-    	# increment the value
-    	a=$((a*4))
+    echo "No. of trajectories = $a"
+    python3 ./GPU_ODE_JAX/bench_diffrax.py $a "$ALGORITHM"
+    a=$((a*4))
 done
+
 deactivate

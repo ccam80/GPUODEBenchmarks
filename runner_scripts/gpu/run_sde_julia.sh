@@ -1,22 +1,16 @@
 #!/bin/bash
-a=8
-max_a=$1
+set -e
+. "$(dirname "$0")/../parse_args.sh" "$@"
+[ "$ANALYSIS" == "performance" ] || { echo "GPU Julia SDE supports -a performance only" >&2; exit 1; }
 
 path="SDE"
-if [ -d "./data/${path}" ] 
-then
-	rm -rf "./data/${path}"/* || true
-	mkdir -p "./data/${path}"
-else
-	mkdir -p "./data/${path}"
-fi
+rm -rf "./data/${path}"
+mkdir -p "./data/${path}"
 
-
-while [ $a -le $max_a ]
+a=8
+while [ $a -le $NMAX ]
 do
-    	# Print the values
-    	echo $a
-		julia --threads=16 --project="./GPU_ODE_Julia/" ./GPU_ODE_Julia/sde_examples/bench_gpu.jl $a
-    	# increment the value
-    	a=$((a*4))
+    echo "No. of trajectories = $a"
+    julia --threads=16 --project="./GPU_ODE_Julia/" ./GPU_ODE_Julia/sde_examples/bench_gpu.jl $a
+    a=$((a*4))
 done

@@ -1,25 +1,20 @@
 #!/bin/bash
 set -e
-
+. "$(dirname "$0")/../parse_args.sh" "$@"
 source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
-# Algorithm filter; "all" runs every algorithm this framework supports.
-ALG=${2:-all}
-
-# Myokit CUDA exposes float32 forward Euler only. Its work-precision mode
-# therefore writes only the fixed-step sweep.
-if [ "$1" == "wp" ]; then
-    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 32768 wp "$ALG"
+# Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if [ "$ANALYSIS" == "work-precision" ]; then
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 32768 wp "$ALGORITHM"
     deactivate
     exit 0
 fi
 
 a=8
-max_a=$1
-while [ $a -le $max_a ]
+while [ $a -le $NMAX ]
 do
     echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$a" "$ALG"
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$a" "$ALGORITHM"
     a=$((a*4))
 done
 

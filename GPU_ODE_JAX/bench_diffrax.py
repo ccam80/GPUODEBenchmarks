@@ -29,7 +29,7 @@ from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolatio
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
@@ -222,8 +222,6 @@ if WP_MODE:
 
 # %%
 # N-sweep: use jax.vmap to compute parallel solutions of the ODE.
-os.makedirs("./data/JAX", exist_ok=True)
-
 for algorithm in ALGORITHMS:
     if algorithm in FIXED_ALGORITHMS:
         main = make_fixed(algorithm)
@@ -238,10 +236,9 @@ for algorithm in ALGORITHMS:
                 numberOfParameters, best_time, best_time_dev))
         # The pairwise numerical cross-check reads this fixed CSV name.
         if numberOfParameters == 32768 and algorithm == "tsit5":
-            os.makedirs("./data/numerical", exist_ok=True)
             sol = main(parameterList)
             final_states = np.array(sol.ys[:, -1, :])
-            np.savetxt("./data/numerical/jax_{0}.csv".format(DATASET_KEY),
+            np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "jax.csv"),
                        final_states, delimiter=',')
 
     if algorithm in ADAPTIVE_ALGORITHMS:

@@ -21,7 +21,7 @@ import numpy as np
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
@@ -170,8 +170,6 @@ if WP_MODE:
 
 parameters_host = parameters.cpu().numpy()
 
-os.makedirs("./data/PYTORCH", exist_ok=True)
-
 for algorithm in ALGORITHMS:
     solve = make_solve(algorithm)
 
@@ -202,11 +200,10 @@ for algorithm in ALGORITHMS:
 
     # The pairwise numerical cross-check reads this fixed CSV name.
     if numberOfParameters == 32768 and algorithm == "classical-rk4":
-        os.makedirs("./data/numerical", exist_ok=True)
         traj = torch.vmap(solve)(parameters)
         # Extract final state values (last time point for each trajectory)
         final_states = traj[:, -1, :].cpu().numpy()  # shape: (trajectories, states)
-        np.savetxt("./data/numerical/pytorch_{0}.csv".format(DATASET_KEY),
+        np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "pytorch.csv"),
                    final_states, delimiter=',')
 
 

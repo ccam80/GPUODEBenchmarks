@@ -5,7 +5,7 @@ rtol = atol (adaptive) per algorithm, timing each setting (untimed warmup,
 ``timeit.repeat``, min * 1000 ms) and scoring the ensemble l2 final-state
 error against ``data/numerical/golden_lorenz_32768.csv``. Rows
 ``<setting> <time_ms> <error>`` are written (mode "w") to
-``data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt``
+``data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt``
 with cubie-vocabulary algorithm names. The Julia and MPGOS writers mirror
 these constants; keep them in sync.
 """
@@ -13,6 +13,8 @@ these constants; keep them in sync.
 import os
 
 import numpy as np
+
+from bench_key import data_dir
 
 # Euler gets its own finer grid: a first-order method needs far smaller dt
 # for errors in the same range as the order >= 4 methods.
@@ -23,6 +25,8 @@ TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 N_WP = 32768
 
 GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_32768.csv")
+
+ALGORITHMS = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
 
 
 def dts_for(algorithm):
@@ -51,19 +55,15 @@ def ensemble_error(final_states, golden):
 
 
 def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the keyed wp output file; ensures the directory exists."""
-    d = os.path.join("data", framework_dir)
-    os.makedirs(d, exist_ok=True)
-    return os.path.join(d, "{0}_wp_{1}_{2}_{3}.txt".format(
-        prefix, mode, algorithm, dataset_key))
+    """Path of the wp output file under data/<package>/<key>; creates the directory."""
+    return os.path.join(data_dir(framework_dir, dataset_key),
+                        "{0}_wp_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
 def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the keyed N-sweep timing file; ensures the directory exists."""
-    d = os.path.join("data", framework_dir)
-    os.makedirs(d, exist_ok=True)
-    return os.path.join(d, "{0}_times_{1}_{2}_{3}.txt".format(
-        prefix, mode, algorithm, dataset_key))
+    """Path of the N-sweep timing file under data/<package>/<key>; creates the directory."""
+    return os.path.join(data_dir(framework_dir, dataset_key),
+                        "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
 def parse_bench_args(argv, supported):
@@ -80,11 +80,10 @@ def parse_bench_args(argv, supported):
             wp = True
         else:
             request = tok
-    vocabulary = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
-    if request != "all" and request not in vocabulary:
+    if request != "all" and request not in ALGORITHMS:
         raise SystemExit(
             "unknown algorithm '{0}' (expected one of: all, {1})".format(
-                request, ", ".join(vocabulary)))
+                request, ", ".join(ALGORITHMS)))
     if request == "all":
         algorithms = list(supported)
     else:

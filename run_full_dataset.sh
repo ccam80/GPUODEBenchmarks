@@ -1,57 +1,51 @@
 #!/bin/bash
-# Drive the complete benchmark dataset in one set-and-forget run:
+# Drive the complete benchmark dataset in one run:
 #
-#   1. performance  - N-sweep timing benchmarks for every framework
-#   2. work-precision - error-vs-time sweeps for every framework
-#   3. numerical-equivalence - Float32 fixed/adaptive sweeps, cubie vs
-#                              DifferentialEquations.jl, plus report
-#   4. overlap      - per-algorithm cubie vs DiffEqGPU comparison
-#   5. plots + pairwise comparison reports
+#   1. performance    - N-sweep timing benchmarks
+#   2. work-precision - error-vs-time sweeps
+#   3. numerical      - Float32 fixed/adaptive sweeps, cubie vs DifferentialEquations.jl
+#   4. overlap        - per-algorithm cubie vs DiffEqGPU comparison
+#   5. plots          - plots + pairwise comparison reports
 #
-# Failure policy (the point of this script): at large N some frameworks will
-# exhaust GPU memory. Every framework runs as its own process tree, so an OOM
-# kills only that framework's sweep. The already-completed smaller-N points
-# stay on disk (each N appends a line as it finishes), the remaining N values
-# are simply left absent, and the run continues with the next framework. The
-# same applies stage-to-stage: a failed stage never aborts the others.
-#
-# Nothing here is resumable-by-default: stage 1/2 clear this machine's own
-# data files for the mode being run (see run_benchmark.sh) so a rerun starts
-# clean. Use --resume-from to continue a part-finished sweep instead.
+# A package that runs out of GPU memory stops only its own sweep; completed
+# points stay on disk and the run continues. A failed analysis never aborts
+# the others. Use --resume-from to continue a part-finished sweep.
 #
 # GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh);
 # without passwordless root the run proceeds unlocked and reports any drift.
 #
 # Usage:
-#   ./run_full_dataset.sh                      # everything, nmax = 2^30
-#   ./run_full_dataset.sh -n 16777216          # smaller ceiling
-#   ./run_full_dataset.sh --skip-ne            # drop a stage
-#   ./run_full_dataset.sh --resume-from jax    # restart at a framework
-#   ./run_full_dataset.sh --only overlap       # a single stage
-#   ./run_full_dataset.sh -g tsit5             # a single algorithm (-g in run_benchmark.sh)
+#   ./run_full_dataset.sh                           # every analysis, every package
+#   ./run_full_dataset.sh -n 33554432               # larger ceiling
+#   ./run_full_dataset.sh -p cpp                    # one package
+#   ./run_full_dataset.sh -a overlap                # one analysis
+#   ./run_full_dataset.sh -a performance,numerical  # several analyses
+#   ./run_full_dataset.sh --resume-from jax         # restart at a package
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
-#   ./run_full_dataset.sh --no-lock-clocks     # sample clocks but do not pin
-#   ./run_full_dataset.sh --clock-tolerance 30 # widen the drift threshold (MHz)
+#   ./run_full_dataset.sh --no-lock-clocks          # sample clocks but do not pin
+#   ./run_full_dataset.sh --clock-tolerance 30      # widen the drift threshold (MHz)
 #
-# On Windows, run_full_dataset.bat (a wrapper for run_full_dataset.ps1) takes
-# the same flags.
+#   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+#   -a, --analysis  all (default) | performance | work-precision | numerical | overlap | plots
+#   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
+#   -g, --algorithm all (default) | euler | classical-rk4 | tsit5 | cash-karp-54
 #
-# Exit code: 0 if every stage and framework succeeded, 1 if any did not.
-# A non-zero exit is expected and fine when frameworks OOM at high N; read the
-# summary table to see how far each one got. Clock drift during a timed stage
-# also fails the run.
+# On Windows, run_full_dataset.bat takes the same flags.
+#
+# Exit code: 0 if every analysis and package succeeded, 1 if any did not.
+# Clock drift in a timed analysis also fails the run.
 
 set -u
 cd "$(dirname "$0")" || exit 1
 
-NMAX=$((2**30))
+NMAX=16777216
 DO_PERF=true
 DO_WP=true
 DO_NE=true
 DO_OVERLAP=true
 DO_PLOTS=true
 OVERLAP_PROFILE="full"
-OVERLAP_NMAX=""
+PACKAGE="all"
 ALGORITHM="all"
 COOLDOWN=15
 RESUME_FROM=""
@@ -59,53 +53,51 @@ ALLOW_UNKNOWN_GPU=false
 LOCK_CLOCKS=true
 CLOCK_TARGET=""          # "SM[,MEM]"; empty means use the per-GPU table
 
-LANGUAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
+ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,43p' "$0" | sed 's/^# \?//'
+    sed -n '2,36p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
-# Which plots to draw. Normally a plot is drawn only if this run regenerated
-# the data behind it, so PLOT_TIMING/PLOT_WP track DO_PERF/DO_WP -- except
-# under `--only plots`, which redraws everything from whatever is on disk.
+# `-a plots` redraws from disk; otherwise a plot follows the data this run made.
 PLOT_ALL=false
 
-only_stage() {
+set_analyses() {
     DO_PERF=false; DO_WP=false; DO_NE=false; DO_OVERLAP=false; DO_PLOTS=false
-    case "$1" in
-        perf|performance) DO_PERF=true; DO_PLOTS=true;;
-        wp|work-precision) DO_WP=true; DO_PLOTS=true;;
-        ne|numerical-equivalence) DO_NE=true;;
-        overlap) DO_OVERLAP=true;;
-        plots) DO_PLOTS=true; PLOT_ALL=true;;
-        *) echo "Unknown stage '$1' (perf|wp|ne|overlap|plots)"; exit 1;;
-    esac
+    local item
+    for item in ${1//,/ }; do
+        case "$item" in
+            all) DO_PERF=true; DO_WP=true; DO_NE=true; DO_OVERLAP=true; DO_PLOTS=true;;
+            performance) DO_PERF=true; DO_PLOTS=true;;
+            work-precision) DO_WP=true; DO_PLOTS=true;;
+            numerical) DO_NE=true;;
+            overlap) DO_OVERLAP=true;;
+            plots) DO_PLOTS=true; PLOT_ALL=true;;
+            *) echo "Unknown analysis '$item' (all|performance|work-precision|numerical|overlap|plots)"
+               exit 1;;
+        esac
+    done
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -n|--nmax) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    NMAX="$2"; shift 2;;
+        -p|--package) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+                   PACKAGE="${2//-/_}"; shift 2;;
         -g|--algorithm) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    ALGORITHM="$2"; shift 2;;
-        --overlap-nmax) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
-                   OVERLAP_NMAX="$2"; shift 2;;
-        --overlap-profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+        -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+                   set_analyses "$2"; shift 2;;
+        --profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    OVERLAP_PROFILE="$2"; shift 2;;
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    RESUME_FROM="${2//-/_}"; shift 2;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    COOLDOWN="$2"; shift 2;;
-        --only) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
-                   only_stage "$2"; shift 2;;
-        --skip-perf) DO_PERF=false; shift;;
-        --skip-wp) DO_WP=false; shift;;
-        --skip-ne) DO_NE=false; shift;;
-        --skip-overlap) DO_OVERLAP=false; shift;;
-        --skip-plots) DO_PLOTS=false; shift;;
         --allow-unknown-gpu) ALLOW_UNKNOWN_GPU=true; shift;;
         --lock-clocks) [ $# -ge 2 ] || { echo "$1 requires SM[,MEM]"; exit 1; }
                    CLOCK_TARGET="$2"; LOCK_CLOCKS=true; shift 2;;
@@ -117,8 +109,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# The overlap suite defaults to the same ceiling as the timing sweeps unless
-# told otherwise; it is far slower per point, so it is often worth capping.
+if [ "$PACKAGE" == "all" ]; then
+    LANGUAGES=("${ALL_PACKAGES[@]}")
+elif [[ " ${ALL_PACKAGES[*]} " == *" $PACKAGE "* ]]; then
+    LANGUAGES=("$PACKAGE")
+else
+    echo "Unknown package '$PACKAGE' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
+    exit 1
+fi
+# The overlap suite defaults to the same ceiling as the timing sweeps.
 [ -n "$OVERLAP_NMAX" ] || OVERLAP_NMAX="$NMAX"
 
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
@@ -183,7 +182,7 @@ max_n_reached() {
     dir="data/$(data_dir_for "$1")"
     prefix="$(data_prefix_for "$1")"
     [ -d "$dir" ] || { echo 0; return; }
-    for f in "$dir/${prefix}"_times_*_"${DATASET_KEY}".txt; do
+    for f in "$dir/${DATASET_KEY}/${prefix}"_times_*.txt; do
         [ -f "$f" ] || continue
         n=$(awk 'NF{print $1}' "$f" | sort -n | tail -1)
         [ -n "$n" ] && [ "${n%.*}" -gt "$best" ] 2>/dev/null && best="${n%.*}"
@@ -228,9 +227,10 @@ run_step() {
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
 echo "Algorithm   : $ALGORITHM"
-echo "Overlap     : profile=$OVERLAP_PROFILE nmax=$OVERLAP_NMAX"
+echo "Overlap     : profile=$OVERLAP_PROFILE"
+echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
-echo "Stages      : perf=$DO_PERF wp=$DO_WP ne=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
+echo "Analyses    : performance=$DO_PERF work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
 echo "Clocks      : $CLOCK_STATUS"
 [ -n "$RESUME_FROM" ] && echo "Resume from : $RESUME_FROM"
 echo
@@ -242,7 +242,7 @@ echo
     echo "nmax=$NMAX"
     echo "algorithm=$ALGORITHM"
     echo "overlap_profile=$OVERLAP_PROFILE"
-    echo "overlap_nmax=$OVERLAP_NMAX"
+    echo "packages=${LANGUAGES[*]}"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "git_dirty=$(test -n "$(git status --porcelain 2>/dev/null)" && echo yes || echo no)"
     echo "host=$(uname -a)"
@@ -269,7 +269,7 @@ if $DO_PERF; then
         fi
         CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
-            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -n "$NMAX" -g "$ALGORITHM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM"
         status=$?
         reached=$(max_n_reached "$lang")
         if [ "$status" -eq 0 ]; then
@@ -312,7 +312,7 @@ if $DO_WP; then
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
-            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w -g "$ALGORITHM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM"
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"
@@ -321,14 +321,15 @@ if $DO_WP; then
 fi
 
 # ------------------------------------------------------ numerical equivalence
-if $DO_NE; then
+if $DO_NE && [[ ! " all cubie julia " == *" $PACKAGE "* ]]; then
+    record "ne" "SKIPPED" "$PACKAGE is not in the ne suite" "-"
+elif $DO_NE; then
     # Equivalence is a correctness check; its clock does not have to be stable.
     CLOCK_CRITICAL=false; STEP_LABEL="ne"
-    run_step "Numerical-equivalence suite (all)" "numerical_equivalence.log" \
-        bash ./run_numerical_equivalence.sh all
+    run_step "Numerical-equivalence suite ($PACKAGE)" "numerical_equivalence.log" \
+        bash ./run_numerical_equivalence.sh -p "$PACKAGE"
     status=$?
-    # Exit 2 means the suite ran but found a mismatching/divergent algorithm:
-    # a real result to inspect, not an infrastructure failure.
+    # Exit 2 means a mismatching algorithm, not an infrastructure failure.
     case "$status" in
         0) record "ne" "OK" "all equivalent" "$status";;
         2) record "ne" "MISMATCH" "see numerical_equivalence_*.md" "$status";;
@@ -337,14 +338,16 @@ if $DO_NE; then
 fi
 
 # --------------------------------------------------- cubie vs DiffEqGPU overlap
-if $DO_OVERLAP; then
+if $DO_OVERLAP && [[ ! " all cubie julia " == *" $PACKAGE "* ]]; then
+    record "overlap" "SKIPPED" "$PACKAGE is not in the overlap suite" "-"
+elif $DO_OVERLAP; then
     PY=./GPU_ODE_CUBIE/venv/bin/python
     [ -x "$PY" ] || PY=python3
     CLOCK_CRITICAL=true; STEP_LABEL="overlap"
-    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$OVERLAP_NMAX)" \
+    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$NMAX)" \
         "cubie_julia_overlap.log" \
         "$PY" ./run_cubie_julia_overlap.py \
-            --profile "$OVERLAP_PROFILE" --phase all --nmax "$OVERLAP_NMAX"
+            --profile "$OVERLAP_PROFILE" -a all -p "$PACKAGE" -n "$NMAX"
     status=$?
     # The launcher already records per-framework failures and keeps going, so a
     # non-zero exit here means at least one worker died, not that all did.

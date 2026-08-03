@@ -1,24 +1,21 @@
 #!/bin/bash
 set -e
-a=8
-max_a=$1
+. "$(dirname "$0")/../parse_args.sh" "$@"
 source ./GPU_ODE_PyTorch/venv/bin/activate
 
-# Algorithm filter; "all" runs every algorithm this framework supports.
-ALG=${2:-all}
-# Work-precision mode: `run_ode_pytorch.sh wp` sweeps dt at N=32768 (fixed
-# only: torchdiffeq adaptive solvers are incompatible with torch.vmap).
-if [ "$1" == "wp" ]; then
-    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768 wp "$ALG"
+# Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
+if [ "$ANALYSIS" == "work-precision" ]; then
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768 wp "$ALGORITHM"
     deactivate
     exit 0
 fi
-while [ $a -le $max_a ]
+
+a=8
+while [ $a -le $NMAX ]
 do
-    	# Print the values
-    	echo "No. of trajectories = $a"
-		python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a "$ALG"	
-    	# increment the value
-    	a=$((a*4))
+    echo "No. of trajectories = $a"
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a "$ALGORITHM"
+    a=$((a*4))
 done
+
 deactivate

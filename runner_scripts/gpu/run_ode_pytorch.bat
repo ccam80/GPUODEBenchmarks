@@ -1,39 +1,30 @@
 @echo off
 setlocal enabledelayedexpansion
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
 
-REM Algorithm filter; "all" runs every algorithm this framework supports.
-set "alg=%~2"
-if "%alg%"=="" set "alg=all"
-
-set a=8
-set max_a=%1
-
-REM Activate virtual environment
 call GPU_ODE_PyTorch\venv\Scripts\activate.bat
 
-REM Work-precision mode: `run_ode_pytorch.bat wp` sweeps dt at N=32768.
-if /i "%~1"=="wp" (
-    python GPU_ODE_PyTorch\bench_torchdiffeq.py 32768 wp %alg%
+REM Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
+if /i "%ANALYSIS%"=="work-precision" (
+    python GPU_ODE_PyTorch\bench_torchdiffeq.py 32768 wp "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal
     exit /b 0
 )
 
+set a=8
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
-REM Print the values
 echo No. of trajectories = %a%
-python GPU_ODE_PyTorch\bench_torchdiffeq.py %a% %alg%
+python GPU_ODE_PyTorch\bench_torchdiffeq.py %a% "%ALGORITHM%"
 if errorlevel 1 exit /b 1
 
-REM Increment the value
 set /a a=%a%*4
 goto loop
 
 :end
-REM Deactivate virtual environment
 call deactivate
-
 endlocal

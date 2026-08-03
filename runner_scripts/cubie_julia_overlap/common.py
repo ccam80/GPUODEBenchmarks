@@ -12,8 +12,19 @@ ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
 GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_32768.csv"
 
+# CLI analysis names; the CSVs record the underscored form.
+ANALYSES = ("performance", "numerical", "work-precision")
+PHASES = ("performance", "numerical", "work_precision")
+
+
+def phases_for(analysis):
+    return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
+
+# Protocol constants; mirrored in julia_worker.jl.
 FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
+PERFORMANCE_REPEATS = 20
+WORK_REPEATS = 20
 NE_DTS = [2.0 ** -k for k in range(1, 14)]
 NE_TOLS = [10.0 ** -k for k in range(2, 7)]
 WP_DTS = [2.0 ** -k for k in range(4, 14)]
@@ -34,55 +45,93 @@ FAILURE_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
                   "setting_kind", "setting", "error_type", "message"]
 
 
-def algorithms():
+def algorithms(name="all"):
     with ALGORITHMS_CSV.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
         row["order"] = int(row["order"])
+    if name != "all":
+        rows = [row for row in rows if row["cubie_alias"] == name]
+        if not rows:
+            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
     return rows
 
 
-def performance_ns(nmax):
+def algorithm_names():
+    return ["all"] + [row["cubie_alias"] for row in algorithms()]
+
+
+def performance_ns(nmax, from_n=0):
     values, n = [], 8
     while n <= nmax:
-        values.append(n)
+        if n >= from_n:
+            values.append(n)
         n *= 4
     return values
 
 
-def profile_protocol(profile, nmax, performance_repeats, work_repeats):
+def profile_protocol(profile, nmax, from_n=0):
     if profile == "smoke":
         return {
-            "performance_ns": performance_ns(min(nmax, 32)),
-            "performance_repeats": min(performance_repeats, 2),
+            "performance_ns": performance_ns(min(nmax, 32), from_n),
+            "performance_repeats": 2,
             "ne_n": 32,
             "ne_dts": [2.0 ** -4, 2.0 ** -8],
             "ne_tols": [1.0e-3],
             "wp_n": 256,
             "wp_dts": [2.0 ** -6],
             "wp_tols": [1.0e-4],
-            "work_repeats": min(work_repeats, 2),
+            "work_repeats": 2,
         }
     return {
-        "performance_ns": performance_ns(nmax),
-        "performance_repeats": performance_repeats,
+        "performance_ns": performance_ns(nmax, from_n),
+        "performance_repeats": PERFORMANCE_REPEATS,
         "ne_n": N_NE,
         "ne_dts": NE_DTS,
         "ne_tols": NE_TOLS,
         "wp_n": N_WP,
         "wp_dts": WP_DTS,
         "wp_tols": WP_TOLS,
-        "work_repeats": work_repeats,
+        "work_repeats": WORK_REPEATS,
     }
 
 
-def ensure_csv(path, fields, reset=False):
+def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if reset or not path.exists():
+    if not path.exists():
         with path.open("w", newline="", encoding="utf-8") as handle:
             csv.DictWriter(handle, fieldnames=fields).writeheader()
     return path
+
+
+def regenerated(row, phases, from_n=0, algorithm="all"):
+    """True when a run over `phases` will produce this row again."""
+    if algorithm != "all" and row.get("algorithm") != algorithm:
+        return False
+    if row.get("phase") not in phases:
+        return False
+    if not from_n or row.get("phase") != "performance":
+        return True
+    try:
+        return int(row["n"]) >= from_n
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def prune_csv(path, fields, phases, from_n=0, algorithm="all"):
+    """Drop the rows a run regenerates; from_n and algorithm narrow which."""
+    path = ensure_csv(path, fields)
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    kept = [row for row in rows if not regenerated(row, phases, from_n, algorithm)]
+    if len(kept) == len(rows):
+        return 0
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(kept)
+    return len(rows) - len(kept)
 
 
 def append_csv(path, fields, row):

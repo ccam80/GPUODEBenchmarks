@@ -86,10 +86,9 @@ if "wp" in ARGS
     DTS = [2.0^-k for k in 4:13]     # 1/16 .. 1/8192
     TOLS = [10.0^-k for k in 2:8]    # 1e-2 .. 1e-8
 
-    outdir = joinpath(dirname(@__DIR__), "data", "Julia")
-    mkpath(outdir)
+    outdir = data_dir(dirname(@__DIR__), "Julia", DATASET_KEY)
 
-    open(joinpath(outdir, "Julia_wp_fixed_$(ALGORITHM)_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_fixed_$(ALGORITHM).txt"), "w") do io
         for dt in DTS
             dt32 = Float32(dt)
             CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5();
@@ -108,7 +107,7 @@ if "wp" in ARGS
         end
     end
 
-    open(joinpath(outdir, "Julia_wp_adaptive_$(ALGORITHM)_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_adaptive_$(ALGORITHM).txt"), "w") do io
         for tol in TOLS
             tol32 = Float32(tol)
             CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
@@ -161,7 +160,7 @@ data = @benchmark begin
     end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_fixed_$(ALGORITHM)_$(DATASET_KEY).txt"),
+    open(joinpath(data_dir(dirname(@__DIR__), "Julia", DATASET_KEY), "Julia_times_fixed_$(ALGORITHM).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1e6,
             " ", minimum(data_dev.times) / 1e6)
@@ -171,8 +170,6 @@ end
 # Save numerical output for 32768-trajectory run
 if !isinteractive() && numberOfParameters == 32768
   
-    # Create directory
-    mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
@@ -184,7 +181,7 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed_$(DATASET_KEY).csv"), df2, header=false)
+    CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_fixed.csv"), df2, header=false)
     # CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_fixed.csv"), 
     #           DataFrame(final_states, :auto), header=false)
 end
@@ -215,7 +212,7 @@ data = @benchmark begin
 end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(ALGORITHM)_$(DATASET_KEY).txt"),
+    open(joinpath(data_dir(dirname(@__DIR__), "Julia", DATASET_KEY), "Julia_times_adaptive_$(ALGORITHM).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1f6,
             " ", minimum(data_dev.times) / 1f6)
@@ -237,8 +234,6 @@ if !isinteractive() && numberOfParameters == 32768
                            reltol = 1.0f-8,
                            abstol = 1.0f-8,
                            dt = 0.001f0))
-    # Create directory
-    mkpath(joinpath(dirname(@__DIR__), "data", "numerical"))
     
     # Extract final state values for each trajectory
     using CSV, DataFrames
@@ -246,5 +241,5 @@ if !isinteractive() && numberOfParameters == 32768
     
     # Save to CSV
     df2 = DataFrame([Tuple(s) for s in final_states], [:x, :y, :z])
-    CSV.write(joinpath(dirname(@__DIR__), "data", "numerical", "julia_adaptive_$(DATASET_KEY).csv"), df2, header=false)
+    CSV.write(joinpath(data_dir(dirname(@__DIR__), "numerical", DATASET_KEY), "julia_adaptive.csv"), df2, header=false)
 end

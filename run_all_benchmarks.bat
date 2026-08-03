@@ -1,160 +1,136 @@
 @echo off
-REM Script to run all GPU ODE benchmarks in sequence
-REM This allows for set-and-forget benchmarking while the GPU is available
+setlocal enabledelayedexpansion
 
-REM Run from the repo root regardless of the caller's working directory
+REM Generate benchmark data for every package, or one, across one or more analyses.
+REM   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+REM   -a, --analysis  performance (default) | work-precision | numerical | all
+REM   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
+REM   -g, --algorithm all (default) | euler | classical-rk4 | tsit5 | cash-karp-54
+
 pushd "%~dp0"
 
-echo =========================================
-echo Starting All GPU ODE Benchmarks
-echo =========================================
-echo.
+set PACKAGE=all
+set ANALYSIS=performance
+set NMAX=16777216
+set ALGORITHM=all
 
-REM Parse command line arguments for custom nmax, work-precision and
-REM numerical-precision modes.
-REM -w also runs the work-precision (error-vs-time) sweeps and their plot.
-REM -np/--numerical-precision also runs the numerical-equivalence suite: the
-REM fixed-step error-vs-dt sweeps of every algorithm mutually supported by
-REM cubie and DifferentialEquations.jl (both in Float32) plus their
-REM comparison report.
-set nmax_arg=
-set alg_arg=
-set wp=false
-set np=false
-:parse_args
-if "%~1"=="" goto end_parse
+:parse_loop
+if "%~1"=="" goto parse_done
+if /i "%~1"=="-p" (
+    set "PACKAGE=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--package" (
+    set "PACKAGE=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="-a" (
+    set "ANALYSIS=%~2"
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--analysis" (
+    set "ANALYSIS=%~2"
+    shift
+    shift
+    goto parse_loop
+)
 if /i "%~1"=="-n" (
-    set nmax_arg=-n %~2
+    set "NMAX=%~2"
     shift
     shift
-    goto parse_args
+    goto parse_loop
+)
+if /i "%~1"=="--nmax" (
+    set "NMAX=%~2"
+    shift
+    shift
+    goto parse_loop
 )
 if /i "%~1"=="-g" (
-    set alg_arg=-g %~2
+    set "ALGORITHM=%~2"
     shift
     shift
-    goto parse_args
+    goto parse_loop
 )
-if /i "%~1"=="-w" (
-    set wp=true
+if /i "%~1"=="--algorithm" (
+    set "ALGORITHM=%~2"
     shift
-    goto parse_args
-)
-if /i "%~1"=="-np" (
-    set np=true
     shift
-    goto parse_args
-)
-if /i "%~1"=="--numerical-precision" (
-    set np=true
-    shift
-    goto parse_args
+    goto parse_loop
 )
 echo Unknown option %~1
-echo Usage: %~nx0 [-n nmax] [-g algorithm] [-w] [-np^|--numerical-precision]
+popd
 exit /b 1
-:end_parse
+:parse_done
 
-REM Array of languages to benchmark
-set languages=julia cpp pytorch jax cubie cubie_mlir myokit_cuda
-
-REM Run timing benchmarks for each language
-for %%l in (%languages%) do (
-    echo =========================================
-    echo Benchmarking: %%l
-    echo =========================================
-
-    call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode %nmax_arg% %alg_arg%
-    if errorlevel 1 (
-        echo.
-        echo X Error occurred while benchmarking %%l
-        echo Continuing with next language...
-        echo.
-    ) else (
-        echo.
-        echo Successfully completed benchmarking for %%l
-        echo.
-    )
+if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" if /i not "%ANALYSIS%"=="numerical" if /i not "%ANALYSIS%"=="all" (
+    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|numerical^|all^)
+    popd
+    exit /b 1
 )
 
-REM Optionally run the work-precision sweeps for each language (-w).
-if "%wp%"=="true" (
-    for %%l in (%languages%) do (
-        echo =========================================
-        echo Work-precision benchmarking: %%l
-        echo =========================================
+set PACKAGES=julia cpp pytorch jax cubie cubie_mlir myokit_cuda
+if /i not "%PACKAGE%"=="all" set PACKAGES=%PACKAGE%
 
-        call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode -w %alg_arg%
-        if errorlevel 1 (
-            echo.
-            echo X Error occurred while work-precision benchmarking %%l
-            echo Continuing with next language...
-            echo.
-        ) else (
-            echo.
-            echo Successfully completed work-precision benchmarking for %%l
-            echo.
-        )
-    )
-)
+if /i "%ANALYSIS%"=="performance" call :run_sweep performance
+if /i "%ANALYSIS%"=="all" call :run_sweep performance
+if /i "%ANALYSIS%"=="performance" call :plot plot_ode_comp.jl
+if /i "%ANALYSIS%"=="all" call :plot plot_ode_comp.jl
 
-REM Optionally run the numerical-equivalence suite (-np/--numerical-precision):
-REM Float32 fixed-step error-vs-dt sweeps of every mutually supported
-REM algorithm, for DifferentialEquations.jl (CPU reference) and cubie (GPU),
-REM then the comparison report + plot.
-if "%np%"=="true" (
-    call "%~dp0run_numerical_equivalence.bat"
-    if errorlevel 1 (
-        echo X Numerical-equivalence suite reported problems (see numerical_equivalence_^<os^>_^<gpu^>.md^)
-    ) else (
-        echo Numerical-equivalence suite completed (all algorithms equivalent/tracking^)
-    )
-    echo.
-)
+if /i "%ANALYSIS%"=="work-precision" call :run_sweep work-precision
+if /i "%ANALYSIS%"=="all" call :run_sweep work-precision
+if /i "%ANALYSIS%"=="work-precision" call :plot plot_ode_wp.jl
+if /i "%ANALYSIS%"=="all" call :plot plot_ode_wp.jl
 
-echo =========================================
-echo All Benchmarks Completed
-echo =========================================
-echo.
+if /i "%ANALYSIS%"=="numerical" call :run_numerical
+if /i "%ANALYSIS%"=="all" call :run_numerical
 
-echo =========================================
-echo Generating timing comparison plot
-echo =========================================
-julia --project=. runner_scripts\plot\plot_ode_comp.jl
-if errorlevel 1 (
-    echo X Error occurred while generating the timing comparison plot
-) else (
-    echo Plot saved to .\plots
-)
-echo.
-
-REM Work-precision plot (only meaningful when -w regenerated the wp data).
-if "%wp%"=="true" (
-    echo =========================================
-    echo Generating work-precision plot
-    echo =========================================
-    julia --project=. runner_scripts\plot\plot_ode_wp.jl
-    if errorlevel 1 (
-        echo X Error occurred while generating the work-precision plot
-    ) else (
-        echo Plot saved to .\plots
-    )
-    echo.
-)
-
-echo =========================================
-echo Comparing numerical results
-echo =========================================
+echo --- Pairwise numerical comparison ---
 if exist "GPU_ODE_CUBIE\venv\Scripts\python.exe" (
     call "GPU_ODE_CUBIE\venv\Scripts\python.exe" compare_numerical_results.py
-    if errorlevel 1 (
-        echo X Error occurred while comparing numerical results
-    ) else (
-        echo Numerical comparison written to .\pairwise_comparisons.md
-    )
+    if errorlevel 1 echo Pairwise comparison failed
 ) else (
-    echo X Could not find GPU_ODE_CUBIE\venv; skipping numerical comparison
+    echo GPU_ODE_CUBIE venv not found; skipping pairwise comparison
 )
-echo.
 
 popd
+endlocal
+exit /b 0
+
+:run_sweep
+for %%p in (%PACKAGES%) do (
+    echo =========================================
+    echo %~1: %%p
+    echo =========================================
+    call "%~dp0run_benchmark.bat" -p %%p -a %~1 -n %NMAX% -g %ALGORITHM% -d gpu -m ode
+    if errorlevel 1 (
+        echo Error during %~1 for %%p; continuing with the next package
+    ) else (
+        echo Completed %~1 for %%p
+    )
+    echo.
+)
+exit /b 0
+
+:plot
+echo --- Plot: %~1 ---
+julia --project=. runner_scripts\plot\%~1
+if errorlevel 1 echo Plot %~1 failed
+exit /b 0
+
+:run_numerical
+REM The numerical-equivalence suite only covers julia and cubie.
+if /i "%PACKAGE%"=="all" goto run_numerical_go
+if /i "%PACKAGE%"=="julia" goto run_numerical_go
+if /i "%PACKAGE%"=="cubie" goto run_numerical_go
+echo Numerical equivalence skipped: %PACKAGE% is not in the suite (all^|julia^|cubie)
+exit /b 0
+:run_numerical_go
+call "%~dp0run_numerical_equivalence.bat" -p %PACKAGE%
+exit /b 0

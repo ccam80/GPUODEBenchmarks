@@ -1,16 +1,13 @@
 @echo off
 setlocal enabledelayedexpansion
-
-REM Algorithm filter; "all" runs every algorithm this framework supports.
-set "alg=%~2"
-if "%alg%"=="" set "alg=all"
+call "%~dp0..\parse_args.bat" %*
+if errorlevel 1 exit /b 1
 
 call GPU_ODE_MYOKIT_CUDA\venv\Scripts\activate.bat
 
-REM Myokit CUDA exposes float32 forward Euler only. Its work-precision mode
-REM therefore writes only the fixed-step sweep.
-if /i "%~1"=="wp" (
-    python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py 32768 wp %alg%
+REM Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if /i "%ANALYSIS%"=="work-precision" (
+    python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py 32768 wp "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal
@@ -18,13 +15,11 @@ if /i "%~1"=="wp" (
 )
 
 set a=8
-set max_a=%1
-
 :loop
-if %a% gtr %max_a% goto end
+if %a% gtr %NMAX% goto end
 
 echo No. of trajectories = %a%
-python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py %a% %alg%
+python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py %a% "%ALGORITHM%"
 if errorlevel 1 exit /b 1
 
 set /a a=%a%*4

@@ -66,7 +66,7 @@ JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
 CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
 
 
-def load_algorithms():
+def load_algorithms(name="all"):
     """Return the mutual algorithm table as a list of dicts.
 
     Keys: ``cubie_alias``, ``julia_expr``, ``order`` (int), ``family``,
@@ -79,7 +79,15 @@ def load_algorithms():
     for row in rows:
         row["order"] = int(row["order"])
         row["exact"] = row["exact"].strip().lower() == "true"
+    if name != "all":
+        rows = [row for row in rows if row["cubie_alias"] == name]
+        if not rows:
+            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
     return rows
+
+
+def algorithm_names():
+    return ["all"] + [row["cubie_alias"] for row in load_algorithms()]
 
 
 def load_golden_ne():
@@ -197,9 +205,10 @@ def julia_ne_file(alias):
 
 
 def cubie_ne_file(alias, dataset_key):
-    """Path of the per-machine cubie output; ensures the directory exists."""
-    os.makedirs(CUBIE_NE_DIR, exist_ok=True)
-    return os.path.join(CUBIE_NE_DIR, "{0}_{1}.csv".format(alias, dataset_key))
+    """Path of the per-machine cubie output under a key dir; creates it."""
+    d = os.path.join(CUBIE_NE_DIR, dataset_key)
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "{0}.csv".format(alias))
 
 
 def julia_ne_adaptive_file(alias):
@@ -208,14 +217,10 @@ def julia_ne_adaptive_file(alias):
 
 
 def cubie_ne_adaptive_file(alias, tier, dataset_key):
-    """Cubie adaptive-sweep output for a controller tier.
-
-    ``tier`` is "default" (cubie's own controller defaults) or "matched"
-    (controller constants mirrored from the Julia run's resolved defaults).
-    """
-    os.makedirs(CUBIE_NE_DIR, exist_ok=True)
-    return os.path.join(CUBIE_NE_DIR, "{0}_adaptive_{1}_{2}.csv".format(
-        alias, tier, dataset_key))
+    """Cubie adaptive-sweep output per controller tier: "default" or "matched"."""
+    d = os.path.join(CUBIE_NE_DIR, dataset_key)
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "{0}_adaptive_{1}.csv".format(alias, tier))
 
 
 CONTROLLER_CONSTANTS_CSV = os.path.join(JULIA_NE_DIR,

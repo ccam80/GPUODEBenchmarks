@@ -1,21 +1,17 @@
 #!/bin/bash
 set -e
+. "$(dirname "$0")/../parse_args.sh" "$@"
 unset LD_LIBRARY_PATH
 
-# Algorithm filter; "all" runs every algorithm this framework supports.
-ALG=${2:-all}
-# Work-precision mode: `run_ode_julia.sh wp` sweeps dt/tolerance at N=32768.
-if [ "$1" == "wp" ]; then
-    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768 wp "$ALG"
+if [ "$ANALYSIS" == "work-precision" ]; then
+    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768 wp "$ALGORITHM"
     exit 0
 fi
+
 a=8
-max_a=$1
-while [ $a -le $max_a ]
+while [ $a -le $NMAX ]
 do
-	# Print the values
-	echo $a
-	julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl $a "$ALG"
-	# increment the value
-	a=$((a*4))
+    echo "No. of trajectories = $a"
+    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl $a "$ALGORITHM"
+    a=$((a*4))
 done

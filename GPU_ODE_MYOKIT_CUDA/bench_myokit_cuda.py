@@ -14,7 +14,7 @@ from myokit_cuda import MyokitCudaModel
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
-from bench_key import dataset_key  # noqa: E402
+from bench_key import data_dir, dataset_key  # noqa: E402
 from wp_common import (  # noqa: E402
     N_WP,
     dts_for,
@@ -172,11 +172,9 @@ def main(argv=None):
         handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
 
     if cell_count == N_WP:
-        numerical_dir = REPO_ROOT / "data" / "numerical"
-        numerical_dir.mkdir(parents=True, exist_ok=True)
         numerical_file = (
-            numerical_dir
-            / "myokit_cuda_{0}.csv".format(DATASET_KEY)
+            Path(data_dir("numerical", DATASET_KEY, REPO_ROOT))
+            / "myokit_cuda.csv"
         )
         np.savetxt(numerical_file, finals, delimiter=",")
     return 0

@@ -7,6 +7,7 @@ euler/classical-rk4/tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
 Usage: bench_cubie.py <N> [wp] [algorithm|all]
 """
 
+import gc
 import os
 import sys
 import timeit
@@ -21,7 +22,7 @@ default_timelogger.set_verbosity(None)
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from bench_key import dataset_key
+from bench_key import dataset_key, data_dir
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
@@ -117,9 +118,13 @@ def make_adaptive_solver(algorithm, tol=1e-08):
     )
 
 
+# Grid built once; one solver at a time from here.
 grid_solver = make_fixed_solver('classical-rk4')
 initials_array, parameter_array = grid_solver.build_grid(
         initial_values=initial_conditions, parameters=parameters)
+grid_solver.close()
+del grid_solver
+gc.collect()
 
 # ========================================
 # WORK-PRECISION (wp) MODE
@@ -153,20 +158,24 @@ if WP_MODE:
                                  algorithm, DATASET_KEY)
             with open(outfile, "w") as f:
                 for dt in dts_for(algorithm):
-                    t_ms, err = bench_solver(make_fixed_solver(algorithm, dt))
+                    solver = make_fixed_solver(algorithm, dt)
+                    t_ms, err = bench_solver(solver)
                     print(f"wp fixed {algorithm} dt={dt:g}: {t_ms:.2f} ms, "
                           f"err={err:.3e}")
                     f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
+                    solver.close()
 
         if algorithm in ADAPTIVE_ALGORITHMS:
             outfile = wp_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "adaptive",
                                  algorithm, DATASET_KEY)
             with open(outfile, "w") as f:
                 for tol in TOLS:
-                    t_ms, err = bench_solver(make_adaptive_solver(algorithm, tol))
+                    solver = make_adaptive_solver(algorithm, tol)
+                    t_ms, err = bench_solver(solver)
                     print(f"wp adaptive {algorithm} tol={tol:g}: {t_ms:.2f} ms, "
                           f"err={err:.3e}")
                     f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
+                    solver.close()
 
     sys.exit(0)
 
@@ -210,19 +219,25 @@ def bench_times(solver):
     return min(res) * 1000, min(res_dev) * 1000, solution
 
 
-def save_numerical(solution, tag):
+def save_numerical(solution, name):
     """Final states for the 32768-run numerical cross-check."""
-    os.makedirs("./data/numerical", exist_ok=True)
     final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/{0}_{1}.csv".format(tag, DATASET_KEY),
+    np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), name),
                final_states, delimiter=',')
+
+
+def release(solver):
+    """One solver at a time: close and free before the next is built."""
+    solver.close()
+    gc.collect()
 
 
 for algorithm in ALGORITHMS:
     if algorithm in FIXED_ALGORITHMS:
         print(f"Running {numberOfParameters} trajectories, fixed dt, "
               f"{algorithm}...")
-        best, best_dev, solution = bench_times(make_fixed_solver(algorithm))
+        solver = make_fixed_solver(algorithm)
+        best, best_dev, solution = bench_times(solver)
         print(f"{numberOfParameters} ODE solves ({algorithm}, fixed) completed "
               f"in {best:.1f} ms ({best_dev:.1f} ms without transfers)")
         outfile = times_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "fixed",
@@ -231,12 +246,14 @@ for algorithm in ALGORITHMS:
             file.write(f'{numberOfParameters} {best} {best_dev}\n')
         # The pairwise numerical cross-check reads this fixed CSV name.
         if numberOfParameters == 32768 and algorithm == "classical-rk4":
-            save_numerical(solution, NUMERICAL_TAG + "_unadaptive")
+            save_numerical(solution, NUMERICAL_TAG + "_unadaptive.csv")
+        release(solver)
 
     if algorithm in ADAPTIVE_ALGORITHMS:
         print(f"Running {numberOfParameters} trajectories, adaptive dt, "
               f"{algorithm}...")
-        best, best_dev, solution = bench_times(make_adaptive_solver(algorithm))
+        solver = make_adaptive_solver(algorithm)
+        best, best_dev, solution = bench_times(solver)
         print(f"{numberOfParameters} ODE solves ({algorithm}, adaptive) "
               f"completed in {best:.1f} ms ({best_dev:.1f} ms without transfers)")
         outfile = times_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "adaptive",
@@ -244,4 +261,5 @@ for algorithm in ALGORITHMS:
         with open(outfile, "a+") as file:
             file.write(f'{numberOfParameters} {best} {best_dev}\n')
         if numberOfParameters == 32768 and algorithm == "tsit5":
-            save_numerical(solution, NUMERICAL_TAG + "_adaptive")
+            save_numerical(solution, NUMERICAL_TAG + "_adaptive.csv")
+        release(solver)

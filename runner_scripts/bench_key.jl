@@ -34,3 +34,17 @@ end
 
 "Return \"<os>_<gpu>\" for this machine."
 dataset_key() = string(_os_key(), "_", _sanitize_gpu(_gpu_name_raw()))
+
+"Directory holding one machine's files for a package; creates it."
+function data_dir(repo_root, package, key = dataset_key())
+    d = joinpath(repo_root, "data", package, key)
+    mkpath(d)
+    return d
+end
+
+"Directory holding one group's plots and reports; creates it."
+function group_dir(repo_root, group)
+    d = joinpath(repo_root, "plots", group)
+    mkpath(d)
+    return d
+end
