@@ -111,16 +111,18 @@ CUBIE-MLIR, and Myokit-CUDA) sequentially in one command:
     > run_all_benchmarks.bat
 ```
 
-This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag can be used to specify the upper bound of trajectories:
+This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag sets the upper bound of the trajectory sweep (8, 32, ... ≤ N); a comma list runs exactly those trajectory counts instead:
 
 **On Linux/macOS:**
 ```bash
     $ bash ./run_all_benchmarks.sh -n $((2**20))
+    $ bash ./run_all_benchmarks.sh -n $((2**23)),$((2**27))   # only N = 2^23 and 2^27
 ```
 
 **On Windows:**
 ```cmd
     > run_all_benchmarks.bat -n 1048576
+    > run_all_benchmarks.bat -n 8388608,134217728
 ```
 
 Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
@@ -137,8 +139,16 @@ Each benchmark typically takes around 20 minutes, so running all of them may tak
   run standalone.
 * `-a all` — every analysis above, plus the timing sweeps.
 
-`-p` restricts any of them to one package; `-g <algorithm>` restricts the
-timing and work-precision sweeps to a single integration algorithm (see
+`-p`, `-a`, `-g` and `-n` all accept comma lists, so one command can run any
+subset of packages, analyses, algorithms and trajectory counts:
+
+```bash
+    $ bash ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision \
+          -g euler,tsit5 -n $((2**23)),$((2**27))
+```
+
+`-p` restricts the run to the listed packages; `-g <algorithms>` restricts the
+timing and work-precision sweeps to the listed integration algorithms (see
 [Algorithm-matched subsets](#algorithm-matched-subsets) below).
 
 ### Algorithm-matched subsets
@@ -163,12 +173,13 @@ the bench scripts. Subset D matches the tableau but not the error
 controller: each framework uses its own step controller, so step counts
 differ at equal tolerance.
 
-All benchmark entry points accept `-g <algorithm>` (default `all`, meaning
-every algorithm the framework supports); a framework that does not support
-the requested algorithm skips cleanly:
+All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
+every algorithm the framework supports; a comma list runs the listed ones);
+a framework that does not support a requested algorithm skips cleanly:
 
 ```bash
     $ bash ./run_benchmark.sh -p cubie -g tsit5
+    $ bash ./run_benchmark.sh -p cubie -g euler,tsit5
     $ bash ./run_all_benchmarks.sh -g classical-rk4
     $ ./run_full_dataset.sh --algorithm euler
 ```
@@ -188,8 +199,10 @@ and comparison reports:
 ```bash
     $ ./run_full_dataset.sh                     # everything, nmax = 2^24
     $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
+    $ ./run_full_dataset.sh -n $((2**23)),$((2**27))  # exact trajectory counts only
     $ ./run_full_dataset.sh -a performance      # one analysis
     $ ./run_full_dataset.sh -p cpp              # one package
+    $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
     $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
 ```
 

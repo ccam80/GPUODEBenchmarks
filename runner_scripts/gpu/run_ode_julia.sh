@@ -8,10 +8,8 @@ if [ "$ANALYSIS" == "work-precision" ]; then
     exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
     echo "No. of trajectories = $a"
     julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl $a "$ALGORITHM"
-    a=$((a*4))
 done

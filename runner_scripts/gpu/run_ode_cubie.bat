@@ -16,17 +16,11 @@ if /i "%ANALYSIS%"=="work-precision" (
     exit /b 0
 )
 
-set a=8
-:loop
-if %a% gtr %NMAX% goto end
+for %%a in (!NLIST!) do (
+    echo No. of trajectories = %%a
+    python GPU_ODE_CUBIE\bench_cubie.py %%a "%ALGORITHM%"
+    if !errorlevel! neq 0 exit /b 1
+)
 
-echo No. of trajectories = %a%
-python GPU_ODE_CUBIE\bench_cubie.py %a% "%ALGORITHM%"
-if errorlevel 1 exit /b 1
-
-set /a a=%a%*4
-goto loop
-
-:end
 call deactivate
 endlocal

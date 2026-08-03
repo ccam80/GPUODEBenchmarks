@@ -39,8 +39,7 @@ if [ "$ANALYSIS" == "work-precision" ]; then
 	exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
 	echo "No. of trajectories = $a"
 	set_nt "$a"
@@ -50,5 +49,4 @@ do
 		rebuild
 		./GPU_ODE_MPGOS/Lorenz.exe $a
 	done
-	a=$((a*4))
 done

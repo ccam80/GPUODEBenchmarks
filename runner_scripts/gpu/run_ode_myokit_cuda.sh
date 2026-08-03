@@ -10,12 +10,10 @@ if [ "$ANALYSIS" == "work-precision" ]; then
     exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
     echo "No. of trajectories = $a"
     python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$a" "$ALGORITHM"
-    a=$((a*4))
 done
 
 deactivate

@@ -4,8 +4,9 @@ setlocal enabledelayedexpansion
 REM Generate benchmark data for one package and one analysis.
 REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | work-precision
-REM   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
-REM   -g, --algorithm all (default) | euler | classical-rk4 | tsit5 | cash-karp-54
+REM   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
+REM                   or a comma list of exact trajectory counts (e.g. 8388608,134217728)
+REM   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
 REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
 
@@ -18,83 +19,43 @@ set ALGORITHM=all
 set DEVICE=gpu
 set MODEL=ode
 
+REM cmd splits unquoted commas into separate arguments, so after capturing a
+REM flag's value keep appending tokens (comma-joined) until the next -flag.
 :parse_loop
 if "%~1"=="" goto parse_done
-if /i "%~1"=="-p" (
-    set "PACKAGE=%~2"
-    shift
-    shift
-    goto parse_loop
+set "PA_TARGET="
+if /i "%~1"=="-p" set "PA_TARGET=PACKAGE"
+if /i "%~1"=="--package" set "PA_TARGET=PACKAGE"
+if /i "%~1"=="-a" set "PA_TARGET=ANALYSIS"
+if /i "%~1"=="--analysis" set "PA_TARGET=ANALYSIS"
+if /i "%~1"=="-n" set "PA_TARGET=NMAX"
+if /i "%~1"=="--nmax" set "PA_TARGET=NMAX"
+if /i "%~1"=="-g" set "PA_TARGET=ALGORITHM"
+if /i "%~1"=="--algorithm" set "PA_TARGET=ALGORITHM"
+if /i "%~1"=="-d" set "PA_TARGET=DEVICE"
+if /i "%~1"=="--device" set "PA_TARGET=DEVICE"
+if /i "%~1"=="-m" set "PA_TARGET=MODEL"
+if /i "%~1"=="--model" set "PA_TARGET=MODEL"
+if not defined PA_TARGET (
+    echo Unknown option %~1
+    popd
+    exit /b 1
 )
-if /i "%~1"=="--package" (
-    set "PACKAGE=%~2"
-    shift
-    shift
-    goto parse_loop
+if "%~2"=="" (
+    echo %~1 requires a value
+    popd
+    exit /b 1
 )
-if /i "%~1"=="-a" (
-    set "ANALYSIS=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="--analysis" (
-    set "ANALYSIS=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="-n" (
-    set "NMAX=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="--nmax" (
-    set "NMAX=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="-g" (
-    set "ALGORITHM=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="--algorithm" (
-    set "ALGORITHM=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="-d" (
-    set "DEVICE=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="--device" (
-    set "DEVICE=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="-m" (
-    set "MODEL=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-if /i "%~1"=="--model" (
-    set "MODEL=%~2"
-    shift
-    shift
-    goto parse_loop
-)
-echo Unknown option %~1
-popd
-exit /b 1
+set "!PA_TARGET!=%~2"
+shift
+shift
+:parse_collect
+if "%~1"=="" goto parse_done
+set "PA_NEXT=%~1"
+if "!PA_NEXT:~0,1!"=="-" goto parse_loop
+for %%v in (!PA_TARGET!) do set "%%v=!%%v!,%~1"
+shift
+goto parse_collect
 :parse_done
 
 REM Accept hyphenated aliases for underscore-separated package names
@@ -112,28 +73,51 @@ if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
     exit /b 1
 )
 
-set ALG_OK=
-if "%ALGORITHM%"=="all" set ALG_OK=1
-if "%ALGORITHM%"=="euler" set ALG_OK=1
-if "%ALGORITHM%"=="classical-rk4" set ALG_OK=1
-if "%ALGORITHM%"=="tsit5" set ALG_OK=1
-if "%ALGORITHM%"=="cash-karp-54" set ALG_OK=1
-if "%ALG_OK%"=="" (
-    echo Unknown algorithm "%ALGORITHM%" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
+REM -g accepts "all" or a comma list of algorithms; each token is whitelisted.
+REM Delayed expansion in the for-set keeps metacharacters in the value inert.
+set ALG_LIST=
+set ALG_HAS_ALL=
+set ALG_BAD=
+for %%g in (!ALGORITHM!) do (
+    set "TOK=%%g"
+    set TOK_OK=
+    if "!TOK!"=="all" ( set ALG_HAS_ALL=1& set TOK_OK=1 )
+    if "!TOK!"=="euler" set TOK_OK=1
+    if "!TOK!"=="classical-rk4" set TOK_OK=1
+    if "!TOK!"=="tsit5" set TOK_OK=1
+    if "!TOK!"=="cash-karp-54" set TOK_OK=1
+    if not defined TOK_OK (
+        echo Unknown algorithm "!TOK!" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
+        set ALG_BAD=1
+    )
+    if defined TOK_OK if not defined ALG_HAS_ALL set "ALG_LIST=!ALG_LIST! !TOK!"
+)
+if defined ALG_BAD (
+    popd
+    exit /b 1
+)
+if defined ALG_HAS_ALL set "ALG_LIST=all"
+if "!ALG_LIST!"=="" (
+    echo -g/--algorithm requires a value
     popd
     exit /b 1
 )
 
 if "!NMAX!"=="" (
-    echo -n/--nmax must be a positive integer
+    echo -n/--nmax must be a positive integer or a comma list of them
     popd
     exit /b 1
 )
-REM Sentinel keeps the variable defined when every digit is stripped.
-set "NMAX_CHECK=x!NMAX!"
+if "!NMAX:,=!"=="" (
+    echo -n/--nmax must be a positive integer or a comma list of them, got "!NMAX!"
+    popd
+    exit /b 1
+)
+REM Sentinel keeps the variable defined when every digit and comma is stripped.
+set "NMAX_CHECK=x!NMAX:,=!"
 for %%d in (0 1 2 3 4 5 6 7 8 9) do set "NMAX_CHECK=!NMAX_CHECK:%%d=!"
 if not "!NMAX_CHECK!"=="x" (
-    echo -n/--nmax must be a positive integer, got "!NMAX!"
+    echo -n/--nmax must be a positive integer or a comma list of them, got "!NMAX!"
     popd
     exit /b 1
 )
@@ -159,25 +143,32 @@ if not exist "%RUNNER%" (
     exit /b 1
 )
 
-echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %ALGORITHM%^)...
-
-REM Clear this machine's appended files for the analysis and algorithm being run.
-if "%ALGORITHM%"=="all" (
-    set "ALG_GLOB=*"
-) else (
-    set "ALG_GLOB=*_%ALGORITHM%"
-)
 if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
     for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
     if not exist "data\%DATA_DIR%\!DATASET_KEY!\" mkdir "data\%DATA_DIR%\!DATASET_KEY!"
-    if /i "%ANALYSIS%"=="work-precision" (
-        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_wp_!ALG_GLOB!.txt" 2>nul
-    ) else (
-        del /q "data\%DATA_DIR%\!DATASET_KEY!\*_times_!ALG_GLOB!.txt" 2>nul
-    )
 )
 
-call "%RUNNER%" -a %ANALYSIS% -n %NMAX% -g %ALGORITHM%
-set benchmark_exit=%errorlevel%
+REM One runner invocation per requested algorithm; a failure does not stop the rest.
+set benchmark_exit=0
+for %%g in (!ALG_LIST!) do (
+    echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %%g^)...
+
+    REM Clear this machine's appended files for the analysis and algorithm being run.
+    if "%%g"=="all" (
+        set "ALG_GLOB=*"
+    ) else (
+        set "ALG_GLOB=*_%%g"
+    )
+    if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
+        if /i "%ANALYSIS%"=="work-precision" (
+            del /q "data\%DATA_DIR%\!DATASET_KEY!\*_wp_!ALG_GLOB!.txt" 2>nul
+        ) else (
+            del /q "data\%DATA_DIR%\!DATASET_KEY!\*_times_!ALG_GLOB!.txt" 2>nul
+        )
+    )
+
+    call "%RUNNER%" -a %ANALYSIS% -n "%NMAX%" -g %%g
+    if !errorlevel! neq 0 set benchmark_exit=1
+)
 popd
 endlocal & exit /b %benchmark_exit%

@@ -4,13 +4,29 @@ param(
     [Alias('a')]
     [ValidateSet('performance', 'work-precision')]
     [string]$Analysis = 'performance',
+    # A single value is a sweep ceiling (8, 32, ... <= n); a comma list runs exactly those Ns.
     [Alias('n')]
-    [long]$Nmax = 16777216,
+    [string]$Nmax = '16777216',
     [Alias('g')]
     [string]$Algorithm = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Nmax -notmatch '^\d+(,\d+)*$') {
+    Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$Nmax'"
+    exit 1
+}
+if ($Nmax.Contains(',')) {
+    $NValues = @($Nmax.Split(',') | ForEach-Object { [long]$_ })
+} else {
+    $NValues = @()
+    $next = [long]8
+    while ($next -le [long]$Nmax) {
+        $NValues += $next
+        $next = $next * 4
+    }
+}
 
 # MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
 $Solvers = switch ($Algorithm) {
@@ -86,13 +102,11 @@ if ($Analysis -eq 'work-precision') {
     return
 }
 
-$a = 8
-while ($a -le $Nmax) {
+foreach ($a in $NValues) {
     Write-Host "No. of trajectories = $a"
     foreach ($solver in $Solvers) {
         Invoke-Point -Solver $solver -Nt $a
     }
-    $a = $a * 4
 }
 
 Pop-Location

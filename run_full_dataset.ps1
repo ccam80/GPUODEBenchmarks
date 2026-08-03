@@ -3,25 +3,29 @@
 # Usage (run_full_dataset.bat forwards to this script):
 #   run_full_dataset.bat                           # every analysis, every package
 #   run_full_dataset.bat -n 33554432               # larger ceiling
+#   run_full_dataset.bat -n 8388608,134217728      # exact trajectory counts only
 #   run_full_dataset.bat -p cpp                    # one package
+#   run_full_dataset.bat -p cubie,julia            # several packages
 #   run_full_dataset.bat -a overlap                # one analysis
 #   run_full_dataset.bat -a performance,numerical  # several analyses
+#   run_full_dataset.bat -g euler,tsit5            # several algorithms
 #   run_full_dataset.bat --resume-from jax         # restart at a package
 #   run_full_dataset.bat --lock-clocks 1470,6801   # override the clock target
 #   run_full_dataset.bat --no-lock-clocks          # sample clocks but do not pin
 #   run_full_dataset.bat --clock-tolerance 30      # widen the drift threshold (MHz)
 #
-#   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  all (default) | performance | work-precision | numerical | overlap | plots
-#   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
-#   -g, --algorithm all (default) | euler | classical-rk4 | tsit5 | cash-karp-54
+#   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+#   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
+#   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
+#                   or a comma list of exact trajectory counts
+#   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
 
 Set-Location $PSScriptRoot
 
-$NMax = [long]16777216
+$NMax = '16777216'
 $DoPerf = $true
 $DoWp = $true
 $DoNe = $true
@@ -44,7 +48,7 @@ $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myoki
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 20 |
+    Get-Content $PSCommandPath -TotalCount 25 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -76,12 +80,13 @@ function Set-Analyses {
 function Get-RequiredValue {
     param([object[]]$Arguments, [int]$Index, [string]$Flag)
     if ($Index + 1 -ge $Arguments.Count) { Write-Host "$Flag requires a value"; exit 1 }
-    return [string]$Arguments[$Index + 1]
+    # PowerShell turns an unquoted comma list into an array; rejoin it.
+    return ([string[]]$Arguments[$Index + 1] -join ',')
 }
 
 for ($i = 0; $i -lt $args.Count; $i++) {
     switch -Regex ([string]$args[$i]) {
-        '^(-n|--nmax)$' { $NMax = [long](Get-RequiredValue $args $i $args[$i]); $i++ }
+        '^(-n|--nmax)$' { $NMax = [string](Get-RequiredValue $args $i $args[$i]); $i++ }
         '^(-p|--package)$' { $Package = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^(-g|--algorithm)$' { $Algorithm = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^(-a|--analysis)$' { Set-Analyses (Get-RequiredValue $args $i $args[$i]); $i++ }
@@ -97,14 +102,57 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
-if ($Package -eq 'all') {
-    $Languages = $AllPackages
-} elseif ($AllPackages -contains $Package) {
-    $Languages = @($Package)
-} else {
-    Write-Host "Unknown package '$Package' (all|$($AllPackages -join '|'))"
+# -p accepts "all" or a comma list; each token is validated.
+$Languages = @()
+$HasAllPackages = $false
+foreach ($pkg in ($Package.Split(',') | Where-Object { $_ })) {
+    if ($pkg -eq 'all') {
+        $HasAllPackages = $true
+    } elseif ($AllPackages -contains $pkg) {
+        if ($Languages -notcontains $pkg) { $Languages += $pkg }
+    } else {
+        Write-Host "Unknown package '$pkg' (all|$($AllPackages -join '|'))"
+        exit 1
+    }
+}
+if ($HasAllPackages) { $Languages = $AllPackages }
+if ($Languages.Count -eq 0) {
+    Write-Host "-p/--package requires a value"
     exit 1
 }
+
+# The ne and overlap suites only cover julia and cubie; map the package list
+# onto their single-token -p vocabulary (both -> all, one -> that one).
+$NePackage = ''
+$HasJulia = $Languages -contains 'julia'
+$HasCubie = $Languages -contains 'cubie'
+if ($HasJulia -and $HasCubie) { $NePackage = 'all' }
+elseif ($HasJulia) { $NePackage = 'julia' }
+elseif ($HasCubie) { $NePackage = 'cubie' }
+
+# -g accepts "all" or a comma list; each token is whitelisted before it can
+# reach a command line.
+$AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
+$algTokens = @($Algorithm.Split(',') | Where-Object { $_ })
+if ($algTokens.Count -eq 0) {
+    Write-Host "-g/--algorithm requires a value"
+    exit 1
+}
+foreach ($alg in $algTokens) {
+    if ($AllAlgorithms -notcontains $alg) {
+        Write-Host "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        exit 1
+    }
+}
+if ($algTokens -contains 'all') { $Algorithm = 'all' }
+
+# -n is a sweep ceiling or a comma list of exact Ns; the overlap suite takes a
+# plain ceiling, so give it the largest requested N.
+if ($NMax -notmatch '^\d+(,\d+)*$') {
+    Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$NMax'"
+    exit 1
+}
+$NMaxCeiling = ($NMax.Split(',') | ForEach-Object { [long]$_ } | Measure-Object -Maximum).Maximum
 
 $DatasetKey = Get-DatasetKey
 
@@ -267,7 +315,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n $NMax -g $Algorithm"
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n `"$NMax`" -g `"$Algorithm`""
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -303,7 +351,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g $Algorithm"
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`""
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
@@ -312,13 +360,13 @@ try {
 
     # -------------------------------------------------- numerical equivalence
     if ($DoNe) {
-        if ($Package -notin @('all', 'cubie', 'julia')) {
+        if (-not $NePackage) {
             Add-Record 'ne' 'SKIPPED' "$Package is not in the ne suite" '-'
         } else {
             # Equivalence is a correctness check; its clock does not have to be stable.
             $ClockCritical = $false; $StepLabel = 'ne'
-            $status = Invoke-Step "Numerical equivalence ($Package)" 'numerical_equivalence.log' `
-                ".\run_numerical_equivalence.bat -p $Package"
+            $status = Invoke-Step "Numerical equivalence ($NePackage)" 'numerical_equivalence.log' `
+                ".\run_numerical_equivalence.bat -p $NePackage"
             # Exit 2 means a mismatching algorithm, not an infrastructure failure.
             switch ($status) {
                 0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }
@@ -331,15 +379,15 @@ try {
     # ----------------------------------------------- cubie vs DiffEqGPU overlap
     if ($DoOverlap) {
         # Only cubie and julia have an algorithm-for-algorithm mapping.
-        if ($Package -notin @('all', 'cubie', 'julia')) {
+        if (-not $NePackage) {
             Add-Record 'overlap' 'SKIPPED' "$Package is not in the overlap suite" '-'
         } else {
             $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
             if (-not (Test-Path $py)) { $py = 'python' }
             $ClockCritical = $true; $StepLabel = 'overlap'
-            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$NMax)" `
+            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$NMaxCeiling)" `
                 'cubie_julia_overlap.log' `
-                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $Package -n $NMax"
+                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $NePackage -n $NMaxCeiling"
             # A non-zero exit means at least one worker died, not that all did.
             if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
             else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }
