@@ -1,14 +1,8 @@
-"""Shared constants and helpers for the work-precision (wp) sweeps.
-
-wp mode runs the Lorenz ensemble at N = 32768, sweeping dt (fixed) and/or
-rtol = atol (adaptive) per algorithm, timing each setting (untimed warmup,
-``timeit.repeat``, min * 1000 ms) and scoring the ensemble l2 final-state
-error against ``data/numerical/golden_lorenz_32768.csv``. Rows
-``<setting> <time_ms> <error>`` are written (mode "w") to
-``data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt``
-with cubie-vocabulary algorithm names. The Julia and MPGOS writers mirror
-these constants; keep them in sync.
-"""
+"""Shared constants and helpers for the work-precision (wp) sweeps: dt or
+tolerance settings per algorithm at N = 32768, timed and scored against the
+golden reference, written as "<setting> <time_ms> <error>" rows to
+data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt.
+The Julia and MPGOS writers mirror these constants; keep them in sync."""
 
 import os
 

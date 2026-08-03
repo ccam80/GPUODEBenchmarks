@@ -4,13 +4,9 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz timing benchmarks from
-# data/<package>/<os>_<gpu>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt.
-# Emits one algorithm-matched plot per (group, mode, algorithm) plus an "all"
-# overview per group, per transfer variant (with h2d+d2h / device only), into
-# plots/<group>/. Groups: each dataset key, each os, each gpu, then "all",
-# most specific first; a group repeating an earlier group's keys is dropped.
-# Default data directory is the repo `data/`; override with ARGS[1].
+# Reads data/<package>/<os>_<gpu>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt
+# and emits one plot per (group, mode, algorithm, transfer variant) plus an
+# "all" overview per group into plots/<group>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 

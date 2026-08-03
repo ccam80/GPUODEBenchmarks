@@ -161,9 +161,7 @@ if not exist "%RUNNER%" (
 
 echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %ALGORITHM%^)...
 
-REM Timing files are appended across the N sweep, so clear this machine's files
-REM for the analysis being run; other machines' keyed files stay. -g narrows
-REM the wipe to the one algorithm being rerun.
+REM Clear this machine's appended files for the analysis and algorithm being run.
 if "%ALGORITHM%"=="all" (
     set "ALG_GLOB=*"
 ) else (

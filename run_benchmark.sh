@@ -73,9 +73,7 @@ fi
 
 echo "Benchmarking ${PACKAGE} ${DEVICE} ensemble ${MODEL} solvers (${ANALYSIS}, ${ALGORITHM})..."
 
-# Timing files are appended across the N sweep, so clear this machine's files
-# for the analysis being run; other machines' keyed files stay. -g narrows
-# the wipe to the one algorithm being rerun.
+# Clear this machine's appended files for the analysis and algorithm being run.
 if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ]; then
     DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
     mkdir -p "./data/${DATA_DIR}/${DATASET_KEY}"

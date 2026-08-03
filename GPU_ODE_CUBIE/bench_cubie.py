@@ -1,11 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""
-Benchmarking Cubie ODE solvers for ensemble problems, once per algorithm:
-euler/classical-rk4/tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
-
-Usage: bench_cubie.py <N> [wp] [algorithm|all]
-"""
+"""Cubie Lorenz ensemble benchmarks, once per algorithm: euler/classical-rk4/
+tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
+Usage: bench_cubie.py <N> [wp] [algorithm|all]"""
 
 import gc
 import os

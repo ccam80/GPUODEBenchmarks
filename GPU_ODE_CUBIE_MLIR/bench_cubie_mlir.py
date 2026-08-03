@@ -1,12 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""
-Benchmarking Cubie ODE solvers (MLIR backend via numba-cuda-mlir) for
-ensemble problems, once per algorithm:
-euler/classical-rk4/tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
-
-Usage: bench_cubie_mlir.py <N> [wp] [algorithm|all]
-"""
+"""Cubie (MLIR backend via numba-cuda-mlir) Lorenz ensemble benchmarks, once per algorithm: euler/classical-rk4/
+tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
+Usage: bench_cubie_mlir.py <N> [wp] [algorithm|all]"""
 
 import gc
 import os

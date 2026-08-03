@@ -4,14 +4,9 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz work-precision benchmarks (error vs runtime, N = 32768) from
-# data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
-# (rows "<setting> <time_ms> <error>"; see runner_scripts/wp_common.py).
-# Emits one error-vs-time plot per (group, mode, algorithm) plus an "all"
-# overview per group, into plots/<group>/. Groups: each dataset key, each os,
-# each gpu, then "all", most specific first; a group repeating an earlier
-# group's keys is dropped.
-# Default data directory is the repo `data/`; override with ARGS[1].
+# Reads data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
+# and emits one error-vs-time plot per (group, mode, algorithm) plus an "all"
+# overview per group into plots/<group>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
