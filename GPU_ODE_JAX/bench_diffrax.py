@@ -1,14 +1,22 @@
 #!/usr/bin/env python
 # coding: utf-8
 # %%
-# Benchmarking Diffrax ODE solvers for ensemble problems, via vmap. The Lorenz ODE is integrated by Tsit5.
+# Benchmarking Diffrax ODE solvers for ensemble problems, via vmap. The
+# Lorenz ODE is integrated once per supported algorithm so every timing file
+# compares like-for-like against the other frameworks (issue #29):
+#
+#     fixed:    euler, classical-rk4 (custom ButcherTableau), tsit5
+#     adaptive: tsit5 (PIDController)
+#
+# Usage: bench_diffrax.py <N> [wp] [algorithm|all]
 
 # Created By: Utkarsh
 # Last Updated: 19 April 2023
 
 
 # %%
-import time
+from collections.abc import Callable
+from typing import ClassVar
 
 import diffrax
 import equinox as eqx
@@ -19,17 +27,25 @@ import os
 import timeit
 import sys
 
-numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported.
-REPEATS = 20
-
+from diffrax import AbstractERK, ButcherTableau
+from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolation
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key
+from wp_common import parse_bench_args, times_outfile
+
 DATASET_KEY = dataset_key()
+
+FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
+ADAPTIVE_ALGORITHMS = ("tsit5",)
+SUPPORTED = ("euler", "classical-rk4", "tsit5")
+
+numberOfParameters, WP_MODE, ALGORITHMS = parse_bench_args(sys.argv[1:], SUPPORTED)
+# Timed repeats per point; min is reported.
+REPEATS = 20
 
 # %%
 
@@ -42,6 +58,45 @@ if jax.default_backend() == "cpu":
     print("ERROR: JAX is running on the CPU backend; aborting so CPU "
           "timings are not recorded as GPU results.")
     sys.exit(1)
+
+
+# %%
+# Classical RK4 is not shipped by diffrax; define it from the standard
+# tableau. b_error is unused on the fixed-step path (ConstantStepSize) and
+# zeroed — this solver must never be used with an adaptive controller.
+_rk4_tableau = ButcherTableau(
+    a_lower=(
+        np.array([1 / 2]),
+        np.array([0.0, 1 / 2]),
+        np.array([0.0, 0.0, 1.0]),
+    ),
+    b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6]),
+    b_error=np.zeros(4),
+    c=np.array([1 / 2, 1 / 2, 1.0]),
+)
+
+
+class ClassicalRK4(AbstractERK):
+    """The classical fourth-order Runge--Kutta method, fixed-step only."""
+
+    tableau: ClassVar[ButcherTableau] = _rk4_tableau
+    interpolation_cls: ClassVar[
+        Callable[..., ThirdOrderHermitePolynomialInterpolation]
+    ] = ThirdOrderHermitePolynomialInterpolation.from_k
+
+    def order(self, terms):
+        del terms
+        return 4
+
+
+def make_solver(algorithm):
+    if algorithm == "euler":
+        return diffrax.Euler()
+    if algorithm == "classical-rk4":
+        return ClassicalRK4()
+    if algorithm == "tsit5":
+        return diffrax.Tsit5()
+    raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
 def best_times_ms(solve, args, label):
@@ -94,28 +149,36 @@ class Lorenz(eqx.Module):
 
 
 # %%
-# JIT compilation of ODE solver
-@jax.jit
-@jax.vmap
-def main(k1):
-    lorenz = Lorenz(k1)
-    terms = diffrax.ODETerm(lorenz)
-    t0 = 0.0
-    t1 = 1.0
-    y0 = jnp.array([1.0, 0.0, 0.0])
-    dt0 = 0.001
-    solver = diffrax.Tsit5()
-    saveat = diffrax.SaveAt(ts = jnp.array([t0,t1]))
-    stepsize_controller = diffrax.PIDController(rtol=1e-6, atol=1e-3)
-    sol = diffrax.diffeqsolve(
-        terms,
-        solver,
-        t0,
-        t1,
-        dt0,
-        y0,
-    )
-    return sol
+# JIT-compiled ensemble solves. The fixed factory uses the default
+# ConstantStepSize controller; the adaptive one uses diffrax's PIDController.
+def make_fixed(algorithm, dt0=0.001, max_steps=4096):
+    solver = make_solver(algorithm)
+
+    @jax.jit
+    @jax.vmap
+    def main(k1):
+        lorenz = Lorenz(k1)
+        terms = diffrax.ODETerm(lorenz)
+        return diffrax.diffeqsolve(
+            terms, solver, 0.0, 1.0, dt0,
+            jnp.array([1.0, 0.0, 0.0]), max_steps=max_steps)
+    return main
+
+
+def make_adaptive(algorithm, tol=1e-8, max_steps=65536):
+    solver = make_solver(algorithm)
+
+    @jax.jit
+    @jax.vmap
+    def main(k1):
+        lorenz = Lorenz(k1)
+        terms = diffrax.ODETerm(lorenz)
+        return diffrax.diffeqsolve(
+            terms, solver, 0.0, 1.0, 0.001,
+            jnp.array([1.0, 0.0, 0.0]), max_steps=max_steps,
+            stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
+    return main
+
 
 # %%
 # Setting up parameters for parallel simulation
@@ -127,44 +190,20 @@ parameterList = jnp.linspace(0.0,21.0,numberOfParameters)
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_diffrax.py 32768 wp` sweeps fixed dt / adaptive tolerance at N=32768
-# and records "<setting> <time_ms> <error-vs-golden>" per point. Protocol and
-# sweep grids live in runner_scripts/wp_common.py. Note: wp timings call
-# block_until_ready so the full solve (not just the async dispatch) is
-# measured.
-if len(sys.argv) > 2 and sys.argv[2] == "wp":
-    from wp_common import (DTS, TOLS, N_WP, load_golden, ensemble_error,
+# `bench_diffrax.py 32768 wp [algorithm]` sweeps fixed dt / adaptive tolerance
+# at N=32768 per algorithm and records "<setting> <time_ms> <error-vs-golden>"
+# per point. Protocol and sweep grids live in runner_scripts/wp_common.py.
+# Note: wp timings call block_until_ready so the full solve (not just the
+# async dispatch) is measured.
+if WP_MODE:
+    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
 
     if numberOfParameters != N_WP:
         sys.exit("wp mode must be run with N = {0}".format(N_WP))
     golden = load_golden()
 
-    def make_fixed(dt0):
-        @jax.jit
-        @jax.vmap
-        def m(k1):
-            lorenz = Lorenz(k1)
-            terms = diffrax.ODETerm(lorenz)
-            return diffrax.diffeqsolve(
-                terms, diffrax.Tsit5(), 0.0, 1.0, dt0,
-                jnp.array([1.0, 0.0, 0.0]), max_steps=65536)
-        return m
-
-    def make_adaptive(tol):
-        @jax.jit
-        @jax.vmap
-        def m(k1):
-            lorenz = Lorenz(k1)
-            terms = diffrax.ODETerm(lorenz)
-            return diffrax.diffeqsolve(
-                terms, diffrax.Tsit5(), 0.0, 1.0, 0.001,
-                jnp.array([1.0, 0.0, 0.0]), max_steps=65536,
-                stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
-        return m
-
-    def bench(make, setting, outfh):
-        m = make(setting)
+    def bench(m, setting, outfh):
         sol = m(parameterList)
         jax.block_until_ready(sol.ys)  # warm-up (JIT) + numerical result
         err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
@@ -176,87 +215,56 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
             setting, t_ms, err))
         outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
 
-    with open(wp_outfile("JAX", "Jax", "fixed", DATASET_KEY), "w") as f:
-        for dt in DTS:
-            bench(make_fixed, dt, f)
-    with open(wp_outfile("JAX", "Jax", "adaptive", DATASET_KEY), "w") as f:
-        for tol in TOLS:
-            bench(make_adaptive, tol, f)
+    for algorithm in ALGORITHMS:
+        if algorithm in FIXED_ALGORITHMS:
+            outfile = wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY)
+            with open(outfile, "w") as f:
+                for dt in dts_for(algorithm):
+                    # Steps = 1/dt; the finest euler dt needs 2^17.
+                    bench(make_fixed(algorithm, dt, max_steps=262144), dt, f)
+        if algorithm in ADAPTIVE_ALGORITHMS:
+            outfile = wp_outfile("JAX", "Jax", "adaptive", algorithm,
+                                 DATASET_KEY)
+            with open(outfile, "w") as f:
+                for tol in TOLS:
+                    bench(make_adaptive(algorithm, tol), tol, f)
 
     sys.exit(0)
 
 # %%
-# Use jax.vmap to compute parallel solutions of the ODE
-best_time, best_time_dev = best_times_ms(main, parameterList, "fixed time-stepping")
-print("{:} ODE solves with fixed time-stepping completed in {:.1f} ms "
-      "({:.1f} ms without transfers)".format(numberOfParameters, best_time, best_time_dev))
-
-
-# %%
-# Save the minimum time 
+# N-sweep: use jax.vmap to compute parallel solutions of the ODE.
 os.makedirs("./data/JAX", exist_ok=True)
-file = open("./data/JAX/Jax_times_unadaptive_{0}.txt".format(DATASET_KEY),"a+")
-file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
-file.close()
 
-# Save numerical output for 32768-trajectory run
-if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
-    sol = main(parameterList)
-    # Extract final state values (last time point for each trajectory)
-    final_states = np.array(sol.ys[:, -1, :])  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/jax_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+for algorithm in ALGORITHMS:
+    if algorithm in FIXED_ALGORITHMS:
+        main = make_fixed(algorithm)
+        best_time, best_time_dev = best_times_ms(
+            main, parameterList, "fixed {0}".format(algorithm))
+        print("{:} ODE solves ({}, fixed) completed in {:.1f} ms "
+              "({:.1f} ms without transfers)".format(
+                  numberOfParameters, algorithm, best_time, best_time_dev))
+        outfile = times_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY)
+        with open(outfile, "a+") as file:
+            file.write('{0} {1} {2}\n'.format(
+                numberOfParameters, best_time, best_time_dev))
+        # The pairwise numerical cross-check keys on the pre-#29 run mode:
+        # the fixed N-sweep ran Tsit5, so tsit5 keeps the CSV name.
+        if numberOfParameters == 32768 and algorithm == "tsit5":
+            os.makedirs("./data/numerical", exist_ok=True)
+            sol = main(parameterList)
+            final_states = np.array(sol.ys[:, -1, :])
+            np.savetxt("./data/numerical/jax_{0}.csv".format(DATASET_KEY),
+                       final_states, delimiter=',')
 
-
-# %%
-# Repeat the same for adaptive time-stepping
-@jax.jit
-@jax.vmap
-def main(k1):
-    lorenz = Lorenz(k1)
-    terms = diffrax.ODETerm(lorenz)
-    t0 = 0.0
-    t1 = 1.0
-    y0 = jnp.array([1.0, 0.0, 0.0])
-    dt0 = 0.001
-    solver = diffrax.Tsit5()
-    saveat = diffrax.SaveAt(ts = jnp.array([t0,t1]))
-    stepsize_controller = diffrax.PIDController(rtol=1e-8, atol=1e-8)
-    sol = diffrax.diffeqsolve(
-        terms,
-        solver,
-        t0,
-        t1,
-        dt0,
-        y0,
-#         saveat=saveat,
-        stepsize_controller=stepsize_controller,
-    )
-    return sol
-
-
-# %%
-
-
-import timeit
-
-
-# %%
-
-
-best_time, best_time_dev = best_times_ms(main, parameterList, "adaptive time-stepping")
-
-
-# %%
-
-print("{:} ODE solves with adaptive time-stepping completed in {:.1f} ms "
-      "({:.1f} ms without transfers)".format(numberOfParameters, best_time, best_time_dev))
-
-
-# %%
-
-
-file = open("./data/JAX/Jax_times_adaptive_{0}.txt".format(DATASET_KEY),"a+")
-file.write('{0} {1} {2}\n'.format(numberOfParameters, best_time, best_time_dev))
-file.close()
-
+    if algorithm in ADAPTIVE_ALGORITHMS:
+        main = make_adaptive(algorithm)
+        best_time, best_time_dev = best_times_ms(
+            main, parameterList, "adaptive {0}".format(algorithm))
+        print("{:} ODE solves ({}, adaptive) completed in {:.1f} ms "
+              "({:.1f} ms without transfers)".format(
+                  numberOfParameters, algorithm, best_time, best_time_dev))
+        outfile = times_outfile("JAX", "Jax", "adaptive", algorithm,
+                                DATASET_KEY)
+        with open(outfile, "a+") as file:
+            file.write('{0} {1} {2}\n'.format(
+                numberOfParameters, best_time, best_time_dev))

@@ -11,6 +11,7 @@ set model=
 set nmax=
 set has_n_option=false
 set wp=false
+set alg=all
 
 :parse_loop
 if "%~1"=="" goto end_parse_loop
@@ -35,6 +36,12 @@ if /i "%~1"=="-m" (
 if /i "%~1"=="-n" (
     set nmax=%~2
     set has_n_option=true
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="-g" (
+    set alg=%~2
     shift
     shift
     goto parse_loop
@@ -68,6 +75,19 @@ REM keyed files are left in place so data accumulates additively across machines
 set "DATASET_KEY="
 for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
 
+REM -g narrows the run to one integration algorithm (cubie vocabulary: euler,
+REM classical-rk4, tsit5, cash-karp-54 - see issue #29); the default "all"
+REM runs every algorithm the framework supports. The pre-run wipe is narrowed
+REM to the same algorithm so sweeping a second algorithm never deletes the
+REM first one's data.
+if /i "%alg%"=="all" (
+    set "times_glob=*_times_*_%DATASET_KEY%.txt"
+    set "wp_glob=*_wp_*_%DATASET_KEY%.txt"
+) else (
+    set "times_glob=*_times_*_%alg%_%DATASET_KEY%.txt"
+    set "wp_glob=*_wp_*_%alg%_%DATASET_KEY%.txt"
+)
+
 echo %lang%
 
 if /i "%lang%"=="julia" (
@@ -79,11 +99,11 @@ if /i "%lang%"=="julia" (
     ) else (
         if not exist "data\Julia\" mkdir "data\Julia"
         if "%wp%"=="true" (
-            del /q "data\Julia\*_wp_*_%DATASET_KEY%.txt" 2>nul
+            del /q "data\Julia\%wp_glob%" 2>nul
         ) else (
-            del /q "data\Julia\*_times_*_%DATASET_KEY%.txt" 2>nul
+            del /q "data\Julia\%times_glob%" 2>nul
         )
-        call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
+        call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax% %alg%
     )
 ) else if /i "%lang%"=="jax" (
     goto check_ode_gpu
@@ -121,11 +141,11 @@ if /i "%lang%"=="myokit_cuda" set data_lang=MYOKIT_CUDA
 echo Benchmarking %lang% %dev% accelerated ensemble %model% solvers...
 if not exist "data\%data_lang%\" mkdir "data\%data_lang%"
 if "%wp%"=="true" (
-    del /q "data\%data_lang%\*_wp_*_%DATASET_KEY%.txt" 2>nul
+    del /q "data\%data_lang%\%wp_glob%" 2>nul
 ) else (
-    del /q "data\%data_lang%\*_times_*_%DATASET_KEY%.txt" 2>nul
+    del /q "data\%data_lang%\%times_glob%" 2>nul
 )
-call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax%
+call runner_scripts\%dev%\run_%model%_%lang%.bat %nmax% %alg%
 goto end_script
 
 :unsupported

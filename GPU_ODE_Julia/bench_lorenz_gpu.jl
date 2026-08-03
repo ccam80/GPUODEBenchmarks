@@ -17,6 +17,23 @@ numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
 
+# Algorithm-matched benchmarking (issue #29). CLI: <N> [wp] [algorithm|all].
+# The DiffEqGPU kernel path (vectorized_solve/vectorized_asolve) exposes no
+# GPUEuler or GPURK4, so Tsit5 is the only algorithm this benchmark can match;
+# any other request skips cleanly so orchestrated sweeps keep going.
+requested_algorithm = "all"
+for tok in ARGS[2:end]
+    if tok != "wp"
+        global requested_algorithm = tok
+    end
+end
+if !(requested_algorithm in ("all", "tsit5"))
+    println("Julia (DiffEqGPU kernel path) does not support algorithm '",
+        requested_algorithm, "'; skipping.")
+    exit(0)
+end
+const ALGORITHM = "tsit5"
+
 function lorenz(u, p, t)
     du1 = 10.0f0 * (u[2] - u[1])
     du2 = p[1] * u[1] - u[2] - u[1] * u[3]
@@ -50,7 +67,7 @@ probs = cu(probs_host)
 # `bench_lorenz_gpu.jl 32768 wp` sweeps fixed dt / adaptive tolerance at
 # N=32768 and records "<setting> <time_ms> <error-vs-golden>" per point.
 # Grids and protocol mirror runner_scripts/wp_common.py — keep in sync.
-if length(ARGS) > 1 && ARGS[2] == "wp"
+if "wp" in ARGS
     using DelimitedFiles
 
     numberOfParameters == 32768 || error("wp mode must be run with N = 32768")
@@ -74,7 +91,7 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
     outdir = joinpath(dirname(@__DIR__), "data", "Julia")
     mkpath(outdir)
 
-    open(joinpath(outdir, "Julia_wp_fixed_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_fixed_$(ALGORITHM)_$(DATASET_KEY).txt"), "w") do io
         for dt in DTS
             dt32 = Float32(dt)
             CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5();
@@ -93,7 +110,7 @@ if length(ARGS) > 1 && ARGS[2] == "wp"
         end
     end
 
-    open(joinpath(outdir, "Julia_wp_adaptive_$(DATASET_KEY).txt"), "w") do io
+    open(joinpath(outdir, "Julia_wp_adaptive_$(ALGORITHM)_$(DATASET_KEY).txt"), "w") do io
         for tol in TOLS
             tol32 = Float32(tol)
             CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
@@ -146,7 +163,7 @@ data = @benchmark begin
     end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_unadaptive_$(DATASET_KEY).txt"),
+    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_fixed_$(ALGORITHM)_$(DATASET_KEY).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1e6,
             " ", minimum(data_dev.times) / 1e6)
@@ -200,7 +217,7 @@ data = @benchmark begin
 end samples=REPEATS evals=1 seconds=1e9
 
 if !isinteractive()
-    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(DATASET_KEY).txt"),
+    open(joinpath(dirname(@__DIR__), "data", "Julia", "Julia_times_adaptive_$(ALGORITHM)_$(DATASET_KEY).txt"),
          "a+") do io
         println(io, numberOfParameters, " ", minimum(data.times) / 1f6,
             " ", minimum(data_dev.times) / 1f6)

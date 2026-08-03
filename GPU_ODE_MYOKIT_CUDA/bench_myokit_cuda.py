@@ -16,10 +16,12 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
 from bench_key import dataset_key  # noqa: E402
 from wp_common import (  # noqa: E402
-    DTS,
     N_WP,
+    dts_for,
     ensemble_error,
     load_golden,
+    parse_bench_args,
+    times_outfile,
     wp_outfile,
 )
 
@@ -30,6 +32,10 @@ STANDARD_DT = 0.001
 STANDARD_STEPS = 1000
 # Timed repeats per point; min is reported.
 REPEATS = 20
+# Myokit's generated CUDA kernel is forward Euler only (issue #29): any other
+# requested algorithm skips cleanly so orchestrated sweeps keep going.
+ALGORITHM = "euler"
+SUPPORTED = (ALGORITHM,)
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats):
@@ -87,10 +93,11 @@ def run_work_precision(model, cell_count):
         "MYOKIT_CUDA",
         "Myokit_cuda",
         "fixed",
+        ALGORITHM,
         DATASET_KEY,
     )
     with open(output, "w", encoding="utf-8") as handle:
-        for dt in DTS:
+        for dt in dts_for(ALGORITHM):
             step_count = int(round(1.0 / dt))
             elapsed_ms, _, finals = timed_solve(
                 model,
@@ -115,14 +122,14 @@ def run_work_precision(model, cell_count):
 def main(argv=None):
     """Run a standard timing point or the fixed work-precision sweep."""
     argv = sys.argv[1:] if argv is None else argv
-    if not argv or len(argv) > 2:
+    if not argv or len(argv) > 3:
         raise SystemExit(
-            "usage: bench_myokit_cuda.py <trajectory-count> [wp]"
+            "usage: bench_myokit_cuda.py <trajectory-count> [wp] [algorithm|all]"
         )
-    cell_count = int(argv[0])
-    mode = argv[1].lower() if len(argv) == 2 else "timing"
-    if mode not in ("timing", "wp"):
-        raise SystemExit("second argument must be wp when supplied")
+    cell_count, wp_mode, algorithms = parse_bench_args(argv, SUPPORTED)
+    if not algorithms:
+        print("Myokit CUDA supports forward Euler only; skipping.")
+        return 0
 
     os.chdir(REPO_ROOT)
     model = MyokitCudaModel(
@@ -138,7 +145,7 @@ def main(argv=None):
             "unexpected Lorenz state order: {0}".format(model.state_names)
         )
 
-    if mode == "wp":
+    if wp_mode:
         run_work_precision(model, cell_count)
         return 0
 
@@ -159,12 +166,9 @@ def main(argv=None):
         .format(cell_count, elapsed_ms, elapsed_dev_ms)
     )
 
-    timing_dir = REPO_ROOT / "data" / "MYOKIT_CUDA"
-    timing_dir.mkdir(parents=True, exist_ok=True)
-    timing_file = (
-        timing_dir
-        / "Myokit_cuda_times_unadaptive_{0}.txt".format(DATASET_KEY)
-    )
+    timing_file = Path(times_outfile(
+        "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY
+    ))
     with timing_file.open("a", encoding="utf-8") as handle:
         handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
 

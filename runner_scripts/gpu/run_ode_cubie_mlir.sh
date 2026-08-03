@@ -7,9 +7,13 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 # import time via this env var).
 export CUBIE_CUDA_BACKEND=mlir
 
+# Algorithm request (issue #29): forwarded to the bench script, which runs
+# every supported algorithm for "all" and skips cleanly when unsupported.
+ALG=${2:-all}
+
 # Work-precision mode: `run_ode_cubie_mlir.sh wp` sweeps dt/tolerance at N=32768.
 if [ "$1" == "wp" ]; then
-    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp "$ALG"
     deactivate
     exit 0
 fi
@@ -19,7 +23,7 @@ max_a=$1
 while [ $a -le $max_a ]
 do
     echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py $a
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py $a "$ALG"
     a=$((a*4))
 done
 

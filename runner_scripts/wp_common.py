@@ -1,11 +1,17 @@
 """Shared protocol constants and helpers for the work-precision (wp) sweeps.
 
 Every framework's `wp` mode runs the same Lorenz ensemble at N = 32768 (the
-numerical cross-check size) and sweeps the controls it supports:
+numerical cross-check size) and sweeps the controls it supports, once per
+integration algorithm it can run:
 
-* fixed-step frameworks use dt in DTS (dyadic fractions of the t=1 duration,
-  so save and end boundaries are exact in binary floating point), and
-* adaptive frameworks use rtol = atol in TOLS.
+* fixed-step sweeps use dt in dts_for(algorithm) (dyadic fractions of the
+  t=1 duration, so save and end boundaries are exact in binary floating
+  point), and
+* adaptive sweeps use rtol = atol in TOLS.
+
+The dt grid is per-algorithm because a useful error range depends on the
+method order: first-order Euler sits at err ~2e4 on the higher-order grid's
+loose end and only becomes meaningful at much smaller steps.
 
 For each setting the solve is timed with the established protocol (one
 untimed warmup, ``timeit.repeat(..., number=1)``, ``min * 1000`` ms) and the
@@ -18,7 +24,9 @@ DiffEqDevTools.WorkPrecisionSet.
 
 Rows ``<setting> <time_ms> <error>`` are written (mode "w" — a wp file always
 holds exactly one full sweep) to
-``data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt``.
+``data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt``
+where <algorithm> is the cubie-vocabulary name (euler, classical-rk4, tsit5,
+cash-karp-54 — see runner_scripts/numerical_equivalence/algorithms.csv).
 
 The Julia writer mirrors these constants; keep them in sync.
 """
@@ -28,13 +36,20 @@ import os
 import numpy as np
 
 # Sweep grids (canonical — mirrored in bench_lorenz_gpu.jl and the MPGOS
-# runner; keep in sync).
+# runner; keep in sync). DTS is the default grid for order >= 4 methods;
+# forward Euler gets a finer grid so its errors land in a comparable range.
 DTS = [2.0 ** -k for k in range(4, 14)]        # 1/16 .. 1/8192, 10 points
+DTS_EULER = [2.0 ** -k for k in range(8, 18)]  # 1/256 .. 1/131072, 10 points
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 32768
 
 GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_32768.csv")
+
+
+def dts_for(algorithm):
+    """The fixed-step dt grid appropriate to the given algorithm."""
+    return DTS_EULER if algorithm == "euler" else DTS
 
 
 def load_golden():
@@ -57,8 +72,47 @@ def ensemble_error(final_states, golden):
     return float(np.sqrt(np.mean(diff ** 2)))
 
 
-def wp_outfile(framework_dir, prefix, mode, dataset_key):
+def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
     """Path of the keyed wp output file; ensures the directory exists."""
     d = os.path.join("data", framework_dir)
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, "{0}_wp_{1}_{2}.txt".format(prefix, mode, dataset_key))
+    return os.path.join(d, "{0}_wp_{1}_{2}_{3}.txt".format(
+        prefix, mode, algorithm, dataset_key))
+
+
+def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
+    """Path of the keyed N-sweep timing file; ensures the directory exists."""
+    d = os.path.join("data", framework_dir)
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "{0}_times_{1}_{2}_{3}.txt".format(
+        prefix, mode, algorithm, dataset_key))
+
+
+def parse_bench_args(argv, supported):
+    """Parse ``<N> [wp] [algorithm|all]`` from an argv list (excluding argv[0]).
+
+    Returns (n, wp, algorithms) where algorithms is the requested subset of
+    `supported`, in `supported` order. Unknown algorithm names exit with an
+    error; a supported vocabulary name this framework lacks yields an empty
+    list so callers can skip cleanly.
+    """
+    if not argv:
+        raise SystemExit("usage: <N> [wp] [algorithm|all]")
+    n = int(argv[0])
+    wp = False
+    request = "all"
+    for tok in argv[1:]:
+        if tok == "wp":
+            wp = True
+        else:
+            request = tok
+    vocabulary = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
+    if request != "all" and request not in vocabulary:
+        raise SystemExit(
+            "unknown algorithm '{0}' (expected one of: all, {1})".format(
+                request, ", ".join(vocabulary)))
+    if request == "all":
+        algorithms = list(supported)
+    else:
+        algorithms = [a for a in supported if a == request]
+    return n, wp, algorithms

@@ -5,14 +5,40 @@
 # make, this script enters the Visual Studio developer environment (located
 # via vswhere) and invokes nvcc directly with the Makefile's flags.
 param(
-    [Parameter(Mandatory=$true)]
-    [int]$MaxA,
-    # Work-precision mode: build RK4 and RKCK45 once at NT=32768 and run the
-    # dt/tolerance sweeps ("Lorenz.exe 32768 wp") instead of the N sweep.
+    # Upper bound of the N sweep, or the literal "wp" for work-precision mode.
+    [Parameter(Position=0)]
+    [string]$MaxA,
+    # Algorithm to run: classical-rk4 (RK4 build), cash-karp-54 (RKCK45
+    # build), or all (both). Any other name skips cleanly (issue #29).
+    [Parameter(Position=1)]
+    [string]$Algorithm = 'all',
+    # Work-precision mode: build the requested solvers at NT=32768 and sweep
+    # dt/tolerance.
     [switch]$Wp
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($MaxA -eq 'wp') { $Wp = $true }
+
+[int]$MaxTrajectories = 0
+if (-not $Wp -and -not [int]::TryParse($MaxA, [ref]$MaxTrajectories)) {
+    Write-Error "Usage: run_ode_cpp.ps1 <max-trajectories>|wp [algorithm|all]"
+}
+
+# MPGOS ships exactly two explicit solvers: RK4 (classical-rk4, fixed dt) and
+# RKCK45 (cash-karp-54, adaptive).
+$RunRk4 = $false
+$RunRkck45 = $false
+switch ($Algorithm) {
+    'all' { $RunRk4 = $true; $RunRkck45 = $true }
+    'classical-rk4' { $RunRk4 = $true }
+    'cash-karp-54' { $RunRkck45 = $true }
+    default {
+        Write-Host "MPGOS does not support algorithm '$Algorithm'; skipping."
+        exit 0
+    }
+}
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 $env:CUDA_MODULE_LOADING = 'EAGER'
@@ -52,26 +78,34 @@ function Build-Project {
     }
 }
 
+# Lorenz.cu's config block is rewritten by absolute line number (see the
+# warning at GPU_ODE_MPGOS/Lorenz.cu:32-34).
+function Set-SolverConfig {
+    param([string]$Solver, [int]$Nt)
+    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    $content[14] = "#define SOLVER $Solver"
+    $content[16] = "const int NT = $Nt;"
+    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
+}
+
 Enter-VsEnvironment
 
 if ($Wp) {
-    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    $content[16] = "const int NT = 32768;"
+    if ($RunRk4) {
+        # RK4 build -> fixed-dt sweep
+        Set-SolverConfig -Solver 'RK4' -Nt 32768
+        Build-Project
+        & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
+        if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RK4 wp) failed with exit code $LASTEXITCODE" }
+    }
 
-    # RK4 build -> fixed-dt sweep
-    $content[14] = "#define SOLVER RK4"
-    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    Build-Project
-    & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
-    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RK4 wp) failed with exit code $LASTEXITCODE" }
-
-    # RKCK45 build -> adaptive-tolerance sweep
-    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    $content[14] = "#define SOLVER RKCK45"
-    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    Build-Project
-    & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
-    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RKCK45 wp) failed with exit code $LASTEXITCODE" }
+    if ($RunRkck45) {
+        # RKCK45 build -> adaptive-tolerance sweep
+        Set-SolverConfig -Solver 'RKCK45' -Nt 32768
+        Build-Project
+        & "GPU_ODE_MPGOS\Lorenz.exe" 32768 wp
+        if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RKCK45 wp) failed with exit code $LASTEXITCODE" }
+    }
 
     Pop-Location
     return
@@ -79,39 +113,22 @@ if ($Wp) {
 
 $a = 8
 
-while ($a -le $MaxA) {
+while ($a -le $MaxTrajectories) {
     Write-Host $a
 
-    # Read the file content
-    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
+    if ($RunRk4) {
+        Set-SolverConfig -Solver 'RK4' -Nt $a
+        Build-Project
+        & "GPU_ODE_MPGOS\Lorenz.exe" $a
+        if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RK4) failed with exit code $LASTEXITCODE" }
+    }
 
-    # Replace line 15 with RK4 solver definition
-    $content[14] = "#define SOLVER RK4"
-
-    # Replace line 17 with NT value
-    $content[16] = "const int NT = $a;"
-
-    # Write back to file
-    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
-
-    # Build and run with RK4
-    Build-Project
-    & "GPU_ODE_MPGOS\Lorenz.exe" $a
-    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RK4) failed with exit code $LASTEXITCODE" }
-
-    # Read the file content again
-    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
-
-    # Replace line 15 with RKCK45 solver definition
-    $content[14] = "#define SOLVER RKCK45"
-
-    # Write back to file
-    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
-
-    # Build and run with RKCK45
-    Build-Project
-    & "GPU_ODE_MPGOS\Lorenz.exe" $a
-    if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RKCK45) failed with exit code $LASTEXITCODE" }
+    if ($RunRkck45) {
+        Set-SolverConfig -Solver 'RKCK45' -Nt $a
+        Build-Project
+        & "GPU_ODE_MPGOS\Lorenz.exe" $a
+        if ($LASTEXITCODE -ne 0) { Write-Error "Lorenz.exe (RKCK45) failed with exit code $LASTEXITCODE" }
+    }
 
     # Increment the value
     $a = $a * 4

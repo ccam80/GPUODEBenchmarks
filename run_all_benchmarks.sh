@@ -19,16 +19,19 @@ echo ""
 # cubie and DifferentialEquations.jl (both in Float32) plus their comparison
 # report. Parsed manually because getopts cannot distinguish -np from -n.
 nmax_arg=""
+alg_arg=""
 wp=false
 np=false
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) if [ $# -lt 2 ]; then echo "-n requires a value"; exit 1; fi
             nmax_arg="-n $2"; shift 2;;
+        -g) if [ $# -lt 2 ]; then echo "-g requires a value"; exit 1; fi
+            alg_arg="-g $2"; shift 2;;
         -w) wp=true; shift;;
         -np|--numerical-precision) np=true; shift;;
         *) echo "Unknown option $1"
-           echo "Usage: $0 [-n nmax] [-w] [-np|--numerical-precision]"; exit 1;;
+           echo "Usage: $0 [-n nmax] [-g algorithm] [-w] [-np|--numerical-precision]"; exit 1;;
     esac
 done
 
@@ -42,7 +45,7 @@ do
     echo "Benchmarking: $lang"
     echo "========================================="
 
-    if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode $nmax_arg; then
+    if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode $nmax_arg $alg_arg; then
         echo ""
         echo "✓ Successfully completed benchmarking for $lang"
         echo ""
@@ -62,7 +65,7 @@ if $wp; then
         echo "Work-precision benchmarking: $lang"
         echo "========================================="
 
-        if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w; then
+        if bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w $alg_arg; then
             echo ""
             echo "✓ Successfully completed work-precision benchmarking for $lang"
             echo ""

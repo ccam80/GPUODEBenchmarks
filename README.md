@@ -130,12 +130,64 @@ Two further optional flags extend the run:
 * `-w` — also run the work-precision (error vs. runtime) sweeps for every
   framework and generate their plot (see
   [Work-Precision Benchmarks](#work-precision-error-vs-runtime-benchmarks)).
+* `-g <algorithm>` — narrow the run to a single integration algorithm (see
+  [Algorithm-matched subsets](#algorithm-matched-subsets) below).
 * `-np` / `--numerical-precision` — also run the numerical-equivalence
   suite (cubie vs. DifferentialEquations.jl, error vs. dt and vs. tolerance
   per algorithm; see
   [Numerical Equivalence](#numerical-equivalence-error-vs-dt--cubie-vs-differentialequationsjl)).
   This delegates to `run_numerical_equivalence.sh`/`.bat`, which can also be
   run standalone.
+
+### Algorithm-matched subsets
+
+Every benchmark runs once per integration algorithm the framework supports,
+so each figure compares the same method across packages instead of mixing
+forward Euler against RK4 against Tsit5 at the same dt
+([issue #29](https://github.com/ccam80/GPUODEBenchmarks/issues/29)).
+Algorithms use the cubie vocabulary — `euler`, `classical-rk4`, `tsit5`,
+`cash-karp-54` — and the matched subsets that emerge from what each package
+exposes are:
+
+| Subset | Mode | Algorithm | Members |
+|---|---|---|---|
+| A | fixed | `euler` | CUBIE, CUBIE_MLIR, JAX, PYTORCH, MYOKIT_CUDA |
+| B | fixed | `classical-rk4` | CUBIE, CUBIE_MLIR, MPGOS, PYTORCH, JAX |
+| C | fixed | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX, PYTORCH |
+| D | adaptive | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX |
+| E | adaptive | `cash-karp-54` | MPGOS, CUBIE, CUBIE_MLIR |
+
+No algorithm is available across all seven series (Myokit exposes Euler only
+and MPGOS exposes RK4/RKCK45 only), so a single figure containing every
+package is not achievable. JAX's classical RK4 and PyTorch's fixed-grid
+Tsit5 are custom solvers built from the standard tableaus inside the bench
+scripts (diffrax ships no classical RK4; torchdiffeq ships no Tsit5).
+Subset D matches the tableau but not the error controller — each framework
+uses its own step controller, so step counts still differ at equal
+tolerance.
+
+All benchmark entry points accept `-g <algorithm>` (default `all`, meaning
+every algorithm the framework supports); a framework that does not support
+the requested algorithm skips cleanly:
+
+```bash
+    $ bash ./run_benchmark.sh -l cubie -d gpu -m ode -g tsit5
+    $ bash ./run_all_benchmarks.sh -g classical-rk4
+    $ ./run_full_dataset.sh --algorithm euler
+```
+
+Timing files are named
+`data/<FRAMEWORK>/<Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt`
+(work-precision files use `_wp_` in place of `_times_`). Data collected
+before the algorithm dimension existed can be renamed into this layout with
+
+```bash
+    $ python3 runner_scripts/migrate_data_layout.py --dry-run   # preview
+    $ python3 runner_scripts/migrate_data_layout.py             # rename
+```
+
+which is lossless because each framework previously ran exactly one known
+algorithm per mode.
 
 ### Generating the complete dataset
 
@@ -666,9 +718,12 @@ artifact.
 
 ### Running the sweeps
 
-Each framework's `wp` mode sweeps the controls it supports: fixed-step
-frameworks use dyadic dt from 1/16 to 1/8192, while adaptive frameworks use
-rtol = atol from 1e-2 to 1e-8. Each setting uses the usual timing protocol
+Each framework's `wp` mode sweeps the controls it supports, once per
+supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
+dyadic dt from 1/16 to 1/8192 (forward Euler uses 1/256 to 1/131072, since a
+first-order method's errors land far off the higher-order grid), while
+adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
+usual timing protocol
 (untimed warm-up, repeated solves, best time) and computes the ensemble l2
 error of the final states against the golden reference. Protocol constants
 live in `runner_scripts/wp_common.py` (mirrored in the Julia and MPGOS
@@ -689,8 +744,8 @@ framework's wp sweeps and the wp plot in one go, pass `-w` to the all-in-one
 script: `./run_all_benchmarks.sh -w` (`run_all_benchmarks.bat -w`).
 
 Results are written per machine as
-`data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt` with rows
-`<setting> <time_ms> <error>`. Notes:
+`data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt`
+with rows `<setting> <time_ms> <error>`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
   `block_until_ready`, torch `cuda.synchronize`), unlike the historical
@@ -706,9 +761,10 @@ Results are written per machine as
 julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
 ```
 
-discovers all keyed wp files and writes `plots/Lorenz_wp_<mode>_<group>.png`
-for the same (all / per-os / per-gpu) x (fixed / adaptive / all) groups as
-`plot_ode_comp.jl`.
+discovers all keyed wp files and writes one algorithm-matched figure per
+(mode, algorithm), `plots/Lorenz_wp_<mode>_<algorithm>_<group>.png`, plus an
+`plots/Lorenz_wp_all_<group>.png` overview, for the same
+(all / per-os / per-gpu) groups as `plot_ode_comp.jl`.
 
 ## Numerical Equivalence (error vs. dt) — cubie vs. DifferentialEquations.jl
 

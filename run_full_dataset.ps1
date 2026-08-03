@@ -8,6 +8,7 @@
 #   run_full_dataset.bat --skip-ne            # drop a stage
 #   run_full_dataset.bat --resume-from jax    # restart at a framework
 #   run_full_dataset.bat --only overlap       # a single stage
+#   run_full_dataset.bat -g tsit5             # a single algorithm (-g in run_benchmark.bat)
 #   run_full_dataset.bat --lock-clocks 1470,6801   # override the clock target
 #   run_full_dataset.bat --no-lock-clocks     # sample clocks but do not pin
 #   run_full_dataset.bat --clock-tolerance 30 # widen the drift threshold (MHz)
@@ -27,6 +28,7 @@ $DoOverlap = $true
 $DoPlots = $true
 $OverlapProfile = 'full'
 $OverlapNMax = ''
+$Algorithm = 'all'
 $Cooldown = 15
 $ResumeFrom = ''
 $AllowUnknownGpu = $false
@@ -41,7 +43,7 @@ $Languages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myokit_
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 18 |
+    Get-Content $PSCommandPath -TotalCount 19 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -70,6 +72,7 @@ function Get-RequiredValue {
 for ($i = 0; $i -lt $args.Count; $i++) {
     switch -Regex ([string]$args[$i]) {
         '^(-n|--nmax)$' { $NMax = [long](Get-RequiredValue $args $i $args[$i]); $i++ }
+        '^(-g|--algorithm)$' { $Algorithm = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^--overlap-nmax$' { $OverlapNMax = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^--overlap-profile$' { $OverlapProfile = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^--resume-from$' { $ResumeFrom = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
@@ -202,6 +205,7 @@ function Invoke-Step {
 
 Write-Host "Dataset key : $DatasetKey"
 Write-Host "nmax        : $NMax"
+Write-Host "Algorithm   : $Algorithm"
 Write-Host "Overlap     : profile=$OverlapProfile nmax=$OverlapNMax"
 Write-Host "Log dir     : $LogDir"
 Write-Host "Stages      : perf=$DoPerf wp=$DoWp ne=$DoNe overlap=$DoOverlap plots=$DoPlots"
@@ -218,6 +222,7 @@ $manifest = @(
     "dataset_key=$DatasetKey"
     "started_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
     "nmax=$NMax"
+    "algorithm=$Algorithm"
     "overlap_profile=$OverlapProfile"
     "overlap_nmax=$OverlapNMax"
     "git_rev=$gitRev"
@@ -250,7 +255,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                ".\run_benchmark.bat -l $lang -d gpu -m ode -n $NMax"
+                ".\run_benchmark.bat -l $lang -d gpu -m ode -n $NMax -g $Algorithm"
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -286,7 +291,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                ".\run_benchmark.bat -l $lang -d gpu -m ode -w"
+                ".\run_benchmark.bat -l $lang -d gpu -m ode -w -g $Algorithm"
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown

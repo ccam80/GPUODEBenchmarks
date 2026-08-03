@@ -2,7 +2,14 @@
 # coding: utf-8
 """
 Benchmarking Cubie ODE solvers for ensemble problems.
-The Lorenz ODE is integrated with fixed and adaptive time-stepping.
+The Lorenz ODE is integrated with fixed and adaptive time-stepping, once per
+supported integration algorithm, so every timing file compares like-for-like
+against the other frameworks (issue #29):
+
+    fixed:    euler, classical-rk4, tsit5
+    adaptive: tsit5, cash-karp-54 (PID controller in both cases)
+
+Usage: bench_cubie.py <N> [wp] [algorithm|all]
 
 Created for GPUODEBenchmarks integration
 """
@@ -17,18 +24,26 @@ from cubie.time_logger import default_timelogger
 
 default_timelogger.set_verbosity(None)
 
-# Get number of trajectories from command line
-numberOfParameters = int(sys.argv[1])
-# Timed repeats per point; min is reported.
-REPEATS = 20
-
-
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key
+from wp_common import parse_bench_args, times_outfile
+
 DATASET_KEY = dataset_key()
+
+FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
+ADAPTIVE_ALGORITHMS = ("tsit5", "cash-karp-54")
+SUPPORTED = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
+
+numberOfParameters, WP_MODE, ALGORITHMS = parse_bench_args(sys.argv[1:], SUPPORTED)
+# Timed repeats per point; min is reported.
+REPEATS = 20
+
+FRAMEWORK_DIR = "CUBIE"
+FRAMEWORK_PREFIX = "Cubie"
+NUMERICAL_TAG = "cubie"
 
 # ========================================
 # LORENZ SYSTEM DEFINITION
@@ -40,7 +55,7 @@ DATASET_KEY = dataset_key()
 #
 # Where:
 #   sigma = 10.0 (fixed)
-#   beta = 8/3 (fixed)  
+#   beta = 8/3 (fixed)
 #   rho = parameter varied from 0 to 21
 
 precision = np.float32
@@ -64,9 +79,7 @@ lorenz_system = qb.create_ODE_system(
 # Create linear space from 0 to 21 for rho parameter
 parameterList = np.linspace(0.0, 21.0, numberOfParameters)
 
-# Build parameter dictionary for batch solve
-# All parameters except rho are scalar (same for all trajectories)
-# rho varies across the ensemble
+# rho varies across the ensemble; everything else is scalar.
 parameters = {
     'rho': parameterList
 }
@@ -78,45 +91,51 @@ initial_conditions = {
     'z': 0.0
 }
 
-fixed_solver = qb.Solver(
-    lorenz_system,
-    algorithm='classical-rk4',
-    dt=0.001,
-    save_every=1.0,
-    step_controller='fixed',
-    output_types=['state'],
-    time_logging_level=None,
-)
 
-adaptive_solver = qb.Solver(
-    lorenz_system,
-    algorithm='tsit5',
-    atol=1e-08,
-    rtol=1e-08,
-    save_every=1.0,
-    dt_min=1e-12,
-    dt_max=1e3,
-    step_controller='pid',
-    kp=6/5,
-    kd=0.0,
-    ki=0.0,
-    max_gain=5.0,
-    min_gain=0.1,
-    output_types=['state'],
-    time_logging_level=None,
-)
+def make_fixed_solver(algorithm, dt=0.001):
+    return qb.Solver(
+        lorenz_system,
+        algorithm=algorithm,
+        dt=dt,
+        save_every=1.0,
+        step_controller='fixed',
+        output_types=['state'],
+        time_logging_level=None,
+    )
 
-initials_array, parameter_array = fixed_solver.build_grid(
+
+def make_adaptive_solver(algorithm, tol=1e-08):
+    return qb.Solver(
+        lorenz_system,
+        algorithm=algorithm,
+        atol=tol,
+        rtol=tol,
+        save_every=1.0,
+        dt_min=1e-12,
+        dt_max=1e3,
+        step_controller='pid',
+        kp=6/5,
+        kd=0.0,
+        ki=0.0,
+        max_gain=5.0,
+        min_gain=0.1,
+        output_types=['state'],
+        time_logging_level=None,
+    )
+
+
+grid_solver = make_fixed_solver('classical-rk4')
+initials_array, parameter_array = grid_solver.build_grid(
         initial_values=initial_conditions, parameters=parameters)
 
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_cubie.py 32768 wp` sweeps fixed dt / adaptive tolerance at N=32768
-# and records "<setting> <time_ms> <error-vs-golden>" per point. Protocol and
-# sweep grids live in runner_scripts/wp_common.py.
-if len(sys.argv) > 2 and sys.argv[2] == "wp":
-    from wp_common import (DTS, TOLS, N_WP, load_golden, ensemble_error,
+# `bench_cubie.py 32768 wp [algorithm]` sweeps fixed dt / adaptive tolerance
+# at N=32768 per algorithm and records "<setting> <time_ms> <error-vs-golden>"
+# per point. Protocol and sweep grids live in runner_scripts/wp_common.py.
+if WP_MODE:
+    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
 
     if numberOfParameters != N_WP:
@@ -137,132 +156,102 @@ if len(sys.argv) > 2 and sys.argv[2] == "wp":
         res = timeit.repeat(run, setup='gc.enable()', repeat=repeats, number=1)
         return min(res) * 1000, err
 
-    with open(wp_outfile("CUBIE", "Cubie", "fixed", DATASET_KEY), "w") as f:
-        for dt in DTS:
-            solver = qb.Solver(
-                lorenz_system, algorithm='classical-rk4', dt=dt, save_every=1.0,
-                step_controller='fixed', output_types=['state'],
-                time_logging_level=None)
-            t_ms, err = bench_solver(solver)
-            print(f"wp fixed dt={dt:g}: {t_ms:.2f} ms, err={err:.3e}")
-            f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
+    for algorithm in ALGORITHMS:
+        if algorithm in FIXED_ALGORITHMS:
+            outfile = wp_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "fixed",
+                                 algorithm, DATASET_KEY)
+            with open(outfile, "w") as f:
+                for dt in dts_for(algorithm):
+                    t_ms, err = bench_solver(make_fixed_solver(algorithm, dt))
+                    print(f"wp fixed {algorithm} dt={dt:g}: {t_ms:.2f} ms, "
+                          f"err={err:.3e}")
+                    f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
 
-    with open(wp_outfile("CUBIE", "Cubie", "adaptive", DATASET_KEY), "w") as f:
-        for tol in TOLS:
-            solver = qb.Solver(
-                lorenz_system, algorithm='tsit5', atol=tol, rtol=tol,
-                save_every=1.0, dt_min=1e-12, dt_max=1e3,
-                step_controller='pid', kp=6/5, kd=0.0, ki=0.0,
-                max_gain=5.0, min_gain=0.1, output_types=['state'],
-                time_logging_level=None)
-            t_ms, err = bench_solver(solver)
-            print(f"wp adaptive tol={tol:g}: {t_ms:.2f} ms, err={err:.3e}")
-            f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
+        if algorithm in ADAPTIVE_ALGORITHMS:
+            outfile = wp_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "adaptive",
+                                 algorithm, DATASET_KEY)
+            with open(outfile, "w") as f:
+                for tol in TOLS:
+                    t_ms, err = bench_solver(make_adaptive_solver(algorithm, tol))
+                    print(f"wp adaptive {algorithm} tol={tol:g}: {t_ms:.2f} ms, "
+                          f"err={err:.3e}")
+                    f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
 
     sys.exit(0)
 
 # ========================================
-# FIXED TIME-STEPPING BENCHMARK
+# N-SWEEP TIMING BENCHMARK
 # ========================================
-print(f"Running {numberOfParameters} trajectories with fixed time-stepping...")
-
-def solve_fixed(blocksize=64):
-    """Solve with fixed time step (unadaptive)."""
-    solution = fixed_solver.solve(
-        initial_values=initials_array,
-        parameters=parameter_array,
-        blocksize=blocksize,
-        duration=1.0
-    )
-    return solution
-
-def solve_fixed_on_device(blocksize=64):
-    """Solve with neither transfer: device arrays in, results left on device."""
-    solution = fixed_solver.solve(
-        initial_values=d_initials,
-        parameters=d_parameters,
-        blocksize=blocksize,
-        duration=1.0,
-        on_device=True
-    )
-    cuda.synchronize()
-    return solution
-
-def solve_adaptive_on_device(blocksize=64):
-    """Solve with neither transfer: device arrays in, results left on device."""
-    solution = adaptive_solver.solve(
-        initial_values=d_initials,
-        parameters=d_parameters,
-        blocksize=blocksize,
-        duration=1.0,
-        on_device=True
-    )
-    cuda.synchronize()
-    return solution
-
-def solve_adaptive(blocksize=64):
-    """Solve with adaptive time step."""
-    solution = adaptive_solver.solve(
-        initial_values=initials_array,
-        parameters=parameter_array,
-        blocksize=blocksize,
-        duration=1.0
-    )
-    return solution
-
 # Uploaded once so the device-only timing excludes the h2d.
 d_initials = cuda.to_device(initials_array)
 d_parameters = cuda.to_device(parameter_array)
 
-# Warm-up runs (JIT compilation), one per timed path
-_ = solve_fixed()
-_ = solve_fixed_on_device()
 
-res = timeit.repeat(lambda: solve_fixed(), setup='gc.enable()', repeat=REPEATS, number=1)
-res_dev = timeit.repeat(lambda: solve_fixed_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
+def bench_times(solver):
+    """Best-of-REPEATS (with_transfers_ms, device_only_ms, solution)."""
+    def with_transfers(blocksize=64):
+        return solver.solve(
+            initial_values=initials_array,
+            parameters=parameter_array,
+            blocksize=blocksize,
+            duration=1.0
+        )
 
-best_time = min(res) * 1000  # Convert to milliseconds
-best_time_dev = min(res_dev) * 1000
-print(f"{numberOfParameters} ODE solves with fixed time-stepping completed in {best_time:.1f} ms "
-      f"({best_time_dev:.1f} ms without transfers)")
+    def device_only(blocksize=64):
+        solution = solver.solve(
+            initial_values=d_initials,
+            parameters=d_parameters,
+            blocksize=blocksize,
+            duration=1.0,
+            on_device=True
+        )
+        cuda.synchronize()
+        return solution
 
-# Save results
-os.makedirs("./data/CUBIE", exist_ok=True)
-with open("./data/CUBIE/Cubie_times_unadaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
-    file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
+    # Warm-up runs (JIT compilation), one per timed path
+    solution = with_transfers()
+    _ = device_only()
 
-# Save numerical output for 32768-trajectory run
-if numberOfParameters == 32768:
+    res = timeit.repeat(with_transfers, setup='gc.enable()',
+                        repeat=REPEATS, number=1)
+    res_dev = timeit.repeat(device_only, setup='gc.enable()',
+                            repeat=REPEATS, number=1)
+    return min(res) * 1000, min(res_dev) * 1000, solution
+
+
+def save_numerical(solution, tag):
+    """Final states for the 32768-run numerical cross-check."""
     os.makedirs("./data/numerical", exist_ok=True)
-    solution = solve_fixed()
-    # Extract final state values
     final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_unadaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    np.savetxt("./data/numerical/{0}_{1}.csv".format(tag, DATASET_KEY),
+               final_states, delimiter=',')
 
-# ========================================
-# ADAPTIVE TIME-STEPPING BENCHMARK
-# ========================================
-print(f"Running {numberOfParameters} trajectories with adaptive time-stepping...")
 
-# Warm-up runs (JIT compilation), one per timed path
-_ = solve_adaptive()
-_ = solve_adaptive_on_device()
+for algorithm in ALGORITHMS:
+    if algorithm in FIXED_ALGORITHMS:
+        print(f"Running {numberOfParameters} trajectories, fixed dt, "
+              f"{algorithm}...")
+        best, best_dev, solution = bench_times(make_fixed_solver(algorithm))
+        print(f"{numberOfParameters} ODE solves ({algorithm}, fixed) completed "
+              f"in {best:.1f} ms ({best_dev:.1f} ms without transfers)")
+        outfile = times_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "fixed",
+                                algorithm, DATASET_KEY)
+        with open(outfile, "a+") as file:
+            file.write(f'{numberOfParameters} {best} {best_dev}\n')
+        # The pairwise numerical cross-check keys on the pre-#29 run modes:
+        # classical-rk4 was the fixed algorithm, so it keeps the CSV name.
+        if numberOfParameters == 32768 and algorithm == "classical-rk4":
+            save_numerical(solution, NUMERICAL_TAG + "_unadaptive")
 
-res = timeit.repeat(lambda: solve_adaptive(), setup='gc.enable()', repeat=REPEATS, number=1)
-res_dev = timeit.repeat(lambda: solve_adaptive_on_device(), setup='gc.enable()', repeat=REPEATS, number=1)
-
-best_time = min(res) * 1000  # Convert to milliseconds
-best_time_dev = min(res_dev) * 1000
-print(f"{numberOfParameters} ODE solves with adaptive time-stepping completed in {best_time:.1f} ms "
-      f"({best_time_dev:.1f} ms without transfers)")
-
-# Save results
-with open("./data/CUBIE/Cubie_times_adaptive_{0}.txt".format(DATASET_KEY), "a+") as file:
-    file.write(f'{numberOfParameters} {best_time} {best_time_dev}\n')
-
-if numberOfParameters == 32768:
-    os.makedirs("./data/numerical", exist_ok=True)
-    solution = solve_adaptive()
-    # Extract final state values
-    final_states = solution.state[-1, :, :].T  # shape: (trajectories, states)
-    np.savetxt("./data/numerical/cubie_adaptive_{0}.csv".format(DATASET_KEY), final_states, delimiter=',')
+    if algorithm in ADAPTIVE_ALGORITHMS:
+        print(f"Running {numberOfParameters} trajectories, adaptive dt, "
+              f"{algorithm}...")
+        best, best_dev, solution = bench_times(make_adaptive_solver(algorithm))
+        print(f"{numberOfParameters} ODE solves ({algorithm}, adaptive) "
+              f"completed in {best:.1f} ms ({best_dev:.1f} ms without transfers)")
+        outfile = times_outfile(FRAMEWORK_DIR, FRAMEWORK_PREFIX, "adaptive",
+                                algorithm, DATASET_KEY)
+        with open(outfile, "a+") as file:
+            file.write(f'{numberOfParameters} {best} {best_dev}\n')
+        if numberOfParameters == 32768 and algorithm == "tsit5":
+            save_numerical(solution, NUMERICAL_TAG + "_adaptive")

@@ -18,12 +18,19 @@ REM fixed-step error-vs-dt sweeps of every algorithm mutually supported by
 REM cubie and DifferentialEquations.jl (both in Float32) plus their
 REM comparison report.
 set nmax_arg=
+set alg_arg=
 set wp=false
 set np=false
 :parse_args
 if "%~1"=="" goto end_parse
 if /i "%~1"=="-n" (
     set nmax_arg=-n %~2
+    shift
+    shift
+    goto parse_args
+)
+if /i "%~1"=="-g" (
+    set alg_arg=-g %~2
     shift
     shift
     goto parse_args
@@ -44,7 +51,7 @@ if /i "%~1"=="--numerical-precision" (
     goto parse_args
 )
 echo Unknown option %~1
-echo Usage: %~nx0 [-n nmax] [-w] [-np^|--numerical-precision]
+echo Usage: %~nx0 [-n nmax] [-g algorithm] [-w] [-np^|--numerical-precision]
 exit /b 1
 :end_parse
 
@@ -57,7 +64,7 @@ for %%l in (%languages%) do (
     echo Benchmarking: %%l
     echo =========================================
 
-    call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode %nmax_arg%
+    call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode %nmax_arg% %alg_arg%
     if errorlevel 1 (
         echo.
         echo X Error occurred while benchmarking %%l
@@ -77,7 +84,7 @@ if "%wp%"=="true" (
         echo Work-precision benchmarking: %%l
         echo =========================================
 
-        call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode -w
+        call "%~dp0run_benchmark.bat" -l %%l -d gpu -m ode -w %alg_arg%
         if errorlevel 1 (
             echo.
             echo X Error occurred while work-precision benchmarking %%l

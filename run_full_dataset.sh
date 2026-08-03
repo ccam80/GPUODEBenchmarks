@@ -28,6 +28,7 @@
 #   ./run_full_dataset.sh --skip-ne            # drop a stage
 #   ./run_full_dataset.sh --resume-from jax    # restart at a framework
 #   ./run_full_dataset.sh --only overlap       # a single stage
+#   ./run_full_dataset.sh -g tsit5             # a single algorithm (-g in run_benchmark.sh)
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
 #   ./run_full_dataset.sh --no-lock-clocks     # sample clocks but do not pin
 #   ./run_full_dataset.sh --clock-tolerance 30 # widen the drift threshold (MHz)
@@ -51,6 +52,7 @@ DO_OVERLAP=true
 DO_PLOTS=true
 OVERLAP_PROFILE="full"
 OVERLAP_NMAX=""
+ALGORITHM="all"
 COOLDOWN=15
 RESUME_FROM=""
 ALLOW_UNKNOWN_GPU=false
@@ -62,7 +64,7 @@ LANGUAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,42p' "$0" | sed 's/^# \?//'
+    sed -n '2,43p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -87,6 +89,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -n|--nmax) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    NMAX="$2"; shift 2;;
+        -g|--algorithm) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+                   ALGORITHM="$2"; shift 2;;
         --overlap-nmax) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    OVERLAP_NMAX="$2"; shift 2;;
         --overlap-profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
@@ -223,6 +227,7 @@ run_step() {
 
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
+echo "Algorithm   : $ALGORITHM"
 echo "Overlap     : profile=$OVERLAP_PROFILE nmax=$OVERLAP_NMAX"
 echo "Log dir     : $LOG_DIR"
 echo "Stages      : perf=$DO_PERF wp=$DO_WP ne=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
@@ -235,6 +240,7 @@ echo
     echo "dataset_key=$DATASET_KEY"
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "nmax=$NMAX"
+    echo "algorithm=$ALGORITHM"
     echo "overlap_profile=$OVERLAP_PROFILE"
     echo "overlap_nmax=$OVERLAP_NMAX"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -263,7 +269,7 @@ if $DO_PERF; then
         fi
         CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
-            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -n "$NMAX"
+            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -n "$NMAX" -g "$ALGORITHM"
         status=$?
         reached=$(max_n_reached "$lang")
         if [ "$status" -eq 0 ]; then
@@ -306,7 +312,7 @@ if $DO_WP; then
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
-            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w
+            bash ./run_benchmark.sh -l "$lang" -d gpu -m ode -w -g "$ALGORITHM"
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"

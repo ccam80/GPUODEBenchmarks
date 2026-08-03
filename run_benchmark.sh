@@ -3,13 +3,15 @@
 cd "$(dirname "$0")" || exit 1
 has_n_option=false
 wp=false
-while getopts l:d:m:n:w flag
+alg=all
+while getopts l:d:m:n:g:w flag
 do
     case "${flag}" in
         l) lang=${OPTARG};;
         d) dev=${OPTARG};;
         m) model=${OPTARG};;
         n) nmax=${OPTARG};has_n_option=true;;
+        g) alg=${OPTARG};;
         w) wp=true;;
         \?) echo "Unknown option -$OPTARG"; exit 1;;
     esac
@@ -32,9 +34,23 @@ lang=${lang//-/_}
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
 
 if [ -z "$lang" ] || [ -z "$dev" ] || [ -z "$model" ]; then
-    echo "Usage: $0 -l <language> -d <device> -m <model> [-n nmax]"
+    echo "Usage: $0 -l <language> -d <device> -m <model> [-n nmax] [-g algorithm] [-w]"
     exit 1
 fi
+
+# -g narrows the run to one integration algorithm (cubie vocabulary: euler,
+# classical-rk4, tsit5, cash-karp-54 — see issue #29); the default "all" runs
+# every algorithm the framework supports. The pre-run wipe is narrowed to the
+# same algorithm so sweeping a second algorithm never deletes the first one's
+# data.
+if [ "$alg" == "all" ]; then
+    times_glob="*_times_*_${DATASET_KEY}.txt"
+    wp_glob="*_wp_*_${DATASET_KEY}.txt"
+else
+    times_glob="*_times_*_${alg}_${DATASET_KEY}.txt"
+    wp_glob="*_wp_*_${alg}_${DATASET_KEY}.txt"
+fi
+
 echo "$lang"
 if [ "$lang" == "julia" ]; then
     echo "Benchmarking ${lang^} ${dev^^} accelerated ensemble ${model^^} solvers..."
@@ -47,11 +63,11 @@ if [ "$lang" == "julia" ]; then
         # Clear only this machine's files for the mode being run: timing
         # files for an N sweep, wp files for a wp sweep.
         if $wp; then
-            rm -f "./data/${lang^}"/*_wp_*_"${DATASET_KEY}".txt
+            rm -f "./data/${lang^}"/$wp_glob
         else
-            rm -f "./data/${lang^}"/*_times_*_"${DATASET_KEY}".txt
+            rm -f "./data/${lang^}"/$times_glob
         fi
-        bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
+        bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}" "${alg}"
     fi
 elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubie" || $lang == "cubie_mlir" || $lang == "myokit_cuda" ]]; then
     if [[ $model != "ode" || $dev != "gpu" ]]; then
@@ -61,11 +77,11 @@ elif [[ $lang == "jax" || $lang == "pytorch" || $lang == "cpp" || $lang == "cubi
         echo "Benchmarking ${lang^^} ${dev^^} accelerated ensemble ${model^^} solvers..."
         mkdir -p "./data/${lang^^}"
         if $wp; then
-            rm -f "./data/${lang^^}"/*_wp_*_"${DATASET_KEY}".txt
+            rm -f "./data/${lang^^}"/$wp_glob
         else
-            rm -f "./data/${lang^^}"/*_times_*_"${DATASET_KEY}".txt
+            rm -f "./data/${lang^^}"/$times_glob
         fi
-        bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}"
+        bash "./runner_scripts/${dev}/run_${model}_${lang}.sh" "${nmax}" "${alg}"
     fi
 else
     echo "Unknown language: ${lang}. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda."
