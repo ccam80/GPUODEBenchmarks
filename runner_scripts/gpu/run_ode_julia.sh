@@ -4,14 +4,12 @@ set -e
 unset LD_LIBRARY_PATH
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768 wp
+    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768 wp "$ALGORITHM"
     exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
     echo "No. of trajectories = $a"
-    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl $a
-    a=$((a*4))
+    julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl $a "$ALGORITHM"
 done

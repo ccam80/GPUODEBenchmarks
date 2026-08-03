@@ -5,6 +5,15 @@ set -e
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
+SOLVERS=""
+case "$ALGORITHM" in
+    all) SOLVERS="RK4 RKCK45";;
+    classical-rk4) SOLVERS="RK4";;
+    cash-karp-54) SOLVERS="RKCK45";;
+    *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
+esac
+
 # Solver and trajectory count are compile-time constants, so each point is a rebuild.
 set_solver() {
 	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
@@ -21,7 +30,7 @@ rebuild() {
 
 if [ "$ANALYSIS" == "work-precision" ]; then
 	set_nt 32768
-	for solver in RK4 RKCK45
+	for solver in $SOLVERS
 	do
 		set_solver "$solver"
 		rebuild
@@ -30,16 +39,14 @@ if [ "$ANALYSIS" == "work-precision" ]; then
 	exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
 	echo "No. of trajectories = $a"
 	set_nt "$a"
-	for solver in RK4 RKCK45
+	for solver in $SOLVERS
 	do
 		set_solver "$solver"
 		rebuild
 		./GPU_ODE_MPGOS/Lorenz.exe $a
 	done
-	a=$((a*4))
 done

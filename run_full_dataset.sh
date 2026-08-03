@@ -17,17 +17,21 @@
 # Usage:
 #   ./run_full_dataset.sh                           # every analysis, every package
 #   ./run_full_dataset.sh -n 33554432               # larger ceiling
+#   ./run_full_dataset.sh -n 8388608,134217728      # exact trajectory counts only
 #   ./run_full_dataset.sh -p cpp                    # one package
+#   ./run_full_dataset.sh -p cubie,julia            # several packages
 #   ./run_full_dataset.sh -a overlap                # one analysis
 #   ./run_full_dataset.sh -a performance,numerical  # several analyses
+#   ./run_full_dataset.sh -g euler,tsit5            # several algorithms
 #   ./run_full_dataset.sh --resume-from jax         # restart at a package
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
 #   ./run_full_dataset.sh --no-lock-clocks          # sample clocks but do not pin
 #   ./run_full_dataset.sh --clock-tolerance 30      # widen the drift threshold (MHz)
 #
-#   -p, --package   all (default) | julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  all (default) | performance | work-precision | numerical | overlap | plots
-#   -n, --nmax      largest trajectory count for a performance sweep (default 16777216)
+#   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
+#   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -45,6 +49,7 @@ DO_OVERLAP=true
 DO_PLOTS=true
 OVERLAP_PROFILE="full"
 PACKAGE="all"
+ALGORITHM="all"
 COOLDOWN=15
 RESUME_FROM=""
 ALLOW_UNKNOWN_GPU=false
@@ -56,7 +61,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,35p' "$0" | sed 's/^# \?//'
+    sed -n '2,39p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -64,6 +69,12 @@ usage() {
 PLOT_ALL=false
 
 set_analyses() {
+    # Charset check keeps the unquoted token split free of glob metacharacters.
+    case "$1" in
+        ''|*[!a-z,-]*)
+            echo "Unknown analysis '$1' (all|performance|work-precision|numerical|overlap|plots)"
+            exit 1;;
+    esac
     DO_PERF=false; DO_WP=false; DO_NE=false; DO_OVERLAP=false; DO_PLOTS=false
     local item
     for item in ${1//,/ }; do
@@ -86,6 +97,8 @@ while [ $# -gt 0 ]; do
                    NMAX="$2"; shift 2;;
         -p|--package) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    PACKAGE="${2//-/_}"; shift 2;;
+        -g|--algorithm) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+                   ALGORITHM="$2"; shift 2;;
         -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    set_analyses "$2"; shift 2;;
         --profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
@@ -105,16 +118,73 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ "$PACKAGE" == "all" ]; then
+# Charset-check each list before its unquoted split; tokens validated below.
+case "$PACKAGE" in
+    ''|*[!a-z0-9,_-]*)
+        echo "Unknown package '$PACKAGE' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
+        exit 1;;
+esac
+case "$ALGORITHM" in
+    ''|*[!a-z0-9,-]*)
+        echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        exit 1;;
+esac
+
+# -p accepts "all" or a comma list; each token is validated.
+LANGUAGES=()
+HAS_ALL_PACKAGES=false
+HAS_JULIA=false
+HAS_CUBIE=false
+for pkg in ${PACKAGE//,/ }; do
+    if [ "$pkg" == "all" ]; then
+        HAS_ALL_PACKAGES=true
+    elif [[ " ${ALL_PACKAGES[*]} " == *" $pkg "* ]]; then
+        LANGUAGES+=("$pkg")
+        [ "$pkg" == "julia" ] && HAS_JULIA=true
+        [ "$pkg" == "cubie" ] && HAS_CUBIE=true
+    else
+        echo "Unknown package '$pkg' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
+        exit 1
+    fi
+done
+if $HAS_ALL_PACKAGES; then
     LANGUAGES=("${ALL_PACKAGES[@]}")
-elif [[ " ${ALL_PACKAGES[*]} " == *" $PACKAGE "* ]]; then
-    LANGUAGES=("$PACKAGE")
-else
-    echo "Unknown package '$PACKAGE' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
-    exit 1
+    HAS_JULIA=true
+    HAS_CUBIE=true
 fi
-# The overlap suite defaults to the same ceiling as the timing sweeps.
-[ -n "$OVERLAP_NMAX" ] || OVERLAP_NMAX="$NMAX"
+[ "${#LANGUAGES[@]}" -gt 0 ] || { echo "-p/--package requires a value"; exit 1; }
+
+# ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
+NE_PACKAGE=""
+if $HAS_JULIA && $HAS_CUBIE; then NE_PACKAGE=all
+elif $HAS_JULIA; then NE_PACKAGE=julia
+elif $HAS_CUBIE; then NE_PACKAGE=cubie
+fi
+
+# --profile: whitelisted before it reaches a command line.
+case "$OVERLAP_PROFILE" in
+    smoke|full) ;;
+    *) echo "Unknown profile '$OVERLAP_PROFILE' (smoke|full)"; exit 1;;
+esac
+
+# -g: "all" or a comma list; every token whitelisted.
+for alg in ${ALGORITHM//,/ }; do
+    case "$alg" in
+        all|euler|classical-rk4|tsit5|cash-karp-54) ;;
+        *) echo "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"; exit 1;;
+    esac
+done
+
+# -n: ceiling or comma list; overlap takes a plain ceiling (largest N).
+case ",$NMAX," in
+    *[!0-9,]*|*,,*)
+        echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'"
+        exit 1;;
+esac
+NMAX_CEIL=0
+for n in ${NMAX//,/ }; do
+    if [ "$n" -gt "$NMAX_CEIL" ]; then NMAX_CEIL=$n; fi
+done
 
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
 
@@ -222,6 +292,7 @@ run_step() {
 
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
+echo "Algorithm   : $ALGORITHM"
 echo "Overlap     : profile=$OVERLAP_PROFILE"
 echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
@@ -235,6 +306,7 @@ echo
     echo "dataset_key=$DATASET_KEY"
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "nmax=$NMAX"
+    echo "algorithm=$ALGORITHM"
     echo "overlap_profile=$OVERLAP_PROFILE"
     echo "packages=${LANGUAGES[*]}"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -263,7 +335,7 @@ if $DO_PERF; then
         fi
         CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM"
         status=$?
         reached=$(max_n_reached "$lang")
         if [ "$status" -eq 0 ]; then
@@ -306,7 +378,7 @@ if $DO_WP; then
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM"
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"
@@ -315,13 +387,13 @@ if $DO_WP; then
 fi
 
 # ------------------------------------------------------ numerical equivalence
-if $DO_NE && [[ ! " all cubie julia " == *" $PACKAGE "* ]]; then
+if $DO_NE && [ -z "$NE_PACKAGE" ]; then
     record "ne" "SKIPPED" "$PACKAGE is not in the ne suite" "-"
 elif $DO_NE; then
     # Equivalence is a correctness check; its clock does not have to be stable.
     CLOCK_CRITICAL=false; STEP_LABEL="ne"
-    run_step "Numerical-equivalence suite ($PACKAGE)" "numerical_equivalence.log" \
-        bash ./run_numerical_equivalence.sh -p "$PACKAGE"
+    run_step "Numerical-equivalence suite ($NE_PACKAGE)" "numerical_equivalence.log" \
+        bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE"
     status=$?
     # Exit 2 means a mismatching algorithm, not an infrastructure failure.
     case "$status" in
@@ -332,16 +404,16 @@ elif $DO_NE; then
 fi
 
 # --------------------------------------------------- cubie vs DiffEqGPU overlap
-if $DO_OVERLAP && [[ ! " all cubie julia " == *" $PACKAGE "* ]]; then
+if $DO_OVERLAP && [ -z "$NE_PACKAGE" ]; then
     record "overlap" "SKIPPED" "$PACKAGE is not in the overlap suite" "-"
 elif $DO_OVERLAP; then
     PY=./GPU_ODE_CUBIE/venv/bin/python
     [ -x "$PY" ] || PY=python3
     CLOCK_CRITICAL=true; STEP_LABEL="overlap"
-    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$NMAX)" \
+    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$NMAX_CEIL)" \
         "cubie_julia_overlap.log" \
         "$PY" ./run_cubie_julia_overlap.py \
-            --profile "$OVERLAP_PROFILE" -a all -p "$PACKAGE" -n "$NMAX"
+            --profile "$OVERLAP_PROFILE" -a all -p "$NE_PACKAGE" -n "$NMAX_CEIL"
     status=$?
     # The launcher already records per-framework failures and keeps going, so a
     # non-zero exit here means at least one worker died, not that all did.

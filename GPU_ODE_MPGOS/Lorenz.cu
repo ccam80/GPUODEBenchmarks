@@ -3,7 +3,6 @@
 #include <vector>
 #include <string>
 #include <fstream>
-#include <algorithm>
 
 #include "Lorenz_SystemDefinition.cuh"
 #include "SingleSystem_PerThread_Interface.cuh"
@@ -33,6 +32,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 // NOTE: the run_ode_cpp runners rewrite lines 15 and 17 of this file by absolute
 // line number, so nothing may be inserted above the config block. Keep the
 // dataset-key helper below the forward declarations.
+#include <algorithm>
 #include <cstdio>
 #include <cctype>
 #include <chrono>
@@ -187,8 +187,10 @@ int main(int argc, char *argv[])
 		else
 			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
 
+		// Filenames carry the cubie-vocabulary algorithm name.
 		string Mode = FixedMode ? "fixed" : "adaptive";
-		ofstream wpfile((DataDir("CPP") + "MPGOS_wp_" + Mode + ".txt").c_str());
+		string Algorithm = FixedMode ? "classical-rk4" : "cash-karp-54";
+		ofstream wpfile((DataDir("CPP") + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt").c_str());
 		wpfile.precision(12);
 
 		const int Repeats = 10;
@@ -311,12 +313,12 @@ int main(int argc, char *argv[])
 	
 	ofstream datafile;
 	if (SOLVER == RK4){
-		datafile.open ((DataDir("CPP") + "MPGOS_times_unadaptive.txt").c_str(),ios::app);
+		datafile.open ((DataDir("CPP") + "MPGOS_times_fixed_classical-rk4.txt").c_str(),ios::app);
 		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}else{
 		
-		datafile.open ((DataDir("CPP") + "MPGOS_times_adaptive.txt").c_str(),ios::app);
+		datafile.open ((DataDir("CPP") + "MPGOS_times_adaptive_cash-karp-54.txt").c_str(),ios::app);
 		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
 		datafile.close();
 	}

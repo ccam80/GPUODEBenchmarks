@@ -4,23 +4,9 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768).
-#
-# Each framework's `wp` mode sweeps its supported fixed step size and/or
-# adaptive tolerance and writes rows "<setting> <time_ms> <error>" to
-#   data/<DIR>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt
-# where the error is the ensemble l2 norm of the final-state difference
-# against the Float64 golden reference
-# (data/numerical/golden_lorenz_32768.csv — see
-# runner_scripts/golden/generate_golden.jl and runner_scripts/wp_common.py).
-#
-# This script discovers those keyed files exactly like plot_ode_comp.jl and
-# emits one error-vs-time plot per (group, mode):
-#   * groups: "all" (everything combined), one per distinct os, one per distinct gpu
-#   * modes:  "fixed", "adaptive", "all" (both)
-# giving e.g. Lorenz_wp_fixed_windows.png, Lorenz_wp_all_RTX-4070-SUPER.png.
-#
-# Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+# Reads data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
+# and emits one error-vs-time plot per (group, mode, algorithm) plus an "all"
+# overview per group into plots/<group>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
@@ -47,7 +33,8 @@ markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
 # One work-precision curve loaded from disk.
 struct WPSeries
     display::String
-    mode::String     # "fixed" or "adaptive"
+    mode::String       # "fixed" or "adaptive"
+    algorithm::String  # cubie-vocabulary method name, e.g. "classical-rk4"
     os::String
     gpu::String
     key::String      # "<os>_<gpu>"
@@ -61,7 +48,7 @@ function collect_series(base_path, frameworks)
     for (display, dir, prefix) in frameworks
         dpath = joinpath(base_path, dir)
         isdir(dpath) || continue
-        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)[.]txt" * "\$")
+        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)_([^_]+)[.]txt" * "\$")
         for key in sort(readdir(dpath))
             kpath = joinpath(dpath, key)
             isdir(kpath) || continue
@@ -72,6 +59,7 @@ function collect_series(base_path, frameworks)
                 m = match(pat, fname)
                 m === nothing && continue
                 mode = String(m.captures[1])
+                algorithm = String(m.captures[2])
                 fpath = joinpath(kpath, fname)
                 # readdlm raises on a file with no data rows, so screen those out.
                 isempty(strip(read(fpath, String))) && continue
@@ -87,7 +75,7 @@ function collect_series(base_path, frameworks)
                 setting, err, time_s = setting[keep], err[keep], time_s[keep]
                 isempty(err) && continue
                 order = sortperm(setting, rev = true)
-                push!(series, WPSeries(display, mode, os, gpu, key,
+                push!(series, WPSeries(display, mode, algorithm, os, gpu, key,
                                        err[order], time_s[order]))
             end
         end
@@ -95,24 +83,26 @@ function collect_series(base_path, frameworks)
     return series
 end
 
-# Draw and save one plot for the given series subset, or warn if it is empty.
-function render_plot(sel, group_label, mode_label, plots_dir, multikey)
+# Draw one plot; alg_label "all" mixes algorithms and labels them per series.
+function render_plot(sel, group_label, mode_label, alg_label, plots_dir, multikey)
     if isempty(sel)
-        println("Skipping empty plot: wp_$(mode_label)_$(group_label)")
+        println("Skipping empty plot: wp_$(mode_label)_$(alg_label)_$(group_label)")
         return
     end
     gr(size = (810, 540))
     modeword = mode_label == "fixed" ? "fixed dt" :
         mode_label == "adaptive" ? "adaptive tol" : "fixed + adaptive"
+    algword = alg_label == "all" ? "all algorithms" : alg_label
     plt = plot(xaxis = :log, yaxis = :log, linewidth = 2,
         ylabel = "Time (s)", xlabel = "Error (ensemble l2, final state)",
-        title = "Lorenz WP, N=32768, $(modeword) ($(group_label))",
+        title = "Lorenz WP, N=32768, $(modeword), $(algword) ($(group_label))",
         titlefontsize = 12, legend = :outertopright, dpi = 600)
 
     for s in sel
         stepword = s.mode == "adaptive" ? "adaptive" : "fixed"
-        label = multikey ? "$(s.display) ($(stepword)) [$(s.key)]" :
-            "$(s.display) ($(stepword))"
+        algpart = alg_label == "all" ? ", $(s.algorithm)" : ""
+        keypart = multikey ? " [$(s.key)]" : ""
+        label = "$(s.display) ($(stepword)$(algpart))$(keypart)"
         ls = s.mode == "adaptive" ? :dash : :solid
         plot!(plt, s.err, s.time_s, label = label, color = colors[s.display],
             marker = markers[s.display], linestyle = ls)
@@ -120,7 +110,8 @@ function render_plot(sel, group_label, mode_label, plots_dir, multikey)
 
     outdir = joinpath(plots_dir, group_label)
     isdir(outdir) || mkpath(outdir)
-    outfile = joinpath(outdir, "Lorenz_wp_$(mode_label).png")
+    algpart = alg_label == "all" ? "" : "_$(alg_label)"
+    outfile = joinpath(outdir, "Lorenz_wp_$(mode_label)$(algpart).png")
     savefig(plt, outfile)
     println("Saved $(outfile)")
 end
@@ -129,7 +120,7 @@ function main()
     series = collect_series(base_path, frameworks)
     if isempty(series)
         println("Warning: no keyed wp files found under $(base_path). Nothing to plot.")
-        println("Expected files like <package>/<os>_<gpu>/<Prefix>_wp_adaptive.txt (run the wp benchmarks first).")
+        println("Expected files like <package>/<os>_<gpu>/<Prefix>_wp_adaptive_<algorithm>.txt (run the wp benchmarks first).")
         return
     end
 
@@ -157,9 +148,14 @@ function main()
     add_group!("all", series)
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
-        render_plot(filter(s -> s.mode == "fixed", sel), label, "fixed", plots_dir, multikey)
-        render_plot(filter(s -> s.mode == "adaptive", sel), label, "adaptive", plots_dir, multikey)
-        render_plot(sel, label, "all", plots_dir, multikey)
+        for mode in ("fixed", "adaptive")
+            msel = filter(s -> s.mode == mode, sel)
+            for alg in sort(unique(s.algorithm for s in msel))
+                render_plot(filter(s -> s.algorithm == alg, msel),
+                            label, mode, alg, plots_dir, multikey)
+            end
+        end
+        render_plot(sel, label, "all", "all", plots_dir, multikey)
     end
 end
 

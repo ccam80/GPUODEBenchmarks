@@ -1,11 +1,43 @@
 # Windows MPGOS runner: enters the Visual Studio developer environment and calls nvcc.
 param(
+    # Exact aliases keep -a and -g unambiguous under prefix matching.
+    [Alias('a')]
     [ValidateSet('performance', 'work-precision')]
     [string]$Analysis = 'performance',
-    [long]$Nmax = 16777216
+    # A single value is a sweep ceiling (8, 32, ... <= n); a comma list runs exactly those Ns.
+    [Alias('n')]
+    [string]$Nmax = '16777216',
+    [Alias('g')]
+    [string]$Algorithm = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Nmax -notmatch '^\d+(,\d+)*$') {
+    Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$Nmax'"
+    exit 1
+}
+if ($Nmax.Contains(',')) {
+    $NValues = @($Nmax.Split(',') | ForEach-Object { [long]$_ })
+} else {
+    $NValues = @()
+    $next = [long]8
+    while ($next -le [long]$Nmax) {
+        $NValues += $next
+        $next = $next * 4
+    }
+}
+
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
+$Solvers = switch ($Algorithm) {
+    'all' { @('RK4', 'RKCK45') }
+    'classical-rk4' { @('RK4') }
+    'cash-karp-54' { @('RKCK45') }
+    default {
+        Write-Host "MPGOS does not support algorithm '$Algorithm'; skipping."
+        exit 0
+    }
+}
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 $env:CUDA_MODULE_LOADING = 'EAGER'
@@ -63,20 +95,18 @@ function Invoke-Point {
 Enter-VsEnvironment
 
 if ($Analysis -eq 'work-precision') {
-    foreach ($solver in @('RK4', 'RKCK45')) {
+    foreach ($solver in $Solvers) {
         Invoke-Point -Solver $solver -Nt 32768 -Wp
     }
     Pop-Location
     return
 }
 
-$a = 8
-while ($a -le $Nmax) {
+foreach ($a in $NValues) {
     Write-Host "No. of trajectories = $a"
-    foreach ($solver in @('RK4', 'RKCK45')) {
+    foreach ($solver in $Solvers) {
         Invoke-Point -Solver $solver -Nt $a
     }
-    $a = $a * 4
 }
 
 Pop-Location

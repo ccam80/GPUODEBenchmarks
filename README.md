@@ -111,16 +111,18 @@ CUBIE-MLIR, and Myokit-CUDA) sequentially in one command:
     > run_all_benchmarks.bat
 ```
 
-This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag can be used to specify the upper bound of trajectories:
+This script will execute all benchmarks one after another, allowing for set-and-forget benchmarking. The optional `-n N` flag sets the upper bound of the trajectory sweep (8, 32, ... ≤ N); a comma list runs exactly those trajectory counts instead:
 
 **On Linux/macOS:**
 ```bash
     $ bash ./run_all_benchmarks.sh -n $((2**20))
+    $ bash ./run_all_benchmarks.sh -n $((2**23)),$((2**27))   # only N = 2^23 and 2^27
 ```
 
 **On Windows:**
 ```cmd
     > run_all_benchmarks.bat -n 1048576
+    > run_all_benchmarks.bat -n 8388608,134217728
 ```
 
 Each benchmark typically takes around 20 minutes, so running all of them may take several hours. The script will continue running subsequent benchmarks even if one fails.
@@ -137,7 +139,55 @@ Each benchmark typically takes around 20 minutes, so running all of them may tak
   run standalone.
 * `-a all` — every analysis above, plus the timing sweeps.
 
-`-p` restricts any of them to one package.
+`-p`, `-a`, `-g` and `-n` accept comma lists selecting a subset of packages,
+analyses, algorithms and trajectory counts:
+
+```bash
+    $ bash ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision \
+          -g euler,tsit5 -n $((2**23)),$((2**27))
+```
+
+`-p` restricts the run to the listed packages; `-g <algorithms>` restricts the
+timing and work-precision sweeps to the listed integration algorithms (see
+[Algorithm-matched subsets](#algorithm-matched-subsets) below).
+
+### Algorithm-matched subsets
+
+Every benchmark runs once per integration algorithm the framework supports,
+and each figure contains only packages running the same method. Algorithms
+use the cubie vocabulary — `euler`, `classical-rk4`, `tsit5`,
+`cash-karp-54` — giving these matched subsets:
+
+| Subset | Mode | Algorithm | Members |
+|---|---|---|---|
+| A | fixed | `euler` | CUBIE, CUBIE_MLIR, JAX, PYTORCH, MYOKIT_CUDA |
+| B | fixed | `classical-rk4` | CUBIE, CUBIE_MLIR, MPGOS, PYTORCH, JAX |
+| C | fixed | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX, PYTORCH |
+| D | adaptive | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX |
+| E | adaptive | `cash-karp-54` | MPGOS, CUBIE, CUBIE_MLIR |
+
+Myokit exposes Euler only and MPGOS exposes RK4/RKCK45 only, so no single
+figure can contain every package. JAX's classical RK4 and PyTorch's
+fixed-grid Tsit5 are custom solvers built from the standard tableaus inside
+the bench scripts. Subset D matches the tableau but not the error
+controller: each framework uses its own step controller, so step counts
+differ at equal tolerance.
+
+All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
+every algorithm the framework supports; a comma list runs the listed ones);
+a framework that does not support a requested algorithm skips cleanly:
+
+```bash
+    $ bash ./run_benchmark.sh -p cubie -g tsit5
+    $ bash ./run_benchmark.sh -p cubie -g euler,tsit5
+    $ bash ./run_all_benchmarks.sh -g classical-rk4
+    $ ./run_full_dataset.sh --algorithm euler
+```
+
+Timing files are named
+`data/<package>/<os>_<gpu>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
+(work-precision files use `_wp_` in place of `_times_`). Data without the
+algorithm field is regenerated fresh rather than migrated.
 
 ### Generating the complete dataset
 
@@ -149,8 +199,10 @@ and comparison reports:
 ```bash
     $ ./run_full_dataset.sh                     # everything, nmax = 2^24
     $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
+    $ ./run_full_dataset.sh -n $((2**23)),$((2**27))  # exact trajectory counts only
     $ ./run_full_dataset.sh -a performance      # one analysis
     $ ./run_full_dataset.sh -p cpp              # one package
+    $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
     $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
 ```
 
@@ -668,9 +720,11 @@ artifact.
 
 ### Running the sweeps
 
-Each framework's `wp` mode sweeps the controls it supports: fixed-step
-frameworks use dyadic dt from 1/16 to 1/8192, while adaptive frameworks use
-rtol = atol from 1e-2 to 1e-8. Each setting uses the usual timing protocol
+Each framework's `wp` mode sweeps the controls it supports, once per
+supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
+dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
+adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
+usual timing protocol
 (untimed warm-up, repeated solves, best time) and computes the ensemble l2
 error of the final states against the golden reference. Protocol constants
 live in `runner_scripts/wp_common.py` (mirrored in the Julia and MPGOS
@@ -691,8 +745,8 @@ package's work-precision sweeps and the plot in one go:
 `./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 
 Results are written per machine as
-`data/<FRAMEWORK>/<Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt` with rows
-`<setting> <time_ms> <error>`. Notes:
+`data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
+with rows `<setting> <time_ms> <error>`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
   `block_until_ready`, torch `cuda.synchronize`), unlike the historical
@@ -708,8 +762,9 @@ Results are written per machine as
 julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
 ```
 
-discovers all keyed wp files and writes `plots/Lorenz_wp_<mode>_<group>.png`
-for the same (all / per-os / per-gpu) x (fixed / adaptive / all) groups as
+discovers all keyed wp files and writes one algorithm-matched figure per
+(mode, algorithm), `plots/<group>/Lorenz_wp_<mode>_<algorithm>.png`, plus a
+`plots/<group>/Lorenz_wp_all.png` overview, for the same groups as
 `plot_ode_comp.jl`.
 
 ## Numerical Equivalence (error vs. dt) — cubie vs. DifferentialEquations.jl

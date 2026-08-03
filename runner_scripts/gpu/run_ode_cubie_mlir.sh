@@ -7,17 +7,15 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 export CUBIE_CUDA_BACKEND=mlir
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp "$ALGORITHM"
     deactivate
     exit 0
 fi
 
-a=8
-while [ $a -le $NMAX ]
+for a in $NLIST
 do
     echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py $a
-    a=$((a*4))
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py $a "$ALGORITHM"
 done
 
 deactivate
