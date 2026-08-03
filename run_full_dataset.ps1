@@ -128,6 +128,12 @@ if ($HasJulia -and $HasCubie) { $NePackage = 'all' }
 elseif ($HasJulia) { $NePackage = 'julia' }
 elseif ($HasCubie) { $NePackage = 'cubie' }
 
+# --profile: whitelisted before it reaches a command line.
+if ($OverlapProfile -notin @('smoke', 'full')) {
+    Write-Host "Unknown profile '$OverlapProfile' (smoke|full)"
+    exit 1
+}
+
 # -g: "all" or a comma list; every token whitelisted.
 $AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
 $algTokens = @($Algorithm.Split(',') | Where-Object { $_ })

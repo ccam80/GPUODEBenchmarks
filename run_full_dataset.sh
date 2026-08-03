@@ -161,6 +161,12 @@ elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
 
+# --profile: whitelisted before it reaches a command line.
+case "$OVERLAP_PROFILE" in
+    smoke|full) ;;
+    *) echo "Unknown profile '$OVERLAP_PROFILE' (smoke|full)"; exit 1;;
+esac
+
 # -g: "all" or a comma list; every token whitelisted.
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in

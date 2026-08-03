@@ -29,12 +29,12 @@ if /i "%~1"=="--nmax" set "PA_TARGET=NMAX"
 if /i "%~1"=="-g" set "PA_TARGET=ALGORITHM"
 if /i "%~1"=="--algorithm" set "PA_TARGET=ALGORITHM"
 if not defined PA_TARGET (
-    echo Unknown option %~1
+    echo Unknown option "%~1"
     popd
     exit /b 1
 )
 if "%~2"=="" (
-    echo %~1 requires a value
+    echo "%~1" requires a value
     popd
     exit /b 1
 )

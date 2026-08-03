@@ -1,6 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
-call "%~dp0..\parse_args.bat" %*
+set "PA_RAW=%*"
+call "%~dp0..\parse_args.bat"
 if errorlevel 1 exit /b 1
 
 call GPU_ODE_JAX\venv\Scripts\activate.bat

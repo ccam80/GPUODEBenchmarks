@@ -35,12 +35,12 @@ if /i "%~1"=="--device" set "PA_TARGET=DEVICE"
 if /i "%~1"=="-m" set "PA_TARGET=MODEL"
 if /i "%~1"=="--model" set "PA_TARGET=MODEL"
 if not defined PA_TARGET (
-    echo Unknown option %~1
+    echo Unknown option "%~1"
     popd
     exit /b 1
 )
 if "%~2"=="" (
-    echo %~1 requires a value
+    echo "%~1" requires a value
     popd
     exit /b 1
 )
@@ -62,6 +62,16 @@ if /i "%PACKAGE%"=="myokit-cuda" set PACKAGE=myokit_cuda
 
 if "%PACKAGE%"=="" (
     echo -p/--package is required
+    popd
+    exit /b 1
+)
+if /i not "%DEVICE%"=="gpu" if /i not "%DEVICE%"=="cpu" (
+    echo Unknown device "%DEVICE%" ^(gpu^|cpu^)
+    popd
+    exit /b 1
+)
+if /i not "%MODEL%"=="ode" if /i not "%MODEL%"=="sde" (
+    echo Unknown model "%MODEL%" ^(ode^|sde^)
     popd
     exit /b 1
 )
@@ -128,12 +138,12 @@ if /i "%PACKAGE%"=="cubie" set DATA_DIR=CUBIE
 if /i "%PACKAGE%"=="cubie_mlir" set DATA_DIR=CUBIE_MLIR
 if /i "%PACKAGE%"=="myokit_cuda" set DATA_DIR=MYOKIT_CUDA
 if "%DATA_DIR%"=="" (
-    echo Unknown package: %PACKAGE%. Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda.
+    echo Unknown package: "%PACKAGE%". Supported: julia, cpp, jax, pytorch, cubie, cubie_mlir, myokit_cuda.
     popd
     exit /b 1
 )
 
-set RUNNER=runner_scripts\%DEVICE%\run_%MODEL%_%PACKAGE%.bat
+set "RUNNER=runner_scripts\%DEVICE%\run_%MODEL%_%PACKAGE%.bat"
 if not exist "%RUNNER%" (
     echo Ensemble %MODEL% on %DEVICE% with %PACKAGE% is not supported.
     popd
