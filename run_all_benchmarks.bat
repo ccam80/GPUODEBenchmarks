@@ -4,9 +4,8 @@ setlocal enabledelayedexpansion
 REM Generate benchmark data for one or more packages across one or more analyses.
 REM   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
-REM   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-REM                   or a comma list of exact trajectory counts (e.g. 8388608,134217728)
-REM   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+REM   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 REM
 REM e.g. run_all_benchmarks.bat -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
 
@@ -17,8 +16,7 @@ set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
 
-REM cmd splits unquoted commas into separate arguments, so after capturing a
-REM flag's value keep appending tokens (comma-joined) until the next -flag.
+REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_loop
 if "%~1"=="" goto parse_done
 set "PA_TARGET="
@@ -52,8 +50,7 @@ shift
 goto parse_collect
 :parse_done
 
-REM Every value is validated before it reaches a command line.
-REM Delayed expansion in the for-sets keeps metacharacters in the values inert.
+REM Validate every value before it reaches a command line.
 set DO_PERF=
 set DO_WP=
 set DO_NE=

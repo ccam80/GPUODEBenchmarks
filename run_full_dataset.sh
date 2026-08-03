@@ -30,9 +30,8 @@
 #
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
-#   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-#                   or a comma list of exact trajectory counts
-#   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -62,7 +61,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,40p' "$0" | sed 's/^# \?//'
+    sed -n '2,39p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -119,8 +118,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Charset checks keep the unquoted token splits below free of glob and shell
-# metacharacters; tokens are then validated against the vocabulary.
+# Charset-check each list before its unquoted split; tokens validated below.
 case "$PACKAGE" in
     ''|*[!a-z0-9,_-]*)
         echo "Unknown package '$PACKAGE' (all|$(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
@@ -156,16 +154,14 @@ if $HAS_ALL_PACKAGES; then
 fi
 [ "${#LANGUAGES[@]}" -gt 0 ] || { echo "-p/--package requires a value"; exit 1; }
 
-# The ne and overlap suites only cover julia and cubie; map the package list
-# onto their single-token -p vocabulary (both -> all, one -> that one).
+# ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
 NE_PACKAGE=""
 if $HAS_JULIA && $HAS_CUBIE; then NE_PACKAGE=all
 elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
 
-# -g accepts "all" or a comma list; each token is whitelisted before it can
-# reach a command line.
+# -g: "all" or a comma list; every token whitelisted.
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
         all|euler|classical-rk4|tsit5|cash-karp-54) ;;
@@ -173,8 +169,7 @@ for alg in ${ALGORITHM//,/ }; do
     esac
 done
 
-# -n is a sweep ceiling or a comma list of exact Ns; the overlap suite takes a
-# plain ceiling, so give it the largest requested N.
+# -n: ceiling or comma list; overlap takes a plain ceiling (largest N).
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'"

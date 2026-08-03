@@ -4,9 +4,8 @@
 # Usage: ./run_all_benchmarks.sh [-p <packages>] [-a <analyses>] [-n <nmax>] [-g <algorithms>]
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
-#   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-#                   or a comma list of exact trajectory counts (e.g. 8388608,134217728)
-#   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 #
 # e.g. ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
 
@@ -24,13 +23,12 @@ while [ $# -gt 0 ]; do
         -a|--analysis) ANALYSIS=$2; shift 2;;
         -n|--nmax)     NMAX=$2; shift 2;;
         -g|--algorithm) ALGORITHM=$2; shift 2;;
-        -h|--help)     sed -n '2,11p' "$0" | sed 's/^# \?//'; exit 0;;
+        -h|--help)     sed -n '2,10p' "$0" | sed 's/^# \?//'; exit 0;;
         *) echo "Unknown option $1" >&2; exit 1;;
     esac
 done
 
-# Charset checks keep the unquoted token splits below free of glob and shell
-# metacharacters; tokens are then validated against the vocabulary.
+# Charset-check each list before its unquoted split; tokens validated below.
 case "$ANALYSIS" in
     ''|*[!a-z,-]*) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|numerical|all)" >&2; exit 1;;
 esac

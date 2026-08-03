@@ -16,9 +16,8 @@
 #
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
-#   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-#                   or a comma list of exact trajectory counts
-#   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
@@ -48,7 +47,7 @@ $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myoki
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 25 |
+    Get-Content $PSCommandPath -TotalCount 24 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -121,8 +120,7 @@ if ($Languages.Count -eq 0) {
     exit 1
 }
 
-# The ne and overlap suites only cover julia and cubie; map the package list
-# onto their single-token -p vocabulary (both -> all, one -> that one).
+# ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
 $NePackage = ''
 $HasJulia = $Languages -contains 'julia'
 $HasCubie = $Languages -contains 'cubie'
@@ -130,8 +128,7 @@ if ($HasJulia -and $HasCubie) { $NePackage = 'all' }
 elseif ($HasJulia) { $NePackage = 'julia' }
 elseif ($HasCubie) { $NePackage = 'cubie' }
 
-# -g accepts "all" or a comma list; each token is whitelisted before it can
-# reach a command line.
+# -g: "all" or a comma list; every token whitelisted.
 $AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
 $algTokens = @($Algorithm.Split(',') | Where-Object { $_ })
 if ($algTokens.Count -eq 0) {
@@ -146,8 +143,7 @@ foreach ($alg in $algTokens) {
 }
 if ($algTokens -contains 'all') { $Algorithm = 'all' }
 
-# -n is a sweep ceiling or a comma list of exact Ns; the overlap suite takes a
-# plain ceiling, so give it the largest requested N.
+# -n: ceiling or comma list; overlap takes a plain ceiling (largest N).
 if ($NMax -notmatch '^\d+(,\d+)*$') {
     Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$NMax'"
     exit 1

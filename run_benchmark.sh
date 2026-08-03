@@ -4,9 +4,8 @@
 # Usage: ./run_benchmark.sh -p <package> [-a <analysis>] [-n <nmax>] [-g <algorithm>] [-d <device>] [-m <model>]
 #   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | work-precision
-#   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-#                   or a comma list of exact trajectory counts (e.g. 8388608,134217728)
-#   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 #   -d, --device    gpu (default) | cpu
 #   -m, --model     ode (default) | sde
 
@@ -21,7 +20,7 @@ DEVICE=gpu
 MODEL=ode
 
 usage() {
-    sed -n '2,11p' "$0" | sed 's/^# \?//'
+    sed -n '2,10p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -46,8 +45,7 @@ case "$ANALYSIS" in
     performance|work-precision) ;;
     *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision)" >&2; exit 1;;
 esac
-# -g accepts "all" or a comma list of algorithms. The charset check keeps the
-# unquoted token split below free of glob and shell metacharacters.
+# -g: "all" or a comma list; charset-check before the unquoted split.
 case "$ALGORITHM" in
     ''|*[!a-z0-9,-]*)
         echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2

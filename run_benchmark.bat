@@ -4,9 +4,8 @@ setlocal enabledelayedexpansion
 REM Generate benchmark data for one package and one analysis.
 REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | work-precision
-REM   -n, --nmax      sweep ceiling (runs 8, 32, ... <= n; default 16777216),
-REM                   or a comma list of exact trajectory counts (e.g. 8388608,134217728)
-REM   -g, --algorithm all (default) | comma list of euler | classical-rk4 | tsit5 | cash-karp-54
+REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+REM   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
 REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
 
@@ -19,8 +18,7 @@ set ALGORITHM=all
 set DEVICE=gpu
 set MODEL=ode
 
-REM cmd splits unquoted commas into separate arguments, so after capturing a
-REM flag's value keep appending tokens (comma-joined) until the next -flag.
+REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_loop
 if "%~1"=="" goto parse_done
 set "PA_TARGET="
@@ -73,8 +71,7 @@ if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
     exit /b 1
 )
 
-REM -g accepts "all" or a comma list of algorithms; each token is whitelisted.
-REM Delayed expansion in the for-set keeps metacharacters in the value inert.
+REM -g: "all" or a comma list; every token whitelisted.
 set ALG_LIST=
 set ALG_HAS_ALL=
 set ALG_BAD=

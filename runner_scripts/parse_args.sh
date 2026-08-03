@@ -1,7 +1,5 @@
 # Sets ANALYSIS, NMAX, NLIST and ALGORITHM in the caller: . "$(dirname "$0")/../parse_args.sh" "$@"
-# -n takes a single sweep ceiling (runs 8, 32, ... <= n) or a comma list of exact
-# trajectory counts (runs exactly those). NLIST holds the resulting space-separated
-# counts; NMAX is the largest of them.
+# -n: single value = sweep ceiling (8, 32, ... <= n); comma list = exact Ns. NLIST holds the counts, NMAX the largest.
 ANALYSIS=performance
 NMAX=16777216
 ALGORITHM=all

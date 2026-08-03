@@ -139,8 +139,8 @@ Each benchmark typically takes around 20 minutes, so running all of them may tak
   run standalone.
 * `-a all` — every analysis above, plus the timing sweeps.
 
-`-p`, `-a`, `-g` and `-n` all accept comma lists, so one command can run any
-subset of packages, analyses, algorithms and trajectory counts:
+`-p`, `-a`, `-g` and `-n` accept comma lists selecting a subset of packages,
+analyses, algorithms and trajectory counts:
 
 ```bash
     $ bash ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision \

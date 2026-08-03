@@ -1,15 +1,12 @@
 @echo off
 REM Sets ANALYSIS, NMAX, NLIST and ALGORITHM in the caller: call "%~dp0..\parse_args.bat" %*
-REM -n takes a single sweep ceiling (runs 8, 32, ... <= n) or a comma list of exact
-REM trajectory counts (runs exactly those). NLIST holds the resulting space-separated
-REM counts; NMAX is the largest of them.
+REM -n: single value = sweep ceiling (8, 32, ... <= n); comma list = exact Ns. NLIST holds the counts, NMAX the largest.
 set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
 set NLIST=
 
-REM cmd splits unquoted commas into separate arguments, so after capturing a
-REM flag's value keep appending tokens (comma-joined) until the next -flag.
+REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_args_loop
 if "%~1"=="" goto parse_args_done
 set "PA_TARGET="
