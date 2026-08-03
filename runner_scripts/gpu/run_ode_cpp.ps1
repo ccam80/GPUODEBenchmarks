@@ -8,12 +8,10 @@ param(
     # Upper bound of the N sweep, or the literal "wp" for work-precision mode.
     [Parameter(Position=0)]
     [string]$MaxA,
-    # Algorithm to run: classical-rk4 (RK4 build), cash-karp-54 (RKCK45
-    # build), or all (both). Any other name skips cleanly (issue #29).
+    # classical-rk4 (RK4 build), cash-karp-54 (RKCK45 build), or all.
     [Parameter(Position=1)]
     [string]$Algorithm = 'all',
-    # Work-precision mode: build the requested solvers at NT=32768 and sweep
-    # dt/tolerance.
+    # Build the requested solvers at NT=32768 and sweep dt/tolerance.
     [switch]$Wp
 )
 
@@ -26,8 +24,7 @@ if (-not $Wp -and -not [int]::TryParse($MaxA, [ref]$MaxTrajectories)) {
     Write-Error "Usage: run_ode_cpp.ps1 <max-trajectories>|wp [algorithm|all]"
 }
 
-# MPGOS ships exactly two explicit solvers: RK4 (classical-rk4, fixed dt) and
-# RKCK45 (cash-karp-54, adaptive).
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
 $RunRk4 = $false
 $RunRkck45 = $false
 switch ($Algorithm) {
@@ -78,8 +75,7 @@ function Build-Project {
     }
 }
 
-# Lorenz.cu's config block is rewritten by absolute line number (see the
-# warning at GPU_ODE_MPGOS/Lorenz.cu:32-34).
+# Lorenz.cu's config block is rewritten by absolute line number.
 function Set-SolverConfig {
     param([string]$Solver, [int]$Nt)
     $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"

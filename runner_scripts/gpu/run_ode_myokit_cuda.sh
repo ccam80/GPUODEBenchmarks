@@ -3,8 +3,7 @@ set -e
 
 source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 
 # Myokit CUDA exposes float32 forward Euler only. Its work-precision mode

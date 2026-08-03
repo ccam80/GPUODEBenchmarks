@@ -4,23 +4,12 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz timing benchmarks. Data files are named
-#   data/<DIR>/<Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt
-# where <algorithm> is the cubie-vocabulary method name (euler, classical-rk4,
-# tsit5, cash-karp-54) and "<os>_<gpu>" is the per-machine key (see
-# runner_scripts/bench_key.*), e.g.
-#   data/Julia/Julia_times_adaptive_tsit5_linux_RTX-2060-SUPER.txt
-# so the same repo can be populated additively across machines. This script
-# discovers those files, parses (framework, mode, algorithm, os, gpu) from
-# the names, and emits:
-#   * one algorithm-matched plot per (group, mode, algorithm) — every curve
-#     within a figure runs the same integration method (issue #29), and
-#   * one "all" overview per group with the algorithm in each label.
-# Groups: "all" (everything combined), one per distinct os, one per distinct
-# gpu; each is drawn per transfer variant (with h2d+d2h / device only),
-# giving e.g. Lorenz_fixed_classical-rk4_both_linux.png.
-#
-# Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+# Plot the Lorenz timing benchmarks from
+# data/<DIR>/<Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt.
+# Emits one algorithm-matched plot per (group, mode, algorithm) plus an "all"
+# overview per group, per transfer variant (with h2d+d2h / device only).
+# Groups: "all", one per distinct os, one per distinct gpu.
+# Default data directory is the repo `data/`; override with ARGS[1].
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
@@ -36,8 +25,7 @@ frameworks = [
     ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
 ]
 
-# color/marker choices per framework, kept identical across every subset
-# figure so a package stays recognisable from plot to plot.
+# color/marker choices per framework, identical across every figure
 colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
     "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple,
     "MYOKIT CUDA"=>:Black)
@@ -90,9 +78,7 @@ function collect_series(base_path, frameworks)
     return series
 end
 
-# Draw and save one plot for the given series subset, or warn if it is empty.
-# alg_label == "all" is the overview figure mixing algorithms (labels carry
-# the algorithm); otherwise every series in `sel` runs the same algorithm.
+# Draw one plot; alg_label "all" mixes algorithms and labels them per series.
 function render_plot(sel, group_label, mode_label, alg_label, transfers_label, plots_dir, multikey)
     if isempty(sel)
         println("Skipping empty plot: $(mode_label)_$(alg_label)_$(transfers_label)_$(group_label)")
@@ -149,8 +135,6 @@ function main()
         push!(groups, (gpu, filter(s -> s.gpu == gpu, series)))
     end
 
-    # Emit one algorithm-matched plot per (mode, algorithm) plus an "all"
-    # overview, per group and transfer variant.
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
         for transfers in sort(unique(s.transfers for s in sel))

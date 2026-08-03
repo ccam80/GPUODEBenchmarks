@@ -1,15 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
 # %%
-# Benchmarking torchdiffeq ODE solvers for ensemble problems, via vmap. The
-# Lorenz ODE is integrated once per supported algorithm so every timing file
-# compares like-for-like against the other frameworks (issue #29):
-#
-#     fixed: euler, classical-rk4, tsit5 (custom fixed-grid solver below)
-#
-# There is no adaptive sweep: torchdiffeq's adaptive solvers have
-# data-dependent control flow that torch.vmap cannot trace.
-#
+# Benchmarking torchdiffeq ODE solvers for ensemble problems via vmap, once
+# per algorithm: euler/classical-rk4/tsit5, all fixed-step (torch.vmap cannot
+# trace the adaptive solvers' data-dependent control flow).
 # Usage: bench_torchdiffeq.py <N> [wp] [algorithm|all]
 
 # Created By: Utkarsh
@@ -49,9 +43,7 @@ from torchdiffeq._impl.solvers import FixedGridODESolver
 from torchdiffeq._impl.misc import Perturb
 
 
-# torchdiffeq has no Tsit5; register a fixed-grid one built from the
-# Tsitouras 5(4) coefficients (same values as cubie/diffrax/DiffEqGPU).
-# Fixed-grid only: the embedded error weights are not carried.
+# Fixed-grid Tsit5 from the Tsitouras 5(4) coefficients, registered below.
 _TSIT5_C = (0.161, 0.327, 0.9, 0.9800255409045097, 1.0, 1.0)
 _TSIT5_A = (
     (0.161,),
@@ -141,11 +133,8 @@ parameters = torch.linspace(0.0,21.0,numberOfParameters).cuda()
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_torchdiffeq.py 32768 wp [algorithm]` sweeps the fixed step size at
-# N=32768 per algorithm and records "<dt> <time_ms> <error-vs-golden>" per
-# point. Protocol and sweep grids live in runner_scripts/wp_common.py.
-# Note: unlike the N-sweep below, wp timings synchronize the device so the
-# full solve (not just the async dispatch) is measured.
+# Sweeps dt per algorithm at N=32768; see runner_scripts/wp_common.py.
+# wp timings synchronize the device so the full solve is measured.
 if WP_MODE:
     from wp_common import dts_for, N_WP, load_golden, ensemble_error, wp_outfile
 
@@ -211,8 +200,7 @@ for algorithm in ALGORITHMS:
         file.write('{0} {1} {2}\n'.format(
             numberOfParameters, best_time, best_time_dev))
 
-    # The pairwise numerical cross-check keys on the pre-#29 run mode:
-    # classical-rk4 was the benchmarked algorithm, so it keeps the CSV name.
+    # The pairwise numerical cross-check reads this fixed CSV name.
     if numberOfParameters == 32768 and algorithm == "classical-rk4":
         os.makedirs("./data/numerical", exist_ok=True)
         traj = torch.vmap(solve)(parameters)

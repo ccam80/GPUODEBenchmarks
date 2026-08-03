@@ -142,12 +142,9 @@ Two further optional flags extend the run:
 ### Algorithm-matched subsets
 
 Every benchmark runs once per integration algorithm the framework supports,
-so each figure compares the same method across packages instead of mixing
-forward Euler against RK4 against Tsit5 at the same dt
-([issue #29](https://github.com/ccam80/GPUODEBenchmarks/issues/29)).
-Algorithms use the cubie vocabulary — `euler`, `classical-rk4`, `tsit5`,
-`cash-karp-54` — and the matched subsets that emerge from what each package
-exposes are:
+and each figure contains only packages running the same method. Algorithms
+use the cubie vocabulary — `euler`, `classical-rk4`, `tsit5`,
+`cash-karp-54` — giving these matched subsets:
 
 | Subset | Mode | Algorithm | Members |
 |---|---|---|---|
@@ -157,14 +154,12 @@ exposes are:
 | D | adaptive | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX |
 | E | adaptive | `cash-karp-54` | MPGOS, CUBIE, CUBIE_MLIR |
 
-No algorithm is available across all seven series (Myokit exposes Euler only
-and MPGOS exposes RK4/RKCK45 only), so a single figure containing every
-package is not achievable. JAX's classical RK4 and PyTorch's fixed-grid
-Tsit5 are custom solvers built from the standard tableaus inside the bench
-scripts (diffrax ships no classical RK4; torchdiffeq ships no Tsit5).
-Subset D matches the tableau but not the error controller — each framework
-uses its own step controller, so step counts still differ at equal
-tolerance.
+Myokit exposes Euler only and MPGOS exposes RK4/RKCK45 only, so no single
+figure can contain every package. JAX's classical RK4 and PyTorch's
+fixed-grid Tsit5 are custom solvers built from the standard tableaus inside
+the bench scripts. Subset D matches the tableau but not the error
+controller: each framework uses its own step controller, so step counts
+differ at equal tolerance.
 
 All benchmark entry points accept `-g <algorithm>` (default `all`, meaning
 every algorithm the framework supports); a framework that does not support
@@ -178,16 +173,13 @@ the requested algorithm skips cleanly:
 
 Timing files are named
 `data/<FRAMEWORK>/<Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt`
-(work-precision files use `_wp_` in place of `_times_`). Data collected
-before the algorithm dimension existed can be renamed into this layout with
+(work-precision files use `_wp_` in place of `_times_`). Data without the
+algorithm field renames into this layout with
 
 ```bash
     $ python3 runner_scripts/migrate_data_layout.py --dry-run   # preview
     $ python3 runner_scripts/migrate_data_layout.py             # rename
 ```
-
-which is lossless because each framework previously ran exactly one known
-algorithm per mode.
 
 ### Generating the complete dataset
 
@@ -720,8 +712,7 @@ artifact.
 
 Each framework's `wp` mode sweeps the controls it supports, once per
 supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
-dyadic dt from 1/16 to 1/8192 (forward Euler uses 1/256 to 1/131072, since a
-first-order method's errors land far off the higher-order grid), while
+dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
 adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
 usual timing protocol
 (untimed warm-up, repeated solves, best time) and computes the ensemble l2

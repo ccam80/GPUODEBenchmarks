@@ -7,8 +7,7 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 # import time via this env var).
 export CUBIE_CUDA_BACKEND=mlir
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 
 # Work-precision mode: `run_ode_cubie_mlir.sh wp` sweeps dt/tolerance at N=32768.

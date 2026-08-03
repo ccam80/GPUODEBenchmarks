@@ -171,9 +171,7 @@ int main(int argc, char *argv[])
 		else
 			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
 
-		// Data files carry the algorithm (cubie vocabulary) so plots group
-		// like-for-like methods (issue #29): RK4 is classical-rk4, RKCK45 is
-		// Cash-Karp 4(5).
+		// Filenames carry the cubie-vocabulary algorithm name.
 		string Mode = FixedMode ? "fixed" : "adaptive";
 		string Algorithm = FixedMode ? "classical-rk4" : "cash-karp-54";
 		ofstream wpfile(("./data/CPP/MPGOS_wp_" + Mode + "_" + Algorithm + "_" + DatasetKey() + ".txt").c_str());
@@ -297,8 +295,6 @@ int main(int argc, char *argv[])
 	cout << "Ensemble size:                   " << NT << endl << endl;
 		
 	
-	// Data files carry the algorithm (cubie vocabulary) so plots group
-	// like-for-like methods (issue #29).
 	ofstream datafile;
 	if (SOLVER == RK4){
 		datafile.open (("./data/CPP/MPGOS_times_fixed_classical-rk4_" + DatasetKey() + ".txt").c_str(),ios::app);

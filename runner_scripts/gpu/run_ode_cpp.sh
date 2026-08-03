@@ -5,10 +5,7 @@ set -e
 export CUDA_MODULE_LOADING=EAGER
 
 # Usage: run_ode_cpp.sh <max-trajectories>|wp [algorithm|all]
-#
-# MPGOS ships exactly two explicit solvers (issue #29): RK4 (classical-rk4,
-# fixed dt) and RKCK45 (cash-karp-54, adaptive). Any other requested
-# algorithm skips cleanly so orchestrated sweeps keep going.
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
 ALG=${2:-all}
 RUN_RK4=false
 RUN_RKCK45=false
@@ -19,8 +16,7 @@ case "$ALG" in
     *) echo "MPGOS does not support algorithm '$ALG'; skipping."; exit 0;;
 esac
 
-# Lorenz.cu's config block is rewritten by absolute line number (see the
-# warning at GPU_ODE_MPGOS/Lorenz.cu:32-34).
+# Lorenz.cu's config block is rewritten by absolute line number.
 set_solver() {  # $1 = RK4|RKCK45
 	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
 	sed -i "15 i #define SOLVER $1" ./GPU_ODE_MPGOS/Lorenz.cu
@@ -34,9 +30,7 @@ build() {
 	make --directory=./GPU_ODE_MPGOS/
 }
 
-# Work-precision mode: `run_ode_cpp.sh wp` builds the requested solvers once
-# at NT=32768 and runs the dt/tolerance sweeps ("Lorenz.exe 32768 wp")
-# instead of the N sweep.
+# wp mode builds the requested solvers at NT=32768 and runs the sweeps.
 if [ "$1" == "wp" ]; then
 	set_nt 32768
 	if $RUN_RK4; then

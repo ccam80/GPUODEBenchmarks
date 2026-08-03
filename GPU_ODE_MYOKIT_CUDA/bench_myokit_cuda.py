@@ -32,8 +32,7 @@ STANDARD_DT = 0.001
 STANDARD_STEPS = 1000
 # Timed repeats per point; min is reported.
 REPEATS = 20
-# Myokit's generated CUDA kernel is forward Euler only (issue #29): any other
-# requested algorithm skips cleanly so orchestrated sweeps keep going.
+# Myokit's generated CUDA kernel is forward Euler only.
 ALGORITHM = "euler"
 SUPPORTED = (ALGORITHM,)
 

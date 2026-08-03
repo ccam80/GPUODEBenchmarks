@@ -1,17 +1,10 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-Benchmarking Cubie ODE solvers for ensemble problems.
-The Lorenz ODE is integrated with fixed and adaptive time-stepping, once per
-supported integration algorithm, so every timing file compares like-for-like
-against the other frameworks (issue #29):
-
-    fixed:    euler, classical-rk4, tsit5
-    adaptive: tsit5, cash-karp-54 (PID controller in both cases)
+Benchmarking Cubie ODE solvers for ensemble problems, once per algorithm:
+euler/classical-rk4/tsit5 fixed, tsit5/cash-karp-54 adaptive (PID).
 
 Usage: bench_cubie.py <N> [wp] [algorithm|all]
-
-Created for GPUODEBenchmarks integration
 """
 
 import os
@@ -131,9 +124,7 @@ initials_array, parameter_array = grid_solver.build_grid(
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_cubie.py 32768 wp [algorithm]` sweeps fixed dt / adaptive tolerance
-# at N=32768 per algorithm and records "<setting> <time_ms> <error-vs-golden>"
-# per point. Protocol and sweep grids live in runner_scripts/wp_common.py.
+# Sweeps dt / tolerance per algorithm at N=32768; see runner_scripts/wp_common.py.
 if WP_MODE:
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
@@ -238,8 +229,7 @@ for algorithm in ALGORITHMS:
                                 algorithm, DATASET_KEY)
         with open(outfile, "a+") as file:
             file.write(f'{numberOfParameters} {best} {best_dev}\n')
-        # The pairwise numerical cross-check keys on the pre-#29 run modes:
-        # classical-rk4 was the fixed algorithm, so it keeps the CSV name.
+        # The pairwise numerical cross-check reads this fixed CSV name.
         if numberOfParameters == 32768 and algorithm == "classical-rk4":
             save_numerical(solution, NUMERICAL_TAG + "_unadaptive")
 

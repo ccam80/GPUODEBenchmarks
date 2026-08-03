@@ -8,8 +8,7 @@ source ./GPU_ODE_CUBIE/venv/bin/activate
 # on the default (backend is chosen at import time from this env var).
 export CUBIE_CUDA_BACKEND=numba-cuda
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 
 # Work-precision mode: `run_ode_cubie.sh wp` sweeps dt/tolerance at N=32768.

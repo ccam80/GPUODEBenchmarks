@@ -4,25 +4,12 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Plot the Lorenz WORK-PRECISION benchmarks (error vs runtime at N = 32768).
-#
-# Each framework's `wp` mode sweeps its supported fixed step size and/or
-# adaptive tolerance per integration algorithm and writes rows
-# "<setting> <time_ms> <error>" to
-#   data/<DIR>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt
-# where <algorithm> is the cubie-vocabulary method name (euler,
-# classical-rk4, tsit5, cash-karp-54) and the error is the ensemble l2 norm
-# of the final-state difference against the Float64 golden reference
-# (data/numerical/golden_lorenz_32768.csv — see
-# runner_scripts/golden/generate_golden.jl and runner_scripts/wp_common.py).
-#
-# This script discovers those keyed files exactly like plot_ode_comp.jl and
-# emits one error-vs-time plot per (group, mode, algorithm) — every curve
-# within a figure runs the same integration method (issue #29) — plus an
-# "all" overview per group with the algorithm in each label, giving e.g.
-# Lorenz_wp_fixed_euler_windows.png, Lorenz_wp_all_RTX-4070-SUPER.png.
-#
-# Default: use the repo `data/` directory. Optionally pass a custom data directory as ARGS[1].
+# Plot the Lorenz work-precision benchmarks (error vs runtime, N = 32768) from
+# data/<DIR>/<Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt
+# (rows "<setting> <time_ms> <error>"; see runner_scripts/wp_common.py).
+# Emits one error-vs-time plot per (group, mode, algorithm) plus an "all"
+# overview per group. Groups: "all", one per distinct os, one per distinct gpu.
+# Default data directory is the repo `data/`; override with ARGS[1].
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
@@ -95,9 +82,7 @@ function collect_series(base_path, frameworks)
     return series
 end
 
-# Draw and save one plot for the given series subset, or warn if it is empty.
-# alg_label == "all" is the overview figure mixing algorithms (labels carry
-# the algorithm); otherwise every series in `sel` runs the same algorithm.
+# Draw one plot; alg_label "all" mixes algorithms and labels them per series.
 function render_plot(sel, group_label, mode_label, alg_label, plots_dir, multikey)
     if isempty(sel)
         println("Skipping empty plot: wp_$(mode_label)_$(alg_label)_$(group_label)")

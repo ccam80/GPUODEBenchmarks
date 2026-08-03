@@ -17,10 +17,8 @@ numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
 
-# Algorithm-matched benchmarking (issue #29). CLI: <N> [wp] [algorithm|all].
-# The DiffEqGPU kernel path (vectorized_solve/vectorized_asolve) exposes no
-# GPUEuler or GPURK4, so Tsit5 is the only algorithm this benchmark can match;
-# any other request skips cleanly so orchestrated sweeps keep going.
+# CLI: <N> [wp] [algorithm|all]. The DiffEqGPU kernel path exposes Tsit5 only;
+# other requests skip cleanly.
 requested_algorithm = "all"
 for tok in ARGS[2:end]
     if tok != "wp"

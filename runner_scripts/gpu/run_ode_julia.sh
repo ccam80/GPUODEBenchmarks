@@ -2,8 +2,7 @@
 set -e
 unset LD_LIBRARY_PATH
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 # Work-precision mode: `run_ode_julia.sh wp` sweeps dt/tolerance at N=32768.
 if [ "$1" == "wp" ]; then

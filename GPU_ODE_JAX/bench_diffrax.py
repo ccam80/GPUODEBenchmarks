@@ -1,13 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 # %%
-# Benchmarking Diffrax ODE solvers for ensemble problems, via vmap. The
-# Lorenz ODE is integrated once per supported algorithm so every timing file
-# compares like-for-like against the other frameworks (issue #29):
-#
-#     fixed:    euler, classical-rk4 (custom ButcherTableau), tsit5
-#     adaptive: tsit5 (PIDController)
-#
+# Benchmarking Diffrax ODE solvers for ensemble problems via vmap, once per
+# algorithm: euler/classical-rk4/tsit5 fixed, tsit5 adaptive (PIDController).
 # Usage: bench_diffrax.py <N> [wp] [algorithm|all]
 
 # Created By: Utkarsh
@@ -61,9 +56,7 @@ if jax.default_backend() == "cpu":
 
 
 # %%
-# Classical RK4 is not shipped by diffrax; define it from the standard
-# tableau. b_error is unused on the fixed-step path (ConstantStepSize) and
-# zeroed — this solver must never be used with an adaptive controller.
+# Classical RK4 from the standard tableau; b_error is zeroed, so fixed-step only.
 _rk4_tableau = ButcherTableau(
     a_lower=(
         np.array([1 / 2]),
@@ -149,8 +142,7 @@ class Lorenz(eqx.Module):
 
 
 # %%
-# JIT-compiled ensemble solves. The fixed factory uses the default
-# ConstantStepSize controller; the adaptive one uses diffrax's PIDController.
+# JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(algorithm, dt0=0.001, max_steps=4096):
     solver = make_solver(algorithm)
 
@@ -190,11 +182,8 @@ parameterList = jnp.linspace(0.0,21.0,numberOfParameters)
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_diffrax.py 32768 wp [algorithm]` sweeps fixed dt / adaptive tolerance
-# at N=32768 per algorithm and records "<setting> <time_ms> <error-vs-golden>"
-# per point. Protocol and sweep grids live in runner_scripts/wp_common.py.
-# Note: wp timings call block_until_ready so the full solve (not just the
-# async dispatch) is measured.
+# Sweeps dt / tolerance per algorithm at N=32768; see runner_scripts/wp_common.py.
+# wp timings block_until_ready so the full solve is measured.
 if WP_MODE:
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
@@ -220,7 +209,7 @@ if WP_MODE:
             outfile = wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY)
             with open(outfile, "w") as f:
                 for dt in dts_for(algorithm):
-                    # Steps = 1/dt; the finest euler dt needs 2^17.
+                    # max_steps covers the finest euler dt (2^17 steps).
                     bench(make_fixed(algorithm, dt, max_steps=262144), dt, f)
         if algorithm in ADAPTIVE_ALGORITHMS:
             outfile = wp_outfile("JAX", "Jax", "adaptive", algorithm,
@@ -247,8 +236,7 @@ for algorithm in ALGORITHMS:
         with open(outfile, "a+") as file:
             file.write('{0} {1} {2}\n'.format(
                 numberOfParameters, best_time, best_time_dev))
-        # The pairwise numerical cross-check keys on the pre-#29 run mode:
-        # the fixed N-sweep ran Tsit5, so tsit5 keeps the CSV name.
+        # The pairwise numerical cross-check reads this fixed CSV name.
         if numberOfParameters == 32768 and algorithm == "tsit5":
             os.makedirs("./data/numerical", exist_ok=True)
             sol = main(parameterList)

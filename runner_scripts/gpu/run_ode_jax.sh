@@ -4,8 +4,7 @@ a=8
 max_a=$1
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 source ./GPU_ODE_JAX/venv/bin/activate
 # Work-precision mode: `run_ode_jax.sh wp` sweeps dt/tolerance at N=32768.

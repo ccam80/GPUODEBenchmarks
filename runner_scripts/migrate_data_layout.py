@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""Rename pre-issue-#29 data files into the algorithm-tagged layout.
-
-The old layout encoded only the controller in the filename:
-
-    <Prefix>_times_<unadaptive|adaptive>_<os>_<gpu>.txt
-    <Prefix>_wp_<fixed|adaptive>_<os>_<gpu>.txt
-
-Every framework ran exactly one algorithm per mode, so the algorithm each
-old file was recorded with is known and the rename is lossless:
-
-    framework   fixed algorithm   adaptive algorithm
-    CUBIE       classical-rk4     tsit5
-    CUBIE_MLIR  classical-rk4     tsit5
-    Julia       tsit5             tsit5
-    JAX         tsit5             tsit5
-    PYTORCH     classical-rk4     -
-    MYOKIT_CUDA euler             -
-    CPP (MPGOS) classical-rk4     cash-karp-54
-
-New layout ("unadaptive" is retired in favour of "fixed"):
-
-    <Prefix>_times_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt
-    <Prefix>_wp_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt
+"""Rename legacy data files into the algorithm-tagged layout:
+<Prefix>_{times,wp}_<unadaptive|fixed|adaptive>_<os>_<gpu>.txt becomes
+<Prefix>_{times,wp}_<fixed|adaptive>_<algorithm>_<os>_<gpu>.txt, using the
+per-framework algorithm each legacy mode ran (FRAMEWORKS table below).
 
 Usage: python runner_scripts/migrate_data_layout.py [--dry-run] [data-dir]
 """
@@ -48,10 +29,7 @@ def planned_renames(data_dir):
         dpath = os.path.join(data_dir, subdir)
         if not os.path.isdir(dpath):
             continue
-        # <prefix>_times_<unadaptive|adaptive>_<key>.txt and
-        # <prefix>_wp_<fixed|adaptive>_<key>.txt; the key is
-        # "<os>_<gpu>" and neither part contains underscores, so a legacy
-        # name has exactly two fields after the mode.
+        # Legacy names have exactly two underscore fields after the mode.
         pat = re.compile(
             "^" + re.escape(prefix)
             + r"_(times|wp)_(unadaptive|fixed|adaptive)_([^_]+_[^_]+)\.txt$")

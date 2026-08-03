@@ -75,11 +75,7 @@ REM keyed files are left in place so data accumulates additively across machines
 set "DATASET_KEY="
 for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0runner_scripts\bench_key.ps1"`) do set "DATASET_KEY=%%K"
 
-REM -g narrows the run to one integration algorithm (cubie vocabulary: euler,
-REM classical-rk4, tsit5, cash-karp-54 - see issue #29); the default "all"
-REM runs every algorithm the framework supports. The pre-run wipe is narrowed
-REM to the same algorithm so sweeping a second algorithm never deletes the
-REM first one's data.
+REM -g runs one algorithm (default "all"); the pre-run wipe narrows to match.
 if /i "%alg%"=="all" (
     set "times_glob=*_times_*_%DATASET_KEY%.txt"
     set "wp_glob=*_wp_*_%DATASET_KEY%.txt"

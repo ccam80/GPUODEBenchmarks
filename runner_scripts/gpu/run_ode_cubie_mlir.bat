@@ -1,8 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Algorithm request (issue #29): forwarded to the bench script, which runs
-REM every supported algorithm for "all" and skips cleanly when unsupported.
+REM Algorithm filter; "all" runs every algorithm this framework supports.
 set "alg=%~2"
 if "%alg%"=="" set "alg=all"
 

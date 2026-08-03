@@ -38,11 +38,7 @@ if [ -z "$lang" ] || [ -z "$dev" ] || [ -z "$model" ]; then
     exit 1
 fi
 
-# -g narrows the run to one integration algorithm (cubie vocabulary: euler,
-# classical-rk4, tsit5, cash-karp-54 — see issue #29); the default "all" runs
-# every algorithm the framework supports. The pre-run wipe is narrowed to the
-# same algorithm so sweeping a second algorithm never deletes the first one's
-# data.
+# -g runs one algorithm (default "all"); the pre-run wipe narrows to match.
 if [ "$alg" == "all" ]; then
     times_glob="*_times_*_${DATASET_KEY}.txt"
     wp_glob="*_wp_*_${DATASET_KEY}.txt"

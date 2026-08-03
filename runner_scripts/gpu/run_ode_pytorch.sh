@@ -4,8 +4,7 @@ a=8
 max_a=$1
 source ./GPU_ODE_PyTorch/venv/bin/activate
 
-# Algorithm request (issue #29): forwarded to the bench script, which runs
-# every supported algorithm for "all" and skips cleanly when unsupported.
+# Algorithm filter; "all" runs every algorithm this framework supports.
 ALG=${2:-all}
 # Work-precision mode: `run_ode_pytorch.sh wp` sweeps dt at N=32768 (fixed
 # only: torchdiffeq adaptive solvers are incompatible with torch.vmap).
