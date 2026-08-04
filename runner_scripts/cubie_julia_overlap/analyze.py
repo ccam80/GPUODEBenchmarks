@@ -185,7 +185,9 @@ def plots(root, summaries, metrics, work_rows):
     names = [a["cubie_alias"] for a in algorithms()]
     colors = {("julia", "fixed"): "black", ("julia", "julia"): "black",
               ("cubie", "fixed"): "tab:blue", ("cubie", "default"): "tab:orange",
-              ("cubie", "pi"): "tab:green"}
+              ("cubie", "pi"): "tab:green", ("cubie", "match"): "tab:red"}
+    # The cubie tiers drawn against julia in every adaptive panel.
+    series = (("cubie", "default"), ("cubie", "pi"), ("cubie", "match"))
     plots_dir = root / "plots"
     plots_dir.mkdir(exist_ok=True)
 
@@ -193,9 +195,8 @@ def plots(root, summaries, metrics, work_rows):
     for i, name in enumerate(names):
         for j, mode in enumerate(("fixed", "adaptive")):
             ax = axes[i, j]
-            for framework, tier in (("julia", "fixed" if mode == "fixed" else "julia"),
-                                    ("cubie", "fixed" if mode == "fixed" else "default"),
-                                    ("cubie", "pi")):
+            drawn = ((("cubie", "fixed"),) if mode == "fixed" else series)
+            for framework, tier in ((("julia", "fixed" if mode == "fixed" else "julia"),) + drawn):
                 for transfers, style in (("both", "-"), ("none", "--")):
                     vals = [r for r in summaries if r["phase"] == "performance" and
                             r["algorithm"] == name and r["mode"] == mode and
@@ -217,9 +218,8 @@ def plots(root, summaries, metrics, work_rows):
     for i, name in enumerate(names):
         for j, mode in enumerate(("fixed", "adaptive")):
             ax = axes[i, j]
-            for framework, tier in (("julia", "fixed" if mode == "fixed" else "julia"),
-                                    ("cubie", "fixed" if mode == "fixed" else "default"),
-                                    ("cubie", "pi")):
+            drawn = ((("cubie", "fixed"),) if mode == "fixed" else series)
+            for framework, tier in ((("julia", "fixed" if mode == "fixed" else "julia"),) + drawn):
                 vals = [r for r in metrics if r["phase"] == "numerical" and r["algorithm"] == name and
                         r["mode"] == mode and r["framework"] == framework and r["tier"] == tier]
                 if vals:
@@ -239,9 +239,8 @@ def plots(root, summaries, metrics, work_rows):
     for i, name in enumerate(names):
         for j, mode in enumerate(("fixed", "adaptive")):
             ax = axes[i, j]
-            for framework, tier in (("julia", "fixed" if mode == "fixed" else "julia"),
-                                    ("cubie", "fixed" if mode == "fixed" else "default"),
-                                    ("cubie", "pi")):
+            drawn = ((("cubie", "fixed"),) if mode == "fixed" else series)
+            for framework, tier in ((("julia", "fixed" if mode == "fixed" else "julia"),) + drawn):
                 for transfers, style in (("both", "-"), ("none", "--")):
                     vals = [r for r in work_rows if r["algorithm"] == name and r["mode"] == mode and
                             r["framework"] == framework and r["tier"] == tier and

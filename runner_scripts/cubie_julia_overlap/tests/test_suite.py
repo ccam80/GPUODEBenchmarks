@@ -173,5 +173,38 @@ class AnalysisTests(unittest.TestCase):
             self.assertAlmostEqual(result[0]["mutual_max_abs"], 1.0)
 
 
+class MatchTierTests(unittest.TestCase):
+    def summary(self, tier, phase="performance"):
+        return {"framework": "cubie", "algorithm": "tsit5", "phase": phase,
+                "mode": "adaptive", "tier": tier, "transfers": "both", "n": "8",
+                "setting_kind": "tol", "setting": "1e-8", "samples": 1,
+                "min_ms": 1.0, "p05_ms": 1.0, "median_ms": 1.0, "p95_ms": 1.0,
+                "max_ms": 1.0}
+
+    def test_match_tier_is_plotted(self):
+        summaries = [self.summary("default"), self.summary("pi"), self.summary("match")]
+        metrics = [dict(s, golden_rmse="1e-6", finite_trajectories="8",
+                        failed_trajectories="0", phase="numerical") for s in summaries]
+        work = [dict(s, golden_rmse="1e-6") for s in summaries]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            analyze.plots(root, summaries, metrics, work)
+            self.assertEqual(
+                sorted(p.name for p in (root / "plots").iterdir()),
+                ["numerical_equivalence.png", "performance_scaling.png",
+                 "work_precision.png"])
+
+    def test_match_tier_gets_its_own_speedup_row(self):
+        rows = []
+        for framework, tier, ms in (("julia", "julia", "6"), ("cubie", "match", "2")):
+            rows.append({"framework": framework, "algorithm": "tsit5",
+                         "phase": "performance", "mode": "adaptive", "tier": tier,
+                         "transfers": "both", "n": "8", "setting_kind": "tol",
+                         "setting": "1e-8", "sample": "0", "time_ms": ms})
+        boosts = analyze.speedups(analyze.timing_summary(rows))
+        self.assertEqual([r["cubie_tier"] for r in boosts], ["match"])
+        self.assertAlmostEqual(boosts[0]["julia_over_cubie_speedup"], 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()

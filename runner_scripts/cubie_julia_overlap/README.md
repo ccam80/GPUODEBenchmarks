@@ -21,6 +21,8 @@ the rest:
 - `--algorithm` runs one row of `algorithms.csv`; other rows stay.
 - `--profile` picks the protocol size: `smoke` or `full`.
 
+Adaptive cubie points run in three tiers, recorded in the `tier` column: `default` (cubie's controller defaults), `pi` (gains from the algorithm order), and `match` (DiffEqGPU's controller, gain clamps, safety factor and Newton stopping rule).
+
 `manifest.json` records the commands of the last run. Protocol settings live in
 `common.py`, mirrored in `julia_worker.jl`. The CSVs record the analysis in a
 `phase` column, where `work-precision` is written `work_precision`.

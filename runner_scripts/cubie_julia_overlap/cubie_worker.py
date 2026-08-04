@@ -93,6 +93,15 @@ def make_solver(system, alias, mode, setting, order, tier):
         return qb.Solver(system, dt=setting, step_controller="fixed", **common)
     settings = {"dt": DT0, "dt_min": DT_MIN, "dt_max": DT_MAX,
                 "atol": setting, "rtol": setting}
+    if tier == "match":
+        # DiffEqGPU-parity solver configuration.
+        settings.update(
+            step_controller="sciml_pi", min_gain=0.2, max_gain=10.0,
+            safety=0.9, deadband_min=1.0, deadband_max=1.0,
+            smooth_error=True, newton_stop_criterion="residual",
+            newton_max_iters=30,
+        )
+        return qb.Solver(system, **settings, **common)
     controller = {} if tier == "default" else pi_controller(order)
     if controller:
         settings["step_controller"] = controller.pop("step_controller")
@@ -189,19 +198,22 @@ def main():
                 for n in protocol["performance_ns"]:
                     points.extend([("fixed", "fixed", "dt", FIXED_DT, n),
                                    ("adaptive", "default", "tol", ADAPTIVE_TOL, n),
-                                   ("adaptive", "pi", "tol", ADAPTIVE_TOL, n)])
+                                   ("adaptive", "pi", "tol", ADAPTIVE_TOL, n),
+                                   ("adaptive", "match", "tol", ADAPTIVE_TOL, n)])
                 repeats = protocol["performance_repeats"]
             elif phase == "numerical":
                 n = protocol["ne_n"]
                 points = [("fixed", "fixed", "dt", dt, n) for dt in protocol["ne_dts"]]
                 points += [("adaptive", tier, "tol", tol, n)
-                           for tier in ("default", "pi") for tol in protocol["ne_tols"]]
+                           for tier in ("default", "pi", "match")
+                           for tol in protocol["ne_tols"]]
                 repeats = 1
             else:
                 n = protocol["wp_n"]
                 points = [("fixed", "fixed", "dt", dt, n) for dt in protocol["wp_dts"]]
                 points += [("adaptive", tier, "tol", tol, n)
-                           for tier in ("default", "pi") for tol in protocol["wp_tols"]]
+                           for tier in ("default", "pi", "match")
+                           for tol in protocol["wp_tols"]]
                 repeats = protocol["work_repeats"]
 
             for mode, tier, setting_kind, setting, n in points:
