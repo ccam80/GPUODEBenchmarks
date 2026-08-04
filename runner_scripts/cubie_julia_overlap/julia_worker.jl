@@ -38,19 +38,30 @@ const OPT = cli_args(ARGS)
 const OUT = abspath(haskey(OPT, "output") ? OPT["output"] : error("--output is required"))
 const PROFILE = get(OPT, "profile", "smoke")
 const ANALYSIS = get(OPT, "analysis", "all")
-const NMAX = parse(Int, get(OPT, "nmax", "16777216"))
+const NMAX = get(OPT, "nmax", "16777216")
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
 const ALGORITHM = get(OPT, "algorithm", "all")
 
 mkpath(OUT)
 
-function protocol()
-    ns = Int[]
-    n = 8
-    limit = PROFILE == "smoke" ? min(NMAX, 32) : NMAX
-    while n <= limit
-        n >= FROM_N && push!(ns, n)
+# A single value is a sweep ceiling; a comma list is the exact counts.
+function parse_ns(spec, from_n)
+    if occursin(',', spec)
+        values = sort(unique(parse.(Int, filter(!isempty, split(spec, ',')))))
+        return filter(n -> n >= max(from_n, 8), values)
+    end
+    ns, n = Int[], 8
+    while n <= parse(Int, spec)
+        n >= from_n && push!(ns, n)
         n *= 4
+    end
+    return ns
+end
+
+function protocol()
+    ns = parse_ns(NMAX, FROM_N)
+    if PROFILE == "smoke"
+        ns = filter(n -> n <= 32, ns)
     end
     if PROFILE == "smoke"
         return (performance_ns = ns, performance_repeats = 2,

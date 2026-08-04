@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze one direct-overlap run and render CSV summaries, plots and report."""
+"""Summarize one machine's overlap results: CSVs beside the raw ones, figures in plots/, report at the repo root."""
 
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from common import algorithms  # noqa: E402 - suite-local bootstrap above
+sys.path.insert(0, str(HERE.parent))
+from common import REPO_ROOT, algorithms  # noqa: E402 - suite-local bootstrap above
+from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
 
 
 def read_rows(path):
@@ -177,7 +179,7 @@ def work_precision_rows(summaries, metrics):
     return out
 
 
-def plots(root, summaries, metrics, work_rows):
+def plots(plots_dir, key, summaries, metrics, work_rows):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -186,8 +188,7 @@ def plots(root, summaries, metrics, work_rows):
     colors = {("julia", "fixed"): "black", ("julia", "julia"): "black",
               ("cubie", "fixed"): "tab:blue", ("cubie", "default"): "tab:orange",
               ("cubie", "pi"): "tab:green"}
-    plots_dir = root / "plots"
-    plots_dir.mkdir(exist_ok=True)
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
     fig, axes = plt.subplots(len(names), 2, figsize=(12, 3.2 * len(names)), squeeze=False)
     for i, name in enumerate(names):
@@ -210,7 +211,8 @@ def plots(root, summaries, metrics, work_rows):
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "performance_scaling.png", dpi=160)
+    written = [plots_dir / "overlap_performance_scaling_{}.png".format(key)]
+    fig.savefig(written[-1], dpi=160)
     plt.close(fig)
 
     fig, axes = plt.subplots(len(names), 2, figsize=(12, 3.2 * len(names)), squeeze=False)
@@ -232,7 +234,8 @@ def plots(root, summaries, metrics, work_rows):
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "numerical_equivalence.png", dpi=160)
+    written.append(plots_dir / "overlap_numerical_equivalence_{}.png".format(key))
+    fig.savefig(written[-1], dpi=160)
     plt.close(fig)
 
     fig, axes = plt.subplots(len(names), 2, figsize=(12, 3.2 * len(names)), squeeze=False)
@@ -255,8 +258,10 @@ def plots(root, summaries, metrics, work_rows):
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(plots_dir / "work_precision.png", dpi=160)
+    written.append(plots_dir / "overlap_work_precision_{}.png".format(key))
+    fig.savefig(written[-1], dpi=160)
     plt.close(fig)
+    return written
 
 
 def markdown_table(fields, rows, limit=None):
@@ -275,9 +280,18 @@ def markdown_table(fields, rows, limit=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--output", type=Path, default=None,
+                        help="Result directory; default data/cubie_julia_overlap/<dataset-key>.")
+    parser.add_argument("--key", default=None,
+                        help="Dataset key <os>_<gpu>; detected when omitted.")
+    parser.add_argument("--plots-dir", type=Path, default=REPO_ROOT / "plots")
+    parser.add_argument("--report", type=Path, default=None,
+                        help="Report path; default cubie_julia_overlap_<key>.md at the repo root.")
     args = parser.parse_args()
-    root = args.output.resolve()
+    key = args.key or (args.output.name if args.output else dataset_key())
+    root = (args.output or REPO_ROOT / "data" / "cubie_julia_overlap" / key).resolve()
+    plots_dir = args.plots_dir.resolve()
+    report_path = (args.report or REPO_ROOT / "cubie_julia_overlap_{}.md".format(key)).resolve()
     timings = read_rows(root / "cubie_timings.csv") + read_rows(root / "julia_timings.csv")
     metrics = read_rows(root / "cubie_metrics.csv") + read_rows(root / "julia_metrics.csv")
     valid_metrics = [row for row in metrics if valid_metric(row)]
@@ -298,15 +312,22 @@ def main():
     write_rows(root / "work_precision.csv", ["framework", "algorithm", "mode", "tier", "transfers", "n",
                "setting_kind", "setting", "samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms",
                "golden_rmse", "finite_trajectories", "failed_trajectories"], work_rows)
+    def cite(path):
+        # Repo-relative where possible, absolute otherwise.
+        try:
+            return path.relative_to(REPO_ROOT).as_posix()
+        except ValueError:
+            return path.as_posix()
+
     try:
-        plots(root, summaries, valid_metrics, work_rows)
-        plot_note = "Plots: `plots/performance_scaling.png`, `plots/numerical_equivalence.png`, and `plots/work_precision.png`."
+        written = plots(plots_dir, key, summaries, valid_metrics, work_rows)
+        plot_note = "Plots: " + ", ".join("`{}`".format(cite(p)) for p in written) + "."
     except Exception as exc:
         (root / "plot_failure.txt").write_text("{}: {}\n".format(type(exc).__name__, exc), encoding="utf-8")
         plot_note = "Plot generation failed; see `plot_failure.txt`."
 
     perf = [r for r in boosts if r["phase"] == "performance"]
-    report = """# Cubie ↔ DiffEqGPU benchmark
+    report = """# Cubie ↔ DiffEqGPU benchmark — """ + key + """
 
 Algorithms: `tsit5` ↔ `GPUTsit5()`, `vern7` ↔ `GPUVern7()`, `rosenbrock23_sciml` ↔ `GPURosenbrock23()`, `kvaerno3` ↔ `GPUKvaerno3()`, and `kvaerno5` ↔ `GPUKvaerno5()`.
 
@@ -328,12 +349,17 @@ Analytic Lorenz Jacobian and time-gradient functions are supplied to every Julia
     report += markdown_table(["algorithm", "mode", "cubie_tier", "setting", "mutual_rmse", "mutual_p99_abs", "mutual_max_abs", "failed_pairs"], comparisons)
     report += "\n## Observed fixed-step convergence order\n\n"
     report += markdown_table(["framework", "algorithm", "tier", "observed_order", "usable_intervals"], orders)
-    report += "\n## Work-precision\n\n`work_precision.csv` joins every work-point timing distribution (min/p05/median/p95/max) to golden RMSE. `plots/work_precision.png` plots median runtime on the x-axis against golden RMSE on the y-axis; it is an error-work plot, not another setting sweep.\n"
+    report += ("\n## Work-precision\n\n`work_precision.csv` joins every work-point timing distribution "
+               "(min/p05/median/p95/max) to golden RMSE. `plots/overlap_work_precision_{}.png` plots median "
+               "runtime on the x-axis against golden RMSE on the y-axis; it is an error-work plot, not another "
+               "setting sweep.\n".format(key))
     report += "\n## Failures and non-finite results\n\n{} point failures were recorded. See the framework failure CSVs for full messages. Non-finite trajectory counts are retained per successful point in the metric CSVs.\n\n".format(len(failures))
     report += markdown_table(["framework", "algorithm", "phase", "mode", "tier", "setting_kind", "setting", "error_type", "message"], failures, limit=100)
-    report += "\n## Artifacts\n\n" + plot_note + " Raw and derived CSVs in this directory are algorithm-, mode-, tier-, N-, and setting-keyed.\n"
-    (root / "report.md").write_text(report, encoding="utf-8")
-    print("Wrote {}".format(root / "report.md"))
+    report += ("\n## Artifacts\n\n" + plot_note + " Raw and derived CSVs are in `{}`, algorithm-, mode-, "
+               "tier-, N-, and setting-keyed.\n".format(cite(root)))
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report, encoding="utf-8")
+    print("Wrote {}".format(report_path))
     return 0
 
 

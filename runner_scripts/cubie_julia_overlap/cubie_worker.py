@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("smoke", "full"), default="smoke")
     parser.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all")
-    parser.add_argument("-n", "--nmax", type=int, default=16_777_216)
+    parser.add_argument("-n", "--nmax", default="16777216")
     parser.add_argument("--from-n", type=int, default=0)
     parser.add_argument("--algorithm", default="all")
     return parser.parse_args()

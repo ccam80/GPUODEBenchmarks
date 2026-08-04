@@ -7,16 +7,18 @@ python run_cubie_julia_overlap.py --profile full
 python run_cubie_julia_overlap.py -a performance -n 16777216
 python run_cubie_julia_overlap.py -a numerical -p cubie
 python run_cubie_julia_overlap.py -a performance --from-n 2048
+python run_cubie_julia_overlap.py -a performance -n 32768,134217728 -p julia
 python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
 ```
 
-Results are written to `data/cubie_julia_overlap/<dataset-key>/`, one
-directory per GPU and OS. A run replaces the rows it regenerates and leaves
-the rest:
+CSVs are written to `data/cubie_julia_overlap/<dataset-key>/`, one directory
+per GPU and OS; figures to `plots/overlap_*_<dataset-key>.png` and the report
+to `cubie_julia_overlap_<dataset-key>.md` in the repository root. A run
+replaces the rows it regenerates and leaves the rest:
 
 - `-a, --analysis` selects the analysis: `performance`, `numerical`, `work-precision`, `all`.
 - `-p, --package` selects the package: `cubie`, `julia`, `all`.
-- `-n, --nmax` caps the performance analysis.
+- `-n, --nmax` is a sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.
 - `--from-n` restarts the performance analysis at that N; lower-N rows stay.
 - `--algorithm` runs one row of `algorithms.csv`; other rows stay.
 - `--profile` picks the protocol size: `smoke` or `full`.
@@ -38,5 +40,7 @@ points are excluded from timing summaries and speedups. Re-run the analyzer
 alone with:
 
 ```text
-python runner_scripts/cubie_julia_overlap/analyze.py --output data/cubie_julia_overlap/<dataset-key>
+python runner_scripts/cubie_julia_overlap/analyze.py
 ```
+
+Pass `--key <os>_<gpu>` to redraw another machine's results.

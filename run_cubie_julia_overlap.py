@@ -5,11 +5,13 @@ Examples:
   python run_cubie_julia_overlap.py --profile full
   python run_cubie_julia_overlap.py -a numerical -p cubie
   python run_cubie_julia_overlap.py -a performance --from-n 2048
+  python run_cubie_julia_overlap.py -a performance -n 32768,134217728 -p julia
   python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
 
-Results land in data/cubie_julia_overlap/<dataset-key>/. A run replaces the
-rows it regenerates and leaves the rest. Workers record point failures and
-keep going; the analyzer runs after the selected workers finish.
+Results land in data/cubie_julia_overlap/<dataset-key>/, figures in plots/ and
+the report at cubie_julia_overlap_<dataset-key>.md. A run replaces the rows it
+regenerates and leaves the rest. Workers record point failures and keep going;
+the analyzer runs after the selected workers finish.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ sys.path.insert(0, str(SUITE))
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
-    phases_for, prune_csv,
+    parse_ns, phases_for, prune_csv,
 )
 
 CSV_KINDS = (("timings", TIMING_FIELDS), ("metrics", METRIC_FIELDS),
@@ -56,8 +58,8 @@ def parser():
     p.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all",
                    help="Which analysis to run; one not selected keeps its existing rows.")
     p.add_argument("-p", "--package", choices=("all", "cubie", "julia"), default="all")
-    p.add_argument("-n", "--nmax", type=int, default=16_777_216,
-                   help="Largest performance N; values are 8*4^k not exceeding this value.")
+    p.add_argument("-n", "--nmax", default="16777216",
+                   help="Sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.")
     p.add_argument("--from-n", type=int, default=0,
                    help="Continue the performance analysis at this N; rows below it are kept.")
     p.add_argument("--algorithm", choices=algorithm_names(), default="all",
@@ -67,8 +69,13 @@ def parser():
 
 def main():
     args = parser().parse_args()
-    if args.nmax < 8:
-        parser().error("--nmax must be at least 8")
+    try:
+        ns = parse_ns(args.nmax, args.from_n)
+    except ValueError:
+        parser().error("-n/--nmax takes an integer or a comma list of integers, got '{}'"
+                       .format(args.nmax))
+    if not ns:
+        parser().error("-n/--nmax selects no trajectory count of at least 8")
     if args.from_n and args.analysis != "performance":
         parser().error("--from-n continues the performance analysis; pass -a performance")
     key = dataset_key()
@@ -78,7 +85,7 @@ def main():
     phases = phases_for(args.analysis)
     packages = ("julia", "cubie") if args.package == "all" else (args.package,)
     shared = ["--output", str(output), "--profile", args.profile,
-              "--analysis", args.analysis, "--nmax", str(args.nmax),
+              "--analysis", args.analysis, "--nmax", ",".join(str(n) for n in ns),
               "--from-n", str(args.from_n), "--algorithm", args.algorithm]
     commands = []
     if "julia" in packages:
@@ -86,7 +93,8 @@ def main():
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
     if "cubie" in packages:
         commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
-    commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"), "--output", str(output)]))
+    commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"),
+                                  "--output", str(output), "--key", key]))
 
     print("Output: {}".format(output))
     for label, command in commands:
@@ -105,7 +113,7 @@ def main():
     for framework in packages:
         for kind, fields in CSV_KINDS:
             dropped = prune_csv(output / "{}_{}.csv".format(framework, kind),
-                                fields, phases, args.from_n, args.algorithm)
+                                fields, phases, args.from_n, args.algorithm, ns)
             if dropped:
                 print("Replacing {} row(s) in {}_{}.csv".format(dropped, framework, kind))
         if "numerical" in phases:
@@ -118,7 +126,8 @@ def main():
         "dataset_key": key, "profile": args.profile,
         "analysis": args.analysis, "package": args.package,
         "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
-        "nmax": args.nmax, "from_n": args.from_n, "algorithm": args.algorithm,
+        "nmax": args.nmax, "performance_ns": ns, "from_n": args.from_n,
+        "algorithm": args.algorithm,
         "commands": [c for _, c in commands],
         "started_utc": datetime.now(timezone.utc).isoformat(), "results": {},
     }

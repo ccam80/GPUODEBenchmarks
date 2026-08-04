@@ -149,12 +149,11 @@ foreach ($alg in $algTokens) {
 }
 if ($algTokens -contains 'all') { $Algorithm = 'all' }
 
-# -n: ceiling or comma list; overlap takes a plain ceiling (largest N).
+# -n: sweep ceiling or comma list of exact counts.
 if ($NMax -notmatch '^\d+(,\d+)*$') {
     Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$NMax'"
     exit 1
 }
-$NMaxCeiling = ($NMax.Split(',') | ForEach-Object { [long]$_ } | Measure-Object -Maximum).Maximum
 
 $DatasetKey = Get-DatasetKey
 
@@ -387,9 +386,9 @@ try {
             $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
             if (-not (Test-Path $py)) { $py = 'python' }
             $ClockCritical = $true; $StepLabel = 'overlap'
-            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, nmax=$NMaxCeiling)" `
+            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, n=$NMax)" `
                 'cubie_julia_overlap.log' `
-                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $NePackage -n $NMaxCeiling"
+                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $NePackage -n $NMax"
             # A non-zero exit means at least one worker died, not that all did.
             if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
             else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }
@@ -414,8 +413,19 @@ try {
             else { Add-Record 'plot:wp' 'FAILED' '-' "$status" }
         }
 
-        # Exit 3 is "nothing to compare"; any other non-zero is a real failure.
         $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
+        if (($DoOverlap -or $PlotAll) -and $NePackage) {
+            if (Test-Path $py) {
+                $status = Invoke-Step 'Overlap plot and report' 'cubie_julia_overlap_analyze.log' `
+                    "$py runner_scripts\cubie_julia_overlap\analyze.py"
+                if ($status -eq 0) { Add-Record 'plot:overlap' 'OK' '-' "$status" }
+                else { Add-Record 'plot:overlap' 'FAILED' '-' "$status" }
+            } else {
+                Add-Record 'plot:overlap' 'SKIPPED' 'cubie venv missing' '-'
+            }
+        }
+
+        # Exit 3 is "nothing to compare"; any other non-zero is a real failure.
         if (Test-Path $py) {
             $status = Invoke-Step 'Pairwise numerical comparison' 'compare_numerical.log' `
                 "$py compare_numerical_results.py"

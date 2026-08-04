@@ -230,6 +230,8 @@ The run refuses to start if `nvidia-smi` cannot identify the GPU, since every
 output file is keyed by `<os>_<gpu>` and the whole dataset would otherwise be
 mislabelled `unknown-gpu`; override with `--allow-unknown-gpu`.
 
+Overlap CSVs stay in `data/cubie_julia_overlap/<os>_<gpu>/`; its figures are `plots/overlap_*_<os>_<gpu>.png` and its report `cubie_julia_overlap_<os>_<gpu>.md`, both redrawn by `-a plots`.
+
 #### Clock stability
 
 The run pins the SM and memory clocks to the per-GPU rate in
