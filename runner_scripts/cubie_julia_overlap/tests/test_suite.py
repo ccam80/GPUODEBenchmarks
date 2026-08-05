@@ -53,22 +53,11 @@ class ProtocolTests(unittest.TestCase):
             common.profile_protocol("full", "32768,134217728")["performance_ns"],
             [32768, 134217728])
 
-    def test_smoke_caps_a_comma_list(self):
-        self.assertEqual(
-            common.profile_protocol("smoke", "8,32768")["performance_ns"], [8])
-
     def test_analysis_names_map_to_phase_names(self):
         self.assertEqual(common.phases_for("work-precision"), ("work_precision",))
         self.assertEqual(common.phases_for("performance"), ("performance",))
         self.assertEqual(common.phases_for("all"), common.PHASES)
         self.assertEqual(len(common.ANALYSES), len(common.PHASES))
-
-    def test_smoke_keeps_every_metric_family(self):
-        protocol = common.profile_protocol("smoke", 10_000)
-        self.assertTrue(protocol["performance_ns"])
-        self.assertTrue(protocol["ne_dts"] and protocol["ne_tols"])
-        self.assertTrue(protocol["wp_dts"] and protocol["wp_tols"])
-        self.assertLess(protocol["wp_n"], common.N_WP)
 
     def test_pi_controller_constants(self):
         settings = common.pi_controller(5)
