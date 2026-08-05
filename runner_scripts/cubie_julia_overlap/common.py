@@ -167,13 +167,17 @@ def rmse(finals, golden):
 
 def pi_controller(order):
     """Return the PI-controller configuration used by the comparison tier."""
-    beta1 = 7.0 / (10.0 * order)
-    beta2 = 2.0 / (5.0 * order)
+    from cubie.integrators.algorithms.generic_dirk import (
+        dirk_default_ki,
+        dirk_default_kp,
+    )
     return {
         "step_controller": "pi",
-        "kp": beta1 * (order + 1),
-        "ki": -beta2 * (order + 1),
+        "kp": dirk_default_kp,
+        "ki": dirk_default_ki,
         "safety": 0.9,
         "min_gain": 0.2,
         "max_gain": 10.0,
+        "deadband_min": 1.0,
+        "deadband_max": 1.0,
     }
