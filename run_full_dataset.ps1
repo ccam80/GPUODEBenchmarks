@@ -30,7 +30,6 @@ $DoWp = $true
 $DoNe = $true
 $DoOverlap = $true
 $DoPlots = $true
-$OverlapProfile = 'full'
 $Cooldown = 15
 $ResumeFrom = ''
 $AllowUnknownGpu = $false
@@ -89,7 +88,6 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '^(-p|--package)$' { $Package = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^(-g|--algorithm)$' { $Algorithm = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^(-a|--analysis)$' { Set-Analyses (Get-RequiredValue $args $i $args[$i]); $i++ }
-        '^--profile$' { $OverlapProfile = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^--resume-from$' { $ResumeFrom = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^--cooldown$' { $Cooldown = [int](Get-RequiredValue $args $i $args[$i]); $i++ }
         '^--allow-unknown-gpu$' { $AllowUnknownGpu = $true }
@@ -127,12 +125,6 @@ $HasCubie = $Languages -contains 'cubie'
 if ($HasJulia -and $HasCubie) { $NePackage = 'all' }
 elseif ($HasJulia) { $NePackage = 'julia' }
 elseif ($HasCubie) { $NePackage = 'cubie' }
-
-# --profile: whitelisted before it reaches a command line.
-if ($OverlapProfile -notin @('smoke', 'full')) {
-    Write-Host "Unknown profile '$OverlapProfile' (smoke|full)"
-    exit 1
-}
 
 # -g: "all" or a comma list; every token whitelisted.
 $AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
@@ -266,7 +258,6 @@ function Invoke-Step {
 Write-Host "Dataset key : $DatasetKey"
 Write-Host "nmax        : $NMax"
 Write-Host "Algorithm   : $Algorithm"
-Write-Host "Overlap     : profile=$OverlapProfile"
 Write-Host "Packages    : $($Languages -join ', ')"
 Write-Host "Log dir     : $LogDir"
 Write-Host "Analyses    : performance=$DoPerf work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
@@ -284,7 +275,6 @@ $manifest = @(
     "started_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
     "nmax=$NMax"
     "algorithm=$Algorithm"
-    "overlap_profile=$OverlapProfile"
     "packages=$($Languages -join ',')"
     "git_rev=$gitRev"
     "git_dirty=$gitDirty"
@@ -386,9 +376,9 @@ try {
             $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'
             if (-not (Test-Path $py)) { $py = 'python' }
             $ClockCritical = $true; $StepLabel = 'overlap'
-            $status = Invoke-Step "Cubie vs DiffEqGPU overlap ($OverlapProfile, n=$NMax)" `
+            $status = Invoke-Step "Cubie vs DiffEqGPU overlap (n=$NMax)" `
                 'cubie_julia_overlap.log' `
-                "$py run_cubie_julia_overlap.py --profile $OverlapProfile -a all -p $NePackage -n $NMax"
+                "$py run_cubie_julia_overlap.py -a all -p $NePackage -n $NMax"
             # A non-zero exit means at least one worker died, not that all did.
             if ($status -eq 0) { Add-Record 'overlap' 'OK' '-' "$status" }
             else { Add-Record 'overlap' 'PARTIAL' 'a worker failed; see manifest.json' "$status" }

@@ -3,7 +3,6 @@
 Run from the repository root:
 
 ```text
-python run_cubie_julia_overlap.py --profile full
 python run_cubie_julia_overlap.py -a performance -n 16777216
 python run_cubie_julia_overlap.py -a numerical -p cubie
 python run_cubie_julia_overlap.py -a performance --from-n 2048
@@ -21,7 +20,6 @@ replaces the rows it regenerates and leaves the rest:
 - `-n, --nmax` is a sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.
 - `--from-n` restarts the performance analysis at that N; lower-N rows stay.
 - `--algorithm` runs one row of `algorithms.csv`; other rows stay.
-- `--profile` picks the protocol size: `smoke` or `full`.
 
 `manifest.json` records the commands of the last run. Protocol settings live in
 `common.py`, mirrored in `julia_worker.jl`. The CSVs record the analysis in a

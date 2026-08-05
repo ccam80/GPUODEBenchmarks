@@ -47,7 +47,6 @@ DO_WP=true
 DO_NE=true
 DO_OVERLAP=true
 DO_PLOTS=true
-OVERLAP_PROFILE="full"
 PACKAGE="all"
 ALGORITHM="all"
 COOLDOWN=15
@@ -101,8 +100,6 @@ while [ $# -gt 0 ]; do
                    ALGORITHM="$2"; shift 2;;
         -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    set_analyses "$2"; shift 2;;
-        --profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
-                   OVERLAP_PROFILE="$2"; shift 2;;
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    RESUME_FROM="${2//-/_}"; shift 2;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
@@ -160,12 +157,6 @@ if $HAS_JULIA && $HAS_CUBIE; then NE_PACKAGE=all
 elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
-
-# --profile: whitelisted before it reaches a command line.
-case "$OVERLAP_PROFILE" in
-    smoke|full) ;;
-    *) echo "Unknown profile '$OVERLAP_PROFILE' (smoke|full)"; exit 1;;
-esac
 
 # -g: "all" or a comma list; every token whitelisted.
 for alg in ${ALGORITHM//,/ }; do
@@ -289,7 +280,6 @@ run_step() {
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
 echo "Algorithm   : $ALGORITHM"
-echo "Overlap     : profile=$OVERLAP_PROFILE"
 echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
 echo "Analyses    : performance=$DO_PERF work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
@@ -303,7 +293,6 @@ echo
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "nmax=$NMAX"
     echo "algorithm=$ALGORITHM"
-    echo "overlap_profile=$OVERLAP_PROFILE"
     echo "packages=${LANGUAGES[*]}"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "git_dirty=$(test -n "$(git status --porcelain 2>/dev/null)" && echo yes || echo no)"
@@ -406,10 +395,10 @@ elif $DO_OVERLAP; then
     PY=./GPU_ODE_CUBIE/venv/bin/python
     [ -x "$PY" ] || PY=python3
     CLOCK_CRITICAL=true; STEP_LABEL="overlap"
-    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, n=$NMAX)" \
+    run_step "Cubie vs DiffEqGPU overlap (n=$NMAX)" \
         "cubie_julia_overlap.log" \
         "$PY" ./run_cubie_julia_overlap.py \
-            --profile "$OVERLAP_PROFILE" -a all -p "$NE_PACKAGE" -n "$NMAX"
+            -a all -p "$NE_PACKAGE" -n "$NMAX"
     status=$?
     # The launcher already records per-framework failures and keeps going, so a
     # non-zero exit here means at least one worker died, not that all did.

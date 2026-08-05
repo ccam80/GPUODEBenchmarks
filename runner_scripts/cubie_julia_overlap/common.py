@@ -79,19 +79,7 @@ def parse_ns(spec, from_n=0):
     return [n for n in values if n >= max(from_n, 8)]
 
 
-def profile_protocol(profile, nmax, from_n=0):
-    if profile == "smoke":
-        return {
-            "performance_ns": [n for n in parse_ns(nmax, from_n) if n <= 32],
-            "performance_repeats": 2,
-            "ne_n": 32,
-            "ne_dts": [2.0 ** -4, 2.0 ** -8],
-            "ne_tols": [1.0e-3],
-            "wp_n": 256,
-            "wp_dts": [2.0 ** -6],
-            "wp_tols": [1.0e-4],
-            "work_repeats": 2,
-        }
+def protocol(nmax, from_n=0):
     return {
         "performance_ns": parse_ns(nmax, from_n),
         "performance_repeats": PERFORMANCE_REPEATS,

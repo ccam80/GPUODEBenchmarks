@@ -36,7 +36,6 @@ end
 
 const OPT = cli_args(ARGS)
 const OUT = abspath(haskey(OPT, "output") ? OPT["output"] : error("--output is required"))
-const PROFILE = get(OPT, "profile", "smoke")
 const ANALYSIS = get(OPT, "analysis", "all")
 const NMAX = get(OPT, "nmax", "16777216")
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
@@ -60,15 +59,6 @@ end
 
 function protocol()
     ns = parse_ns(NMAX, FROM_N)
-    if PROFILE == "smoke"
-        ns = filter(n -> n <= 32, ns)
-    end
-    if PROFILE == "smoke"
-        return (performance_ns = ns, performance_repeats = 2,
-            ne_n = 32, ne_dts = [2.0^-4, 2.0^-8], ne_tols = [1.0e-3],
-            wp_n = 256, wp_dts = [2.0^-6], wp_tols = [1.0e-4],
-            work_repeats = 2)
-    end
     return (performance_ns = ns, performance_repeats = PERFORMANCE_REPEATS,
         ne_n = 1024, ne_dts = [2.0^-k for k in 1:13],
         ne_tols = [10.0^-k for k in 2:6], wp_n = N_WP,
@@ -314,8 +304,7 @@ open(joinpath(OUT, "julia_metadata.json"), "w") do io
     println(io, "  \"framework\": \"DiffEqGPU\",")
     println(io, "  \"julia_version\": \"$(VERSION)\",")
     println(io, "  \"diffeqgpu_version\": \"$(pkgversion(DiffEqGPU))\",")
-    println(io, "  \"cuda_runtime\": \"$(CUDA.runtime_version())\",")
-    println(io, "  \"profile\": \"$(PROFILE)\"")
+    println(io, "  \"cuda_runtime\": \"$(CUDA.runtime_version())\"")
     println(io, "}")
 end
 

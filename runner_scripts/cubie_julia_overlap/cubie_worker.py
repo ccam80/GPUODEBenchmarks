@@ -24,7 +24,7 @@ from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, DT0, DT_MAX, DT_MIN, FAILURE_FIELDS, FIXED_DT, GOLDEN_NE,
     ANALYSES, GOLDEN_WP, METRIC_FIELDS, N_WP, TIMING_FIELDS, algorithms,
     append_csv, ensure_csv, finite_counts, phases_for, pi_controller,
-    point_slug, profile_protocol, rmse, write_json,
+    point_slug, protocol as suite_protocol, rmse, write_json,
 )
 
 try:
@@ -42,7 +42,6 @@ except Exception:
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--profile", choices=("smoke", "full"), default="smoke")
     parser.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all")
     parser.add_argument("-n", "--nmax", default="16777216")
     parser.add_argument("--from-n", type=int, default=0)
@@ -160,11 +159,11 @@ def main():
     timing_file = ensure_csv(args.output / "cubie_timings.csv", TIMING_FIELDS)
     metric_file = ensure_csv(args.output / "cubie_metrics.csv", METRIC_FIELDS)
     failure_file = ensure_csv(args.output / "cubie_failures.csv", FAILURE_FIELDS)
-    protocol = profile_protocol(args.profile, args.nmax, args.from_n)
+    protocol = suite_protocol(args.nmax, args.from_n)
     write_json(args.output / "cubie_metadata.json", {
         "framework": "cubie", "cubie_version": package_version(),
         "python": sys.version, "platform": platform.platform(),
-        "profile": args.profile, "protocol": protocol,
+        "protocol": protocol,
     })
     system = make_system()
     phases = phases_for(args.analysis)

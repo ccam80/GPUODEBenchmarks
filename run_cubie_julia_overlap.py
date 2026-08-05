@@ -2,7 +2,6 @@
 """Run the direct Cubie <-> DiffEqGPU GPU-ODE overlap benchmark.
 
 Examples:
-  python run_cubie_julia_overlap.py --profile full
   python run_cubie_julia_overlap.py -a numerical -p cubie
   python run_cubie_julia_overlap.py -a performance --from-n 2048
   python run_cubie_julia_overlap.py -a performance -n 32768,134217728 -p julia
@@ -53,8 +52,6 @@ def parser():
     p = argparse.ArgumentParser(
         description="Cubie versus DiffEqGPU GPU ODE comparison.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--profile", choices=("smoke", "full"), default="smoke",
-                   help="Smoke uses every algorithm with reduced N/grids; full uses the published protocol.")
     p.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all",
                    help="Which analysis to run; one not selected keeps its existing rows.")
     p.add_argument("-p", "--package", choices=("all", "cubie", "julia"), default="all")
@@ -84,7 +81,7 @@ def main():
     julia = os.environ.get("JULIA", "julia")
     phases = phases_for(args.analysis)
     packages = ("julia", "cubie") if args.package == "all" else (args.package,)
-    shared = ["--output", str(output), "--profile", args.profile,
+    shared = ["--output", str(output),
               "--analysis", args.analysis, "--nmax", ",".join(str(n) for n in ns),
               "--from-n", str(args.from_n), "--algorithm", args.algorithm]
     commands = []
@@ -123,7 +120,7 @@ def main():
             shutil.rmtree(stale, ignore_errors=True)
 
     manifest = {
-        "dataset_key": key, "profile": args.profile,
+        "dataset_key": key,
         "analysis": args.analysis, "package": args.package,
         "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
         "nmax": args.nmax, "performance_ns": ns, "from_n": args.from_n,

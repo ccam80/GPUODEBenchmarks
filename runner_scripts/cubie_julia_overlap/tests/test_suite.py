@@ -38,9 +38,7 @@ class ProtocolTests(unittest.TestCase):
         # Not a grid value: continue at the first point at or above it.
         self.assertEqual(common.performance_ns(512, 100), [128, 512])
         self.assertEqual(common.performance_ns(512, 0), [8, 32, 128, 512])
-        self.assertEqual(
-            common.profile_protocol("full", 512, 128)["performance_ns"],
-            [128, 512])
+        self.assertEqual(common.protocol(512, 128)["performance_ns"], [128, 512])
 
     def test_comma_list_selects_exact_counts(self):
         self.assertEqual(common.parse_ns("32768,134217728"), [32768, 134217728])
@@ -49,9 +47,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(common.parse_ns("512"), [8, 32, 128, 512])
         self.assertEqual(common.parse_ns("32768,134217728", 100000), [134217728])
         self.assertEqual(common.parse_ns("4"), [])
-        self.assertEqual(
-            common.profile_protocol("full", "32768,134217728")["performance_ns"],
-            [32768, 134217728])
+        self.assertEqual(common.protocol("32768,134217728")["performance_ns"],
+                         [32768, 134217728])
 
     def test_analysis_names_map_to_phase_names(self):
         self.assertEqual(common.phases_for("work-precision"), ("work_precision",))
