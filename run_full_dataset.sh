@@ -47,7 +47,6 @@ DO_WP=true
 DO_NE=true
 DO_OVERLAP=true
 DO_PLOTS=true
-OVERLAP_PROFILE="full"
 PACKAGE="all"
 ALGORITHM="all"
 COOLDOWN=15
@@ -101,8 +100,6 @@ while [ $# -gt 0 ]; do
                    ALGORITHM="$2"; shift 2;;
         -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    set_analyses "$2"; shift 2;;
-        --profile) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
-                   OVERLAP_PROFILE="$2"; shift 2;;
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    RESUME_FROM="${2//-/_}"; shift 2;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
@@ -161,12 +158,6 @@ elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
 
-# --profile: whitelisted before it reaches a command line.
-case "$OVERLAP_PROFILE" in
-    smoke|full) ;;
-    *) echo "Unknown profile '$OVERLAP_PROFILE' (smoke|full)"; exit 1;;
-esac
-
 # -g: "all" or a comma list; every token whitelisted.
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
@@ -175,16 +166,12 @@ for alg in ${ALGORITHM//,/ }; do
     esac
 done
 
-# -n: ceiling or comma list; overlap takes a plain ceiling (largest N).
+# -n: sweep ceiling or comma list of exact counts.
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'"
         exit 1;;
 esac
-NMAX_CEIL=0
-for n in ${NMAX//,/ }; do
-    if [ "$n" -gt "$NMAX_CEIL" ]; then NMAX_CEIL=$n; fi
-done
 
 DATASET_KEY="$(bash ./runner_scripts/bench_key.sh)"
 
@@ -293,7 +280,6 @@ run_step() {
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
 echo "Algorithm   : $ALGORITHM"
-echo "Overlap     : profile=$OVERLAP_PROFILE"
 echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
 echo "Analyses    : performance=$DO_PERF work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
@@ -307,7 +293,6 @@ echo
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "nmax=$NMAX"
     echo "algorithm=$ALGORITHM"
-    echo "overlap_profile=$OVERLAP_PROFILE"
     echo "packages=${LANGUAGES[*]}"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "git_dirty=$(test -n "$(git status --porcelain 2>/dev/null)" && echo yes || echo no)"
@@ -410,10 +395,10 @@ elif $DO_OVERLAP; then
     PY=./GPU_ODE_CUBIE/venv/bin/python
     [ -x "$PY" ] || PY=python3
     CLOCK_CRITICAL=true; STEP_LABEL="overlap"
-    run_step "Cubie vs DiffEqGPU overlap ($OVERLAP_PROFILE, nmax=$NMAX_CEIL)" \
+    run_step "Cubie vs DiffEqGPU overlap (n=$NMAX)" \
         "cubie_julia_overlap.log" \
         "$PY" ./run_cubie_julia_overlap.py \
-            --profile "$OVERLAP_PROFILE" -a all -p "$NE_PACKAGE" -n "$NMAX_CEIL"
+            -a all -p "$NE_PACKAGE" -n "$NMAX"
     status=$?
     # The launcher already records per-framework failures and keeps going, so a
     # non-zero exit here means at least one worker died, not that all did.
@@ -441,9 +426,20 @@ if $DO_PLOTS; then
                             || record "plot:wp" "FAILED" "-" "$status"
     fi
 
-    # Exit 3 is "nothing to compare", normal on a single machine. Any other
-    # non-zero is a real failure and must count.
     PY=./GPU_ODE_CUBIE/venv/bin/python
+    if { $DO_OVERLAP || $PLOT_ALL; } && [ -n "$NE_PACKAGE" ]; then
+        if [ -x "$PY" ]; then
+            run_step "Overlap plot and report" "cubie_julia_overlap_analyze.log" \
+                "$PY" ./runner_scripts/cubie_julia_overlap/analyze.py
+            status=$?
+            [ "$status" -eq 0 ] && record "plot:overlap" "OK" "-" "$status" \
+                                || record "plot:overlap" "FAILED" "-" "$status"
+        else
+            record "plot:overlap" "SKIPPED" "cubie venv missing" "-"
+        fi
+    fi
+
+    # Exit 3 is "nothing to compare"; any other non-zero is a real failure.
     if [ -x "$PY" ]; then
         run_step "Pairwise numerical comparison" "compare_numerical.log" \
             "$PY" compare_numerical_results.py

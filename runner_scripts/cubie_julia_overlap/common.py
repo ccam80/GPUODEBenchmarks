@@ -70,21 +70,18 @@ def performance_ns(nmax, from_n=0):
     return values
 
 
-def profile_protocol(profile, nmax, from_n=0):
-    if profile == "smoke":
-        return {
-            "performance_ns": performance_ns(min(nmax, 32), from_n),
-            "performance_repeats": 2,
-            "ne_n": 32,
-            "ne_dts": [2.0 ** -4, 2.0 ** -8],
-            "ne_tols": [1.0e-3],
-            "wp_n": 256,
-            "wp_dts": [2.0 ** -6],
-            "wp_tols": [1.0e-4],
-            "work_repeats": 2,
-        }
+def parse_ns(spec, from_n=0):
+    """A single value is a sweep ceiling; a comma list is the exact counts."""
+    text = str(spec)
+    if "," not in text:
+        return performance_ns(int(text), from_n)
+    values = sorted({int(part) for part in text.split(",") if part})
+    return [n for n in values if n >= max(from_n, 8)]
+
+
+def protocol(nmax, from_n=0):
     return {
-        "performance_ns": performance_ns(nmax, from_n),
+        "performance_ns": parse_ns(nmax, from_n),
         "performance_repeats": PERFORMANCE_REPEATS,
         "ne_n": N_NE,
         "ne_dts": NE_DTS,
@@ -105,26 +102,27 @@ def ensure_csv(path, fields):
     return path
 
 
-def regenerated(row, phases, from_n=0, algorithm="all"):
+def regenerated(row, phases, from_n=0, algorithm="all", ns=None):
     """True when a run over `phases` will produce this row again."""
     if algorithm != "all" and row.get("algorithm") != algorithm:
         return False
     if row.get("phase") not in phases:
         return False
-    if not from_n or row.get("phase") != "performance":
+    if row.get("phase") != "performance" or (not from_n and ns is None):
         return True
     try:
-        return int(row["n"]) >= from_n
+        n = int(row["n"])
     except (KeyError, TypeError, ValueError):
         return True
+    return n in ns if ns is not None else n >= from_n
 
 
-def prune_csv(path, fields, phases, from_n=0, algorithm="all"):
-    """Drop the rows a run regenerates; from_n and algorithm narrow which."""
+def prune_csv(path, fields, phases, from_n=0, algorithm="all", ns=None):
+    """Drop the rows a run regenerates; from_n, algorithm and ns narrow which."""
     path = ensure_csv(path, fields)
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    kept = [row for row in rows if not regenerated(row, phases, from_n, algorithm)]
+    kept = [row for row in rows if not regenerated(row, phases, from_n, algorithm, ns)]
     if len(kept) == len(rows):
         return 0
     with path.open("w", newline="", encoding="utf-8") as handle:
