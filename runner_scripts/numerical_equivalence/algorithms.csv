@@ -14,10 +14,10 @@ crank_nicolson,Trapezoid(),2,implicit,true,
 trapezoidal_dirk,Trapezoid(),2,dirk,true,
 implicit_midpoint,ImplicitMidpoint(),2,dirk,true,
 sdirk_2_2,SDIRK22(),2,dirk,false,OrdinaryDiffEq's SDIRK22 constructor returns Trapezoid (upstream alias) — same order but not Alexander's tableau
-l_stable_sdirk_4,Hairer4(),4,dirk,true,Hairer–Wanner SDIRK4 gamma=1/4; tableau verified identical
-radau_iia_5,RadauIIA5(),5,firk,true,
+l_stable_sdirk_4,Hairer4(smooth_est = false),4,dirk,true,Hairer–Wanner SDIRK4 gamma=1/4; tableau verified identical; smooth_est off — see the smooth_est note in ne_diffeq.jl
+radau_iia_5,RadauIIA5(),5,firk,true,smooth_est LEFT ON — for Radau the smoothed estimate is the standard one (Hairer & Wanner II.IV.8); turning it off over-reports the error and the solve hits maxiters by tol 1e-6
 ros3p,ROS3P(),3,rosenbrock,true,
 rodas3p,Rodas3P(),3,rosenbrock,true,
 rosenbrock23_sciml,Rosenbrock23(),2,rosenbrock,true,
-kvaerno3,Kvaerno3(),3,dirk,true,Kvaerno (2004) ESDIRK; cubie kvaerno3 tableau
-kvaerno5,Kvaerno5(),5,dirk,true,Kvaerno (2004) ESDIRK; cubie kvaerno5 tableau
+kvaerno3,Kvaerno3(smooth_est = false),3,dirk,true,Kvaerno (2004) ESDIRK; cubie kvaerno3 tableau; smooth_est off — see the smooth_est note in ne_diffeq.jl
+kvaerno5,Kvaerno5(smooth_est = false),5,dirk,true,Kvaerno (2004) ESDIRK; cubie kvaerno5 tableau; smooth_est off — see the smooth_est note in ne_diffeq.jl
