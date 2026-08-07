@@ -36,8 +36,12 @@ DT_MIN = 1.0e-12
 DT_MAX = 1.0e3
 
 # "transfers": "both" includes h2d and d2h, "none" includes neither.
+# One row per timed point: the workers reduce their repeats before writing, so
+# the headline statistic (min, as in the performance suite) is fixed at the
+# point of measurement rather than recomputed downstream.
+TIMING_STATS = ["samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms"]
 TIMING_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "transfers",
-                 "n", "setting_kind", "setting", "sample", "time_ms"]
+                 "n", "setting_kind", "setting"] + TIMING_STATS
 METRIC_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
                  "setting_kind", "setting", "golden_rmse", "finite_trajectories",
                  "failed_trajectories", "finals_path"]
@@ -93,9 +97,48 @@ def protocol(nmax, from_n=0):
     }
 
 
+def timing_stats(values):
+    """Reduce one point's repeats to the persisted timing statistics.
+
+    Percentiles use linear interpolation so the Julia worker's
+    ``Statistics.quantile`` defaults produce identical numbers.
+    """
+    import numpy as np
+    a = np.asarray(list(values), dtype=float)
+    return {"samples": len(a), "min_ms": float(np.min(a)),
+            "p05_ms": float(np.percentile(a, 5)),
+            "median_ms": float(np.median(a)),
+            "p95_ms": float(np.percentile(a, 95)),
+            "max_ms": float(np.max(a))}
+
+
+def _retire_stale_schema(path, fields):
+    """Move a CSV written under a different schema aside, keeping the data.
+
+    Timing rows changed from one-per-repeat to one-per-point. A file left
+    over from the old layout cannot be appended to or pruned coherently, so
+    it is renamed rather than silently mixed with new rows or deleted.
+    """
+    with path.open(newline="", encoding="utf-8") as handle:
+        header = next(csv.reader(handle), None)
+    if header is None or header == list(fields):
+        return False
+    target = path.with_name(path.stem + ".legacy" + path.suffix)
+    index = 1
+    while target.exists():
+        target = path.with_name("{}.legacy{}{}".format(path.stem, index, path.suffix))
+        index += 1
+    path.rename(target)
+    print("{} used the previous schema; moved to {} and starting fresh."
+          .format(path.name, target.name))
+    return True
+
+
 def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        _retire_stale_schema(path, fields)
     if not path.exists():
         with path.open("w", newline="", encoding="utf-8") as handle:
             csv.DictWriter(handle, fieldnames=fields).writeheader()
@@ -165,12 +208,24 @@ def rmse(finals, golden):
     return float(np.sqrt(np.mean(delta * delta)))
 
 
-def pi_controller(order):
+# OrdinaryDiffEq's qsteady deadband, resolved from its defaults and exported
+# by the ne suite (data/numerical_equivalence/julia/controller_constants.csv):
+# explicit RK holds dt over qsteady 1.0..1.0 (no deadband), every implicit
+# family over 1.0..1.2. Julia's q divides dt where cubie's gain multiplies it,
+# so the bounds inverate: deadband = (1/qsteady_max, 1/qsteady_min). The ne
+# suite's "matched" tier derives the same numbers per algorithm; keep the two
+# in sync so both suites' comparison tiers are the same experiment.
+JULIA_QSTEADY_MAX = {"ERK": 1.0}
+JULIA_QSTEADY_MAX_IMPLICIT = 1.2
+
+
+def pi_controller(order, family):
     """Return the PI-controller configuration used by the comparison tier."""
     from cubie.integrators.algorithms.generic_dirk import (
         dirk_default_ki,
         dirk_default_kp,
     )
+    qsteady_max = JULIA_QSTEADY_MAX.get(family, JULIA_QSTEADY_MAX_IMPLICIT)
     return {
         "step_controller": "pi",
         "kp": dirk_default_kp,
@@ -178,6 +233,6 @@ def pi_controller(order):
         "safety": 0.9,
         "min_gain": 0.2,
         "max_gain": 10.0,
-        "deadband_min": 1.0,
+        "deadband_min": 1.0 / qsteady_max,
         "deadband_max": 1.0,
     }

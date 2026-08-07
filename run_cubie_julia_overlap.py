@@ -7,8 +7,8 @@ Examples:
   python run_cubie_julia_overlap.py -a performance -n 32768,134217728 -p julia
   python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
 
-Results land in data/cubie_julia_overlap/<dataset-key>/, figures in plots/ and
-the report at cubie_julia_overlap_<dataset-key>.md. A run replaces the rows it
+Results land in data/cubie_julia_overlap/<dataset-key>/; figures and the report
+land in plots/<dataset-key>/. A run replaces the rows it
 regenerates and leaves the rest. Workers record point failures and keep going;
 the analyzer runs after the selected workers finish.
 """

@@ -57,11 +57,32 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(len(common.ANALYSES), len(common.PHASES))
 
     def test_pi_controller_constants(self):
-        settings = common.pi_controller(5)
+        settings = common.pi_controller(5, "ERK")
         self.assertEqual(settings["step_controller"], "pi")
         self.assertAlmostEqual(settings["min_gain"], 0.2)
         self.assertAlmostEqual(settings["max_gain"], 10.0)
         self.assertAlmostEqual(settings["safety"], 0.9)
+
+    def test_pi_controller_deadband_follows_julia_qsteady(self):
+        """Julia holds dt over qsteady 1.0..1.0 for ERK, 1.0..1.2 elsewhere.
+
+        Cubie's gain multiplies dt where Julia's q divides it, so the mapped
+        deadband is (1/qsteady_max, 1/qsteady_min).
+        """
+        for family in ("ESDIRK", "Rosenbrock-W"):
+            settings = common.pi_controller(3, family)
+            self.assertAlmostEqual(settings["deadband_min"], 1.0 / 1.2)
+            self.assertAlmostEqual(settings["deadband_max"], 1.0)
+        explicit = common.pi_controller(5, "ERK")
+        self.assertAlmostEqual(explicit["deadband_min"], 1.0)
+        self.assertAlmostEqual(explicit["deadband_max"], 1.0)
+
+    def test_every_algorithm_family_has_a_qsteady_mapping(self):
+        """A new family must not silently inherit the implicit deadband."""
+        families = {row["family"] for row in common.algorithms()}
+        self.assertTrue(families <= (set(common.JULIA_QSTEADY_MAX)
+                                     | {"Rosenbrock-W", "ESDIRK"}),
+                        "unmapped family in algorithms.csv: {}".format(families))
 
 
 class PruneTests(unittest.TestCase):
@@ -134,26 +155,71 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(path.read_text().strip(), ",".join(self.FIELDS))
 
 
+class TimingStatsTests(unittest.TestCase):
+    def test_stats_cover_the_persisted_columns(self):
+        stats = common.timing_stats([4.0, 1.0, 3.0, 2.0])
+        self.assertEqual(sorted(stats), sorted(common.TIMING_STATS))
+        self.assertEqual(stats["samples"], 4)
+        self.assertAlmostEqual(stats["min_ms"], 1.0)
+        self.assertAlmostEqual(stats["median_ms"], 2.5)
+        self.assertAlmostEqual(stats["max_ms"], 4.0)
+
+    def test_a_single_repeat_collapses_to_that_value(self):
+        stats = common.timing_stats([7.5])
+        self.assertEqual(stats["samples"], 1)
+        for field in ("min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms"):
+            self.assertAlmostEqual(stats[field], 7.5)
+
+    def test_stale_schema_is_retired_rather_than_mixed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cubie_timings.csv"
+            with path.open("w", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["framework", "algorithm", "sample", "time_ms"])
+                writer.writerow(["cubie", "tsit5", "0", "1.0"])
+            common.ensure_csv(path, common.TIMING_FIELDS)
+            with path.open(newline="") as handle:
+                self.assertEqual(next(csv.reader(handle)), common.TIMING_FIELDS)
+                self.assertEqual(list(csv.reader(handle)), [])
+            legacy = Path(tmp) / "cubie_timings.legacy.csv"
+            self.assertTrue(legacy.exists())
+            self.assertIn("time_ms", legacy.read_text())
+
+    def test_a_matching_header_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = common.ensure_csv(Path(tmp) / "cubie_timings.csv",
+                                     common.TIMING_FIELDS)
+            common.append_csv(path, common.TIMING_FIELDS,
+                              {"framework": "cubie", "min_ms": "1.0"})
+            common.ensure_csv(path, common.TIMING_FIELDS)
+            with path.open(newline="") as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 1)
+            self.assertFalse((Path(tmp) / "cubie_timings.legacy.csv").exists())
+
+
 class AnalysisTests(unittest.TestCase):
-    def test_timing_percentiles_and_speedup(self):
+    def test_speedup_compares_the_minimum(self):
         base = {"algorithm": "tsit5", "phase": "performance", "mode": "fixed",
                 "n": "8", "setting_kind": "dt", "setting": "0.1"}
-        rows = []
-        for framework, tier, samples in (("julia", "fixed", (4, 6)),
-                                         ("cubie", "fixed", (2, 3))):
-            for i, value in enumerate(samples):
-                rows.append(dict(base, framework=framework, tier=tier,
-                                 sample=str(i), time_ms=str(value)))
+        rows = [dict(base, framework=framework, tier="fixed",
+                     **{k: str(v) for k, v in common.timing_stats(samples).items()})
+                for framework, samples in (("julia", (4.0, 6.0)),
+                                           ("cubie", (2.0, 3.0)))]
         summary = analyze.timing_summary(rows)
         boost = analyze.speedups(summary)
         self.assertEqual(len(boost), 1)
+        # min-of-repeats: 4.0 / 2.0, not the medians 5.0 / 2.5.
         self.assertAlmostEqual(boost[0]["julia_over_cubie_speedup"], 2.0)
+        self.assertAlmostEqual(boost[0]["cubie_min_ms"], 2.0)
+        self.assertAlmostEqual(boost[0]["julia_min_ms"], 4.0)
 
     def test_invalid_points_are_excluded_from_timing_summary(self):
         timing = [{"framework": "cubie", "algorithm": "tsit5",
                    "phase": "performance", "mode": "adaptive",
                    "tier": "default", "n": "8", "setting_kind": "tol",
-                   "setting": "1e-8", "sample": "0", "time_ms": "1.0"}]
+                   "setting": "1e-8", "samples": "1", "min_ms": "1.0",
+                   "p05_ms": "1.0", "median_ms": "1.0", "p95_ms": "1.0",
+                   "max_ms": "1.0"}]
         invalid = [{"framework": "cubie", "algorithm": "tsit5",
                     "phase": "performance", "mode": "adaptive",
                     "tier": "default", "n": "8", "setting_kind": "tol",
@@ -194,8 +260,9 @@ class AnalyzerOutputTests(unittest.TestCase):
         base = {"algorithm": "tsit5", "phase": "performance", "mode": "fixed",
                 "tier": "fixed", "transfers": "both", "n": "8",
                 "setting_kind": "dt", "setting": "0.1"}
-        timing = dict(base, framework=framework, sample="0",
-                      time_ms="4.0" if framework == "julia" else "2.0")
+        elapsed = 4.0 if framework == "julia" else 2.0
+        timing = dict(base, framework=framework,
+                      **{k: str(v) for k, v in common.timing_stats([elapsed]).items()})
         metric = {k: base[k] for k in ("algorithm", "phase", "mode", "tier", "n",
                                        "setting_kind", "setting")}
         metric.update(framework=framework, golden_rmse="", finite_trajectories="8",
@@ -211,21 +278,20 @@ class AnalyzerOutputTests(unittest.TestCase):
     def test_figures_and_report_land_outside_the_data_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            data, plots_dir = tmp / "data" / self.KEY, tmp / "plots"
+            data, plots_dir = tmp / "data" / self.KEY, tmp / "plots" / self.KEY
             data.mkdir(parents=True)
-            report = tmp / "cubie_julia_overlap_{}.md".format(self.KEY)
+            report = plots_dir / analyze.REPORT_NAME
             self.write_point(data, "julia")
             self.write_point(data, "cubie")
             argv = sys.argv
             sys.argv = ["analyze.py", "--output", str(data), "--key", self.KEY,
-                        "--plots-dir", str(plots_dir), "--report", str(report)]
+                        "--plots-dir", str(plots_dir)]
             try:
                 self.assertEqual(analyze.main(), 0)
             finally:
                 sys.argv = argv
-            for name in ("overlap_performance_scaling", "overlap_numerical_equivalence",
-                         "overlap_work_precision"):
-                self.assertTrue((plots_dir / "{}_{}.png".format(name, self.KEY)).exists(), name)
+            for name in analyze.PLOT_NAMES.values():
+                self.assertTrue((plots_dir / name).exists(), name)
             self.assertFalse((data / "plots").exists())
             self.assertFalse((data / "report.md").exists())
             self.assertFalse((data / "plot_failure.txt").exists())
@@ -246,8 +312,16 @@ class AnalyzerOutputTests(unittest.TestCase):
                 self.assertEqual(analyze.main(), 0)
             finally:
                 sys.argv = argv
-            self.assertTrue(
-                (plots_dir / "overlap_work_precision_{}.png".format(self.KEY)).exists())
+            self.assertTrue((plots_dir / analyze.PLOT_NAMES["work_precision"]).exists())
+
+    def test_figures_and_report_default_into_the_machine_group_directory(self):
+        root, plots_dir, report = analyze.output_paths(self.KEY)
+        self.assertEqual(plots_dir, (analyze.REPO_ROOT / "plots" / self.KEY).resolve())
+        self.assertEqual(report, plots_dir / analyze.REPORT_NAME)
+        self.assertEqual(
+            root, (analyze.REPO_ROOT / "data" / "cubie_julia_overlap" / self.KEY).resolve())
+        for name in analyze.PLOT_NAMES.values():
+            self.assertNotIn(self.KEY, name)
 
 
 if __name__ == "__main__":
