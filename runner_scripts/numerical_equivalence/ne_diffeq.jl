@@ -14,6 +14,24 @@
 #
 # The protocol mirrors ne_common.py; keep the two in sync.
 #
+# smooth_est: OrdinaryDiffEq's SDIRK/ESDIRK/FIRK steppers default to
+# smooth_est = true, which passes the embedded error estimate through
+# W^-1 = (I - gamma*h*J)^-1 before the controller sees it. Neither cubie nor
+# DiffEqGPU's GPU kernels do this, so leaving it on compares two different
+# error estimators and not two implementations of the same method: on this
+# non-stiff Lorenz ensemble the smoothed estimate under-reports the error, the
+# CPU run takes far too few steps, and cubie appears 10-100x more accurate per
+# tolerance for the whole DIRK family. Measured for Kvaerno3 at tol=1e-6:
+# smooth_est=true gives 66 steps and err 1.85e-3, smooth_est=false gives 352
+# steps and err 2.45e-5, against cubie 9.5e-6 and GPUKvaerno3 9.9e-6. So the
+# SDIRK/ESDIRK constructors in algorithms.csv that accept the option
+# (Kvaerno3, Kvaerno5, Hairer4) pin smooth_est = false. Trapezoid,
+# ImplicitEuler, ImplicitMidpoint, SDIRK22 and the Rosenbrock methods do not
+# expose it. RadauIIA5 does, but keeps it ON: for Radau the smoothed estimate
+# IS the standard one (Hairer & Wanner II.IV.8) rather than a refinement of a
+# raw embedded pair, and disabling it over-reports the error — 419 steps at
+# tol 1e-2 falling to a maxiters failure on all 1024 trajectories by 1e-6.
+#
 # Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
 # all Float32 (the rho grid is read from the golden file, whose values are
 # exactly representable in Float32), and every trajectory's final state is

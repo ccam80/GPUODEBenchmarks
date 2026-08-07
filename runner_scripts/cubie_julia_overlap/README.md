@@ -11,9 +11,10 @@ python run_cubie_julia_overlap.py --algorithm kvaerno5 -p cubie
 ```
 
 CSVs are written to `data/cubie_julia_overlap/<dataset-key>/`, one directory
-per GPU and OS; figures to `plots/overlap_*_<dataset-key>.png` and the report
-to `cubie_julia_overlap_<dataset-key>.md` in the repository root. A run
-replaces the rows it regenerates and leaves the rest:
+per GPU and OS; figures to `plots/<dataset-key>/overlap_*.png` and the report
+to `plots/<dataset-key>/cubie_julia_overlap.md`, the same group directory the
+other analyzers write to. A run replaces the rows it regenerates and leaves
+the rest:
 
 - `-a, --analysis` selects the analysis: `performance`, `numerical`, `work-precision`, `all`.
 - `-p, --package` selects the package: `cubie`, `julia`, `all`.

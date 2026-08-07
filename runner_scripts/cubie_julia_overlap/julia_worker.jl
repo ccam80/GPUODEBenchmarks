@@ -9,6 +9,7 @@ using StaticArrays
 using CSV
 using DelimitedFiles
 using Printf
+using Statistics
 
 CUDA.allowscalar(false)
 
@@ -67,7 +68,7 @@ function protocol()
 end
 const PROTOCOL = protocol()
 
-const TIMING_HEADER = "framework,algorithm,phase,mode,tier,transfers,n,setting_kind,setting,sample,time_ms"
+const TIMING_HEADER = "framework,algorithm,phase,mode,tier,transfers,n,setting_kind,setting,samples,min_ms,p05_ms,median_ms,p95_ms,max_ms"
 const METRIC_HEADER = "framework,algorithm,phase,mode,tier,n,setting_kind,setting,golden_rmse,finite_trajectories,failed_trajectories,finals_path"
 const FAILURE_HEADER = "framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message"
 const TIMING_FILE = joinpath(OUT, "julia_timings.csv")
@@ -85,6 +86,17 @@ end
 init_csv(TIMING_FILE, TIMING_HEADER)
 init_csv(METRIC_FILE, METRIC_HEADER)
 init_csv(FAILURE_FILE, FAILURE_HEADER)
+
+"""Reduce one point's repeats to the persisted timing statistics.
+
+`quantile` defaults to linear interpolation, matching `np.percentile`, so
+both workers' columns are computed identically.
+"""
+function timing_stats(values)
+    v = collect(Float64, values)
+    return (length(v), minimum(v), quantile(v, 0.05), median(v),
+        quantile(v, 0.95), maximum(v))
+end
 
 clean(value) = replace(replace(string(value), ',' => ';'), '\n' => ' ')
 function append_row(path, values...)
@@ -262,7 +274,11 @@ for row in table
                 solve_end_to_end(probs_host, prob, alg, mode, setting)
                 solve_device_only(probs, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, 3)
-                for sample in 0:(repeats - 1)
+                # Each transfer variant runs as an unbroken block, so one
+                # variant's samples are never separated by the other's
+                # allocation and transfer traffic.
+                end_to_end = Float64[]
+                for _ in 1:repeats
                     finals, elapsed = solve_end_to_end(probs_host, prob, alg, mode, setting)
                     finite, failed = finite_counts(finals)
                     if failed > 0 || finite != n
@@ -270,11 +286,13 @@ for row in table
                             n, setting_kind, setting, "", finite, failed, "")
                         error("non-finite result: $(finite)/$(n) trajectories valid")
                     end
+                    push!(end_to_end, elapsed)
+                end
+                device_only = [solve_device_only(probs, prob, alg, mode, setting)
+                               for _ in 1:repeats]
+                for (transfers, samples) in (("both", end_to_end), ("none", device_only))
                     append_row(TIMING_FILE, "julia", alias, phase, mode, tier,
-                        "both", n, setting_kind, setting, sample, elapsed)
-                    append_row(TIMING_FILE, "julia", alias, phase, mode, tier,
-                        "none", n, setting_kind, setting, sample,
-                        solve_device_only(probs, prob, alg, mode, setting))
+                        transfers, n, setting_kind, setting, timing_stats(samples)...)
                 end
                 finite, failed = finite_counts(finals)
                 if phase == "performance"
