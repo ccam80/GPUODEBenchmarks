@@ -12,7 +12,9 @@ trapezoidal_dirk,Trapezoid(),2,dirk,false,no embedded pair in cubie's ESDIRK tra
 implicit_midpoint,ImplicitMidpoint(),2,dirk,false,Gauss-Legendre 2 tableau is errorless
 sdirk_2_2,SDIRK22(),2,dirk,false,Alexander's tableau carries no error estimate in cubie
 l_stable_sdirk_4,Hairer4(),4,dirk,true,
+radau_iia_3,RadauIIA3(),3,firk,true,
 radau_iia_5,RadauIIA5(),5,firk,true,
+radau_iia_9,RadauIIA9(),9,firk,true,
 ros3p,ROS3P(),3,rosenbrock,true,
 rodas3p,Rodas3P(),3,rosenbrock,true,
 rosenbrock23_sciml,Rosenbrock23(),2,rosenbrock,true,
