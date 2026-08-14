@@ -14,24 +14,6 @@
 #
 # The protocol mirrors ne_common.py; keep the two in sync.
 #
-# smooth_est: OrdinaryDiffEq's SDIRK/ESDIRK/FIRK steppers default to
-# smooth_est = true, which passes the embedded error estimate through
-# W^-1 = (I - gamma*h*J)^-1 before the controller sees it. Neither cubie nor
-# DiffEqGPU's GPU kernels do this, so leaving it on compares two different
-# error estimators and not two implementations of the same method: on this
-# non-stiff Lorenz ensemble the smoothed estimate under-reports the error, the
-# CPU run takes far too few steps, and cubie appears 10-100x more accurate per
-# tolerance for the whole DIRK family. Measured for Kvaerno3 at tol=1e-6:
-# smooth_est=true gives 66 steps and err 1.85e-3, smooth_est=false gives 352
-# steps and err 2.45e-5, against cubie 9.5e-6 and GPUKvaerno3 9.9e-6. So the
-# SDIRK/ESDIRK constructors in algorithms.csv that accept the option
-# (Kvaerno3, Kvaerno5, Hairer4) pin smooth_est = false. Trapezoid,
-# ImplicitEuler, ImplicitMidpoint, SDIRK22 and the Rosenbrock methods do not
-# expose it. RadauIIA5 does, but keeps it ON: for Radau the smoothed estimate
-# IS the standard one (Hairer & Wanner II.IV.8) rather than a refinement of a
-# raw embedded pair, and disabling it over-reports the error — 419 steps at
-# tol 1e-2 falling to a maxiters failure on all 1024 trajectories by 1e-6.
-#
 # Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
 # all Float32 (the rho grid is read from the golden file, whose values are
 # exactly representable in Float32), and every trajectory's final state is
@@ -82,7 +64,7 @@ const N_NE = 1024
 # floor somewhere in the sweep.
 const DTS_NE = [2.0^-k for k in 1:13]
 # Adaptive protocol (same as ne_common): tolerance grid and pinned dt bounds.
-const TOLS_NE = [10.0^-k for k in 2:6]
+const TOLS_NE = [10.0^-k for k in 2:8]
 const DT0_NE = 0.01f0
 const DT_MIN_NE = 1.0f-6
 const DT_MAX_NE = 0.5f0
@@ -261,8 +243,7 @@ end
 if MODE in ("adaptive", "all")
     const_io = IOBuffer()
     println(const_io,
-        "cubie_alias,controller,beta1,beta2,qmin,qmax,gamma," *
-        "qsteady_min,qsteady_max,order")
+        "cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order")
 
     for row in table
         alias = String(row.cubie_alias)
@@ -295,12 +276,10 @@ if MODE in ("adaptive", "all")
             b2 = hasproperty(ctrl, :beta2) ? string(ctrl.beta2) : ""
             println(const_io,
                 "$(alias),$(cname),$(b1),$(b2),$(basic.qmin),$(basic.qmax)," *
-                "$(basic.gamma),$(basic.qsteady_min),$(basic.qsteady_max)," *
-                "$(row.order)")
+                "$(basic.gamma),$(row.order)")
             println("  controller: $(cname) beta1=$(b1) beta2=$(b2) " *
                     "qmin=$(basic.qmin) qmax=$(basic.qmax) " *
-                    "gamma=$(basic.gamma) " *
-                    "qsteady=($(basic.qsteady_min),$(basic.qsteady_max))")
+                    "gamma=$(basic.gamma)")
         catch err
             msg = sprint(showerror, err)[1:min(end, 200)]
             println("  controller-constants export FAILED: $(msg)")

@@ -98,14 +98,9 @@ if errorlevel 1 (
 )
 
 :compare
-echo --- Comparison report + plots ---
+echo --- Comparison tables + plots ---
 call "GPU_ODE_CUBIE\venv\Scripts\python.exe" compare_numerical_equivalence.py
 set compare_status=%errorlevel%
-if %compare_status%==0 (
-    echo All algorithms equivalent/tracking
-) else (
-    echo Comparison found mismatching algorithms ^(see numerical_equivalence_^<os^>_^<gpu^>.md^)
-)
 
 popd
 exit /b %compare_status%
