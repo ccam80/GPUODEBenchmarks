@@ -6,6 +6,7 @@ REM   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax 
 REM   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
 REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 REM   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 REM
 REM e.g. run_all_benchmarks.bat -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
 
@@ -15,6 +16,7 @@ set PACKAGE=all
 set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
+set PROBLEM=all
 
 REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_loop
@@ -28,6 +30,8 @@ if /i "%~1"=="-n" set "PA_TARGET=NMAX"
 if /i "%~1"=="--nmax" set "PA_TARGET=NMAX"
 if /i "%~1"=="-g" set "PA_TARGET=ALGORITHM"
 if /i "%~1"=="--algorithm" set "PA_TARGET=ALGORITHM"
+if /i "%~1"=="-s" set "PA_TARGET=PROBLEM"
+if /i "%~1"=="--problem" set "PA_TARGET=PROBLEM"
 if not defined PA_TARGET (
     echo Unknown option "%~1"
     popd
@@ -159,7 +163,7 @@ for %%p in (!PACKAGES!) do (
     echo =========================================
     echo %~1: %%p
     echo =========================================
-    call "%~dp0run_benchmark.bat" -p %%p -a %~1 -n "%NMAX%" -g "%ALGORITHM%" -d gpu -m ode
+    call "%~dp0run_benchmark.bat" -p %%p -a %~1 -n "%NMAX%" -g "%ALGORITHM%" -s "%PROBLEM%" -d gpu -m ode
     if !errorlevel! neq 0 (
         echo Error during %~1 for %%p; continuing with the next package
     ) else (
@@ -186,5 +190,5 @@ if not defined NE_PACKAGE (
     echo Numerical equivalence skipped: no requested package is in the suite ^(all^|julia^|cubie^)
     exit /b 0
 )
-call "%~dp0run_numerical_equivalence.bat" -p %NE_PACKAGE%
+call "%~dp0run_numerical_equivalence.bat" -p %NE_PACKAGE% -s "%PROBLEM%"
 exit /b 0

@@ -6,6 +6,7 @@
 #   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #
 # e.g. ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
 
@@ -16,6 +17,7 @@ PACKAGE=all
 ANALYSIS=performance
 NMAX=16777216
 ALGORITHM=all
+PROBLEM=all
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -23,6 +25,7 @@ while [ $# -gt 0 ]; do
         -a|--analysis) ANALYSIS=$2; shift 2;;
         -n|--nmax)     NMAX=$2; shift 2;;
         -g|--algorithm) ALGORITHM=$2; shift 2;;
+        -s|--problem)  PROBLEM=$2; shift 2;;
         -h|--help)     sed -n '2,10p' "$0" | sed 's/^# \?//'; exit 0;;
         *) echo "Unknown option $1" >&2; exit 1;;
     esac
@@ -37,6 +40,9 @@ case "$PACKAGE" in
 esac
 case "$ALGORITHM" in
     ''|*[!a-z0-9,-]*) echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2; exit 1;;
+esac
+case "$PROBLEM" in
+    ''|*[!a-z0-9_,-]*) echo "-s/--problem takes names from runner_scripts/problems.csv, got '$PROBLEM'" >&2; exit 1;;
 esac
 
 DO_PERF=false
@@ -88,7 +94,7 @@ run_sweep() {
         echo "========================================="
         echo "$analysis: $pkg"
         echo "========================================="
-        if bash ./run_benchmark.sh -p "$pkg" -a "$analysis" -n "$NMAX" -g "$ALGORITHM" -d gpu -m ode; then
+        if bash ./run_benchmark.sh -p "$pkg" -a "$analysis" -n "$NMAX" -g "$ALGORITHM" -s "$PROBLEM" -d gpu -m ode; then
             echo "Completed $analysis for $pkg"
         else
             echo "Error during $analysis for $pkg; continuing with the next package"
@@ -126,7 +132,7 @@ if $DO_NE; then
         NE_PACKAGE=cubie
     fi
     if [ -n "$NE_PACKAGE" ]; then
-        bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE" || echo "Numerical equivalence reported problems"
+        bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE" -s "$PROBLEM" || echo "Numerical equivalence reported problems"
     else
         echo "Numerical equivalence skipped: no requested package is in the suite (all|julia|cubie)"
     fi

@@ -58,16 +58,19 @@ MODE in ("fixed", "adaptive", "all") ||
     error("--controller must be fixed, adaptive or all")
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
+include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 const N_NE = 1024
-# Dyadic dt grid, 2^-1 .. 2^-13 (same as ne_common.DTS_NE): coarse steps
-# included so high-order methods have truncation error above the float32
-# floor somewhere in the sweep.
-const DTS_NE = [2.0^-k for k in 1:13]
-# Adaptive protocol (same as ne_common): tolerance grid and pinned dt bounds.
+# Adaptive protocol (same as ne_common): tolerance grid and dt pins as
+# fractions of the problem duration.
 const TOLS_NE = [10.0^-k for k in 2:8]
-const DT0_NE = 0.01f0
-const DT_MIN_NE = 1.0f-6
-const DT_MAX_NE = 0.5f0
+const DT0_FRACTION = 1.0f-2
+const DT_MIN_FRACTION = 1.0f-6
+const DT_MAX_FRACTION = 0.5f0
+
+const PROBLEM = get(NE_OPT, "problem", "all")
+const PROBLEMS = resolve_problems(PROBLEM, "julia")
+isempty(PROBLEMS) && error("no problem matches '$(PROBLEM)'")
 
 # Cash-Karp 5(4) and Fehlberg 4(5) tableaus for the generic ExplicitRK
 # stepper. DiffEqDevTools 3.x removed its construct* tableau library, so the
@@ -107,50 +110,60 @@ function construct_fehlberg_45(::Type{T}) where {T}
         αEEst = map(T, αEEst), adaptiveorder = 4)
 end
 
-golden_path = joinpath(REPO_ROOT, "data", "numerical",
-    "golden_ne_lorenz_1024.csv")
-isfile(golden_path) || error(
-    "$(golden_path) not found - generate it first with `julia -t auto " *
-    "--project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl`")
-golden = readdlm(golden_path, ',')
-size(golden) == (N_NE, 4) || error(
-    "golden ne reference has size $(size(golden)), expected ($(N_NE), 4)")
-rhos32 = Float32.(golden[:, 1])
-# The rho values are float32-rounded, so the cast back is exact.
-all(Float64.(rhos32) .== golden[:, 1]) || error(
-    "golden rho column is not exactly representable in Float32")
-golden_states = golden[:, 2:4]
 
-function lorenz!(du, u, p, t)
-    du[1] = 10.0f0 * (u[2] - u[1])
-    du[2] = u[1] * (p[1] - u[3]) - u[2]
-    du[3] = u[1] * u[2] - (8.0f0 / 3.0f0) * u[3]
-    return nothing
+const TABLE_ALL = collect(CSV.File(joinpath(@__DIR__, "algorithms.csv")))
+const TABLE = ALGORITHM == "all" ? TABLE_ALL :
+    filter(row -> String(row.cubie_alias) == ALGORITHM, TABLE_ALL)
+isempty(TABLE) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+
+failures = Tuple{String, String, Float64, String}[]
+
+"Golden reference, ensemble problem and output directory for one problem."
+function setup(problem)
+    name = problem["problem"]
+    nstates = problem["states"]
+    golden_path = joinpath(REPO_ROOT, "data", "numerical",
+        "golden_ne_$(name)_$(N_NE).csv")
+    isfile(golden_path) || error(
+        "$(golden_path) not found - generate it first with `julia -t auto " *
+        "--project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl " *
+        "--problem $(name)`")
+    golden = readdlm(golden_path, ',')
+    size(golden) == (N_NE, nstates + 1) || error(
+        "golden ne reference has size $(size(golden)), expected " *
+        "($(N_NE), $(nstates + 1))")
+    sweep32 = Float32.(golden[:, 1])
+    # The swept values are float32-rounded, so the cast back is exact.
+    all(Float64.(sweep32) .== golden[:, 1]) || error(
+        "golden parameter column is not exactly representable in Float32")
+
+    system = julia_system(problem)
+    duration = Float32(problem["duration"])
+    u0 = Vector{Float32}(system.u0)
+    prob = ODEProblem{true}(system.rhs!, u0, (0.0f0, duration),
+        Float32[sweep32[1]])
+    # SciMLBase's current ensemble API passes an EnsembleContext (with .sim_id)
+    # as the second argument of prob_func/output_func.
+    eprob = EnsembleProblem(prob;
+        prob_func = (pr, ctx) -> remake(pr, p = Float32[sweep32[ctx.sim_id]]),
+        output_func = (sol, ctx) -> ((sol.u[end], sol.retcode,
+            sol.stats.naccept, sol.stats.nreject), false),
+        safetycopy = false)
+
+    outdir = joinpath(REPO_ROOT, "data", "numerical_equivalence", "julia", name)
+    mkpath(outdir)
+    return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
+        prob = prob, eprob = eprob, outdir = outdir,
+        dts = problem_dts_ne(problem),
+        dt0 = duration * DT0_FRACTION, dtmin = duration * DT_MIN_FRACTION,
+        dtmax = duration * DT_MAX_FRACTION)
 end
 
-u0 = Float32[1.0, 0.0, 0.0]
-tspan = (0.0f0, 1.0f0)
-prob = ODEProblem{true}(lorenz!, u0, tspan, Float32[rhos32[1]])
-# SciMLBase's current ensemble API passes an EnsembleContext (with .sim_id)
-# as the second argument of prob_func/output_func.
-eprob = EnsembleProblem(prob;
-    prob_func = (p, ctx) -> remake(p, p = Float32[rhos32[ctx.sim_id]]),
-    output_func = (sol, ctx) -> ((sol.u[end], sol.retcode,
-        sol.stats.naccept, sol.stats.nreject), false),
-    safetycopy = false)
+problem_dts_ne(problem) = problem_ne_dts(problem)
 
-outdir = joinpath(REPO_ROOT, "data", "numerical_equivalence", "julia")
-mkpath(outdir)
-
-table = collect(CSV.File(joinpath(@__DIR__, "algorithms.csv")))
-if ALGORITHM != "all"
-    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
-    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
-end
-failures = Tuple{String, Float64, String}[]
-
-function collect_finals(sim)
-    finals = Matrix{Float32}(undef, N_NE, 3)
+"Final states, step counts and retcodes of one ensemble solve."
+function collect_finals(sim, nstates)
+    finals = Matrix{Float32}(undef, N_NE, nstates)
     naccept = Vector{Int}(undef, N_NE)
     nreject = Vector{Int}(undef, N_NE)
     converged = Vector{Bool}(undef, N_NE)
@@ -165,68 +178,68 @@ function collect_finals(sim)
         nreject[i] = nr
         ok = retcode == SciMLBase.ReturnCode.Success
         converged[i] = ok
-        if !ok
-            n_bad += 1
-        end
+        ok || (n_bad += 1)
     end
     return finals, naccept, nreject, n_bad, converged
 end
 
-ensemble_err(finals) = sqrt(sum(abs2, Float64.(finals) .- golden_states) /
-                            length(golden_states))
+ensemble_err(finals, golden_states) =
+    sqrt(sum(abs2, Float64.(finals) .- golden_states) / length(golden_states))
+
+"Comma-separated final state of one trajectory."
+state_fields(finals, j) = join([@sprintf("%.9g", finals[j, s])
+                                for s in 1:size(finals, 2)], ",")
+
+state_header(nstates) = join(["s$(s)" for s in 1:nstates], ",")
 
 # ---------------------------------------------------------------------------
 # Fixed-step error-vs-dt sweep
 # ---------------------------------------------------------------------------
-if MODE in ("fixed", "all")
-    for row in table
+function run_fixed(ctx)
+    for row in TABLE
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
-        println("=== fixed $(alias) -> $(expr) (order $(row.order)) ===")
+        println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row.order)) ===")
         alg = try
             eval(Meta.parse(expr))
         catch err
             msg = sprint(showerror, err)[1:min(end, 200)]
             println("  constructor FAILED: $(msg)")
-            push!(failures, (alias, NaN, "constructor: $(msg)"))
+            push!(failures, (ctx.name, alias, NaN, "constructor: $(msg)"))
             continue
         end
 
         io = IOBuffer()
-        println(io, "dt,traj,x,y,z,converged")
+        println(io, "dt,traj,$(state_header(ctx.nstates)),converged")
         wrote_any = false
-        for dt in DTS_NE
+        for dt in ctx.dts
             try
                 # abstol/reltol are pinned to the OrdinaryDiffEq defaults
                 # rather than left implicit: with adaptive=false they only
-                # control the implicit solvers' Newton termination (accept
-                # when eta*||dz/(abstol + reltol*|u|)|| < kappa = 1/100), and
-                # the cubie runner's inner-tolerance pin is derived from
-                # these values — see INNER_SOLVER_SETTINGS in
-                # GPU_ODE_CUBIE/numerical_equivalence.py.
-                sim = solve(eprob, alg, EnsembleThreads();
+                # control the implicit solvers' Newton termination, and the
+                # cubie runner's inner-tolerance pin is derived from them.
+                sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, dt = Float32(dt), adaptive = false,
                     abstol = 1.0f-6, reltol = 1.0f-3,
                     save_everystep = false, save_start = false, dense = false)
-                finals, _, _, n_bad, converged = collect_finals(sim)
-                err = ensemble_err(finals)
+                finals, _, _, n_bad, converged = collect_finals(sim, ctx.nstates)
+                err = ensemble_err(finals, ctx.golden_states)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  dt=%-12g err=%.6e%s\n", dt, err, note)
                 for j in 1:N_NE
-                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g,%d\n", dt, j - 1,
-                        finals[j, 1], finals[j, 2], finals[j, 3],
-                        converged[j] ? 1 : 0)
+                    @printf(io, "%.10g,%d,%s,%d\n", dt, j - 1,
+                        state_fields(finals, j), converged[j] ? 1 : 0)
                 end
                 wrote_any = true
             catch err
                 msg = sprint(showerror, err)[1:min(end, 200)]
                 @printf("  dt=%-12g FAILED: %s\n", dt, msg)
-                push!(failures, (alias, dt, msg))
+                push!(failures, (ctx.name, alias, dt, msg))
             end
         end
 
         if wrote_any
-            outfile = joinpath(outdir, "$(alias).csv")
+            outfile = joinpath(ctx.outdir, "$(alias).csv")
             open(outfile, "w") do f
                 write(f, take!(io))
             end
@@ -240,12 +253,12 @@ end
 # ---------------------------------------------------------------------------
 # Adaptive error-vs-tolerance sweep (default controllers) + constants export
 # ---------------------------------------------------------------------------
-if MODE in ("adaptive", "all")
+function run_adaptive(ctx)
     const_io = IOBuffer()
     println(const_io,
         "cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order")
 
-    for row in table
+    for row in TABLE
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
         alg = try
@@ -253,7 +266,7 @@ if MODE in ("adaptive", "all")
         catch err
             msg = sprint(showerror, err)[1:min(end, 200)]
             println("=== adaptive $(alias): constructor FAILED: $(msg)")
-            push!(failures, (alias, NaN, "constructor: $(msg)"))
+            push!(failures, (ctx.name, alias, NaN, "constructor: $(msg)"))
             continue
         end
         if !OrdinaryDiffEqCore.isadaptive(alg)
@@ -261,13 +274,13 @@ if MODE in ("adaptive", "all")
                     "OrdinaryDiffEq)")
             continue
         end
-        println("=== adaptive $(alias) -> $(expr) (order $(row.order), " *
-                "default controller) ===")
+        println("=== $(ctx.name) adaptive $(alias) -> $(expr) " *
+                "(order $(row.order), default controller) ===")
 
         # Resolve and export the default controller constants so the cubie
         # runner can mirror them ("matched" tier).
         try
-            integ = init(prob, alg; dt = DT0_NE, abstol = 1.0f-4,
+            integ = init(ctx.prob, alg; dt = ctx.dt0, abstol = 1.0f-4,
                 reltol = 1.0f-4, save_everystep = false)
             ctrl = integ.controller_cache.controller
             basic = ctrl.basic
@@ -283,39 +296,41 @@ if MODE in ("adaptive", "all")
         catch err
             msg = sprint(showerror, err)[1:min(end, 200)]
             println("  controller-constants export FAILED: $(msg)")
-            push!(failures, (alias, NaN, "controller export: $(msg)"))
+            push!(failures, (ctx.name, alias, NaN, "controller export: $(msg)"))
         end
 
         io = IOBuffer()
-        println(io, "tol,traj,x,y,z,naccept,nreject,converged")
+        println(io,
+            "tol,traj,$(state_header(ctx.nstates)),naccept,nreject,converged")
         wrote_any = false
         for tol in TOLS_NE
             try
-                sim = solve(eprob, alg, EnsembleThreads();
-                    trajectories = N_NE, adaptive = true, dt = DT0_NE,
+                sim = solve(ctx.eprob, alg, EnsembleThreads();
+                    trajectories = N_NE, adaptive = true, dt = ctx.dt0,
                     abstol = Float32(tol), reltol = Float32(tol),
-                    dtmin = DT_MIN_NE, dtmax = DT_MAX_NE,
+                    dtmin = ctx.dtmin, dtmax = ctx.dtmax,
                     save_everystep = false, save_start = false, dense = false)
-                finals, naccept, nreject, n_bad, converged = collect_finals(sim)
-                err = ensemble_err(finals)
+                finals, naccept, nreject, n_bad, converged =
+                    collect_finals(sim, ctx.nstates)
+                err = ensemble_err(finals, ctx.golden_states)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  tol=%-8g err=%.6e steps(med)=%d%s\n", tol, err,
                     Int(round(sum(naccept) / N_NE)), note)
                 for j in 1:N_NE
-                    @printf(io, "%.10g,%d,%.9g,%.9g,%.9g,%d,%d,%d\n", tol, j - 1,
-                        finals[j, 1], finals[j, 2], finals[j, 3],
-                        naccept[j], nreject[j], converged[j] ? 1 : 0)
+                    @printf(io, "%.10g,%d,%s,%d,%d,%d\n", tol, j - 1,
+                        state_fields(finals, j), naccept[j], nreject[j],
+                        converged[j] ? 1 : 0)
                 end
                 wrote_any = true
             catch err
                 msg = sprint(showerror, err)[1:min(end, 200)]
                 @printf("  tol=%-8g FAILED: %s\n", tol, msg)
-                push!(failures, (alias, tol, msg))
+                push!(failures, (ctx.name, alias, tol, msg))
             end
         end
 
         if wrote_any
-            outfile = joinpath(outdir, "$(alias)_adaptive.csv")
+            outfile = joinpath(ctx.outdir, "$(alias)_adaptive.csv")
             open(outfile, "w") do f
                 write(f, take!(io))
             end
@@ -325,16 +340,22 @@ if MODE in ("adaptive", "all")
         end
     end
 
-    constfile = joinpath(outdir, "controller_constants.csv")
+    constfile = joinpath(ctx.outdir, "controller_constants.csv")
     open(constfile, "w") do f
         write(f, take!(const_io))
     end
     println("wrote $(constfile)")
 end
 
+for problem in PROBLEMS
+    ctx = setup(problem)
+    MODE in ("fixed", "all") && run_fixed(ctx)
+    MODE in ("adaptive", "all") && run_adaptive(ctx)
+end
+
 if !isempty(failures)
     println("\n$(length(failures)) failed points:")
-    for (alias, setting, msg) in failures
-        println("  $(alias) @ $(setting): $(msg)")
+    for (problem, alias, setting, msg) in failures
+        println("  $(problem) $(alias) @ $(setting): $(msg)")
     end
 end
