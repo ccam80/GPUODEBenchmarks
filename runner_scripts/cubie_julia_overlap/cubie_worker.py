@@ -24,7 +24,7 @@ from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, DT0, DT_MAX, DT_MIN, FAILURE_FIELDS, FIXED_DT, GOLDEN_NE,
     ANALYSES, GOLDEN_WP, METRIC_FIELDS, N_WP, TIMING_FIELDS, algorithms,
     append_csv, ensure_csv, finite_counts, phases_for, pi_controller,
-    point_slug, protocol as suite_protocol, rmse, write_json,
+    point_slug, protocol as suite_protocol, rmse, timing_stats, write_json,
 )
 
 try:
@@ -85,14 +85,14 @@ def rho_grid(kind, n):
     return np.linspace(0.0, 21.0, n, dtype=np.float32)
 
 
-def make_solver(system, alias, mode, setting, order, tier):
+def make_solver(system, alias, mode, setting, order, family, tier):
     common = dict(algorithm=alias, save_every=1.0, output_types=["state"],
                   time_logging_level=None)
     if mode == "fixed":
         return qb.Solver(system, dt=setting, step_controller="fixed", **common)
     settings = {"dt": DT0, "dt_min": DT_MIN, "dt_max": DT_MAX,
                 "atol": setting, "rtol": setting}
-    controller = {} if tier == "default" else pi_controller(order)
+    controller = {} if tier == "default" else pi_controller(order, family)
     if controller:
         settings["step_controller"] = controller.pop("step_controller")
     solver = qb.Solver(system, **settings, **common)
@@ -181,7 +181,7 @@ def main():
         print("FAILED cubie {} {} {} {}={}: {}".format(algorithm, phase, mode, setting_kind, setting, exc), flush=True)
 
     for row in algorithms(args.algorithm):
-        alias, order = row["cubie_alias"], row["order"]
+        alias, order, family = row["cubie_alias"], row["order"], row["family"]
         for phase in phases:
             if phase == "performance":
                 points = []
@@ -207,7 +207,8 @@ def main():
                 try:
                     # Release the previous point before allocating this one.
                     solver = initials = params = finals = device_inputs = None
-                    solver = make_solver(system, alias, mode, setting, order, tier)
+                    solver = make_solver(system, alias, mode, setting, order,
+                                         family, tier)
                     initials, params = solver.build_grid(
                         initial_values={"x": 1.0, "y": 0.0, "z": 0.0},
                         parameters={"rho": rho_grid(phase, n)})
@@ -215,7 +216,11 @@ def main():
                     solve_once(solver, initials, params)  # JIT/allocation warmup
                     if device_inputs is not None:
                         solve_once_on_device(solver, *device_inputs)  # warmup
-                    for sample in range(repeats):
+                    # Each transfer variant runs as an unbroken block, so one
+                    # variant's samples are never separated by the other's
+                    # allocation and transfer traffic.
+                    end_to_end = []
+                    for _ in range(repeats):
                         finals, elapsed = solve_once(solver, initials, params)
                         finite, failed = finite_counts(finals)
                         if failed or finite != n:
@@ -231,21 +236,19 @@ def main():
                             raise FloatingPointError(
                                 "non-finite result: {}/{} trajectories valid"
                                 .format(finite, n))
-                        append_csv(timing_file, TIMING_FIELDS, {
-                            "framework": "cubie", "algorithm": alias, "phase": phase,
-                            "mode": mode, "tier": tier, "transfers": "both", "n": n,
-                            "setting_kind": setting_kind, "setting": setting,
-                            "sample": sample, "time_ms": elapsed,
-                        })
-                        if device_inputs is not None:
-                            append_csv(timing_file, TIMING_FIELDS, {
-                                "framework": "cubie", "algorithm": alias,
-                                "phase": phase, "mode": mode, "tier": tier,
-                                "transfers": "none", "n": n,
-                                "setting_kind": setting_kind, "setting": setting,
-                                "sample": sample,
-                                "time_ms": solve_once_on_device(solver, *device_inputs),
-                            })
+                        end_to_end.append(elapsed)
+                    device_only = ([solve_once_on_device(solver, *device_inputs)
+                                    for _ in range(repeats)]
+                                   if device_inputs is not None else [])
+                    point = {"framework": "cubie", "algorithm": alias,
+                             "phase": phase, "mode": mode, "tier": tier, "n": n,
+                             "setting_kind": setting_kind, "setting": setting}
+                    for transfers, samples in (("both", end_to_end),
+                                               ("none", device_only)):
+                        if samples:
+                            append_csv(timing_file, TIMING_FIELDS,
+                                       dict(point, transfers=transfers,
+                                            **timing_stats(samples)))
                     finite, failed = finite_counts(finals)
                     if phase == "performance":
                         append_csv(metric_file, METRIC_FIELDS, {

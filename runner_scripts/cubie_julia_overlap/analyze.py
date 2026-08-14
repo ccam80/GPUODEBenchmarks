@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize one machine's overlap results: CSVs beside the raw ones, figures in plots/, report at the repo root."""
+"""Summarize one machine's overlap results: CSVs beside the raw ones, figures and report in plots/<os>_<gpu>/."""
 
 from __future__ import annotations
 
@@ -18,6 +18,13 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 from common import REPO_ROOT, algorithms  # noqa: E402 - suite-local bootstrap above
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
+
+# The group directory is keyed by machine, so the files inside it are not.
+PLOT_NAMES = {"performance": "overlap_performance_scaling.png",
+              "numerical": "overlap_numerical_equivalence.png",
+              "work_precision": "overlap_work_precision.png",
+              "speedup": "overlap_speedup_vs_setting.png"}
+REPORT_NAME = "cubie_julia_overlap.md"
 
 
 def read_rows(path):
@@ -50,6 +57,13 @@ def load_finals(root, relative):
 
 
 def timing_summary(rows, metrics=None):
+    """Select the timing rows backed by an all-finite validity metric.
+
+    The workers reduce their repeats before writing, so each row already
+    carries one point's statistics; this only filters and orders them. A
+    key appearing twice keeps the later row, matching the append-only
+    convention the launcher's pruning relies on.
+    """
     eligible = None
     if metrics is not None:
         eligible = {
@@ -58,7 +72,7 @@ def timing_summary(rows, metrics=None):
             for r in metrics
             if valid_metric(r)
         }
-    groups = defaultdict(list)
+    selected = {}
     for row in rows:
         validity_key = (row["framework"], row["algorithm"], row["phase"],
                         row["mode"], row["tier"], row["n"],
@@ -68,15 +82,15 @@ def timing_summary(rows, metrics=None):
         key = (row["framework"], row["algorithm"], row["phase"], row["mode"],
                row["tier"], row.get("transfers", "both"), row["n"],
                row["setting_kind"], row["setting"])
-        groups[key].append(float(row["time_ms"]))
+        selected[key] = row
     out = []
-    for key, values in sorted(groups.items()):
-        a = np.asarray(values)
-        out.append(dict(zip(("framework", "algorithm", "phase", "mode", "tier",
-                             "transfers", "n", "setting_kind", "setting"), key),
-                        samples=len(values), min_ms=float(np.min(a)),
-                        p05_ms=float(np.percentile(a, 5)), median_ms=float(np.median(a)),
-                        p95_ms=float(np.percentile(a, 95)), max_ms=float(np.max(a))))
+    for key, row in sorted(selected.items()):
+        summary = dict(zip(("framework", "algorithm", "phase", "mode", "tier",
+                            "transfers", "n", "setting_kind", "setting"), key))
+        summary["samples"] = int(row["samples"])
+        for field in ("min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms"):
+            summary[field] = float(row[field])
+        out.append(summary)
     return out
 
 
@@ -144,9 +158,9 @@ def speedups(summaries):
                         "mode": row["mode"], "cubie_tier": row["tier"],
                         "transfers": row["transfers"], "n": row["n"],
                         "setting_kind": row["setting_kind"], "setting": row["setting"],
-                        "cubie_median_ms": row["median_ms"],
-                        "julia_median_ms": other["median_ms"],
-                        "julia_over_cubie_speedup": float(other["median_ms"]) / float(row["median_ms"])})
+                        "cubie_min_ms": row["min_ms"],
+                        "julia_min_ms": other["min_ms"],
+                        "julia_over_cubie_speedup": float(other["min_ms"]) / float(row["min_ms"])})
     return out
 
 
@@ -179,7 +193,7 @@ def work_precision_rows(summaries, metrics):
     return out
 
 
-def plots(plots_dir, key, summaries, metrics, work_rows):
+def plots(plots_dir, summaries, metrics, work_rows, boosts):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -204,14 +218,14 @@ def plots(plots_dir, key, summaries, metrics, work_rows):
                             r["transfers"] == transfers]
                     if vals:
                         vals.sort(key=lambda r: int(r["n"]))
-                        ax.loglog([int(r["n"]) for r in vals], [float(r["median_ms"]) for r in vals],
+                        ax.loglog([int(r["n"]) for r in vals], [float(r["min_ms"]) for r in vals],
                                   marker="o", linestyle=style, color=colors[(framework, tier)],
                                   label="{} {} ({})".format(framework, tier, transfers))
-            ax.set(title="{} — {}".format(name, mode), xlabel="trajectories", ylabel="median ms")
+            ax.set(title="{} — {}".format(name, mode), xlabel="trajectories", ylabel="min ms")
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    written = [plots_dir / "overlap_performance_scaling_{}.png".format(key)]
+    written = [plots_dir / PLOT_NAMES["performance"]]
     fig.savefig(written[-1], dpi=160)
     plt.close(fig)
 
@@ -234,7 +248,7 @@ def plots(plots_dir, key, summaries, metrics, work_rows):
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    written.append(plots_dir / "overlap_numerical_equivalence_{}.png".format(key))
+    written.append(plots_dir / PLOT_NAMES["numerical"])
     fig.savefig(written[-1], dpi=160)
     plt.close(fig)
 
@@ -250,15 +264,46 @@ def plots(plots_dir, key, summaries, metrics, work_rows):
                             r["framework"] == framework and r["tier"] == tier and
                             r["transfers"] == transfers]
                     if vals:
-                        vals.sort(key=lambda r: float(r["median_ms"]))
-                        ax.loglog([float(r["median_ms"]) for r in vals], [float(r["golden_rmse"]) for r in vals],
+                        vals.sort(key=lambda r: float(r["min_ms"]))
+                        ax.loglog([float(r["min_ms"]) for r in vals], [float(r["golden_rmse"]) for r in vals],
                                   marker="o", linestyle=style, color=colors[(framework, tier)],
                                   label="{} {} ({})".format(framework, tier, transfers))
-            ax.set(title="{} — {}".format(name, mode), xlabel="median runtime (ms)", ylabel="golden RMSE")
+            ax.set(title="{} — {}".format(name, mode), xlabel="min runtime (ms)", ylabel="golden RMSE")
             ax.grid(True, which="both", alpha=.25)
             ax.legend(fontsize=8)
     fig.tight_layout()
-    written.append(plots_dir / "overlap_work_precision_{}.png".format(key))
+    written.append(plots_dir / PLOT_NAMES["work_precision"])
+    fig.savefig(written[-1], dpi=160)
+    plt.close(fig)
+
+    # Speedup against the swept setting. The work-precision phase is the only
+    # one that times both frameworks across dt and tolerance, so it is the only
+    # phase that can answer "does the speedup hold as the tolerance tightens?".
+    swept = [r for r in boosts if r["phase"] == "work_precision"]
+    fig, axes = plt.subplots(len(names), 2, figsize=(12, 3.2 * len(names)), squeeze=False)
+    for i, name in enumerate(names):
+        for j, mode in enumerate(("fixed", "adaptive")):
+            ax = axes[i, j]
+            for tier in (("fixed",) if mode == "fixed" else ("default", "pi")):
+                for transfers, style in (("both", "-"), ("none", "--")):
+                    vals = [r for r in swept if r["algorithm"] == name and
+                            r["mode"] == mode and r["cubie_tier"] == tier and
+                            r["transfers"] == transfers]
+                    if vals:
+                        vals.sort(key=lambda r: float(r["setting"]), reverse=True)
+                        ax.semilogx([float(r["setting"]) for r in vals],
+                                    [float(r["julia_over_cubie_speedup"]) for r in vals],
+                                    marker="o", linestyle=style, color=colors[("cubie", tier)],
+                                    label="cubie {} ({})".format(tier, transfers))
+            ax.axhline(1.0, color="grey", linewidth=1, zorder=0)
+            ax.invert_xaxis()
+            ax.set(title="{} — {}".format(name, mode),
+                   xlabel="dt" if mode == "fixed" else "tolerance",
+                   ylabel="speedup (>1 = cubie faster)")
+            ax.grid(True, which="both", alpha=.25)
+            ax.legend(fontsize=8)
+    fig.tight_layout()
+    written.append(plots_dir / PLOT_NAMES["speedup"])
     fig.savefig(written[-1], dpi=160)
     plt.close(fig)
     return written
@@ -278,20 +323,30 @@ def markdown_table(fields, rows, limit=None):
     return "\n".join(lines) + "\n"
 
 
+def output_paths(key, output=None, plots_dir=None, report=None):
+    """Resolve the result, figure and report locations for one machine.
+
+    Figures and the report share one group directory, plots/<key>, the same
+    directory the other analyzers write their per-machine figures to.
+    """
+    root = (output or REPO_ROOT / "data" / "cubie_julia_overlap" / key).resolve()
+    group = (plots_dir or REPO_ROOT / "plots" / key).resolve()
+    return root, group, (report or group / REPORT_NAME).resolve()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=None,
                         help="Result directory; default data/cubie_julia_overlap/<dataset-key>.")
     parser.add_argument("--key", default=None,
                         help="Dataset key <os>_<gpu>; detected when omitted.")
-    parser.add_argument("--plots-dir", type=Path, default=REPO_ROOT / "plots")
+    parser.add_argument("--plots-dir", type=Path, default=None,
+                        help="Figure and report directory; default plots/<dataset-key>.")
     parser.add_argument("--report", type=Path, default=None,
-                        help="Report path; default cubie_julia_overlap_<key>.md at the repo root.")
+                        help="Report path; default {} in the plots directory.".format(REPORT_NAME))
     args = parser.parse_args()
     key = args.key or (args.output.name if args.output else dataset_key())
-    root = (args.output or REPO_ROOT / "data" / "cubie_julia_overlap" / key).resolve()
-    plots_dir = args.plots_dir.resolve()
-    report_path = (args.report or REPO_ROOT / "cubie_julia_overlap_{}.md".format(key)).resolve()
+    root, plots_dir, report_path = output_paths(key, args.output, args.plots_dir, args.report)
     timings = read_rows(root / "cubie_timings.csv") + read_rows(root / "julia_timings.csv")
     metrics = read_rows(root / "cubie_metrics.csv") + read_rows(root / "julia_metrics.csv")
     valid_metrics = [row for row in metrics if valid_metric(row)]
@@ -308,7 +363,7 @@ def main():
     write_rows(root / "observed_orders.csv", ["framework", "algorithm", "tier", "observed_order", "usable_intervals"], orders)
     write_rows(root / "speedups.csv", ["algorithm", "phase", "mode", "cubie_tier", "transfers", "n",
                "setting_kind", "setting",
-               "cubie_median_ms", "julia_median_ms", "julia_over_cubie_speedup"], boosts)
+               "cubie_min_ms", "julia_min_ms", "julia_over_cubie_speedup"], boosts)
     write_rows(root / "work_precision.csv", ["framework", "algorithm", "mode", "tier", "transfers", "n",
                "setting_kind", "setting", "samples", "min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms",
                "golden_rmse", "finite_trajectories", "failed_trajectories"], work_rows)
@@ -320,7 +375,7 @@ def main():
             return path.as_posix()
 
     try:
-        written = plots(plots_dir, key, summaries, valid_metrics, work_rows)
+        written = plots(plots_dir, summaries, valid_metrics, work_rows, boosts)
         plot_note = "Plots: " + ", ".join("`{}`".format(cite(p)) for p in written) + "."
     except Exception as exc:
         (root / "plot_failure.txt").write_text("{}: {}\n".format(type(exc).__name__, exc), encoding="utf-8")
@@ -333,7 +388,7 @@ Algorithms: `tsit5` ↔ `GPUTsit5()`, `vern7` ↔ `GPUVern7()`, `rosenbrock23_sc
 
 `diffeqgpu_ode_inventory.csv` contains the eight specialized DiffEqGPU GPU ODE algorithms and their Cubie mappings.
 
-All timed samples are synchronized end-to-end solves, including final host transfer. Each point has an untimed warmup. Fixed performance uses dyadic `dt=2^-10`; full numerical equivalence uses N=1024 with `dt=2^-1..2^-13` and tolerances `1e-2..1e-6`; full work-precision uses N=32768 with `dt=2^-4..2^-13`, tolerances `1e-2..1e-8`, and 20 repeats by default. The raw sample CSVs remain the authoritative timing record.
+All timed samples are synchronized end-to-end solves, including final host transfer. Each point has an untimed warmup. Fixed performance uses dyadic `dt=2^-10`; full numerical equivalence uses N=1024 with `dt=2^-1..2^-13` and tolerances `1e-2..1e-6`; full work-precision uses N=32768 with `dt=2^-4..2^-13`, tolerances `1e-2..1e-8`, and 20 repeats by default. Each transfer variant runs as an unbroken block of repeats, and the workers reduce those repeats to one row per point before writing. Reported runtimes are the minimum over repeats, matching the main performance suite; `min_ms`, `p05_ms`, `median_ms`, `p95_ms` and `max_ms` describe the spread behind it.
 
 Every phase, including performance, records finite and failed trajectory counts. A point without a complete all-finite validity metric is excluded from timing summaries, speedups, and plots. Workers continue after point failures to preserve successful evidence, then return nonzero so the launcher marks the suite incomplete.
 
@@ -341,18 +396,23 @@ Analytic Lorenz Jacobian and time-gradient functions are supplied to every Julia
 
 ## Performance speedups
 
-`julia_over_cubie_speedup > 1` means Cubie was faster. Percentile timing statistics for both frameworks are in `timing_summary.csv`.
+`julia_over_cubie_speedup > 1` means Cubie was faster, comparing best-of-repeats runtimes. Percentile timing statistics for both frameworks are in `timing_summary.csv`.
 
 """
-    report += markdown_table(["algorithm", "mode", "cubie_tier", "n", "cubie_median_ms", "julia_median_ms", "julia_over_cubie_speedup"], perf)
+    report += markdown_table(["algorithm", "mode", "cubie_tier", "n", "cubie_min_ms", "julia_min_ms", "julia_over_cubie_speedup"], perf)
     report += "\n## Numerical equivalence\n\nPer-trajectory Float32 finals are retained beneath `finals/`. Mutual metrics are elementwise at t=1.\n\n"
     report += markdown_table(["algorithm", "mode", "cubie_tier", "setting", "mutual_rmse", "mutual_p99_abs", "mutual_max_abs", "failed_pairs"], comparisons)
     report += "\n## Observed fixed-step convergence order\n\n"
     report += markdown_table(["framework", "algorithm", "tier", "observed_order", "usable_intervals"], orders)
     report += ("\n## Work-precision\n\n`work_precision.csv` joins every work-point timing distribution "
-               "(min/p05/median/p95/max) to golden RMSE. `plots/overlap_work_precision_{}.png` plots median "
+               "(min/p05/median/p95/max) to golden RMSE. `{}` plots minimum "
                "runtime on the x-axis against golden RMSE on the y-axis; it is an error-work plot, not another "
-               "setting sweep.\n".format(key))
+               "setting sweep.\n".format(cite(plots_dir / PLOT_NAMES["work_precision"])))
+    report += ("\n`{}` plots the same phase's speedups against "
+               "dt and tolerance, answering whether cubie's advantage holds as the setting tightens. "
+               "The performance phase measures a single dt and a single tolerance, so work-precision "
+               "is the only phase that can show this; every point comes from `speedups.csv` rows with "
+               "`phase = work_precision`.\n".format(cite(plots_dir / PLOT_NAMES["speedup"])))
     report += "\n## Failures and non-finite results\n\n{} point failures were recorded. See the framework failure CSVs for full messages. Non-finite trajectory counts are retained per successful point in the metric CSVs.\n\n".format(len(failures))
     report += markdown_table(["framework", "algorithm", "phase", "mode", "tier", "setting_kind", "setting", "error_type", "message"], failures, limit=100)
     report += ("\n## Artifacts\n\n" + plot_note + " Raw and derived CSVs are in `{}`, algorithm-, mode-, "
