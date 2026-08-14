@@ -228,7 +228,7 @@ def main():
         pi_resolved = {key: (value(order) if callable(value) else value)
                        for key, value in pi_controller(order, family).items()}
         shipped = cubie_default_controller(alias, NE_FAMILY.get(family, family),
-                                           order, force_pi=False)
+                                           order)
         if controllers_equal(pi_resolved, shipped):
             adaptive_tiers = ("default",)
             print("cubie {}: pi tier equals the shipped defaults; skipped"

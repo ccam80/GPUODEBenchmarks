@@ -11,7 +11,7 @@ runner_scripts/numerical_equivalence/ne_common.py):
 * adaptive: error-vs-tolerance study at atol = rtol over the mutual
   adaptive set (the ``adaptive`` column of algorithms.csv), run up to
   twice per algorithm:
-    - "default" tier: cubie's own PI controller defaults — cubie's real
+    - "default" tier: cubie's shipped controller defaults — cubie's real
       controller dynamics.
     - "matched" tier: controller constants mirrored from the Julia run's
       resolved defaults (data/numerical_equivalence/julia/
@@ -209,14 +209,16 @@ if MODE in ("adaptive", "all"):
             continue
 
         matched, why_not = matched_controller_settings(alias, row["order"])
-        tiers = [("default", {"step_controller": "pi"})]
+        tiers = [("default", {})]
         matched_reuses_default = False
+        shipped = cubie_default_controller(alias, row["family"], row["order"])
         if matched is None:
             print("=== adaptive {0}: no matched tier ({1}) ==="
                   .format(alias, why_not))
-        elif controllers_equal(matched, cubie_default_controller(
-                alias, row["family"], row["order"])):
-            # Matched equals default; reuse the default results.
+        elif (shipped is not None
+              and matched["step_controller"] == shipped["step_controller"]
+              and controllers_equal(dict(shipped, **matched), shipped)):
+            # Matched resolves to the shipped defaults; reuse the results.
             matched_reuses_default = True
             print("=== adaptive {0}: matched tier equals cubie's defaults; "
                   "reusing the default results ===".format(alias))
@@ -227,6 +229,11 @@ if MODE in ("adaptive", "all"):
             print("=== adaptive {0} [{1}] (order {2}) ==="
                   .format(alias, tier, row["order"]))
             try:
+                # The default tier passes no controller: cubie as shipped.
+                controller_kwargs = {}
+                if "step_controller" in controller_settings:
+                    controller_kwargs["step_controller"] = (
+                        controller_settings["step_controller"])
                 solver = qb.Solver(
                     lorenz_system,
                     algorithm=alias,
@@ -236,9 +243,9 @@ if MODE in ("adaptive", "all"):
                     atol=TOLS_NE[0],
                     rtol=TOLS_NE[0],
                     save_every=1.0,
-                    step_controller=controller_settings["step_controller"],
                     output_types=['state'],
                     time_logging_level=None,
+                    **controller_kwargs,
                 )
                 extra = {k: v for k, v in controller_settings.items()
                          if k != "step_controller"}

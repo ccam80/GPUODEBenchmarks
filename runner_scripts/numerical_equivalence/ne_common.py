@@ -83,13 +83,13 @@ def runs_fixed(row):
     return row["family"] != "erk"
 
 
-def cubie_default_controller(alias, family, order, force_pi=True):
+def cubie_default_controller(alias, family, order):
     """Cubie's resolved controller settings for a default-tier solve.
 
     Mirrors cubie's resolution: family default table, then controller
-    config class defaults for unset keys. ``force_pi`` overrides the
-    table's controller with ``"pi"``. Gains resolve at ``order``; cubie
-    imports lazily. Returns None when the family has no adaptive table.
+    config class defaults for unset keys, gain keys filtered to the
+    resolved controller type. Gains resolve at ``order``; cubie imports
+    lazily. Returns None when the family has no adaptive table.
     """
     from cubie.integrators.algorithms import (generic_dirk, generic_erk,
                                               generic_firk,
@@ -117,8 +117,11 @@ def cubie_default_controller(alias, family, order, force_pi=True):
         if callable(value):
             value = value(order)
         resolved[key] = value
-    if force_pi:
-        resolved["step_controller"] = "pi"
+    gain_keys = {"i": {"kp"}, "pi": {"kp", "ki"}, "pid": {"kp", "ki", "kd"}}
+    allowed = gain_keys.get(resolved["step_controller"], set())
+    for key in ("kp", "ki", "kd"):
+        if key not in allowed:
+            resolved.pop(key, None)
     resolved.pop("deadband_min", None)
     resolved.pop("deadband_max", None)
     return resolved

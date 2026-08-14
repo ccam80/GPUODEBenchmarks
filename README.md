@@ -852,7 +852,7 @@ skip algorithms outside that mutual set.
 
 Cubie runs each algorithm twice:
 
-* **default** — cubie's own PI controller defaults: how cubie really
+* **default** — cubie's shipped controller defaults: how cubie really
   behaves out of the box. Compared to the Julia run (its own per-algorithm
   default controller) as curve tracking within a factor.
 * **matched** — controller type, gains, safety factor and gain clamps
