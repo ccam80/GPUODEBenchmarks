@@ -9,8 +9,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
-GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
-GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_32768.csv"
+
+
+def golden_ne(problem):
+    """Path of the ne golden reference for a problem row or name."""
+    name = problem["problem"] if isinstance(problem, dict) else problem
+    return REPO_ROOT / "data" / "numerical" / "golden_ne_{0}_{1}.csv".format(
+        name, N_NE)
+
+
+def golden_wp(problem):
+    """Path of the wp golden reference for a problem row or name."""
+    name = problem["problem"] if isinstance(problem, dict) else problem
+    return REPO_ROOT / "data" / "numerical" / "golden_{0}_{1}.csv".format(
+        name, N_WP)
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")
@@ -20,7 +32,8 @@ PHASES = ("performance", "numerical", "work_precision")
 def phases_for(analysis):
     return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
-# Protocol constants; mirrored in julia_worker.jl.
+# Protocol constants; mirrored in julia_worker.jl. dt values are fractions of
+# the problem duration.
 FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
 PERFORMANCE_REPEATS = 20
@@ -132,6 +145,13 @@ def _retire_stale_schema(path, fields):
     print("{} used the previous schema; moved to {} and starting fresh."
           .format(path.name, target.name))
     return True
+
+
+def scaled_dts(problem):
+    """Fixed step and the adaptive dt pins for a problem, in problem time."""
+    duration = problem["duration"]
+    return (duration * FIXED_DT, duration * DT0, duration * DT_MIN,
+            duration * DT_MAX)
 
 
 def ensure_csv(path, fields):

@@ -17,8 +17,17 @@ function lorenz_rhs!(du, u, p, t)
     return nothing
 end
 
+function lorenz_jac(u, p, t)
+    return @SMatrix [-10.0f0 10.0f0 0.0f0;
+        p[1]-u[3] -1.0f0 -u[1];
+        u[2] u[1] -(8.0f0/3.0f0)]
+end
+
+lorenz_tgrad(u, p, t) = @SVector [0.0f0, 0.0f0, 0.0f0]
+
 const JULIA_SYSTEMS = Dict{String, Any}(
     "lorenz" => (rhs = lorenz_rhs, rhs! = lorenz_rhs!,
+        jac = lorenz_jac, tgrad = lorenz_tgrad,
         u0 = @SVector([1.0f0, 0.0f0, 0.0f0])),
 )
 

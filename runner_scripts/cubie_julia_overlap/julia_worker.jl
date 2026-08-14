@@ -15,7 +15,9 @@ CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
-# Protocol constants; mirrored in common.py.
+include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
+# Protocol constants; mirrored in common.py. dt values are fractions of the duration.
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
 const PERFORMANCE_REPEATS = 20
@@ -41,6 +43,9 @@ const ANALYSIS = get(OPT, "analysis", "all")
 const NMAX = get(OPT, "nmax", "16777216")
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
 const ALGORITHM = get(OPT, "algorithm", "all")
+const PROBLEM = get_problem(get(OPT, "problem", "lorenz"))
+const NSTATES = PROBLEM["states"]
+const DURATION = Float32(PROBLEM["duration"])
 
 mkpath(OUT)
 
@@ -106,41 +111,31 @@ function append_row(path, values...)
     end
 end
 
-function lorenz(u, p, t)
-    return @SVector [10.0f0 * (u[2] - u[1]),
-        u[1] * (p[1] - u[3]) - u[2],
-        u[1] * u[2] - (8.0f0 / 3.0f0) * u[3]]
-end
-function lorenz_jac(u, p, t)
-    return @SMatrix [-10.0f0 10.0f0 0.0f0;
-        p[1] - u[3] -1.0f0 -u[1];
-        u[2] u[1] -(8.0f0 / 3.0f0)]
-end
-lorenz_tgrad(u, p, t) = @SVector [0.0f0, 0.0f0, 0.0f0]
-
-const ODEF = ODEFunction{false}(lorenz; jac = lorenz_jac, tgrad = lorenz_tgrad)
-const U0 = @SVector [1.0f0, 0.0f0, 0.0f0]
-const TSPAN = (0.0f0, 1.0f0)
+const SYSTEM = julia_system(PROBLEM)
+const ODEF = ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
+    tgrad = SYSTEM.tgrad)
+const U0 = SYSTEM.u0
+const TSPAN = (0.0f0, DURATION)
 
 const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_ne_lorenz_1024.csv"), ',', Float64)
+    "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
 const golden_wp_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_lorenz_32768.csv"), ',', Float64)
+    "golden_$(PROBLEM["problem"])_$(N_WP).csv"), ',', Float64)
 
-function rho_grid(kind, n)
+function sweep_grid(kind, n)
     if kind == "numerical"
         return Float32.(golden_ne_all[1:n, 1])
     elseif kind == "work_precision"
-        return Float32.(range(0.0, 21.0, length = N_WP))[1:n]
+        return Float32.(problem_sweep(PROBLEM, N_WP))[1:n]
     end
-    return Float32.(range(0.0, 21.0, length = n))
+    return Float32.(problem_sweep(PROBLEM, n))
 end
 
 function build_problems(kind, n)
-    rhos = rho_grid(kind, n)
-    prob = ODEProblem{false}(ODEF, U0, TSPAN, @SVector [rhos[1]])
-    probs = map(eachindex(rhos)) do i
-        DiffEqGPU.make_prob_compatible(remake(prob, p = @SVector [rhos[i]]))
+    sweep = sweep_grid(kind, n)
+    prob = ODEProblem{false}(ODEF, U0, TSPAN, @SVector [sweep[1]])
+    probs = map(eachindex(sweep)) do i
+        DiffEqGPU.make_prob_compatible(remake(prob, p = @SVector [sweep[i]]))
     end
     # Host vector is returned too so the end-to-end timing can re-upload it.
     return probs, cu(probs), prob
@@ -148,11 +143,11 @@ end
 
 function run_solve(probs, prob, alg, mode, setting)
     if mode == "fixed"
-        return DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = 1.0f0,
+        return DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = DURATION,
             save_everystep = false, dt = Float32(setting))
     else
-        return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = 1.0f0,
-            save_everystep = false, dt = 0.01f0,
+        return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = DURATION,
+            save_everystep = false, dt = DURATION * Float32(DT0),
             abstol = Float32(setting), reltol = Float32(setting))
     end
 end
@@ -167,12 +162,13 @@ function solve_end_to_end(probs_host, prob, alg, mode, setting)
     CUDA.synchronize()
     elapsed_ms = (time_ns() - start) / 1.0e6
     final_vectors = host_us[end, :]
-    finals = Matrix{Float32}(undef, length(final_vectors), 3)
+    finals = Matrix{Float32}(undef, length(final_vectors), NSTATES)
     for i in eachindex(final_vectors)
         finals[i, :] .= final_vectors[i]
     end
-    size(finals) == (length(probs_host), 3) || error(
-        "unexpected final-state size $(size(finals)); expected ($(length(probs_host)), 3)")
+    size(finals) == (length(probs_host), NSTATES) || error(
+        "unexpected final-state size $(size(finals)); expected " *
+        "($(length(probs_host)), $(NSTATES))")
     return finals, elapsed_ms
 end
 
@@ -205,9 +201,10 @@ function write_finals(alias, mode, tier, setting_kind, setting, finals)
     path = joinpath(OUT, relative)
     mkpath(dirname(path))
     open(path, "w") do io
-        println(io, "traj,x,y,z")
+        println(io, "traj," * join(["s$(s)" for s in 1:NSTATES], ","))
         for i in axes(finals, 1)
-            @printf(io, "%d,%.9g,%.9g,%.9g\n", i - 1, finals[i, 1], finals[i, 2], finals[i, 3])
+            fields = join([@sprintf("%.9g", finals[i, s]) for s in 1:NSTATES], ",")
+            println(io, "$(i - 1),$(fields)")
         end
     end
     return replace(relative, '\\' => '/')
