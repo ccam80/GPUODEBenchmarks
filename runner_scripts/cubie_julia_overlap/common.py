@@ -13,9 +13,7 @@ ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
 GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_131072.csv"
 
-# The numerical grids and adaptive-run pins are the NE suite's own, imported
-# so the overlap suite's numerical phase can reuse NE outputs point-for-point
-# instead of re-solving them.
+# Numerical grids and adaptive pins are shared with the NE suite.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from ne_common import (  # noqa: E402 - path bootstrap above
@@ -41,12 +39,10 @@ PERFORMANCE_REPEATS = 20
 WORK_REPEATS = 20
 WP_DTS = [2.0 ** -k for k in range(4, 14)]
 WP_TOLS = [10.0 ** -k for k in range(2, 9)]
-# Timed wp sweeps sit at a large batch, where the ensembles are
-# throughput-bound; mirrors runner_scripts/wp_common.py.
+# Mirrors runner_scripts/wp_common.py.
 N_WP = 131072
 
-# Overlap family labels -> ne_common family keys, for the cubie controller
-# default tables.
+# Overlap family labels -> ne_common family keys.
 NE_FAMILY = {"ERK": "erk", "ESDIRK": "dirk", "Rosenbrock-W": "rosenbrock"}
 
 # "transfers": "both" includes h2d and d2h, "none" includes neither.

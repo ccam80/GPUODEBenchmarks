@@ -2,11 +2,7 @@
 tolerance settings per algorithm at N = 131072, timed and scored against the
 golden reference, written as "<setting> <time_ms> <error>" rows to
 data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt.
-The Julia and MPGOS writers mirror these constants; keep them in sync.
-
-The wp sweeps time runtime at fixed settings, so they sit at a large batch
-(131072 trajectories) where the GPU ensembles are throughput-bound rather
-than launch-bound."""
+The Julia and MPGOS writers mirror these constants; keep them in sync."""
 
 import os
 

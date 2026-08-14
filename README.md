@@ -701,8 +701,7 @@ For more details, see `data/numerical/README.md`.
 The trajectory-scaling benchmarks above measure *time only*; the
 work-precision (`wp`) mode additionally measures *solution error* against a
 golden reference, giving DiffEqDevTools-style error-vs-runtime curves for
-every framework at a fixed ensemble size of N = 131072 — a large batch, so
-the timed solves are throughput-bound rather than launch-bound.
+every framework at a fixed ensemble size of N = 131072.
 
 ### Golden reference
 
@@ -781,11 +780,9 @@ mapping lives in `runner_scripts/numerical_equivalence/algorithms.csv`)
 integrates the same Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1])
 fixed-step at every dyadic dt from 1/2 to 1/8192 — **both stacks in
 Float32** — and the final states are compared against the Float64 golden
-reference and against each other. Explicit (erk-family) algorithms are
-excluded from the fixed sweep: their fixed-step implementations are
-bit-equivalent, so only their adaptive controller dynamics are compared.
-The small-dt end of the grid resolves the fp-precision tail, where the two
-stacks' rounding behaviour differs.
+reference and against each other. erk-family algorithms run only the
+adaptive sweep. The small-dt end of the grid resolves the fp-precision
+tail.
 
 Float32 discipline on the Julia side is enforced, not assumed: u0, tspan, dt
 and the parameter vector are constructed as Float32 (the rho grid is read
@@ -851,8 +848,7 @@ against cubie's `tableau.has_error_estimate` and OrdinaryDiffEq's
 `isadaptive`) integrates the ensemble at atol = rtol over 1e-2 .. 1e-8, in
 Float32, with pinned initial dt and dt bounds, and errors are compared
 against the golden reference as error-vs-tolerance curves. Both runners
-skip algorithms outside that mutual set — an adaptive sweep with no
-counterpart on the other side would never be consumed.
+skip algorithms outside that mutual set.
 
 Cubie runs each algorithm twice:
 
@@ -866,10 +862,9 @@ Cubie runs each algorithm twice:
   stacks' different exponent conventions — derivation in
   `GPU_ODE_CUBIE/numerical_equivalence.py`). This tier exists to isolate
   how much of the difference between the two stacks comes from the step
-  controller rather than the algorithm. When the matched constants resolve
-  to exactly cubie's own defaults (the DIRKs: OrdinaryDiffEq's PI defaults
-  and cubie's DIRK gains are the same family), the runner skips the solve
-  and writes the default tier's results for the matched file instead.
+  controller rather than the algorithm. When the matched constants equal
+  cubie's own defaults, the matched file is written from the default
+  tier's results.
 
 Both sweeps write per-algorithm CSVs holding, per dt or per tolerance, the
 ensemble l2 error of each implementation against the golden reference and

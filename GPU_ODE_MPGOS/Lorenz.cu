@@ -147,8 +147,7 @@ int main(int argc, char *argv[])
 	ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> ScanLorenz(SelectedDevice);
 	
 	ScanLorenz.SolverOption(ThreadsPerBlock, BlockSize);
-	// 2^-10: the shared fixed-run dt (dyadic, exact in binary floating
-	// point); doubles as the adaptive build's initial step.
+	// Shared fixed-run dt, 2^-10; also the adaptive build's initial step.
 	ScanLorenz.SolverOption(InitialTimeStep, 9.765625e-4);
 
 	// ========================================

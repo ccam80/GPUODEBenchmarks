@@ -15,8 +15,7 @@ CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
-# Protocol constants; mirrored in common.py (which sources the numerical
-# grids and pins from ne_common.py).
+# Protocol constants; mirrored in common.py.
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
 const PERFORMANCE_REPEATS = 20
@@ -251,9 +250,7 @@ for row in table
             end
             repeats = PROTOCOL.performance_repeats
         elseif phase == "numerical"
-            # Explicit fixed steps are bit-equivalent across the stacks, so
-            # erk-family fixed sweeps carry no information (mirrors the NE
-            # suite's exclusion).
+            # erk-family rows run no fixed numerical sweep.
             if uppercase(String(row.family)) != "ERK"
                 append!(points, [("fixed", "dt", dt, PROTOCOL.ne_n) for dt in PROTOCOL.ne_dts])
             end
@@ -277,8 +274,7 @@ for row in table
             try
                 probs_host, probs, prob = build_problems(phase, n)
                 if phase == "numerical"
-                    # Accuracy only: a single untimed solve; nothing here
-                    # feeds the timing tables or plots.
+                    # Accuracy only: one untimed solve.
                     finals, _ = solve_end_to_end(probs_host, prob, alg, mode, setting)
                     finite, failed = finite_counts(finals)
                     finals_path = write_finals(alias, mode, tier, setting_kind,
@@ -290,8 +286,7 @@ for row in table
                     println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
                     continue
                 end
-                # One warmup covers both paths: the compile is shared, so a
-                # second is redundant.
+                # One warmup covers both transfer paths.
                 solve_end_to_end(probs_host, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, 3)
                 # Each transfer variant runs as an unbroken block, so one

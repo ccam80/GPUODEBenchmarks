@@ -7,9 +7,7 @@ DifferentialEquations.jl (protocol and paths in
 runner_scripts/numerical_equivalence/ne_common.py):
 
 * fixed:    error-vs-dt convergence study (fixed step controller) — isolates
-  the tableau from the controller. Explicit (erk-family) algorithms are
-  excluded: their fixed-step implementations are bit-equivalent, so the
-  sweep would only measure roundoff twice.
+  the tableau from the controller. erk-family rows are excluded.
 * adaptive: error-vs-tolerance study at atol = rtol over the mutual
   adaptive set (the ``adaptive`` column of algorithms.csv), run up to
   twice per algorithm:
@@ -20,10 +18,8 @@ runner_scripts/numerical_equivalence/ne_common.py):
       controller_constants.csv, written by ne_diffeq.jl), so both stacks
       run identical controller type, gains and tolerances. Divergence
       between the two stacks in this tier is the CI-gate signal. When the
-      matched settings resolve to the same controller as the default tier
-      (the OrdinaryDiffEq PI defaults and cubie's DIRK defaults are the
-      same Gustafsson-family gains), the tier is skipped and the default
-      results are written for it instead of solving twice.
+      matched settings equal the default tier's, the default results are
+      written for the matched file.
 
 Run from the repo root (inside the GPU_ODE_CUBIE venv):
     python GPU_ODE_CUBIE/numerical_equivalence.py [fixed|adaptive|all]
@@ -123,8 +119,8 @@ if MODE in ("fixed", "all"):
     for row in load_algorithms(ALGORITHM):
         alias = row["cubie_alias"]
         if not runs_fixed(row):
-            print("=== fixed {0}: skipped (explicit fixed steps are "
-                  "bit-equivalent) ===".format(alias))
+            print("=== fixed {0}: skipped (no fixed sweep for erk) ==="
+                  .format(alias))
             continue
         print("=== fixed {0} (order {1}) ===".format(alias, row["order"]))
         solver = qb.Solver(
@@ -220,7 +216,7 @@ if MODE in ("adaptive", "all"):
                   .format(alias, why_not))
         elif controllers_equal(matched, cubie_default_controller(
                 alias, row["family"], row["order"])):
-            # Identical settings solve identically; copy instead of re-running.
+            # Matched equals default; reuse the default results.
             matched_reuses_default = True
             print("=== adaptive {0}: matched tier equals cubie's defaults; "
                   "reusing the default results ===".format(alias))

@@ -18,10 +18,8 @@ Protocol:
 * Algorithms: ``algorithms.csv`` next to this module — one row per cubie
   algorithm alias with the matching DifferentialEquations.jl constructor
   expression, its theoretical order, and an ``adaptive`` flag marking the
-  algorithms that carry an embedded error estimate in cubie (the mutual
-  adaptive set). Both runners consume this file. Explicit (erk-family)
-  algorithms run no fixed sweep: their fixed-step implementations are
-  bit-equivalent, so only their adaptive controller dynamics are compared.
+  mutual adaptive set. Both runners consume this file. erk-family rows run
+  no fixed sweep.
 * dt grid: DTS_NE — dyadic fractions of the t=1 duration so every dt, save
   and end boundary is exact in binary floating point (Float32 included).
 * Outputs: one CSV per algorithm, rows ``dt,traj,x,y,z`` (traj is the
@@ -40,11 +38,7 @@ import os
 
 import numpy as np
 
-# Dyadic dt grid, 2^-1 .. 2^-13, so every dt, save and end boundary is exact
-# in binary floating point (Float32 included). Extends the wp fixed-step grid
-# (2^-4 .. 2^-13) with coarser steps to cover the convergence region of the
-# high-order methods; the small-dt end resolves the fp-precision tail, where
-# the two stacks' rounding behaviour differs.
+# Dyadic dt grid, 2^-1 .. 2^-13; the small-dt end resolves the fp-precision tail.
 DTS_NE = [2.0 ** -k for k in range(1, 14)]
 
 # Adaptive sweep: atol = rtol tolerance grid.
@@ -85,28 +79,17 @@ def load_algorithms(name="all"):
 
 
 def runs_fixed(row):
-    """Whether an algorithm belongs to the fixed-step convergence sweep.
-
-    Explicit (erk-family) fixed-step implementations are bit-equivalent
-    between cubie and DifferentialEquations.jl, so they carry no
-    information and are excluded; every other family runs the dt sweep.
-    """
+    """Whether the algorithm runs the fixed-step dt sweep (non-erk families)."""
     return row["family"] != "erk"
 
 
 def cubie_default_controller(alias, family, order, force_pi=True):
     """Cubie's resolved controller settings for a default-tier solve.
 
-    Cubie seeds the controller from the algorithm family's default table,
-    user keys override, and the controller config class fills anything
-    still unset (SingleIntegratorRunCore). This mirrors that resolution so
-    a comparison tier that lands on identical settings can be skipped.
-    ``force_pi`` reproduces the NE default tier (``step_controller="pi"``
-    passed explicitly); without it the table's own controller stands, as
-    in the overlap suite's default tier. Requires cubie (imported lazily
-    so CSV-only consumers stay cubie-free); gains are resolved at
-    ``order``. Returns None when the family has no adaptive default table
-    to mirror.
+    Mirrors cubie's resolution: family default table, then controller
+    config class defaults for unset keys. ``force_pi`` overrides the
+    table's controller with ``"pi"``. Gains resolve at ``order``; cubie
+    imports lazily. Returns None when the family has no adaptive table.
     """
     from cubie.integrators.algorithms import (generic_dirk, generic_erk,
                                               generic_firk,
@@ -144,10 +127,8 @@ def cubie_default_controller(alias, family, order, force_pi=True):
 def controllers_equal(a, b, rel_tol=1e-9):
     """Whether two controller-settings dicts request the same controller.
 
-    Compares the controller name exactly and every shared numeric key to
-    ``rel_tol``; a key present in only one dict is compared against the
-    other side's absence (unequal). Used to skip a comparison tier whose
-    settings collapse onto the default tier's.
+    Controller names compare exactly, numeric keys to ``rel_tol``; a key
+    present on one side only makes the dicts unequal.
     """
     if a is None or b is None:
         return False

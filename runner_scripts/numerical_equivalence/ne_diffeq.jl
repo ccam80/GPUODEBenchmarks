@@ -5,8 +5,7 @@
 #
 # * fixed:    error-vs-dt convergence study, fixed-step at every dt in the
 #             dyadic grid. Isolates the tableau from the controller.
-#             Explicit (erk-family) algorithms are excluded: their fixed
-#             steps are bit-equivalent between the two stacks.
+#             erk-family rows are excluded.
 # * adaptive: error-vs-tolerance study at atol = rtol in TOLS over the
 #             mutual adaptive set (the csv's `adaptive` column), each
 #             algorithm under its DEFAULT step-size controller — solver
@@ -186,8 +185,7 @@ if MODE in ("fixed", "all")
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
         if String(row.family) == "erk"
-            println("=== fixed $(alias): skipped (explicit fixed steps are " *
-                    "bit-equivalent)")
+            println("=== fixed $(alias): skipped (no fixed sweep for erk)")
             continue
         end
         println("=== fixed $(alias) -> $(expr) (order $(row.order)) ===")
@@ -256,8 +254,7 @@ if MODE in ("adaptive", "all")
     for row in table
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
-        # The adaptive column marks the mutual adaptive set: an adaptive
-        # sweep with no cubie tier to compare against is never consumed.
+        # Only the mutual adaptive set runs.
         if lowercase(string(row.adaptive)) != "true"
             println("=== adaptive $(alias): skipped (not in the mutual " *
                     "adaptive set)")

@@ -80,8 +80,6 @@ def make_system():
 
 
 def rho_grid(kind, n):
-    # The numerical phase reads NE finals instead of solving, so only the
-    # timed phases build a grid here.
     if kind == "work_precision":
         return np.linspace(0.0, 21.0, N_WP, dtype=np.float32)[:n]
     return np.linspace(0.0, 21.0, n, dtype=np.float32)
@@ -143,16 +141,10 @@ def to_device_inputs(initials, parameters):
 
 
 def import_numerical_from_ne(output, alias, family, metric_file, failure):
-    """Copy the NE suite's cubie sweeps into overlap finals and metric rows.
+    """Import the NE suite's cubie finals as numerical-phase metric rows.
 
-    The numerical phase's cubie side is the same protocol the NE suite
-    already ran — same golden rho grid, dt and tolerance grids, and
-    adaptive pins — so the finals are read from
-    data/numerical_equivalence/cubie/<key>/ instead of being re-solved
-    (and recompiled) here. The julia (DiffEqGPU) side still solves; the
-    analyzer pairs the two frameworks by setting. Explicit (erk-family)
-    algorithms have no fixed NE sweep: their fixed steps are
-    bit-equivalent, so only the adaptive default tier is imported.
+    Reads data/numerical_equivalence/cubie/<key>/; erk-family rows import
+    the adaptive default tier only.
     """
     key = output.name
     golden = np.loadtxt(GOLDEN_NE, delimiter=",", usecols=(1, 2, 3))
@@ -232,9 +224,7 @@ def main():
 
     for row in algorithms(args.algorithm):
         alias, order, family = row["cubie_alias"], row["order"], row["family"]
-        # The pi comparison tier duplicates the default tier wherever its
-        # settings resolve to cubie's own defaults (the DIRKs); identical
-        # settings solve identically, so the tier is skipped there.
+        # Skip the pi tier when it resolves to cubie's shipped defaults.
         pi_resolved = {key: (value(order) if callable(value) else value)
                        for key, value in pi_controller(order, family).items()}
         shipped = cubie_default_controller(alias, NE_FAMILY.get(family, family),
@@ -247,8 +237,7 @@ def main():
             adaptive_tiers = ("default", "pi")
         for phase in phases:
             if phase == "numerical":
-                # Reused from the NE suite rather than re-solved; accuracy
-                # data needs no timing, so nothing else runs here.
+                # The cubie side comes from the NE suite's outputs.
                 import_numerical_from_ne(args.output, alias, family,
                                          metric_file, failure)
                 continue
@@ -276,8 +265,7 @@ def main():
                         initial_values={"x": 1.0, "y": 0.0, "z": 0.0},
                         parameters={"rho": rho_grid(phase, n)})
                     device_inputs = to_device_inputs(initials, params)
-                    # One warmup covers both paths: the JIT compile and
-                    # allocations are shared, so a second is redundant.
+                    # One warmup covers both transfer paths.
                     solve_once(solver, initials, params)
                     # Each transfer variant runs as an unbroken block, so one
                     # variant's samples are never separated by the other's
