@@ -10,7 +10,7 @@ REM The venv is shared with the MLIR suite; cubie picks its backend from this at
 set CUBIE_CUDA_BACKEND=numba-cuda
 
 if /i "%ANALYSIS%"=="work-precision" (
-    python GPU_ODE_CUBIE\bench_cubie.py 32768 wp "%ALGORITHM%"
+    python GPU_ODE_CUBIE\bench_cubie.py 32768 wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal
@@ -19,7 +19,7 @@ if /i "%ANALYSIS%"=="work-precision" (
 
 for %%a in (!NLIST!) do (
     echo No. of trajectories = %%a
-    python GPU_ODE_CUBIE\bench_cubie.py %%a "%ALGORITHM%"
+    python GPU_ODE_CUBIE\bench_cubie.py %%a "%ALGORITHM%" --problem "%PROBLEM%"
     if !errorlevel! neq 0 exit /b 1
 )
 

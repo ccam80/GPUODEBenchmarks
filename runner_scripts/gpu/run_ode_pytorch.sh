@@ -5,7 +5,7 @@ source ./GPU_ODE_PyTorch/venv/bin/activate
 
 # Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768 wp "$ALGORITHM"
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768 wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate
     exit 0
 fi
@@ -13,7 +13,7 @@ fi
 for a in $NLIST
 do
     echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a "$ALGORITHM"
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py $a "$ALGORITHM" --problem "$PROBLEM"
 done
 
 deactivate

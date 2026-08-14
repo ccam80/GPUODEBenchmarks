@@ -1,9 +1,9 @@
 @echo off
-REM Sets ANALYSIS, NMAX, NLIST and ALGORITHM in the caller: set "PA_RAW=%*" then call "%~dp0..\parse_args.bat"
-REM -n: single value = sweep ceiling (8, 32, ... <= n); comma list = exact Ns. NLIST holds the counts, NMAX the largest.
+REM Sets ANALYSIS, NMAX, NLIST, ALGORITHM and PROBLEM in the caller; -n takes a sweep ceiling or comma list, -s a problem name, comma list, or all.
 set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
+set PROBLEM=all
 set NLIST=
 
 REM Tokens split on spaces and commas; value tokens after a flag are comma-joined.
@@ -79,6 +79,8 @@ if /i "!TOK!"=="-n" set "PA_FLAG=NMAX"
 if /i "!TOK!"=="--nmax" set "PA_FLAG=NMAX"
 if /i "!TOK!"=="-g" set "PA_FLAG=ALGORITHM"
 if /i "!TOK!"=="--algorithm" set "PA_FLAG=ALGORITHM"
+if /i "!TOK!"=="-s" set "PA_FLAG=PROBLEM"
+if /i "!TOK!"=="--problem" set "PA_FLAG=PROBLEM"
 if defined PA_FLAG (
     if defined PA_TARGET if not defined PA_HAVE (
         echo !PA_TARGET! requires a value

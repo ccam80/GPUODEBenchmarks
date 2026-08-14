@@ -1,20 +1,11 @@
 #!/usr/bin/env python
-# coding: utf-8
-# %%
-# Benchmarking Diffrax ODE solvers for ensemble problems via vmap, once per
-# algorithm: euler/classical-rk4/tsit5 fixed, tsit5 adaptive (PIDController).
-# Usage: bench_diffrax.py <N> [wp] [algorithm|all]
 
-# Created By: Utkarsh
-# Last Updated: 19 April 2023
+# Diffrax ensemble benchmarks via vmap: bench_diffrax.py <N> [wp] [algorithm|all] [--problem <name|all>]
 
-
-# %%
 from collections.abc import Callable
 from typing import ClassVar
 
 import diffrax
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -30,6 +21,7 @@ from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolatio
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
 from bench_key import dataset_key, data_dir
+from jax_systems import build_problem
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
@@ -38,7 +30,8 @@ FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
 ADAPTIVE_ALGORITHMS = ("tsit5",)
 SUPPORTED = ("euler", "classical-rk4", "tsit5")
 
-numberOfParameters, WP_MODE, ALGORITHMS = parse_bench_args(sys.argv[1:], SUPPORTED)
+numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+    sys.argv[1:], SUPPORTED, framework="jax")
 # Timed repeats per point; min is reported.
 REPEATS = 20
 
@@ -93,8 +86,7 @@ def make_solver(algorithm):
 
 
 def best_times_ms(solve, args, label):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only). Exits
-    1 without recording if the compiled solve does not fit in device memory."""
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only); exits 1 without recording when the solve does not fit in device memory."""
     compiled = solve.lower(args).compile()
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
@@ -130,67 +122,49 @@ def best_times_ms(solve, args, label):
 
 
 # %%
-# Defining the Lorenz Problem
-class Lorenz(eqx.Module):
-    k1: float
-
-    def __call__(self, t, y, args):
-        f0 = 10.0*(y[1] - y[0])
-        f1 = self.k1 * y[0] - y[1] - y[0] * y[2]
-        f2 = y[0] * y[1] - (8/3)*y[2]
-        return jnp.stack([f0, f1, f2])
-
-
-# %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
-def make_fixed(algorithm, dt0=0.001, max_steps=4096):
+def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
     solver = make_solver(algorithm)
+    vector_field, y0 = build_problem(problem)
+    duration = problem["duration"]
+    dt0 = problem.timing_dt if dt0 is None else dt0
 
     @jax.jit
     @jax.vmap
-    def main(k1):
-        lorenz = Lorenz(k1)
-        terms = diffrax.ODETerm(lorenz)
+    def main(p):
+        terms = diffrax.ODETerm(vector_field(p))
         return diffrax.diffeqsolve(
-            terms, solver, 0.0, 1.0, dt0,
-            jnp.array([1.0, 0.0, 0.0]), max_steps=max_steps)
+            terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps)
     return main
 
 
-def make_adaptive(algorithm, tol=1e-8, max_steps=65536):
+def make_adaptive(problem, algorithm, tol=1e-8, max_steps=65536):
     solver = make_solver(algorithm)
+    vector_field, y0 = build_problem(problem)
+    duration = problem["duration"]
+    dt0 = problem.timing_dt
 
     @jax.jit
     @jax.vmap
-    def main(k1):
-        lorenz = Lorenz(k1)
-        terms = diffrax.ODETerm(lorenz)
+    def main(p):
+        terms = diffrax.ODETerm(vector_field(p))
         return diffrax.diffeqsolve(
-            terms, solver, 0.0, 1.0, 0.001,
-            jnp.array([1.0, 0.0, 0.0]), max_steps=max_steps,
+            terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps,
             stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
     return main
 
 
-# %%
-# Setting up parameters for parallel simulation
-parameterList = jnp.linspace(0.0,21.0,numberOfParameters)
+# vmap/JIT ordering makes no measurable difference: https://colab.research.google.com/drive/1d7G-O5JX31lHbg7jTzzozbo5-Gp7DBEv
 
-# Test that vmap and JIT ordering does not make a noticeable difference:
-# https://colab.research.google.com/drive/1d7G-O5JX31lHbg7jTzzozbo5-Gp7DBEv?usp=sharing
 
-# ========================================
-# WORK-PRECISION (wp) MODE
-# ========================================
-# Sweeps dt / tolerance per algorithm at N=32768; see runner_scripts/wp_common.py.
-# wp timings block_until_ready so the full solve is measured.
-if WP_MODE:
+def run_wp(problem, parameterList):
+    """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
 
     if numberOfParameters != N_WP:
         sys.exit("wp mode must be run with N = {0}".format(N_WP))
-    golden = load_golden()
+    golden = load_golden(problem)
 
     def bench(m, setting, outfh):
         sol = m(parameterList)
@@ -200,56 +174,75 @@ if WP_MODE:
             lambda: jax.block_until_ready(m(parameterList).ys),
             repeat=20, number=1)
         t_ms = min(res) * 1000
-        print("wp setting={0:g}: {1:.2f} ms, err={2:.3e}".format(
-            setting, t_ms, err))
+        print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}".format(
+            problem.name, setting, t_ms, err))
         outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
 
     for algorithm in ALGORITHMS:
         if algorithm in FIXED_ALGORITHMS:
-            outfile = wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY)
+            outfile = wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY,
+                                 problem)
             with open(outfile, "w") as f:
-                for dt in dts_for(algorithm):
+                for dt in dts_for(algorithm, problem):
                     # max_steps covers the finest euler dt (2^17 steps).
-                    bench(make_fixed(algorithm, dt, max_steps=262144), dt, f)
+                    bench(make_fixed(problem, algorithm, dt,
+                                     max_steps=262144), dt, f)
         if algorithm in ADAPTIVE_ALGORITHMS:
             outfile = wp_outfile("JAX", "Jax", "adaptive", algorithm,
-                                 DATASET_KEY)
+                                 DATASET_KEY, problem)
             with open(outfile, "w") as f:
                 for tol in TOLS:
-                    bench(make_adaptive(algorithm, tol), tol, f)
+                    bench(make_adaptive(problem, algorithm, tol), tol, f)
 
-    sys.exit(0)
+
+def run_times(problem, parameterList):
+    """N-sweep: use jax.vmap to compute parallel solutions of the ODE."""
+    for algorithm in ALGORITHMS:
+        if algorithm in FIXED_ALGORITHMS:
+            main = make_fixed(problem, algorithm)
+            best_time, best_time_dev = best_times_ms(
+                main, parameterList, "fixed {0}".format(algorithm))
+            print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
+                  "({:.1f} ms without transfers)".format(
+                      numberOfParameters, problem.name, algorithm, best_time,
+                      best_time_dev))
+            outfile = times_outfile("JAX", "Jax", "fixed", algorithm,
+                                    DATASET_KEY, problem)
+            with open(outfile, "a+") as file:
+                file.write('{0} {1} {2}\n'.format(
+                    numberOfParameters, best_time, best_time_dev))
+            # The pairwise numerical cross-check reads this fixed CSV name.
+            if numberOfParameters == 32768 and algorithm == "tsit5":
+                sol = main(parameterList)
+                final_states = np.array(sol.ys[:, -1, :])
+                np.savetxt(os.path.join(
+                    data_dir("numerical", DATASET_KEY, problem=problem),
+                    "jax.csv"), final_states, delimiter=',')
+
+        if algorithm in ADAPTIVE_ALGORITHMS:
+            main = make_adaptive(problem, algorithm)
+            best_time, best_time_dev = best_times_ms(
+                main, parameterList, "adaptive {0}".format(algorithm))
+            print("{:} ODE solves ({}, {}, adaptive) completed in {:.1f} ms "
+                  "({:.1f} ms without transfers)".format(
+                      numberOfParameters, problem.name, algorithm, best_time,
+                      best_time_dev))
+            outfile = times_outfile("JAX", "Jax", "adaptive", algorithm,
+                                    DATASET_KEY, problem)
+            with open(outfile, "a+") as file:
+                file.write('{0} {1} {2}\n'.format(
+                    numberOfParameters, best_time, best_time_dev))
+
 
 # %%
-# N-sweep: use jax.vmap to compute parallel solutions of the ODE.
-for algorithm in ALGORITHMS:
-    if algorithm in FIXED_ALGORITHMS:
-        main = make_fixed(algorithm)
-        best_time, best_time_dev = best_times_ms(
-            main, parameterList, "fixed {0}".format(algorithm))
-        print("{:} ODE solves ({}, fixed) completed in {:.1f} ms "
-              "({:.1f} ms without transfers)".format(
-                  numberOfParameters, algorithm, best_time, best_time_dev))
-        outfile = times_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY)
-        with open(outfile, "a+") as file:
-            file.write('{0} {1} {2}\n'.format(
-                numberOfParameters, best_time, best_time_dev))
-        # The pairwise numerical cross-check reads this fixed CSV name.
-        if numberOfParameters == 32768 and algorithm == "tsit5":
-            sol = main(parameterList)
-            final_states = np.array(sol.ys[:, -1, :])
-            np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "jax.csv"),
-                       final_states, delimiter=',')
+if not PROBLEMS:
+    print("diffrax runs none of the requested problems; skipping.")
+    sys.exit(0)
 
-    if algorithm in ADAPTIVE_ALGORITHMS:
-        main = make_adaptive(algorithm)
-        best_time, best_time_dev = best_times_ms(
-            main, parameterList, "adaptive {0}".format(algorithm))
-        print("{:} ODE solves ({}, adaptive) completed in {:.1f} ms "
-              "({:.1f} ms without transfers)".format(
-                  numberOfParameters, algorithm, best_time, best_time_dev))
-        outfile = times_outfile("JAX", "Jax", "adaptive", algorithm,
-                                DATASET_KEY)
-        with open(outfile, "a+") as file:
-            file.write('{0} {1} {2}\n'.format(
-                numberOfParameters, best_time, best_time_dev))
+for _problem in PROBLEMS:
+    # Setting up parameters for parallel simulation
+    _parameters = jnp.asarray(_problem.sweep(numberOfParameters))
+    if WP_MODE:
+        run_wp(_problem, _parameters)
+    else:
+        run_times(_problem, _parameters)

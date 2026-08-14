@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""
-Cross-platform setup script for Julia environment for GPU ODE benchmarking.
-Works on Linux, Windows, and macOS.
 
-Project.toml and Manifest.toml are committed, so the default run instantiates
-that exact version set. ``--update`` re-resolves every package to the newest
-compatible release and rewrites both files.
-"""
+"""Instantiate the committed Julia environment, or re-resolve it with --update."""
+
 import argparse
 import os
 import sys
@@ -17,8 +12,7 @@ from pathlib import Path
 # Plots is required by runner_scripts/plot/*.jl.
 CORE_PACKAGES = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays", "Plots"]
 
-# Solver sub-libraries: the slim OrdinaryDiffEq v7 umbrella only re-exports the
-# default solver set; the numerical-equivalence suite needs the rest explicitly.
+# Solver sub-libraries the numerical-equivalence suite needs beyond the umbrella.
 DIFFEQ_PACKAGES = [
     "DiffEqBase",
     "DiffEqDevTools",
@@ -79,8 +73,7 @@ def add_packages(names):
 
 def resolve_latest():
     """Re-resolve the whole environment and rewrite Project/Manifest."""
-    # CUDA first: resolving it against an empty project avoids the backtracking
-    # a mixed first solve runs into.
+    # CUDA resolves first, against an empty project.
     print("Adding CUDA package for GPU support...")
     if not julia('using Pkg; Pkg.add("CUDA")'):
         print("Failed to add CUDA package")

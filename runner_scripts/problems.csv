@@ -1,0 +1,2 @@
+problem,display,states,duration,sweep_parameter,sweep_min,sweep_max,class,dae_index,wp_k_min,wp_k_max,euler_k_min,euler_k_max,ne_k_min,ne_k_max,golden_algorithm,frameworks
+lorenz,Lorenz,3,1.0,rho,0.0,21.0,nonstiff,0,4,13,8,17,1,13,Vern9,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda

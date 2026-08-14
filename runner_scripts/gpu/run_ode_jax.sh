@@ -5,7 +5,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 source ./GPU_ODE_JAX/venv/bin/activate
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_JAX/bench_diffrax.py 32768 wp "$ALGORITHM"
+    python3 ./GPU_ODE_JAX/bench_diffrax.py 32768 wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate
     exit 0
 fi
@@ -13,7 +13,7 @@ fi
 for a in $NLIST
 do
     echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_JAX/bench_diffrax.py $a "$ALGORITHM"
+    python3 ./GPU_ODE_JAX/bench_diffrax.py $a "$ALGORITHM" --problem "$PROBLEM"
 done
 
 deactivate

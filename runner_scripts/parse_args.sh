@@ -1,8 +1,8 @@
-# Sets ANALYSIS, NMAX, NLIST and ALGORITHM in the caller: . "$(dirname "$0")/../parse_args.sh" "$@"
-# -n: single value = sweep ceiling (8, 32, ... <= n); comma list = exact Ns. NLIST holds the counts, NMAX the largest.
+# Sets ANALYSIS, NMAX, NLIST, ALGORITHM and PROBLEM in the caller; -n takes a sweep ceiling or a comma list, -s a problem name, comma list, or all.
 ANALYSIS=performance
 NMAX=16777216
 ALGORITHM=all
+PROBLEM=all
 NLIST=
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -15,9 +15,13 @@ while [ $# -gt 0 ]; do
         -g|--algorithm)
             [ $# -ge 2 ] || { echo "$1 requires a value" >&2; exit 1; }
             ALGORITHM=$2; shift 2;;
+        -s|--problem)
+            [ $# -ge 2 ] || { echo "$1 requires a value" >&2; exit 1; }
+            PROBLEM=$2; shift 2;;
         *) echo "Unknown option $1" >&2; exit 1;;
     esac
 done
+[ -n "$PROBLEM" ] || { echo "-s/--problem requires a value" >&2; exit 1; }
 case "$ANALYSIS" in
     performance|work-precision) ;;
     *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision)" >&2; exit 1;;
