@@ -45,7 +45,7 @@ python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
 deactivate
 
 # Run Julia benchmark with 32768 trajectories
-julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768
+julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl 32768
 
 # Run MPGOS benchmark with 32768 trajectories (requires modification of NT in Lorenz.cu)
 cd GPU_ODE_MPGOS && make && ./lorenz.exe

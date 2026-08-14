@@ -1,6 +1,6 @@
 # Windows MPGOS runner: enters the Visual Studio developer environment and calls nvcc.
 param(
-    # Exact aliases keep -a and -g unambiguous under prefix matching.
+    # Exact aliases keep -a, -g and -s unambiguous under prefix matching.
     [Alias('a')]
     [ValidateSet('performance', 'work-precision')]
     [string]$Analysis = 'performance',
@@ -8,7 +8,9 @@ param(
     [Alias('n')]
     [string]$Nmax = '16777216',
     [Alias('g')]
-    [string]$Algorithm = 'all'
+    [string]$Algorithm = 'all',
+    [Alias('s')]
+    [string]$Problem = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +46,13 @@ $env:CUDA_MODULE_LOADING = 'EAGER'
 
 Push-Location (Join-Path $PSScriptRoot '..\..')
 
+$Problems = @(& python runner_scripts\mpgos_problems.py $Problem)
+if ($Problems.Count -eq 0) {
+    Write-Host "MPGOS runs none of the requested problems; skipping."
+    Pop-Location
+    exit 0
+}
+
 function Enter-VsEnvironment {
     if (Get-Command cl -ErrorAction SilentlyContinue) {
         return
@@ -62,11 +71,14 @@ function Enter-VsEnvironment {
 
 # Mirrors GPU_ODE_MPGOS/Makefile.
 function Build-Project {
-    if (Test-Path "GPU_ODE_MPGOS\Lorenz.exe") {
-        Remove-Item "GPU_ODE_MPGOS\Lorenz.exe" -Force
+    param([string]$ProblemName, [string]$Solver, [long]$Nt)
+    if (Test-Path "GPU_ODE_MPGOS\Bench.exe") {
+        Remove-Item "GPU_ODE_MPGOS\Bench.exe" -Force
     }
-    nvcc -o GPU_ODE_MPGOS\Lorenz.exe GPU_ODE_MPGOS\Lorenz.cu `
-        -I"GPU_ODE_MPGOS\SourceCodes" `
+    nvcc -o GPU_ODE_MPGOS\Bench.exe GPU_ODE_MPGOS\Bench.cu `
+        -I"GPU_ODE_MPGOS\SourceCodes" -I"GPU_ODE_MPGOS" `
+        "-DPROBLEM_HEADER=\`"problems/$ProblemName.cuh\`"" `
+        "-DSOLVER_CHOICE=$Solver" "-DNT_VALUE=$Nt" `
         -O3 -std=c++17 --ptxas-options=-v --gpu-architecture=native `
         -lineinfo -maxrregcount=128
     if ($LASTEXITCODE -ne 0) {
@@ -74,38 +86,33 @@ function Build-Project {
     }
 }
 
-# Solver and trajectory count are compile-time constants, so each point is a rebuild.
 function Invoke-Point {
-    param([string]$Solver, [long]$Nt, [switch]$Wp)
-    $content = Get-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    $content[14] = "#define SOLVER $Solver"
-    $content[16] = "const int NT = $Nt;"
-    $content | Set-Content "GPU_ODE_MPGOS\Lorenz.cu"
-    Build-Project
+    param([string]$ProblemName, [string]$Solver, [long]$Nt, [switch]$Wp)
+    Build-Project -ProblemName $ProblemName -Solver $Solver -Nt $Nt
     if ($Wp) {
-        & "GPU_ODE_MPGOS\Lorenz.exe" $Nt wp
+        & "GPU_ODE_MPGOS\Bench.exe" $Nt wp
     } else {
-        & "GPU_ODE_MPGOS\Lorenz.exe" $Nt
+        & "GPU_ODE_MPGOS\Bench.exe" $Nt
     }
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Lorenz.exe ($Solver) failed with exit code $LASTEXITCODE"
+        Write-Error "Bench.exe ($ProblemName, $Solver) failed with exit code $LASTEXITCODE"
     }
 }
 
 Enter-VsEnvironment
 
-if ($Analysis -eq 'work-precision') {
-    foreach ($solver in $Solvers) {
-        Invoke-Point -Solver $solver -Nt 32768 -Wp
+foreach ($problemName in $Problems) {
+    if ($Analysis -eq 'work-precision') {
+        foreach ($solver in $Solvers) {
+            Invoke-Point -ProblemName $problemName -Solver $solver -Nt 32768 -Wp
+        }
+        continue
     }
-    Pop-Location
-    return
-}
-
-foreach ($a in $NValues) {
-    Write-Host "No. of trajectories = $a"
-    foreach ($solver in $Solvers) {
-        Invoke-Point -Solver $solver -Nt $a
+    foreach ($a in $NValues) {
+        Write-Host "No. of trajectories = $a ($problemName)"
+        foreach ($solver in $Solvers) {
+            Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
+        }
     }
 }
 

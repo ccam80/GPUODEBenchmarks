@@ -224,7 +224,7 @@ class AnalysisTests(unittest.TestCase):
                 path = root / (framework + ".csv")
                 with path.open("w", newline="") as handle:
                     writer = csv.writer(handle)
-                    writer.writerow(["traj", "x", "y", "z"])
+                    writer.writerow(["traj", "s1", "s2", "s3"])
                     for i, row in enumerate(values):
                         writer.writerow([i] + list(row))
             metrics = []
@@ -284,11 +284,12 @@ class AnalyzerOutputTests(unittest.TestCase):
             self.assertIn(self.KEY, report.read_text(encoding="utf-8"))
             self.assertTrue((data / "timing_summary.csv").exists())
 
-    def test_key_defaults_to_the_result_directory_name(self):
+    def test_key_defaults_to_the_result_directory_parent(self):
+        # The result directory is <key>/<problem>, so the key is its parent.
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            data, plots_dir = tmp / self.KEY, tmp / "plots"
-            data.mkdir()
+            data, plots_dir = tmp / self.KEY / "lorenz", tmp / "plots"
+            data.mkdir(parents=True)
             self.write_point(data, "cubie")
             argv = sys.argv
             sys.argv = ["analyze.py", "--output", str(data),

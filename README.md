@@ -29,6 +29,11 @@ For a streamlined setup experience on any platform, use the Python-based setup s
 python3 setup_all_environments.py
 ```
 
+The Julia environment is pinned: `Project.toml` and `Manifest.toml` are
+committed and `setup_julia.py` instantiates that exact version set. Pass
+`--update` to re-resolve to the newest compatible releases and rewrite both
+files.
+
 This will set up all environments (CUBIE, CUBIE-MLIR, JAX, PyTorch,
 Myokit-CUDA, and Julia) automatically. For more details and individual
 package setup instructions, see [SETUP.md](SETUP.md).
@@ -185,9 +190,33 @@ a framework that does not support a requested algorithm skips cleanly:
 ```
 
 Timing files are named
-`data/<package>/<os>_<gpu>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
+`data/<package>/<os>_<gpu>/<problem>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
 (work-precision files use `_wp_` in place of `_times_`). Data without the
 algorithm field is regenerated fresh rather than migrated.
+
+### Problems
+
+`runner_scripts/problems.csv` is the problem registry: one row per benchmark
+ODE or DAE, giving its state count, duration, swept parameter and range,
+stiffness class, DAE index, dt-grid exponents, golden method, and the
+frameworks expected to run it. Both `problems.py` and `problems.jl` read that
+one file, and every dt grid is a dyadic fraction of the problem's duration so
+dt, save and end boundaries stay exact in binary floating point.
+
+Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
+framework skips cleanly when a requested problem is not in its list:
+
+```bash
+    $ bash ./run_benchmark.sh -p cubie -s lorenz
+    $ bash ./run_all_benchmarks.sh -s lorenz -g tsit5
+    $ ./run_full_dataset.sh -s lorenz
+```
+
+Adding a problem means one CSV row plus its right-hand side in each
+framework's system module: `runner_scripts/{cubie,jax,torch,julia}_systems.*`
+and `reference_systems.jl` for the Float64 golden, a
+`GPU_ODE_MPGOS/problems/<name>.cuh` header, and a CellML model under
+`GPU_ODE_MYOKIT_CUDA/models/` for the Myokit suite.
 
 ### Generating the complete dataset
 
@@ -352,7 +381,9 @@ NVIDIA's website lists the resource
 for installation.
 
 The MPGOS scripts are in the `GPU_ODE_MPGOS` folder. The file
-`GPU_ODE_MPGOS/Lorenz.cu` is the main executed code. However, the MPGOS
+`GPU_ODE_MPGOS/Bench.cu` is the main executed code; the problem header,
+solver and trajectory count are compile-time `-D` definitions, so each point
+is a rebuild. The MPGOS
 programs can be run with the same script by changing the arguments as:
 
 **On Linux/macOS:**
@@ -674,7 +705,7 @@ python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768
 deactivate
 
 # Julia
-julia --project=. ./GPU_ODE_Julia/bench_lorenz_gpu.jl 32768
+julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl 32768
 ```
 
 ### Analyzing Numerical Differences
@@ -712,7 +743,8 @@ checkout:
 
 ```bash
 julia -t auto --project=. runner_scripts/golden/generate_golden.jl
-# -> data/numerical/golden_lorenz_32768.csv (machine independent, no dataset key)
+# -> data/numerical/golden_<problem>_32768.csv (machine independent, no dataset key)
+# An existing file is kept; --force regenerates it, --problem selects one.
 ```
 
 Because the frameworks build their rho grids independently (and differ by
@@ -747,7 +779,7 @@ package's work-precision sweeps and the plot in one go:
 `./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 
 Results are written per machine as
-`data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
+`data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
 with rows `<setting> <time_ms> <error>`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
@@ -765,8 +797,8 @@ julia --project=. ./runner_scripts/plot/plot_ode_wp.jl
 ```
 
 discovers all keyed wp files and writes one algorithm-matched figure per
-(mode, algorithm), `plots/<group>/Lorenz_wp_<mode>_<algorithm>.png`, plus a
-`plots/<group>/Lorenz_wp_all.png` overview, for the same groups as
+(mode, algorithm), `plots/<group>/<problem>/wp_<mode>_<algorithm>.png`, plus a
+`plots/<group>/<problem>/wp_all.png` overview, for the same groups as
 `plot_ode_comp.jl`.
 
 ## Numerical Equivalence (error vs. dt) — cubie vs. DifferentialEquations.jl
@@ -805,7 +837,7 @@ comparison, and exit non-zero when any step fails.
 benchmark run.
 
 Reproducibility: the golden reference and the DifferentialEquations.jl
-outputs under `data/numerical_equivalence/julia/` are machine-independent
+outputs under `data/numerical_equivalence/julia/<problem>/` are machine-independent
 CPU results — once committed, a fresh machine (or cubie's CI) can skip
 Julia entirely and only re-run the cubie sweeps + comparison against the
 committed reference. The golden is regenerated only if its file is missing
@@ -821,14 +853,14 @@ take the same optional `fixed|adaptive|all` mode argument):
 
 ```bash
 julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl
-#   -> data/numerical/golden_ne_lorenz_1024.csv  (Float64 Vern9 tol 1e-13; machine independent)
+#   -> data/numerical/golden_ne_<problem>_1024.csv  (Float64, machine independent)
 julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
-#   -> data/numerical_equivalence/julia/<algorithm>.csv            (fixed sweep)
-#   -> data/numerical_equivalence/julia/<algorithm>_adaptive.csv   (adaptive sweep)
-#   -> data/numerical_equivalence/julia/controller_constants.csv   (resolved defaults)
+#   -> data/numerical_equivalence/julia/<problem>/<algorithm>.csv            (fixed sweep)
+#   -> data/numerical_equivalence/julia/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
+#   -> data/numerical_equivalence/julia/<problem>/controller_constants.csv   (resolved defaults)
 GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
-#   -> data/numerical_equivalence/cubie/<algorithm>_<os>_<gpu>.csv
-#   -> data/numerical_equivalence/cubie/<algorithm>_adaptive_<tier>_<os>_<gpu>.csv
+#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>.csv
+#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
 #   -> plots/<os>_<gpu>/numerical_equivalence_fixed.csv
 #   -> plots/<os>_<gpu>/numerical_equivalence_adaptive.csv

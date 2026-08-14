@@ -53,7 +53,10 @@ def valid_metric(row):
 
 
 def load_finals(root, relative):
-    return np.loadtxt(root / relative, delimiter=",", skiprows=1, usecols=(1, 2, 3), dtype=np.float64)
+    """Final states of one point; column 0 is the trajectory index."""
+    data = np.loadtxt(root / relative, delimiter=",", skiprows=1,
+                      dtype=np.float64, ndmin=2)
+    return data[:, 1:]
 
 
 def timing_summary(rows, metrics=None):

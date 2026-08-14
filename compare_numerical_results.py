@@ -102,7 +102,7 @@ def compare_arrays(name1, arr1, name2, arr2, rtol=1e-4, atol=1e-6):
     }
     return stats
 
-# Packages we compare; CSVs live at data/numerical/<os>_<gpu>/<package>.csv.
+# Packages we compare; CSVs live at data/numerical/<os>_<gpu>/<problem>/<package>.csv.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
 from bench_key import group_dir  # noqa: E402
 
@@ -188,7 +188,7 @@ def main():
         print(f"\nERROR: {data_dir} does not exist. Run the benchmarks with 32768 trajectories first.")
         sys.exit(1)
 
-    # Discover keyed datasets: (package, os, gpu) -> array
+    # Discover keyed datasets: (package, os, gpu, problem) -> array
     datasets = []  # list of dicts
     for key in sorted(os.listdir(data_dir)):
         kpath = os.path.join(data_dir, key)
@@ -198,23 +198,28 @@ def main():
         if parsed is None:
             continue
         os_name, gpu = parsed
-        for fname in sorted(os.listdir(kpath)):
-            if not fname.endswith(".csv"):
+        for problem in sorted(os.listdir(kpath)):
+            ppath = os.path.join(kpath, problem)
+            if not os.path.isdir(ppath):
                 continue
-            package = fname[:-4]
-            if package not in KNOWN_PACKAGES:
-                continue
-            arr = load_data(os.path.join(kpath, fname))
-            if arr is None:
-                continue
-            datasets.append({"package": package, "os": os_name, "gpu": gpu,
-                             "key": key, "arr": arr})
-            print(f"✓ Loaded {key}/{fname} - package={package}, os={os_name}, gpu={gpu}, shape: {arr.shape}")
+            for fname in sorted(os.listdir(ppath)):
+                if not fname.endswith(".csv"):
+                    continue
+                package = fname[:-4]
+                if package not in KNOWN_PACKAGES:
+                    continue
+                arr = load_data(os.path.join(ppath, fname))
+                if arr is None:
+                    continue
+                datasets.append({"package": package, "os": os_name, "gpu": gpu,
+                                 "key": key, "problem": problem, "arr": arr})
+                print(f"✓ Loaded {key}/{problem}/{fname} - package={package}, "
+                      f"os={os_name}, gpu={gpu}, shape: {arr.shape}")
 
     if len(datasets) < 2:
         # Exit 3, not 1, so callers can tell this from a real failure.
         print(f"\nNothing to compare: found {len(datasets)} keyed dataset(s), need at least 2.")
-        print("Expected files like <os>_<gpu>/<package>.csv (run benchmarks with 32768 trajectories).")
+        print("Expected files like <os>_<gpu>/<problem>/<package>.csv (run benchmarks with 32768 trajectories).")
         sys.exit(3)
 
     # Most specific first; a group repeating an earlier group's keys is dropped.
@@ -242,11 +247,14 @@ def main():
     for group_label, group_datasets in groups:
         # Disambiguate names by key only when the group mixes machines.
         multikey = len({d["key"] for d in group_datasets}) > 1
-        named = {}
-        for d in group_datasets:
-            name = f"{d['package']}@{d['key']}" if multikey else d["package"]
-            named[name] = d["arr"]
-        build_comparison(group_label, named)
+        for problem in sorted({d["problem"] for d in group_datasets}):
+            named = {}
+            for d in group_datasets:
+                if d["problem"] != problem:
+                    continue
+                name = f"{d['package']}@{d['key']}" if multikey else d["package"]
+                named[name] = d["arr"]
+            build_comparison(os.path.join(group_label, problem), named)
 
     print(f"\n{'='*80}")
     print("SUMMARY")
