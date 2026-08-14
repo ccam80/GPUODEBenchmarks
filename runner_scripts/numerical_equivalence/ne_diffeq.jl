@@ -5,12 +5,15 @@
 #
 # * fixed:    error-vs-dt convergence study, fixed-step at every dt in the
 #             dyadic grid. Isolates the tableau from the controller.
-# * adaptive: error-vs-tolerance study at atol = rtol in TOLS, each algorithm
-#             under its DEFAULT step-size controller — solver performance
-#             under real controller dynamics. Per-trajectory accept/reject
-#             counts are recorded, and the resolved controller constants are
-#             exported (controller_constants.csv) so the cubie runner can
-#             mirror them exactly for its "matched" tier.
+#             Explicit (erk-family) algorithms are excluded: their fixed
+#             steps are bit-equivalent between the two stacks.
+# * adaptive: error-vs-tolerance study at atol = rtol in TOLS over the
+#             mutual adaptive set (the csv's `adaptive` column), each
+#             algorithm under its DEFAULT step-size controller — solver
+#             performance under real controller dynamics. Per-trajectory
+#             accept/reject counts are recorded, and the resolved controller
+#             constants are exported (controller_constants.csv) so the cubie
+#             runner can mirror them exactly for its "matched" tier.
 #
 # The protocol mirrors ne_common.py; keep the two in sync.
 #
@@ -182,6 +185,11 @@ if MODE in ("fixed", "all")
     for row in table
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
+        if String(row.family) == "erk"
+            println("=== fixed $(alias): skipped (explicit fixed steps are " *
+                    "bit-equivalent)")
+            continue
+        end
         println("=== fixed $(alias) -> $(expr) (order $(row.order)) ===")
         alg = try
             eval(Meta.parse(expr))
@@ -248,6 +256,13 @@ if MODE in ("adaptive", "all")
     for row in table
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
+        # The adaptive column marks the mutual adaptive set: an adaptive
+        # sweep with no cubie tier to compare against is never consumed.
+        if lowercase(string(row.adaptive)) != "true"
+            println("=== adaptive $(alias): skipped (not in the mutual " *
+                    "adaptive set)")
+            continue
+        end
         alg = try
             eval(Meta.parse(expr))
         catch err

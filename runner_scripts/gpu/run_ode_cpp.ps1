@@ -96,7 +96,7 @@ Enter-VsEnvironment
 
 if ($Analysis -eq 'work-precision') {
     foreach ($solver in $Solvers) {
-        Invoke-Point -Solver $solver -Nt 32768 -Wp
+        Invoke-Point -Solver $solver -Nt 131072 -Wp
     }
     Pop-Location
     return

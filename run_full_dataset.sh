@@ -343,7 +343,7 @@ if $DO_WP; then
     # creates it -- without it *every* framework's wp run aborts immediately on
     # a missing-file error, so generate it up front rather than failing seven
     # times over.
-    if [ ! -f data/numerical/golden_lorenz_32768.csv ]; then
+    if [ ! -f data/numerical/golden_lorenz_131072.csv ]; then
         # Reference generation is scored on accuracy, not speed.
         CLOCK_CRITICAL=false; STEP_LABEL="wp:golden"
         run_step "Golden reference for work-precision" "wp_golden.log" \

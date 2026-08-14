@@ -7,16 +7,23 @@ DifferentialEquations.jl (protocol and paths in
 runner_scripts/numerical_equivalence/ne_common.py):
 
 * fixed:    error-vs-dt convergence study (fixed step controller) — isolates
-  the tableau from the controller.
-* adaptive: error-vs-tolerance study at atol = rtol, run twice per
-  algorithm:
+  the tableau from the controller. Explicit (erk-family) algorithms are
+  excluded: their fixed-step implementations are bit-equivalent, so the
+  sweep would only measure roundoff twice.
+* adaptive: error-vs-tolerance study at atol = rtol over the mutual
+  adaptive set (the ``adaptive`` column of algorithms.csv), run up to
+  twice per algorithm:
     - "default" tier: cubie's own PI controller defaults — cubie's real
       controller dynamics.
     - "matched" tier: controller constants mirrored from the Julia run's
       resolved defaults (data/numerical_equivalence/julia/
       controller_constants.csv, written by ne_diffeq.jl), so both stacks
       run identical controller type, gains and tolerances. Divergence
-      between the two stacks in this tier is the CI-gate signal.
+      between the two stacks in this tier is the CI-gate signal. When the
+      matched settings resolve to the same controller as the default tier
+      (the OrdinaryDiffEq PI defaults and cubie's DIRK defaults are the
+      same Gustafsson-family gains), the tier is skipped and the default
+      results are written for it instead of solving twice.
 
 Run from the repo root (inside the GPU_ODE_CUBIE venv):
     python GPU_ODE_CUBIE/numerical_equivalence.py [fixed|adaptive|all]
@@ -42,7 +49,8 @@ from ne_common import (DTS_NE, TOLS_NE, DT0_NE, DT_MIN_NE, DT_MAX_NE, N_NE,
                        algorithm_names, load_algorithms, load_golden_ne, ensemble_error,
                        load_controller_constants, cubie_ne_file,
                        cubie_ne_adaptive_file, write_ne_csv,
-                       write_ne_adaptive_csv)
+                       write_ne_adaptive_csv, runs_fixed,
+                       cubie_default_controller, controllers_equal)
 
 _parser = argparse.ArgumentParser(description="cubie Float32 equivalence sweeps.")
 _parser.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
@@ -114,6 +122,10 @@ def solve_finals(solver, initials_array, parameter_array):
 if MODE in ("fixed", "all"):
     for row in load_algorithms(ALGORITHM):
         alias = row["cubie_alias"]
+        if not runs_fixed(row):
+            print("=== fixed {0}: skipped (explicit fixed steps are "
+                  "bit-equivalent) ===".format(alias))
+            continue
         print("=== fixed {0} (order {1}) ===".format(alias, row["order"]))
         solver = qb.Solver(
             lorenz_system,
@@ -187,10 +199,14 @@ if MODE in ("adaptive", "all"):
 
     for row in load_algorithms(ALGORITHM):
         alias = row["cubie_alias"]
-        if not cubie_is_adaptive(alias):
-            print("=== adaptive {0}: skipped (no embedded error estimate "
-                  "in cubie) ===".format(alias))
+        if not row["adaptive"]:
+            print("=== adaptive {0}: skipped (not in the mutual adaptive "
+                  "set) ===".format(alias))
             continue
+        if not cubie_is_adaptive(alias):
+            raise SystemExit(
+                "algorithms.csv marks {0} adaptive but cubie reports no "
+                "embedded error estimate; fix the csv".format(alias))
         if alias not in constants:
             print("=== adaptive {0}: skipped (not adaptive in "
                   "OrdinaryDiffEq) ===".format(alias))
@@ -198,11 +214,18 @@ if MODE in ("adaptive", "all"):
 
         matched, why_not = matched_controller_settings(alias, row["order"])
         tiers = [("default", {"step_controller": "pi"})]
-        if matched is not None:
-            tiers.append(("matched", matched))
-        else:
+        matched_reuses_default = False
+        if matched is None:
             print("=== adaptive {0}: no matched tier ({1}) ==="
                   .format(alias, why_not))
+        elif controllers_equal(matched, cubie_default_controller(
+                alias, row["family"], row["order"])):
+            # Identical settings solve identically; copy instead of re-running.
+            matched_reuses_default = True
+            print("=== adaptive {0}: matched tier equals cubie's defaults; "
+                  "reusing the default results ===".format(alias))
+        else:
+            tiers.append(("matched", matched))
 
         for tier, controller_settings in tiers:
             print("=== adaptive {0} [{1}] (order {2}) ==="
@@ -258,6 +281,11 @@ if MODE in ("adaptive", "all"):
                 outfile = cubie_ne_adaptive_file(alias, tier, DATASET_KEY)
                 write_ne_adaptive_csv(outfile, per_tol)
                 print("  wrote {0}".format(outfile))
+                if tier == "default" and matched_reuses_default:
+                    outfile = cubie_ne_adaptive_file(alias, "matched",
+                                                     DATASET_KEY)
+                    write_ne_adaptive_csv(outfile, per_tol)
+                    print("  wrote {0} (copy of default)".format(outfile))
             else:
                 print("  no successful tolerance points; nothing written")
 

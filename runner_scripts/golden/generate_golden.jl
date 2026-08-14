@@ -2,7 +2,7 @@
 # benchmarks.
 #
 # The benchmarked problem (identical in every framework): Lorenz with
-# sigma=10, beta=8/3, rho swept linearly over [0, 21] across N=32768
+# sigma=10, beta=8/3, rho swept linearly over [0, 21] across N=131072
 # trajectories, x0=(1,0,0), t in [0,1], solved in float32.
 #
 # The reference is computed on the CPU in Float64 with Vern9 at
@@ -14,7 +14,7 @@
 # meaningful error floor of the work-precision curves at roughly 1e-6
 # relative, which is inherent to benchmarking float32 solvers.)
 #
-# Output: data/numerical/golden_lorenz_32768.csv — 32768 rows, columns x,y,z
+# Output: data/numerical/golden_lorenz_131072.csv — 131072 rows, columns x,y,z
 # (final state at t=1), full Float64 precision, no header. Machine
 # independent: no os/gpu dataset key.
 #
@@ -25,7 +25,7 @@ using OrdinaryDiffEq
 using SciMLBase: EnsembleProblem, EnsembleThreads, ODEProblem, remake
 using DelimitedFiles
 
-const N = 32768
+const N = 131072
 
 function lorenz(u, p, t)
     du1 = 10.0 * (u[2] - u[1])
@@ -51,7 +51,7 @@ end
 
 outdir = joinpath(dirname(dirname(@__DIR__)), "data", "numerical")
 mkpath(outdir)
-outfile = joinpath(outdir, "golden_lorenz_32768.csv")
+outfile = joinpath(outdir, "golden_lorenz_131072.csv")
 open(outfile, "w") do io
     writedlm(io, out, ',')
 end

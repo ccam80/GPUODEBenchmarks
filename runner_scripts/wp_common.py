@@ -1,8 +1,12 @@
 """Shared constants and helpers for the work-precision (wp) sweeps: dt or
-tolerance settings per algorithm at N = 32768, timed and scored against the
+tolerance settings per algorithm at N = 131072, timed and scored against the
 golden reference, written as "<setting> <time_ms> <error>" rows to
 data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt.
-The Julia and MPGOS writers mirror these constants; keep them in sync."""
+The Julia and MPGOS writers mirror these constants; keep them in sync.
+
+The wp sweeps time runtime at fixed settings, so they sit at a large batch
+(131072 trajectories) where the GPU ensembles are throughput-bound rather
+than launch-bound."""
 
 import os
 
@@ -16,9 +20,9 @@ DTS = [2.0 ** -k for k in range(4, 14)]        # 1/16 .. 1/8192, 10 points
 DTS_EULER = [2.0 ** -k for k in range(8, 18)]  # 1/256 .. 1/131072, 10 points
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
-N_WP = 32768
+N_WP = 131072
 
-GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_32768.csv")
+GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_131072.csv")
 
 ALGORITHMS = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
 

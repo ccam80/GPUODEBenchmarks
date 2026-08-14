@@ -111,7 +111,7 @@ class LorenzODE(torch.nn.Module):
 # %%
 # Define the solve without gradient calculations
 # Note: I was't able to JIT compile the code with this application, torchdiffeq + vmap
-def make_solve(algorithm, dt=0.001):
+def make_solve(algorithm, dt=2.0 ** -10):
     method = METHODS[algorithm]
 
     def solve(p):
@@ -133,7 +133,7 @@ parameters = torch.linspace(0.0,21.0,numberOfParameters).cuda()
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# Sweeps dt per algorithm at N=32768; see runner_scripts/wp_common.py.
+# Sweeps dt per algorithm at N=131072; see runner_scripts/wp_common.py.
 # wp timings synchronize the device so the full solve is measured.
 if WP_MODE:
     from wp_common import dts_for, N_WP, load_golden, ensemble_error, wp_outfile

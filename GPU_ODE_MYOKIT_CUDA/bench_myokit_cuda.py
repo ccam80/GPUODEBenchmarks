@@ -28,8 +28,8 @@ from wp_common import (  # noqa: E402
 
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "lorenz.cellml"
 DATASET_KEY = dataset_key()
-STANDARD_DT = 0.001
-STANDARD_STEPS = 1000
+STANDARD_DT = 2.0 ** -10
+STANDARD_STEPS = 1024
 # Timed repeats per point; min is reported.
 REPEATS = 20
 # Myokit's generated CUDA kernel is forward Euler only.

@@ -8,7 +8,7 @@ call GPU_ODE_MYOKIT_CUDA\venv\Scripts\activate.bat
 
 REM Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
 if /i "%ANALYSIS%"=="work-precision" (
-    python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py 32768 wp "%ALGORITHM%"
+    python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py 131072 wp "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal

@@ -29,12 +29,12 @@ rebuild() {
 }
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-	set_nt 32768
+	set_nt 131072
 	for solver in $SOLVERS
 	do
 		set_solver "$solver"
 		rebuild
-		./GPU_ODE_MPGOS/Lorenz.exe 32768 wp
+		./GPU_ODE_MPGOS/Lorenz.exe 131072 wp
 	done
 	exit 0
 fi

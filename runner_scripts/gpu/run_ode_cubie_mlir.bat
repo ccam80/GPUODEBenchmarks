@@ -10,7 +10,7 @@ REM Cubie picks its backend from this at import time.
 set CUBIE_CUDA_BACKEND=mlir
 
 if /i "%ANALYSIS%"=="work-precision" (
-    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 32768 wp "%ALGORITHM%"
+    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 131072 wp "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal

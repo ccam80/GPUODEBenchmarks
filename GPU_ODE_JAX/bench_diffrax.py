@@ -143,7 +143,7 @@ class Lorenz(eqx.Module):
 
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
-def make_fixed(algorithm, dt0=0.001, max_steps=4096):
+def make_fixed(algorithm, dt0=2.0 ** -10, max_steps=4096):
     solver = make_solver(algorithm)
 
     @jax.jit
@@ -182,7 +182,7 @@ parameterList = jnp.linspace(0.0,21.0,numberOfParameters)
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# Sweeps dt / tolerance per algorithm at N=32768; see runner_scripts/wp_common.py.
+# Sweeps dt / tolerance per algorithm at N=131072; see runner_scripts/wp_common.py.
 # wp timings block_until_ready so the full solve is measured.
 if WP_MODE:
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
