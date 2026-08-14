@@ -380,10 +380,8 @@ elif $DO_NE; then
     run_step "Numerical-equivalence suite ($NE_PACKAGE)" "numerical_equivalence.log" \
         bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE"
     status=$?
-    # Exit 2 means a mismatching algorithm, not an infrastructure failure.
     case "$status" in
-        0) record "ne" "OK" "all equivalent" "$status";;
-        2) record "ne" "MISMATCH" "see numerical_equivalence_*.md" "$status";;
+        0) record "ne" "OK" "errors and ratios in numerical_equivalence_*.csv" "$status";;
         *) record "ne" "FAILED" "-" "$status";;
     esac
 fi

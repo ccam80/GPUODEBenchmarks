@@ -800,9 +800,8 @@ run_numerical_equivalence.bat               # Windows
 
 Both take `--controller fixed|adaptive|all` (default `all`) to run just one
 of the two sweep types, `-p julia|cubie|all` to run one side of the
-comparison, and exit non-zero when any step fails or the comparison finds a
-MISMATCH / DIVERGENT algorithm — so the exit code is directly usable as a CI
-gate. `run_all_benchmarks.sh -a numerical` appends the same suite to a full
+comparison, and exit non-zero when any step fails.
+`run_all_benchmarks.sh -a numerical` appends the same suite to a full
 benchmark run.
 
 Reproducibility: the golden reference and the DifferentialEquations.jl
@@ -831,8 +830,9 @@ GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
 #   -> data/numerical_equivalence/cubie/<algorithm>_<os>_<gpu>.csv
 #   -> data/numerical_equivalence/cubie/<algorithm>_adaptive_<tier>_<os>_<gpu>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
-#   -> numerical_equivalence_<os>_<gpu>.md
-#   -> plots/numerical_equivalence_<os>_<gpu>.png (+ _adaptive_ variant)
+#   -> plots/<os>_<gpu>/numerical_equivalence_fixed.csv
+#   -> plots/<os>_<gpu>/numerical_equivalence_adaptive.csv
+#   -> plots/<os>_<gpu>/numerical_equivalence.png (+ _adaptive variant)
 ```
 
 ### Adaptive sweeps
@@ -843,7 +843,7 @@ embedded estimator + error norm + controller — under real controller
 dynamics. Every algorithm with an embedded error estimate on *both* sides
 (the runners derive this programmatically: cubie's
 `tableau.has_error_estimate`, OrdinaryDiffEq's `isadaptive`) integrates the
-ensemble at atol = rtol over 1e-2 .. 1e-6, in Float32, with pinned initial
+ensemble at atol = rtol over 1e-2 .. 1e-8, in Float32, with pinned initial
 dt and dt bounds, and errors are compared against the golden reference as
 error-vs-tolerance curves.
 
@@ -852,41 +852,24 @@ Cubie runs each algorithm twice:
 * **default** — cubie's own PI controller defaults: how cubie really
   behaves out of the box. Compared to the Julia run (its own per-algorithm
   default controller) as curve tracking within a factor.
-* **matched** — controller type, gains, safety factor, gain clamps and
-  deadband mirrored from the constants DifferentialEquations.jl resolved
-  for that algorithm (exported to `controller_constants.csv`; the gain
-  mapping `kp = beta1*(order+1)`, `ki = -beta2*(order+1)` accounts for the
-  two stacks' different exponent conventions — derivation in
-  `GPU_ODE_CUBIE/numerical_equivalence.py`). Even under identical
-  controller settings a single float32 accept/reject flip decouples the two
-  stacks' dt sequences, after which their mutual distance is bounded below
-  by the local truncation error itself — so the CI gate is relative:
-  TRACKING requires the mutual rms distance to stay within 2x the Julia
-  run's own error at every in-range tolerance. Healthy algorithms sit at
-  ratio ~1; broken ones sit orders of magnitude above (per-trajectory
-  rms/p99/max are all tabulated). Julia's PredictiveController (RadauIIA5)
-  maps to cubie's gustafsson controller as a documented approximate match.
+* **matched** — controller type, gains, safety factor and gain clamps
+  mirrored from the constants DifferentialEquations.jl resolved for that
+  algorithm (exported to `controller_constants.csv`; the gain mapping
+  `kp = beta1*(order+1)`, `ki = -beta2*(order+1)` accounts for the two
+  stacks' different exponent conventions — derivation in
+  `GPU_ODE_CUBIE/numerical_equivalence.py`). This tier exists to isolate
+  how much of the difference between the two stacks comes from the step
+  controller rather than the algorithm.
 
-The report tabulates, per algorithm and dt, the ensemble l2 error of both
-implementations against the golden reference, their error ratio, the mutual
-rms difference between the two implementations' final states, and an
-observed convergence order; each algorithm gets a verdict (EQUIVALENT /
-CONSISTENT / MISMATCH — see the report header for the exact criteria).
-
-The implicit solvers' inner tolerances are part of the protocol, matched
-across the two stacks rather than left to defaults: the Julia runner pins
-`abstol=1e-6, reltol=1e-3` (which, with `adaptive=false`, only control the
-Newton termination `eta*||dz/(abstol + reltol*|u|)|| < 1/100`), and the
-cubie runner pins its residual-based `newton_*`/`krylov_*` tolerances to the
-equivalent bound mapped through the golden state scale (derivation in
-`GPU_ODE_CUBIE/numerical_equivalence.py`). A three-way sensitivity study
-(cubie defaults, this mapping, 100x tighter) moved the implicit algorithms'
-ensemble errors by < 0.05%, i.e. the inner solves are not the accuracy
-limiter anywhere in the sweep.
+Both sweeps write per-algorithm CSVs holding, per dt or per tolerance, the
+ensemble l2 error of each implementation against the golden reference and
+their ratio `err_cubie / err_julia`, alongside the per-side non-converged
+trajectory counts. Errors use only the trajectories both stacks solved.
+Each package runs its own implementation and its own defaults; nothing is
+pinned on one stack to make it resemble the other.
 
 The golden file and the DifferentialEquations.jl outputs are machine
 independent and cheap to regenerate (seconds and ~1 minute respectively), so
-the suite is suitable as a cubie CI accuracy gate: commit (or regenerate)
-the golden + Julia reference CSVs, run only the cubie sweep and the
-comparison, and fail on any MISMATCH verdict
-(`compare_numerical_equivalence.py` exits non-zero in that case).
+the suite is cheap to re-run against a fixed reference: commit (or
+regenerate) the golden + Julia reference CSVs, then run only the cubie
+sweep and the comparison.

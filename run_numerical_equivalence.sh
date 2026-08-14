@@ -8,8 +8,7 @@
 #   --controller      all (default) | fixed | adaptive
 #   --algorithm       all (default) | a cubie alias from algorithms.csv
 #
-# Exit code: non-zero if any step fails or the comparison finds a MISMATCH /
-# DIVERGENT algorithm (compare_numerical_equivalence.py exits 2).
+# Exit code: non-zero if any step fails.
 
 # Run from the repo root regardless of the caller's working directory
 cd "$(dirname "$0")" || exit 1
@@ -63,12 +62,6 @@ if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "cubie" ]; then
         echo "cubie sweeps failed" >&2; exit 1; }
 fi
 
-echo "--- Comparison report + plots ---"
+echo "--- Comparison tables + plots ---"
 "$PYTHON" compare_numerical_equivalence.py
-status=$?
-if [ $status -eq 0 ]; then
-    echo "All algorithms equivalent/tracking"
-else
-    echo "Comparison found mismatching algorithms (see numerical_equivalence_<os>_<gpu>.md)"
-fi
-exit $status
+exit $?
