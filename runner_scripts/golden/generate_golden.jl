@@ -1,17 +1,6 @@
-# Golden references for the work-precision sweeps, one file per problem.
+# Float64 golden references for the work-precision sweeps, one file per problem, kept unless --force.
 #
-# Each reference is a Float64 CPU solve at abstol=reltol=1e-13 with the
-# problem's golden_algorithm. The swept parameter grid is the Float64 linspace
-# rounded through Float32 and promoted back, so the reference sits on the same
-# parameter values the float32 frameworks integrate.
-#
-# Output: data/numerical/golden_<problem>_32768.csv, one row per trajectory,
-# one column per state, no header. Machine independent.
-#
-# Run from the repo root:
-#   julia -t auto --project=. runner_scripts/golden/generate_golden.jl [--problem <name|all>] [--force]
-#
-# An existing file is kept unless --force is given.
+# Usage: julia -t auto --project=. runner_scripts/golden/generate_golden.jl [--problem <name|all>] [--force]
 
 using OrdinaryDiffEq
 # The slim OrdinaryDiffEq v7 umbrella doesn't re-export the ensemble API.

@@ -1,16 +1,6 @@
-# Golden references for the numerical-equivalence sweeps, one file per problem.
+# Float64 ne golden references at N=1024, column 1 the Float32-rounded swept parameter, kept unless --force.
 #
-# Same protocol as the wp golden at N=1024, and the Float32-rounded parameter
-# grid is stored in column 1 so every consumer integrates bit-identical
-# parameters instead of rebuilding its own linspace.
-#
-# Output: data/numerical/golden_ne_<problem>_1024.csv, columns
-# <swept parameter> then the final state, no header. Machine independent.
-#
-# Run from the repo root:
-#   julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl [--problem <name|all>] [--force]
-#
-# An existing file is kept unless --force is given.
+# Usage: julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl [--problem <name|all>] [--force]
 
 using OrdinaryDiffEq
 # The slim OrdinaryDiffEq v7 umbrella doesn't re-export the ensemble API.

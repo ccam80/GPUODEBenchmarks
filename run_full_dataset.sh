@@ -350,8 +350,7 @@ fi
 
 # ------------------------------------------------------------- work-precision
 if $DO_WP; then
-    # Every wp point is scored against a Float64 golden reference that nothing
-    # else creates, so generate the missing ones up front; accuracy, not speed.
+    # Missing golden references are generated up front; accuracy, not speed.
     CLOCK_CRITICAL=false; STEP_LABEL="wp:golden"
     run_step "Golden references for work-precision" "wp_golden.log" \
         julia -t auto --project=. ./runner_scripts/golden/generate_golden.jl --problem "$PROBLEM"

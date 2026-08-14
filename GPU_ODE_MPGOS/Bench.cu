@@ -4,8 +4,7 @@
 #include <string>
 #include <fstream>
 
-// The problem header, solver and trajectory count come from the compiler:
-// -DPROBLEM_HEADER=\"problems/lorenz.cuh\" -DSOLVER_CHOICE=RK4 -DNT_VALUE=32768
+// Build with -DPROBLEM_HEADER=\"problems/lorenz.cuh\" -DSOLVER_CHOICE=RK4 -DNT_VALUE=32768.
 #ifndef PROBLEM_HEADER
 	#error "define PROBLEM_HEADER, e.g. -DPROBLEM_HEADER=\"problems/lorenz.cuh\""
 #endif
@@ -52,12 +51,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 #include <chrono>
 #include <cmath>
 
-// Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
-// additively populated across machines without clobbering each other. The GPU
-// name comes from nvidia-smi (the single source of truth shared by every
-// framework) and is sanitised identically to runner_scripts/bench_key.*:
-// tokenise on non-alphanumeric characters, drop the NVIDIA/GeForce vendor words,
-// join the rest with '-'. e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
+// Dataset key "<os>_<gpu>" from nvidia-smi, sanitised as in runner_scripts/bench_key.*.
 static std::string DatasetKey()
 {
 	static std::string cached;
@@ -88,12 +82,7 @@ static std::string DatasetKey()
 #else
 		int rc = pclose(pipe);
 #endif
-		// Trust the output only when nvidia-smi actually succeeded. With a
-		// broken driver it prints its diagnostic ("Failed to initialize NVML:
-		// ...") on stdout, which would otherwise be sanitised into a bogus GPU
-		// name and silently key this framework's files differently from every
-		// other framework's. On failure fall through to "unknown-gpu",
-		// matching runner_scripts/bench_key.*.
+		// Only a successful nvidia-smi names the GPU; anything else is "unknown-gpu".
 		if (rc == 0) raw = captured;
 	}
 
@@ -163,16 +152,7 @@ int main(int argc, char *argv[])
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
 
-	// ========================================
-	// WORK-PRECISION (wp) MODE
-	// ========================================
-	// `<exe> 32768 wp` sweeps the fixed step size (RK4 build) or the adaptive
-	// tolerance (RKCK45 build) at NT=32768 and records
-	// "<setting> <time_ms> <error-vs-golden>" per point. dt and tolerances are
-	// runtime SolverOptions, so only the solver family needs a rebuild. Grids
-	// and protocol mirror runner_scripts/wp_common.py - keep in sync. wp takes
-	// the minimum of 10 repeats after one warm-up; the N sweep below uses 20 per
-	// transfer variant.
+	// `<exe> 32768 wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
 	if (argc > 2 && string(argv[2]) == string("wp"))
 	{
 		if (NT != 32768)
@@ -383,9 +363,7 @@ void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PREC
 	{
 		Solver.SetHost(ProblemNumber, TimeDomain,  0, 0 );
 		Solver.SetHost(ProblemNumber, TimeDomain,  1, DURATION );
-		// MPGOS Solve() continues from ActualTime (by design, for
-		// continuation runs); reset it so repeated solves in the wp sweep
-		// re-integrate from t=0 instead of no-opping at t=t_end.
+		// Solve() continues from ActualTime, so reset it to re-integrate from t=0.
 		Solver.SetHost(ProblemNumber, ActualTime, 0 );
 
 		for (int c=0; c<SD; c++)
