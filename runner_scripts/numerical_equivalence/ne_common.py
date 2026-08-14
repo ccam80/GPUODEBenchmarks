@@ -86,10 +86,8 @@ def runs_fixed(row):
 def cubie_default_controller(alias, family, order):
     """Cubie's resolved controller settings for a default-tier solve.
 
-    Mirrors cubie's resolution: family default table, then controller
-    config class defaults for unset keys, gain keys filtered to the
-    resolved controller type. Gains resolve at ``order``; cubie imports
-    lazily. Returns None when the family has no adaptive table.
+    Family table, then config class defaults, gain keys filtered to the
+    controller type; None when the family has no adaptive table.
     """
     from cubie.integrators.algorithms import (generic_dirk, generic_erk,
                                               generic_firk,

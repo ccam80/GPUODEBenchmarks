@@ -852,9 +852,9 @@ skip algorithms outside that mutual set.
 
 Cubie runs each algorithm twice:
 
-* **default** — cubie's shipped controller defaults: how cubie really
-  behaves out of the box. Compared to the Julia run (its own per-algorithm
-  default controller) as curve tracking within a factor.
+* **default** — cubie's shipped controller defaults, compared to the
+  Julia run's own per-algorithm defaults as curve tracking within a
+  factor.
 * **matched** — controller type, gains, safety factor and gain clamps
   mirrored from the constants DifferentialEquations.jl resolved for that
   algorithm (exported to `controller_constants.csv`; the gain mapping
