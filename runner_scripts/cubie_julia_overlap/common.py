@@ -208,24 +208,12 @@ def rmse(finals, golden):
     return float(np.sqrt(np.mean(delta * delta)))
 
 
-# OrdinaryDiffEq's qsteady deadband, resolved from its defaults and exported
-# by the ne suite (data/numerical_equivalence/julia/controller_constants.csv):
-# explicit RK holds dt over qsteady 1.0..1.0 (no deadband), every implicit
-# family over 1.0..1.2. Julia's q divides dt where cubie's gain multiplies it,
-# so the bounds inverate: deadband = (1/qsteady_max, 1/qsteady_min). The ne
-# suite's "matched" tier derives the same numbers per algorithm; keep the two
-# in sync so both suites' comparison tiers are the same experiment.
-JULIA_QSTEADY_MAX = {"ERK": 1.0}
-JULIA_QSTEADY_MAX_IMPLICIT = 1.2
-
-
 def pi_controller(order, family):
     """Return the PI-controller configuration used by the comparison tier."""
     from cubie.integrators.algorithms.generic_dirk import (
         dirk_default_ki,
         dirk_default_kp,
     )
-    qsteady_max = JULIA_QSTEADY_MAX.get(family, JULIA_QSTEADY_MAX_IMPLICIT)
     return {
         "step_controller": "pi",
         "kp": dirk_default_kp,
@@ -233,6 +221,4 @@ def pi_controller(order, family):
         "safety": 0.9,
         "min_gain": 0.2,
         "max_gain": 10.0,
-        "deadband_min": 1.0 / qsteady_max,
-        "deadband_max": 1.0,
     }

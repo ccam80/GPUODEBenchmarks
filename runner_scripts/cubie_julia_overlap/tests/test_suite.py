@@ -63,26 +63,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(settings["max_gain"], 10.0)
         self.assertAlmostEqual(settings["safety"], 0.9)
 
-    def test_pi_controller_deadband_follows_julia_qsteady(self):
-        """Julia holds dt over qsteady 1.0..1.0 for ERK, 1.0..1.2 elsewhere.
-
-        Cubie's gain multiplies dt where Julia's q divides it, so the mapped
-        deadband is (1/qsteady_max, 1/qsteady_min).
-        """
-        for family in ("ESDIRK", "Rosenbrock-W"):
+    def test_pi_controller_sets_no_deadband(self):
+        """Cubie caches no Jacobian by step size, so it holds no dt deadband."""
+        for family in ("ESDIRK", "Rosenbrock-W", "ERK"):
             settings = common.pi_controller(3, family)
-            self.assertAlmostEqual(settings["deadband_min"], 1.0 / 1.2)
-            self.assertAlmostEqual(settings["deadband_max"], 1.0)
-        explicit = common.pi_controller(5, "ERK")
-        self.assertAlmostEqual(explicit["deadband_min"], 1.0)
-        self.assertAlmostEqual(explicit["deadband_max"], 1.0)
-
-    def test_every_algorithm_family_has_a_qsteady_mapping(self):
-        """A new family must not silently inherit the implicit deadband."""
-        families = {row["family"] for row in common.algorithms()}
-        self.assertTrue(families <= (set(common.JULIA_QSTEADY_MAX)
-                                     | {"Rosenbrock-W", "ESDIRK"}),
-                        "unmapped family in algorithms.csv: {}".format(families))
+            self.assertNotIn("deadband_min", settings)
+            self.assertNotIn("deadband_max", settings)
 
 
 class PruneTests(unittest.TestCase):

@@ -43,14 +43,9 @@ import numpy as np
 # comparison excludes via its error cap.
 DTS_NE = [2.0 ** -k for k in range(1, 14)]
 
-# Adaptive sweep: atol = rtol tolerance grid, 1e-2 .. 1e-6. Below 1e-6 a
-# float32 solve cannot honor the request (the error floor is ~1e-6 relative),
-# so tighter points would only measure the floor.
-TOLS_NE = [10.0 ** -k for k in range(2, 7)]
+# Adaptive sweep: atol = rtol tolerance grid.
+TOLS_NE = [10.0 ** -k for k in range(2, 9)]
 
-# Shared adaptive-run pins (both stacks): initial dt and the dt clamps.
-# The initial dt is pinned because OrdinaryDiffEq otherwise auto-selects it
-# (Hairer's algorithm) while cubie starts from the configured dt.
 DT0_NE = 0.01
 DT_MIN_NE = 1e-6
 DT_MAX_NE = 0.5
@@ -70,15 +65,12 @@ def load_algorithms(name="all"):
     """Return the mutual algorithm table as a list of dicts.
 
     Keys: ``cubie_alias``, ``julia_expr``, ``order`` (int), ``family``,
-    ``exact`` (bool — whether the two sides implement the identical tableau,
-    so per-trajectory equivalence is expected rather than just matching
-    order/error-magnitude), ``notes``.
+    ``notes``.
     """
     with open(ALGORITHMS_CSV, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     for row in rows:
         row["order"] = int(row["order"])
-        row["exact"] = row["exact"].strip().lower() == "true"
     if name != "all":
         rows = [row for row in rows if row["cubie_alias"] == name]
         if not rows:
@@ -231,8 +223,8 @@ def load_controller_constants():
     """Julia's resolved default-controller constants, keyed by cubie alias.
 
     Written by ne_diffeq.jl. Values: controller (type name), beta1, beta2,
-    qmin, qmax, gamma, qsteady_min, qsteady_max, order (classical), floats
-    parsed; missing numeric fields come back as None.
+    qmin, qmax, gamma, order (classical), floats parsed; missing numeric
+    fields come back as None.
     """
     if not os.path.isfile(CONTROLLER_CONSTANTS_CSV):
         raise FileNotFoundError(
@@ -243,8 +235,7 @@ def load_controller_constants():
     with open(CONTROLLER_CONSTANTS_CSV, newline="") as f:
         for row in csv.DictReader(f):
             entry = {"controller": row["controller"]}
-            for key in ("beta1", "beta2", "qmin", "qmax", "gamma",
-                        "qsteady_min", "qsteady_max", "order"):
+            for key in ("beta1", "beta2", "qmin", "qmax", "gamma", "order"):
                 raw = row.get(key, "")
                 entry[key] = float(raw) if raw not in ("", None) else None
             out[row["cubie_alias"]] = entry

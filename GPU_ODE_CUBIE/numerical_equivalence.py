@@ -75,30 +75,6 @@ golden_rho, golden_states = load_golden_ne()
 initial_conditions = {'x': 1.0, 'y': 0.0, 'z': 0.0}
 parameters = {'rho': golden_rho}
 
-# With a fixed step controller cubie does not derive the inner Newton/Krylov
-# tolerances from atol/rtol (that path only runs for adaptive controllers),
-# so pin them to match what OrdinaryDiffEq enforces in the paired Julia run.
-# Both stacks accept the Newton solve when eta*||dz|| < kappa with
-# kappa = 1/100, where ||dz|| scales the Newton update by
-# atol + rtol*max(|u_prev|, |u_stage|). The Julia run pins
-# abstol_j=1e-6, reltol_j=1e-3 (the OrdinaryDiffEq defaults), and kappa
-# is internal to both implementations, so identical inner enforcement is
-# simply Julia's own tolerances:
-#   newton_atol = abstol_j = 1e-6
-#   newton_rtol = reltol_j = 1e-3
-# Julia solves its 3x3 linear systems with a dense LU (exact), so cubie's
-# matrix-free Krylov tolerances sit 10x below the Newton tolerances to
-# make the linear-solve error negligible. Keys not used by an algorithm
-# family (e.g. newton_* for explicit steps) are ignored. (In the adaptive
-# sweeps cubie derives these tolerances itself as atol/10, rtol/10, so no
-# pin is applied there.)
-INNER_SOLVER_SETTINGS = {
-    "newton_atol": 1e-6,
-    "newton_rtol": 1e-3,
-    "krylov_atol": 1e-7,
-    "krylov_rtol": 1e-4,
-}
-
 failures = []
 
 
@@ -148,10 +124,6 @@ if MODE in ("fixed", "all"):
             output_types=['state'],
             time_logging_level=None,
         )
-        recognised = solver.update(dict(INNER_SOLVER_SETTINGS), silent=True)
-        if recognised:
-            print("  inner solver settings applied: {0}"
-                  .format(sorted(recognised)))
         initials_array, parameter_array = solver.build_grid(
             initial_values=initial_conditions, parameters=parameters)
 
@@ -191,10 +163,8 @@ if MODE in ("adaptive", "all"):
         gain is safety*EEst^(-kp/(order+1))*errold^(-ki/(order+1)) with order
         the classical order it feeds the exponent, so kp = beta1*(order+1)
         and ki = -beta2*(order+1). qmin/qmax bound the same gain quantity as
-        cubie's min_gain/max_gain, and Julia's qsteady deadband acts on
-        q = 1/gain, hence the inverted bounds. Julia's PredictiveController
-        (Radau) maps to cubie's gustafsson controller — same Gustafsson
-        family, matched safety only (documented approximate match).
+        cubie's min_gain/max_gain. Julia's PredictiveController (Radau) maps
+        to cubie's gustafsson controller.
         """
         c = constants.get(alias)
         if c is None:
@@ -207,15 +177,8 @@ if MODE in ("adaptive", "all"):
                 "safety": c["gamma"],
                 "min_gain": c["qmin"],
                 "max_gain": c["qmax"],
-                "deadband_min": 1.0 / c["qsteady_max"],
-                "deadband_max": 1.0 / c["qsteady_min"],
             }, None
         if c["controller"] == "PredictiveController":
-            # cubie's Gustafsson controller takes the step-size safety factor
-            # as `safety` (same as the PI path above); `gamma` is now an
-            # overloaded method/tableau coefficient and setting it corrupts
-            # the solve. Julia's PredictiveController gamma IS the safety
-            # factor, so map it to `safety`.
             return {
                 "step_controller": "gustafsson",
                 "safety": c["gamma"],
