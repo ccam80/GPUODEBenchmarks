@@ -40,3 +40,5 @@ GPU_ODE_MYOKIT_CUDA/generated/
 
 # Orchestrator run logs
 /logs/
+
+golden_ring_modulator.log*
