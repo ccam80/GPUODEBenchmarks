@@ -1,7 +1,9 @@
 """Registry tests: the problem table, its derived grids and the output paths."""
 
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -98,6 +100,14 @@ class GridTests(unittest.TestCase):
 class PathTests(unittest.TestCase):
     def setUp(self):
         self.problem = get_problem(DEFAULT_PROBLEM)
+        # The path helpers create their directories, so run in a temp cwd.
+        self._cwd = os.getcwd()
+        self._tmp = tempfile.mkdtemp()
+        os.chdir(self._tmp)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_output_paths_carry_the_problem(self):
         for path in (times_outfile("CUBIE", "Cubie", "fixed", "euler", "k",
