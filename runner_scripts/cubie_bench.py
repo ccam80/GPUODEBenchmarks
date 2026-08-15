@@ -62,26 +62,34 @@ def _release(solver):
     gc.collect()
 
 
+def _grid_builder(initial_conditions, parameters):
+    """Build the ensemble grid once, from the first solver the system accepts.
+
+    A system with a mass matrix rejects explicit algorithms outright, so the
+    grid cannot be built ahead of the algorithm loop."""
+    cache = {}
+
+    def build(solver):
+        if "arrays" not in cache:
+            cache["arrays"] = solver.build_grid(
+                initial_values=initial_conditions, parameters=parameters)
+        return cache["arrays"]
+
+    return build
+
+
 def _run_problem(problem, opts):
     """Every requested algorithm for one problem."""
-    duration = problem["duration"]
-    n = opts["n"]
-    dataset = opts["dataset_key"]
     system, initial_conditions = build_system(
         problem, PRECISION, name_suffix=opts["name_suffix"])
-    parameters = sweep_parameters(problem, n, PRECISION)
-
-    # Grid built once; one solver at a time from here.
-    grid_solver = _make_fixed_solver(system, problem, 'euler')
-    initials_array, parameter_array = grid_solver.build_grid(
-        initial_values=initial_conditions, parameters=parameters)
-    _release(grid_solver)
+    parameters = sweep_parameters(problem, opts["n"], PRECISION)
+    grid = _grid_builder(initial_conditions, parameters)
 
     if opts["wp"]:
-        _run_wp(problem, opts, system, initials_array, parameter_array)
+        _run_wp(problem, opts, system, grid)
         return
 
-    _run_times(problem, opts, system, initials_array, parameter_array)
+    _run_times(problem, opts, system, grid)
 
 
 def _failed(exc, what):
@@ -90,7 +98,7 @@ def _failed(exc, what):
     return float("nan"), float("nan")
 
 
-def _run_wp(problem, opts, system, initials_array, parameter_array):
+def _run_wp(problem, opts, system, grid):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)
@@ -101,6 +109,8 @@ def _run_wp(problem, opts, system, initials_array, parameter_array):
     golden = load_golden(problem)
 
     def bench_solver(solver, repeats=REPEATS):
+        initials_array, parameter_array = grid(solver)
+
         def run():
             return solver.solve(
                 initial_values=initials_array,
@@ -157,18 +167,22 @@ def _run_wp(problem, opts, system, initials_array, parameter_array):
                         _release(solver)
 
 
-def _run_times(problem, opts, system, initials_array, parameter_array):
+def _run_times(problem, opts, system, grid):
     """N-sweep timing: one row per (problem, mode, algorithm)."""
     duration = problem["duration"]
     n = opts["n"]
     dataset = opts["dataset_key"]
-
-    # Uploaded once so the device-only timing excludes the h2d.
-    d_initials = cuda.to_device(initials_array)
-    d_parameters = cuda.to_device(parameter_array)
+    device = {}
 
     def bench_times(solver):
         """Best-of-REPEATS (with_transfers_ms, device_only_ms, solution)."""
+        initials_array, parameter_array = grid(solver)
+        if not device:
+            # Uploaded once so the device-only timing excludes the h2d.
+            device["initials"] = cuda.to_device(initials_array)
+            device["parameters"] = cuda.to_device(parameter_array)
+        d_initials, d_parameters = device["initials"], device["parameters"]
+
         def with_transfers(blocksize=64):
             return solver.solve(
                 initial_values=initials_array,
