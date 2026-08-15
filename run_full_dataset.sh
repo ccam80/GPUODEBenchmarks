@@ -32,7 +32,7 @@
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #
 # On Windows, run_full_dataset.bat takes the same flags.
@@ -128,7 +128,7 @@ case "$PACKAGE" in
 esac
 case "$ALGORITHM" in
     ''|*[!a-z0-9,-]*)
-        echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        echo "-g/--algorithm must be 'all' or a comma list of algorithm names"
         exit 1;;
 esac
 case "$PROBLEM" in
@@ -171,8 +171,8 @@ fi
 # -g: "all" or a comma list; every token whitelisted.
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
-        all|euler|classical-rk4|tsit5|cash-karp-54) ;;
-        *) echo "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"; exit 1;;
+        all) ;;
+        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1;;
     esac
 done
 

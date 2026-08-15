@@ -8,6 +8,7 @@
 #define PROBLEM_DURATION 1.0
 #define PROBLEM_SWEEP_MIN 0.0
 #define PROBLEM_SWEEP_MAX 21.0
+#define PROBLEM_SWEEP_LOG 0
 
 template <class Precision>
 __forceinline__ __device__ void PerThread_OdeFunction(\

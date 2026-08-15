@@ -17,7 +17,7 @@
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
@@ -130,7 +130,7 @@ elseif ($HasJulia) { $NePackage = 'julia' }
 elseif ($HasCubie) { $NePackage = 'cubie' }
 
 # -g: "all" or a comma list; every token whitelisted.
-$AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
+$AllAlgorithms = @('all') + (& python runner_scripts\algorithms.py)
 $algTokens = @($Algorithm.Split(',') | Where-Object { $_ })
 if ($algTokens.Count -eq 0) {
     Write-Host "-g/--algorithm requires a value"
@@ -138,7 +138,7 @@ if ($algTokens.Count -eq 0) {
 }
 foreach ($alg in $algTokens) {
     if ($AllAlgorithms -notcontains $alg) {
-        Write-Host "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        Write-Host "Unknown algorithm '$alg'; see runner_scripts\algorithms.csv"
         exit 1
     }
 }

@@ -41,6 +41,7 @@ const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
 const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION / 1000.0);
 
 void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
+void Logspace(vector<PRECISION>&, PRECISION, PRECISION, int);
 void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, const vector<PRECISION>&, int);
 void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
 void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
@@ -144,7 +145,11 @@ int main(int argc, char *argv[])
 	PRECISION R_RangeLower = (PRECISION)PROBLEM_SWEEP_MIN;
     PRECISION R_RangeUpper = (PRECISION)PROBLEM_SWEEP_MAX;
 		vector<PRECISION> Parameters_R_Values(NumberOfParameters_R,0);
+#if PROBLEM_SWEEP_LOG
+		Logspace(Parameters_R_Values, R_RangeLower, R_RangeUpper, NumberOfParameters_R);
+#else
 		Linspace(Parameters_R_Values, R_RangeLower, R_RangeUpper, NumberOfParameters_R);
+#endif
 
 
 	ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> Scan(SelectedDevice);
@@ -349,6 +354,24 @@ void Linspace(vector<PRECISION>& x, PRECISION B, PRECISION E, int N)
 		for (int i=1; i<N-1; i++)
 		{
 			x[i] = B + i*Increment;
+		}
+	}
+}
+
+// Geometric grid, matching problems.py for a log-scaled sweep.
+void Logspace(vector<PRECISION>& x, PRECISION B, PRECISION E, int N)
+{
+	x[0] = B;
+
+	if ( N>1 )
+	{
+		x[N-1] = E;
+		double LogB = log10((double)B);
+		double Increment = (log10((double)E) - LogB)/(N-1);
+
+		for (int i=1; i<N-1; i++)
+		{
+			x[i] = (PRECISION)pow(10.0, LogB + i*Increment);
 		}
 	}
 }

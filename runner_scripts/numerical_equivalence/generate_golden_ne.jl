@@ -46,16 +46,18 @@ function generate(problem)
         ODEFunction(system.rhs; mass_matrix = system.mass_matrix)
     prob = ODEProblem(f, system.u0, (0.0, problem["duration"]), [grid[1]])
     solver = reference_solver(problem["golden_algorithm"])
+    tol = problem["golden_tol"]
 
     @info "Solving $(N)-trajectory Float64 $(problem["problem"]) reference " *
-          "($(problem["golden_algorithm"]), tol 1e-13) on " *
+          "($(problem["golden_algorithm"]), tol $(tol)) on " *
           "$(Threads.nthreads()) threads..."
     out = Matrix{Float64}(undef, N, nstates + 1)
     out[:, 1] .= grid
     @time Threads.@threads for i in 1:N
+        # Stiff references need far more steps than the default cap allows.
         sol = solve(remake(prob, p = [grid[i]]), solver;
-            abstol = 1e-13, reltol = 1e-13, save_everystep = false,
-            save_start = false, dense = false)
+            abstol = tol, reltol = tol, save_everystep = false,
+            save_start = false, dense = false, maxiters = 10^8)
         out[i, 2:end] .= sol.u[end]
     end
 

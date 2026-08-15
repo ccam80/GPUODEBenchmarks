@@ -23,9 +23,13 @@ class RegistryTests(unittest.TestCase):
         for row in load_problems():
             self.assertIsInstance(row["states"], int)
             self.assertIsInstance(row["duration"], float)
+            self.assertIsInstance(row["golden_tol"], float)
             self.assertIsInstance(row["frameworks"], tuple)
             self.assertGreater(row["states"], 0)
             self.assertGreater(row["duration"], 0.0)
+            self.assertGreater(row["golden_tol"], 0.0)
+            self.assertIn(row["sweep_scale"], ("linear", "log"))
+            self.assertIn(row["class"], ("stiff", "nonstiff"))
 
     def test_unknown_problem_exits(self):
         with self.assertRaises(SystemExit):
@@ -63,10 +67,32 @@ class GridTests(unittest.TestCase):
                                self.problem.timing_dt)
 
     def test_sweep_spans_the_range(self):
-        grid = self.problem.sweep(4)
-        self.assertAlmostEqual(self.problem["sweep_min"], grid[0])
-        self.assertAlmostEqual(self.problem["sweep_max"], grid[-1])
-        self.assertEqual(4, len(grid))
+        for row in load_problems():
+            grid = row.sweep(4)
+            self.assertAlmostEqual(row["sweep_min"], grid[0])
+            self.assertAlmostEqual(row["sweep_max"], grid[-1])
+            self.assertEqual(4, len(grid))
+
+    def test_log_sweeps_are_geometric(self):
+        for row in load_problems():
+            if row["sweep_scale"] != "log":
+                continue
+            grid = row.sweep(5)
+            ratios = [grid[i + 1] / grid[i] for i in range(len(grid) - 1)]
+            for ratio in ratios[1:]:
+                self.assertAlmostEqual(ratios[0], ratio, places=6)
+
+    def test_log_sweeps_need_a_positive_minimum(self):
+        row = get_problem(DEFAULT_PROBLEM)
+        row["sweep_scale"], row["sweep_min"] = "log", 0.0
+        with self.assertRaises(SystemExit):
+            row.sweep(4)
+
+    def test_dae_rows_declare_an_index(self):
+        for row in load_problems():
+            self.assertEqual(row.is_dae, row["dae_index"] > 0)
+            if row["class"] == "nonstiff":
+                self.assertEqual(0, row["dae_index"])
 
 
 class PathTests(unittest.TestCase):

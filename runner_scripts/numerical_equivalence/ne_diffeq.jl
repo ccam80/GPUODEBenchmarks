@@ -35,7 +35,7 @@ using OrdinaryDiffEqExplicitRK, OrdinaryDiffEqVerner
 import OrdinaryDiffEqCore
 import DiffEqBase
 # The slim OrdinaryDiffEq v7 umbrella doesn't re-export the ensemble API.
-using SciMLBase: ODEProblem, EnsembleProblem, EnsembleThreads, remake, init
+using SciMLBase: ODEProblem, ODEFunction, EnsembleProblem, EnsembleThreads, remake, init
 using CSV
 using DelimitedFiles
 using Printf
@@ -140,8 +140,9 @@ function setup(problem)
     system = julia_system(problem)
     duration = Float32(problem["duration"])
     u0 = Vector{Float32}(system.u0)
-    prob = ODEProblem{true}(system.rhs!, u0, (0.0f0, duration),
-        Float32[sweep32[1]])
+    f = system.mass_matrix === nothing ? ODEFunction{true}(system.rhs!) :
+        ODEFunction{true}(system.rhs!; mass_matrix = system.mass_matrix)
+    prob = ODEProblem{true}(f, u0, (0.0f0, duration), Float32[sweep32[1]])
     # SciMLBase's current ensemble API passes an EnsembleContext (with .sim_id)
     # as the second argument of prob_func/output_func.
     eprob = EnsembleProblem(prob;

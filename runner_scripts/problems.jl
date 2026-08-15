@@ -5,7 +5,7 @@ const DEFAULT_PROBLEM = "lorenz"
 
 const _INT_FIELDS = ("states", "dae_index", "wp_k_min", "wp_k_max",
     "euler_k_min", "euler_k_max", "ne_k_min", "ne_k_max")
-const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max")
+const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
 "Every problem in declaration order, as a vector of Dict{String,Any}."
 function load_problems()
@@ -65,5 +65,11 @@ problem_ne_dts(problem) = [problem["duration"] * 2.0^-k
                            for k in problem["ne_k_min"]:problem["ne_k_max"]]
 
 "The ensemble parameter grid: n values over the sweep range."
-problem_sweep(problem, n) = range(problem["sweep_min"],
-    stop = problem["sweep_max"], length = n)
+function problem_sweep(problem, n)
+    lo, hi = problem["sweep_min"], problem["sweep_max"]
+    if problem["sweep_scale"] == "log"
+        lo > 0 || error("problem '$(problem["problem"])': a log sweep needs sweep_min > 0")
+        return 10 .^ range(log10(lo), stop = log10(hi), length = n)
+    end
+    return range(lo, stop = hi, length = n)
+end

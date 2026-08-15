@@ -26,10 +26,6 @@ case "$ANALYSIS" in
     performance|work-precision) ;;
     *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision)" >&2; exit 1;;
 esac
-case "$ALGORITHM" in
-    all|euler|classical-rk4|tsit5|cash-karp-54) ;;
-    *) echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2; exit 1;;
-esac
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'" >&2

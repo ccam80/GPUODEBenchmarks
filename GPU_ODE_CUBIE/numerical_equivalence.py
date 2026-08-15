@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts"))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts",
                                 "numerical_equivalence"))
 from bench_key import dataset_key
-from cubie_systems import build_system
+from cubie_systems import build_system, final_states, output_types
 from problems import problem_names, resolve_problems
 from ne_common import (TOLS_NE, N_NE, algorithm_names, dts_ne, dt_pins_ne,
                        load_algorithms, load_golden_ne, ensemble_error,
@@ -83,7 +83,8 @@ def solve_finals(solver, initials_array, parameter_array, ctx):
     )
     # Copy: the returned array views cubie's output buffer, which the next
     # solve overwrites in place.
-    finals = np.array(solution.state[-1, :, :].T, copy=True)
+    finals = np.array(final_states(ctx["system"], solution,
+                                   ctx["problem"]), copy=True)
     if finals.dtype != precision:
         raise TypeError("expected float32 output, got {0}"
                         .format(finals.dtype))
@@ -129,7 +130,7 @@ def run_fixed(ctx):
             dt=ctx["dts"][0],
             save_every=ctx["duration"],
             step_controller='fixed',
-            output_types=['state'],
+            output_types=output_types(ctx["system"]),
             time_logging_level=None,
         )
         initials_array, parameter_array = solver.build_grid(
@@ -227,7 +228,7 @@ def run_adaptive(ctx):
                     rtol=TOLS_NE[0],
                     save_every=ctx["duration"],
                     step_controller=controller_settings["step_controller"],
-                    output_types=['state'],
+                    output_types=output_types(ctx["system"]),
                     time_logging_level=None,
                 )
                 extra = {k: v for k, v in controller_settings.items()

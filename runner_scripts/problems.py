@@ -10,7 +10,7 @@ DEFAULT_PROBLEM = "lorenz"
 
 _INT_FIELDS = ("states", "dae_index", "wp_k_min", "wp_k_max",
                "euler_k_min", "euler_k_max", "ne_k_min", "ne_k_max")
-_FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max")
+_FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
 
 class Problem(dict):
@@ -43,8 +43,14 @@ class Problem(dict):
     def sweep(self, n, dtype=None):
         """The ensemble parameter grid: n values over the sweep range."""
         import numpy as np
-        return np.linspace(self["sweep_min"], self["sweep_max"], n,
-                           dtype=dtype)
+        lo, hi = self["sweep_min"], self["sweep_max"]
+        if self["sweep_scale"] == "log":
+            if lo <= 0.0:
+                raise SystemExit(
+                    "problem '{0}': a log sweep needs sweep_min > 0"
+                    .format(self.name))
+            return np.logspace(np.log10(lo), np.log10(hi), n, dtype=dtype)
+        return np.linspace(lo, hi, n, dtype=dtype)
 
     def supports(self, framework):
         return framework in self["frameworks"]

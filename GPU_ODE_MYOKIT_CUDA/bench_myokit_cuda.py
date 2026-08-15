@@ -35,7 +35,6 @@ STANDARD_STEPS = 1000
 REPEATS = 20
 # Myokit's generated CUDA kernel is forward Euler only.
 ALGORITHM = "euler"
-SUPPORTED = (ALGORITHM,)
 
 # problem -> (CellML component, ordered state variable names)
 MODELS = {
@@ -189,7 +188,7 @@ def main(argv=None):
             "[algorithm|all] [--problem <name|all>]"
         )
     cell_count, wp_mode, algorithms, problems = parse_bench_args(
-        argv, SUPPORTED, framework="myokit_cuda"
+        argv, "myokit_cuda"
     )
     if not algorithms:
         print("Myokit CUDA supports forward Euler only; skipping.")

@@ -5,7 +5,7 @@
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #
 # e.g. ./run_all_benchmarks.sh -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
@@ -39,7 +39,7 @@ case "$PACKAGE" in
     ''|*[!a-z0-9,_-]*) echo "Unknown package '$PACKAGE'" >&2; exit 1;;
 esac
 case "$ALGORITHM" in
-    ''|*[!a-z0-9,-]*) echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2; exit 1;;
+    ''|*[!a-z0-9,_-]*) echo "-g/--algorithm must be 'all' or a comma list of algorithm names" >&2; exit 1;;
 esac
 case "$PROBLEM" in
     ''|*[!a-z0-9_,-]*) echo "-s/--problem takes names from runner_scripts/problems.csv, got '$PROBLEM'" >&2; exit 1;;
@@ -78,8 +78,8 @@ $HAS_ALL_PACKAGES && PACKAGES="$ALL_PACKAGES"
 
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
-        all|euler|classical-rk4|tsit5|cash-karp-54) ;;
-        *) echo "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2; exit 1;;
+        all) ;;
+        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1;;
     esac
 done
 case ",$NMAX," in

@@ -5,7 +5,7 @@ REM Generate benchmark data for one or more packages across one or more analyses
 REM   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | comma list of performance | work-precision | numerical | all
 REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-REM   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+REM   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 REM
 REM e.g. run_all_benchmarks.bat -p cubie,julia -a performance,work-precision -g euler,tsit5 -n 8388608,134217728
@@ -112,9 +112,12 @@ for %%g in (!ALGORITHM!) do (
     if "!TOK!"=="euler" set TOK_OK=1
     if "!TOK!"=="classical-rk4" set TOK_OK=1
     if "!TOK!"=="tsit5" set TOK_OK=1
-    if "!TOK!"=="cash-karp-54" set TOK_OK=1
     if not defined TOK_OK (
-        echo Unknown algorithm "!TOK!" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
+        python runner_scripts\algorithms.py --check "!TOK!" >nul 2>&1
+        if not errorlevel 1 set TOK_OK=1
+    )
+    if not defined TOK_OK (
+        echo Unknown algorithm "!TOK!"; see runner_scripts\algorithms.csv
         set ARG_BAD=1
     )
 )

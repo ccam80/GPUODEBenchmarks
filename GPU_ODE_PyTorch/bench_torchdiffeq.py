@@ -13,17 +13,17 @@ import numpy as np
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
+from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
-SUPPORTED = ("euler", "classical-rk4", "tsit5")
+FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
 numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
-    sys.argv[1:], SUPPORTED, framework="pytorch")
+    sys.argv[1:], "pytorch")
 # Timed repeats per point; min is reported.
 REPEATS = 20
 

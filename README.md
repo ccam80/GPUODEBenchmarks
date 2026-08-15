@@ -158,25 +158,40 @@ timing and work-precision sweeps to the listed integration algorithms (see
 
 ### Algorithm-matched subsets
 
-Every benchmark runs once per integration algorithm the framework supports,
-and each figure contains only packages running the same method. Algorithms
-use the cubie vocabulary — `euler`, `classical-rk4`, `tsit5`,
-`cash-karp-54` — giving these matched subsets:
+`runner_scripts/algorithms.csv` is the algorithm registry: one row per
+integration algorithm, naming the frameworks that run it fixed-step and the
+frameworks that run it adaptively. Both `algorithms.py` and `algorithms.jl`
+read that one file, and every bench script takes its supported set from it.
+Names use the cubie vocabulary. Each figure contains only packages running
+the same method, giving these matched subsets:
 
 | Subset | Mode | Algorithm | Members |
 |---|---|---|---|
 | A | fixed | `euler` | CUBIE, CUBIE_MLIR, JAX, PYTORCH, MYOKIT_CUDA |
-| B | fixed | `classical-rk4` | CUBIE, CUBIE_MLIR, MPGOS, PYTORCH, JAX |
-| C | fixed | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX, PYTORCH |
-| D | adaptive | `tsit5` | CUBIE, CUBIE_MLIR, Julia, JAX |
-| E | adaptive | `cash-karp-54` | MPGOS, CUBIE, CUBIE_MLIR |
+| B | fixed | `classical-rk4` | CUBIE, CUBIE_MLIR, JAX, PYTORCH, MPGOS |
+| C | fixed | `tsit5` | CUBIE, CUBIE_MLIR, JAX, PYTORCH, Julia |
+| D | adaptive | `tsit5` | CUBIE, CUBIE_MLIR, JAX, Julia |
+| E | adaptive | `cash-karp-54` | CUBIE, CUBIE_MLIR, MPGOS |
+| F | fixed | `rosenbrock23_sciml` | CUBIE, CUBIE_MLIR, Julia |
+| G | adaptive | `rosenbrock23_sciml` | CUBIE, CUBIE_MLIR, Julia |
+| H | fixed | `kvaerno3` | CUBIE, CUBIE_MLIR, JAX, Julia |
+| I | adaptive | `kvaerno3` | CUBIE, CUBIE_MLIR, JAX, Julia |
+| J | fixed | `radau_iia_5` | CUBIE, CUBIE_MLIR |
+| K | adaptive | `radau_iia_5` | CUBIE, CUBIE_MLIR |
 
 Myokit exposes Euler only and MPGOS exposes RK4/RKCK45 only, so no single
 figure can contain every package. JAX's classical RK4 and PyTorch's
 fixed-grid Tsit5 are custom solvers built from the standard tableaus inside
-the bench scripts. Subset D matches the tableau but not the error
+the bench scripts. Julia's implicit entries are the DiffEqGPU kernel solvers
+`GPURosenbrock23` and `GPUKvaerno3` with `autodiff=Val(false)`, and JAX's is
+`diffrax.Kvaerno3`. Subsets D, G and I match the tableau but not the error
 controller: each framework uses its own step controller, so step counts
 differ at equal tolerance.
+
+Every algorithm is run against every problem its framework defines, stiff
+problems included. An algorithm that cannot integrate a system records a NaN
+time and a NaN error for that point and the sweep continues; that a method
+fails on a system is itself a result, and the plots drop non-finite points.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
@@ -197,18 +212,37 @@ algorithm field is regenerated fresh rather than migrated.
 ### Problems
 
 `runner_scripts/problems.csv` is the problem registry: one row per benchmark
-ODE or DAE, giving its state count, duration, swept parameter and range,
-stiffness class, DAE index, dt-grid exponents, golden method, and the
-frameworks expected to run it. Both `problems.py` and `problems.jl` read that
-one file, and every dt grid is a dyadic fraction of the problem's duration so
-dt, save and end boundaries stay exact in binary floating point.
+ODE or DAE, giving its state count, duration, swept parameter, range and
+scale, stiffness class, DAE index, dt-grid exponents, golden method and
+tolerance, and the frameworks expected to run it. Both `problems.py` and
+`problems.jl` read that one file, and every dt grid is a dyadic fraction of
+the problem's duration so dt, save and end boundaries stay exact in binary
+floating point.
+
+| Problem | States | Duration | Swept parameter | Class |
+|---|---|---|---|---|
+| `lorenz` | 3 | 1 | `rho` over [0, 21], linear | non-stiff |
+| `ring_modulator` | 15 | 1e-3 | `Cs` over [2e-13, 2e-9], log | stiff |
+| `ring_modulator_index2` | 15 | 1e-3 | `Uin1_amplitude` over [0, 0.5], linear | stiff, index 2 |
+
+The ring modulator is problem II-3 of the Bari *Test Set for IVP Solvers*: a
+15-state circuit model whose stiffness scales with `1/Cs`. At `Cs = 0` the
+four capacitor rows become algebraic and the system is an index-2 DAE, so
+that formulation is a separate problem with the `Uin1` amplitude swept
+instead. Cubie derives the mass matrix during parsing and tears the algebraic
+states out by structural simplification; the torn variables are recorded as
+observables so the full 15-variable state is still compared against the
+golden. Golden references come from `RadauIIA5`/`RadauIIA9` in Float64 with
+the per-problem `golden_tol`; the index-2 form's local error estimate drives
+the step size to zero below 1e-10, so that row uses 1e-10 and the others
+1e-13.
 
 Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
 framework skips cleanly when a requested problem is not in its list:
 
 ```bash
     $ bash ./run_benchmark.sh -p cubie -s lorenz
-    $ bash ./run_all_benchmarks.sh -s lorenz -g tsit5
+    $ bash ./run_all_benchmarks.sh -s ring_modulator -g kvaerno3
     $ ./run_full_dataset.sh -s lorenz
 ```
 

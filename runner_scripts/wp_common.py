@@ -4,14 +4,13 @@ import os
 
 import numpy as np
 
+from algorithms import resolve_algorithms
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 32768
-
-ALGORITHMS = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
 
 
 def _row(problem):
@@ -67,8 +66,8 @@ def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
                         "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
-def parse_bench_args(argv, supported, framework=None):
-    """Parse <N> [wp] [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); a name this framework lacks yields an empty list."""
+def parse_bench_args(argv, framework):
+    """Parse <N> [wp] [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); names this framework lacks yield empty lists."""
     if not argv:
         raise SystemExit(
             "usage: <N> [wp] [algorithm|all] [--problem <name|all>]")
@@ -89,13 +88,6 @@ def parse_bench_args(argv, supported, framework=None):
             problem_request = tok.split("=", 1)[1]
         else:
             request = tok
-    if request != "all" and request not in ALGORITHMS:
-        raise SystemExit(
-            "unknown algorithm '{0}' (expected one of: all, {1})".format(
-                request, ", ".join(ALGORITHMS)))
-    if request == "all":
-        algorithms = list(supported)
-    else:
-        algorithms = [a for a in supported if a == request]
+    algorithms = resolve_algorithms(request, framework)
     problems = resolve_problems(problem_request, framework)
     return n, wp, algorithms, problems

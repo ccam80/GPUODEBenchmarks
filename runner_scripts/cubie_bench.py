@@ -10,13 +10,11 @@ import timeit
 import numpy as np
 from numba import cuda
 
+from algorithms import supported_for
 from bench_key import dataset_key, data_dir
-from cubie_systems import build_system, sweep_parameters
+from cubie_systems import (build_system, final_states, output_types,
+                           sweep_parameters)
 from wp_common import parse_bench_args, times_outfile
-
-FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
-ADAPTIVE_ALGORITHMS = ("tsit5", "cash-karp-54")
-SUPPORTED = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
 
 # Timed repeats per point; min is reported.
 REPEATS = 20
@@ -32,7 +30,7 @@ def _make_fixed_solver(system, problem, algorithm, dt=None):
         dt=problem.timing_dt if dt is None else dt,
         save_every=problem["duration"],
         step_controller='fixed',
-        output_types=['state'],
+        output_types=output_types(system),
         time_logging_level=None,
     )
 
@@ -53,7 +51,7 @@ def _make_adaptive_solver(system, problem, algorithm, tol=1e-08):
         ki=0.0,
         max_gain=5.0,
         min_gain=0.1,
-        output_types=['state'],
+        output_types=output_types(system),
         time_logging_level=None,
     )
 
@@ -74,7 +72,7 @@ def _run_problem(problem, opts):
     parameters = sweep_parameters(problem, n, PRECISION)
 
     # Grid built once; one solver at a time from here.
-    grid_solver = _make_fixed_solver(system, problem, 'classical-rk4')
+    grid_solver = _make_fixed_solver(system, problem, 'euler')
     initials_array, parameter_array = grid_solver.build_grid(
         initial_values=initial_conditions, parameters=parameters)
     _release(grid_solver)
@@ -84,6 +82,12 @@ def _run_problem(problem, opts):
         return
 
     _run_times(problem, opts, system, initials_array, parameter_array)
+
+
+def _failed(exc, what):
+    """An algorithm that cannot run this system is a NaN row, not an abort."""
+    print("FAILED {0}: {1}".format(what, exc))
+    return float("nan"), float("nan")
 
 
 def _run_wp(problem, opts, system, initials_array, parameter_array):
@@ -105,38 +109,52 @@ def _run_wp(problem, opts, system, initials_array, parameter_array):
                 duration=duration,
             )
         solution = run()  # warm-up (JIT compilation) + numerical result
-        final_states = solution.state[-1, :, :].T
-        err = ensemble_error(final_states, golden)
+        err = ensemble_error(final_states(system, solution, problem),
+                             golden)
         res = timeit.repeat(run, setup='gc.enable()', repeat=repeats, number=1)
         return min(res) * 1000, err
 
     for algorithm in opts["algorithms"]:
-        if algorithm in FIXED_ALGORITHMS:
+        if algorithm in opts["fixed"]:
             outfile = wp_outfile(opts["framework_dir"], opts["prefix"],
                                  "fixed", algorithm, opts["dataset_key"],
                                  problem)
             with open(outfile, "w") as f:
                 for dt in dts_for(algorithm, problem):
-                    solver = _make_fixed_solver(system, problem, algorithm, dt)
-                    t_ms, err = bench_solver(solver)
+                    solver = None
+                    try:
+                        solver = _make_fixed_solver(system, problem,
+                                                    algorithm, dt)
+                        t_ms, err = bench_solver(solver)
+                    except Exception as exc:
+                        t_ms, err = _failed(
+                            exc, f"{problem.name} fixed {algorithm} dt={dt:g}")
                     print(f"wp {problem.name} fixed {algorithm} dt={dt:g}: "
                           f"{t_ms:.2f} ms, err={err:.3e}")
                     f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
-                    _release(solver)
+                    if solver is not None:
+                        _release(solver)
 
-        if algorithm in ADAPTIVE_ALGORITHMS:
+        if algorithm in opts["adaptive"]:
             outfile = wp_outfile(opts["framework_dir"], opts["prefix"],
                                  "adaptive", algorithm, opts["dataset_key"],
                                  problem)
             with open(outfile, "w") as f:
                 for tol in TOLS:
-                    solver = _make_adaptive_solver(system, problem, algorithm,
-                                                   tol)
-                    t_ms, err = bench_solver(solver)
+                    solver = None
+                    try:
+                        solver = _make_adaptive_solver(system, problem,
+                                                       algorithm, tol)
+                        t_ms, err = bench_solver(solver)
+                    except Exception as exc:
+                        t_ms, err = _failed(
+                            exc,
+                            f"{problem.name} adaptive {algorithm} tol={tol:g}")
                     print(f"wp {problem.name} adaptive {algorithm} "
                           f"tol={tol:g}: {t_ms:.2f} ms, err={err:.3e}")
                     f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
-                    _release(solver)
+                    if solver is not None:
+                        _release(solver)
 
 
 def _run_times(problem, opts, system, initials_array, parameter_array):
@@ -182,44 +200,42 @@ def _run_times(problem, opts, system, initials_array, parameter_array):
 
     def save_numerical(solution, name):
         """Final states for the 32768-run numerical cross-check."""
-        final_states = solution.state[-1, :, :].T  # (trajectories, states)
         np.savetxt(os.path.join(
             data_dir("numerical", dataset, problem=problem), name),
-            final_states, delimiter=',')
+            final_states(system, solution, problem), delimiter=',')
 
     for algorithm in opts["algorithms"]:
-        if algorithm in FIXED_ALGORITHMS:
-            print(f"Running {problem.name}, {n} trajectories, fixed dt, "
+        for mode in ("fixed", "adaptive"):
+            if algorithm not in opts[mode]:
+                continue
+            print(f"Running {problem.name}, {n} trajectories, {mode} dt, "
                   f"{algorithm}...")
-            solver = _make_fixed_solver(system, problem, algorithm)
-            best, best_dev, solution = bench_times(solver)
-            print(f"{n} ODE solves ({algorithm}, fixed) completed in "
-                  f"{best:.1f} ms ({best_dev:.1f} ms without transfers)")
+            solver, solution = None, None
+            try:
+                solver = (_make_fixed_solver(system, problem, algorithm)
+                          if mode == "fixed"
+                          else _make_adaptive_solver(system, problem,
+                                                     algorithm))
+                best, best_dev, solution = bench_times(solver)
+                print(f"{n} ODE solves ({algorithm}, {mode}) completed in "
+                      f"{best:.1f} ms ({best_dev:.1f} ms without transfers)")
+            except Exception as exc:
+                best, best_dev = _failed(
+                    exc, f"{problem.name} {mode} {algorithm} N={n}")
             outfile = times_outfile(opts["framework_dir"], opts["prefix"],
-                                    "fixed", algorithm, dataset, problem)
+                                    mode, algorithm, dataset, problem)
             with open(outfile, "a+") as file:
                 file.write(f'{n} {best} {best_dev}\n')
-            # The pairwise numerical cross-check reads this fixed CSV name.
-            if n == 32768 and algorithm == "classical-rk4":
-                save_numerical(solution,
-                               opts["numerical_tag"] + "_unadaptive.csv")
-            _release(solver)
-
-        if algorithm in ADAPTIVE_ALGORITHMS:
-            print(f"Running {problem.name}, {n} trajectories, adaptive dt, "
-                  f"{algorithm}...")
-            solver = _make_adaptive_solver(system, problem, algorithm)
-            best, best_dev, solution = bench_times(solver)
-            print(f"{n} ODE solves ({algorithm}, adaptive) completed in "
-                  f"{best:.1f} ms ({best_dev:.1f} ms without transfers)")
-            outfile = times_outfile(opts["framework_dir"], opts["prefix"],
-                                    "adaptive", algorithm, dataset, problem)
-            with open(outfile, "a+") as file:
-                file.write(f'{n} {best} {best_dev}\n')
-            if n == 32768 and algorithm == "tsit5":
-                save_numerical(solution,
-                               opts["numerical_tag"] + "_adaptive.csv")
-            _release(solver)
+            # The pairwise numerical cross-check reads these fixed CSV names.
+            if solution is not None and n == 32768:
+                if mode == "fixed" and algorithm == "classical-rk4":
+                    save_numerical(solution,
+                                   opts["numerical_tag"] + "_unadaptive.csv")
+                if mode == "adaptive" and algorithm == "tsit5":
+                    save_numerical(solution,
+                                   opts["numerical_tag"] + "_adaptive.csv")
+            if solver is not None:
+                _release(solver)
 
 
 def run(argv, framework, framework_dir, prefix, numerical_tag,
@@ -228,8 +244,7 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
 
-    n, wp, algorithms, problems = parse_bench_args(argv, SUPPORTED,
-                                                   framework=framework)
+    n, wp, algorithms, problems = parse_bench_args(argv, framework)
     if not problems:
         print("{0} runs none of the requested problems; skipping."
               .format(framework))
@@ -242,6 +257,8 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         "prefix": prefix,
         "numerical_tag": numerical_tag,
         "name_suffix": name_suffix,
+        "fixed": supported_for(framework, "fixed"),
+        "adaptive": supported_for(framework, "adaptive"),
         "dataset_key": dataset_key(),
     }
     for problem in problems:

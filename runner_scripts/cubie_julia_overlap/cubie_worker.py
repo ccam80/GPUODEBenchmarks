@@ -27,7 +27,8 @@ from common import (  # noqa: E402 - suite-local bootstrap above
     append_csv, ensure_csv, finite_counts, phases_for, pi_controller,
     point_slug, protocol as suite_protocol, rmse, timing_stats, write_json,
 )
-from cubie_systems import build_system  # noqa: E402
+from cubie_systems import (build_system, final_states,  # noqa: E402
+                           output_types)
 from problems import get_problem  # noqa: E402
 
 try:
@@ -82,7 +83,8 @@ def sweep_grid(problem, kind, n):
 
 def make_solver(system, alias, mode, setting, order, family, tier, pins):
     duration, _, dt0, dt_min, dt_max = pins
-    common = dict(algorithm=alias, save_every=duration, output_types=["state"],
+    common = dict(algorithm=alias, save_every=duration,
+                  output_types=output_types(system),
                   time_logging_level=None)
     if mode == "fixed":
         return qb.Solver(system, dt=setting, step_controller="fixed", **common)
@@ -104,14 +106,15 @@ def make_solver(system, alias, mode, setting, order, family, tier, pins):
     return solver
 
 
-def solve_once(solver, initials, parameters, duration, nstates):
+def solve_once(solver, initials, parameters, duration, nstates, system,
+               problem):
     """Time one solve including the h2d and d2h transfers."""
     sync()
     start = time.perf_counter()
     solution = solver.solve(initial_values=initials, parameters=parameters,
                             blocksize=64, duration=duration)
     # solve() already returns host buffers; this is a host-side view.
-    finals = solution.state[-1, :, :].T
+    finals = final_states(system, solution, problem)
     sync()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     if finals.ndim != 2 or finals.shape[1] != nstates:
@@ -219,7 +222,8 @@ def main():
                         parameters={problem["sweep_parameter"]:
                                     sweep_grid(problem, phase, n)})
                     device_inputs = to_device_inputs(initials, params)
-                    solve_once(solver, initials, params, duration, nstates)  # JIT/allocation warmup
+                    solve_once(solver, initials, params, duration, nstates,
+                               system, problem)  # JIT/allocation warmup
                     if device_inputs is not None:
                         solve_once_on_device(solver, *device_inputs, duration)  # warmup
                     # Each transfer variant runs as an unbroken block, so one
@@ -227,7 +231,9 @@ def main():
                     # allocation and transfer traffic.
                     end_to_end = []
                     for _ in range(repeats):
-                        finals, elapsed = solve_once(solver, initials, params, duration, nstates)
+                        finals, elapsed = solve_once(
+                            solver, initials, params, duration, nstates,
+                            system, problem)
                         finite, failed = finite_counts(finals)
                         if failed or finite != n:
                             append_csv(metric_file, METRIC_FIELDS, {

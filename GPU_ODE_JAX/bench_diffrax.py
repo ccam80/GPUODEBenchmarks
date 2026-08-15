@@ -20,18 +20,18 @@ from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolatio
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
+from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
-ADAPTIVE_ALGORITHMS = ("tsit5",)
-SUPPORTED = ("euler", "classical-rk4", "tsit5")
+FIXED_ALGORITHMS = supported_for("jax", "fixed")
+ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
 
 numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
-    sys.argv[1:], SUPPORTED, framework="jax")
+    sys.argv[1:], "jax")
 # Timed repeats per point; min is reported.
 REPEATS = 20
 
@@ -82,12 +82,19 @@ def make_solver(algorithm):
         return ClassicalRK4()
     if algorithm == "tsit5":
         return diffrax.Tsit5()
+    if algorithm == "kvaerno3":
+        return diffrax.Kvaerno3()
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
 def best_times_ms(solve, args, label):
     """Best of REPEATS timed runs in ms as (with_transfers, device_only); exits 1 without recording when the solve does not fit in device memory."""
-    compiled = solve.lower(args).compile()
+    try:
+        compiled = solve.lower(args).compile()
+    except Exception as err:
+        print("FAILED {0} at N={1} ({2}: {3})".format(
+            label, numberOfParameters, type(err).__name__, err))
+        return float("nan"), float("nan")
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
     if usage is not None:
@@ -114,10 +121,9 @@ def best_times_ms(solve, args, label):
         both = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
         none = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
     except Exception as err:
-        print("ERROR: the {0} solve failed at N={1} ({2}: {3}); no timing "
-              "recorded.".format(label, numberOfParameters,
-                                 type(err).__name__, err))
-        sys.exit(1)
+        print("FAILED {0} at N={1} ({2}: {3})".format(
+            label, numberOfParameters, type(err).__name__, err))
+        return float("nan"), float("nan")
     return both, none
 
 
@@ -167,13 +173,18 @@ def run_wp(problem, parameterList):
     golden = load_golden(problem)
 
     def bench(m, setting, outfh):
-        sol = m(parameterList)
-        jax.block_until_ready(sol.ys)  # warm-up (JIT) + numerical result
-        err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
-        res = timeit.repeat(
-            lambda: jax.block_until_ready(m(parameterList).ys),
-            repeat=20, number=1)
-        t_ms = min(res) * 1000
+        try:
+            sol = m(parameterList)
+            jax.block_until_ready(sol.ys)  # warm-up (JIT) + numerical result
+            err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
+            res = timeit.repeat(
+                lambda: jax.block_until_ready(m(parameterList).ys),
+                repeat=20, number=1)
+            t_ms = min(res) * 1000
+        except Exception as err_exc:
+            print("FAILED wp {0} setting={1:g}: {2}".format(
+                problem.name, setting, err_exc))
+            t_ms, err = float("nan"), float("nan")
         print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}".format(
             problem.name, setting, t_ms, err))
         outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
@@ -212,7 +223,8 @@ def run_times(problem, parameterList):
                 file.write('{0} {1} {2}\n'.format(
                     numberOfParameters, best_time, best_time_dev))
             # The pairwise numerical cross-check reads this fixed CSV name.
-            if numberOfParameters == 32768 and algorithm == "tsit5":
+            if (numberOfParameters == 32768 and algorithm == "tsit5"
+                    and np.isfinite(best_time)):
                 sol = main(parameterList)
                 final_states = np.array(sol.ys[:, -1, :])
                 np.savetxt(os.path.join(

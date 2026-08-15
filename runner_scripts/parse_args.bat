@@ -22,18 +22,9 @@ if defined PA_TARGET if not defined PA_HAVE (
 )
 :parse_args_done
 
-if /i "%ANALYSIS%"=="performance" goto check_algorithm
-if /i "%ANALYSIS%"=="work-precision" goto check_algorithm
+if /i "%ANALYSIS%"=="performance" goto check_nmax
+if /i "%ANALYSIS%"=="work-precision" goto check_nmax
 echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^)
-exit /b 1
-
-:check_algorithm
-if "%ALGORITHM%"=="all" goto check_nmax
-if "%ALGORITHM%"=="euler" goto check_nmax
-if "%ALGORITHM%"=="classical-rk4" goto check_nmax
-if "%ALGORITHM%"=="tsit5" goto check_nmax
-if "%ALGORITHM%"=="cash-karp-54" goto check_nmax
-echo Unknown algorithm "%ALGORITHM%" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
 exit /b 1
 
 :check_nmax

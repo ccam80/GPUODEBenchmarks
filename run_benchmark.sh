@@ -5,7 +5,7 @@
 #   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | work-precision
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #   -d, --device    gpu (default) | cpu
 #   -m, --model     ode (default) | sde
@@ -51,7 +51,7 @@ esac
 # -g: "all" or a comma list; charset-check before the unquoted split.
 case "$ALGORITHM" in
     ''|*[!a-z0-9,-]*)
-        echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2
+        echo "-g/--algorithm must be 'all' or a comma list of algorithm names" >&2
         exit 1;;
 esac
 ALG_LIST=
@@ -59,8 +59,8 @@ ALG_HAS_ALL=false
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
         all) ALG_HAS_ALL=true;;
-        euler|classical-rk4|tsit5|cash-karp-54) ALG_LIST="$ALG_LIST $alg";;
-        *) echo "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)" >&2; exit 1;;
+        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1
+           ALG_LIST="$ALG_LIST $alg";;
     esac
 done
 $ALG_HAS_ALL && ALG_LIST=all
