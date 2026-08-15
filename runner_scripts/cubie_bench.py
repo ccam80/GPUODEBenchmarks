@@ -63,10 +63,7 @@ def _release(solver):
 
 
 def _grid_builder(initial_conditions, parameters):
-    """Build the ensemble grid once, from the first solver the system accepts.
-
-    A system with a mass matrix rejects explicit algorithms outright, so the
-    grid cannot be built ahead of the algorithm loop."""
+    """Build the ensemble grid once, from the first solver that constructs."""
     cache = {}
 
     def build(solver):

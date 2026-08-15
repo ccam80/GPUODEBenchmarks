@@ -31,8 +31,7 @@ RING_ORDER = ("U1", "U2", "U3", "U4", "U5", "U6", "U7",
               "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8")
 RING_STATES = {name: 0.0 for name in RING_ORDER}
 
-# Variables structural simplification tears out of the index-2 form; declared
-# as observables so every original variable is still recorded.
+# Variables torn out of the index-2 form; recorded as observables.
 RING_INDEX2_OBSERVABLES = ["U3", "U4", "U6", "I3"]
 
 # Diode voltages and currents, shared by both ring modulator formulations.
@@ -173,10 +172,7 @@ def state_defaults(system):
 
 
 def final_states(system, solution, problem):
-    """Final values of the problem's variables, in golden-reference order.
-
-    Structural simplification can tear a variable out of the state vector and
-    leave it as an observable, so both arrays are searched."""
+    """Final values of the problem's variables, in golden-reference order; torn variables come from the observables."""
     order = variable_order(problem)
     state_names = _names(system.indices.states.index_map)
     finals = np.asarray(solution.state[-1, :, :]).T

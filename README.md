@@ -160,10 +160,10 @@ timing and work-precision sweeps to the listed integration algorithms (see
 
 `runner_scripts/algorithms.csv` is the algorithm registry: one row per
 integration algorithm, naming the frameworks that run it fixed-step and the
-frameworks that run it adaptively. Both `algorithms.py` and `algorithms.jl`
-read that one file, and every bench script takes its supported set from it.
-Names use the cubie vocabulary. Each figure contains only packages running
-the same method, giving these matched subsets:
+frameworks that run it adaptively, in the cubie vocabulary. Both
+`algorithms.py` and `algorithms.jl` read that file, and every bench script
+takes its supported set from it. Each figure contains only packages running
+the same method:
 
 | Subset | Mode | Algorithm | Members |
 |---|---|---|---|
@@ -188,10 +188,9 @@ the bench scripts. Julia's implicit entries are the DiffEqGPU kernel solvers
 controller: each framework uses its own step controller, so step counts
 differ at equal tolerance.
 
-Every algorithm is run against every problem its framework defines, stiff
-problems included. An algorithm that cannot integrate a system records a NaN
-time and a NaN error for that point and the sweep continues; that a method
-fails on a system is itself a result, and the plots drop non-finite points.
+Every algorithm is run against every problem its framework defines. An
+algorithm that cannot integrate a system records a NaN time and a NaN error
+for that point and the sweep continues; the plots drop non-finite points.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
@@ -227,15 +226,15 @@ floating point.
 
 The ring modulator is problem II-3 of the Bari *Test Set for IVP Solvers*: a
 15-state circuit model whose stiffness scales with `1/Cs`. At `Cs = 0` the
-four capacitor rows become algebraic and the system is an index-2 DAE, so
-that formulation is a separate problem with the `Uin1` amplitude swept
-instead. Cubie derives the mass matrix during parsing and tears the algebraic
-states out by structural simplification; the torn variables are recorded as
-observables so the full 15-variable state is still compared against the
-golden. Golden references come from `RadauIIA5`/`RadauIIA9` in Float64 with
-the per-problem `golden_tol`; the index-2 form's local error estimate drives
-the step size to zero below 1e-10, so that row uses 1e-10 and the others
-1e-13.
+four capacitor rows become algebraic and the system is an index-2 DAE, which
+is a separate row sweeping the `Uin1` amplitude instead. Cubie derives the
+mass matrix during parsing and tears the algebraic states out by structural
+simplification; the torn variables are recorded as observables, so the full
+15-variable state is still compared against the golden. Only fully implicit
+stages integrate it: cubie rejects the explicit algorithms and `kvaerno3` on
+a singular mass matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
+Golden references are Float64 solves under each problem's `golden_algorithm`
+at its `golden_tol`.
 
 Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
 framework skips cleanly when a requested problem is not in its list:

@@ -1,8 +1,7 @@
 #ifndef PROBLEM_RING_MODULATOR_CUH
 #define PROBLEM_RING_MODULATOR_CUH
 
-// Ring modulator (Test Set for IVP Solvers, problem II-3), stiff ODE form
-// with the capacitance Cs swept logarithmically across the ensemble.
+// Ring modulator (Test Set for IVP Solvers II-3); Cs is swept.
 #define PROBLEM_NAME "ring_modulator"
 #define PROBLEM_SD 15
 #define PROBLEM_NCP 1
