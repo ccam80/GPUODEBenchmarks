@@ -1,44 +1,51 @@
-"""Shared constants and helpers for the work-precision (wp) sweeps: dt or
-tolerance settings per algorithm at N = 131072, timed and scored against the
-golden reference, written as "<setting> <time_ms> <error>" rows to
-data/<package>/<key>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt.
-The Julia and MPGOS writers mirror these constants; keep them in sync."""
+"""Work-precision sweep protocol: setting, time and error rows under data/<package>/<key>/<problem>/, mirrored by the Julia and MPGOS writers."""
 
 import os
 
 import numpy as np
 
+from algorithms import resolve_algorithms
 from bench_key import data_dir
+from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 
-# Euler gets its own finer grid: a first-order method needs far smaller dt
-# for errors in the same range as the order >= 4 methods.
-DTS = [2.0 ** -k for k in range(4, 14)]        # 1/16 .. 1/8192, 10 points
-DTS_EULER = [2.0 ** -k for k in range(8, 18)]  # 1/256 .. 1/131072, 10 points
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 131072
 
-GOLDEN_PATH = os.path.join("data", "numerical", "golden_lorenz_131072.csv")
-
-ALGORITHMS = ("euler", "classical-rk4", "tsit5", "cash-karp-54")
-
-
-def dts_for(algorithm):
-    """The fixed-step dt grid appropriate to the given algorithm."""
-    return DTS_EULER if algorithm == "euler" else DTS
+# Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
+TIMING_TOL = 1.0e-8
 
 
-def load_golden():
-    """Load the Float64 golden final states, shape (N_WP, 3)."""
-    if not os.path.isfile(GOLDEN_PATH):
+def _row(problem):
+    """Accept a problem row or a problem name."""
+    return problem if isinstance(problem, dict) else get_problem(problem)
+
+
+def dts_for(algorithm, problem=DEFAULT_PROBLEM):
+    """The fixed-step dt grid appropriate to the algorithm and problem."""
+    return _row(problem).dts(algorithm)
+
+
+def golden_path(problem=DEFAULT_PROBLEM):
+    """Path of the Float64 reference final states for a problem."""
+    return os.path.join(
+        "data", "numerical",
+        "golden_{0}_{1}.csv".format(_row(problem)["problem"], N_WP))
+
+
+def load_golden(problem=DEFAULT_PROBLEM):
+    """Load the Float64 golden final states, shape (N_WP, states)."""
+    row = _row(problem)
+    path = golden_path(row)
+    if not os.path.isfile(path):
         raise FileNotFoundError(
             "{0} not found - generate it first with "
-            "`julia -t auto --project=. runner_scripts/golden/generate_golden.jl`"
-            .format(GOLDEN_PATH))
-    golden = np.loadtxt(GOLDEN_PATH, delimiter=",")
-    if golden.shape != (N_WP, 3):
-        raise ValueError("golden reference has shape {0}, expected ({1}, 3)"
-                         .format(golden.shape, N_WP))
+            "`julia -t auto --project=. runner_scripts/golden/generate_golden.jl "
+            "--problem {1}`".format(path, row["problem"]))
+    golden = np.loadtxt(path, delimiter=",")
+    if golden.shape != (N_WP, row["states"]):
+        raise ValueError("golden reference has shape {0}, expected ({1}, {2})"
+                         .format(golden.shape, N_WP, row["states"]))
     return golden
 
 
@@ -48,38 +55,40 @@ def ensemble_error(final_states, golden):
     return float(np.sqrt(np.mean(diff ** 2)))
 
 
-def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the wp output file under data/<package>/<key>; creates the directory."""
-    return os.path.join(data_dir(framework_dir, dataset_key),
+def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
+               problem=DEFAULT_PROBLEM):
+    """Path of the wp output file under data/<package>/<key>/<problem>."""
+    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
                         "{0}_wp_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
-def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the N-sweep timing file under data/<package>/<key>; creates the directory."""
-    return os.path.join(data_dir(framework_dir, dataset_key),
+def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
+                  problem=DEFAULT_PROBLEM):
+    """Path of the N-sweep timing file under data/<package>/<key>/<problem>."""
+    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
                         "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
-def parse_bench_args(argv, supported):
-    """Parse ``<N> [wp] [algorithm|all]``; return (n, wp, requested subset of
-    `supported`). Unknown names exit; a valid name this framework lacks
-    yields an empty list."""
+def parse_bench_args(argv, framework):
+    """Parse <N>|wp [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); wp mode always runs at N_WP."""
     if not argv:
-        raise SystemExit("usage: <N> [wp] [algorithm|all]")
-    n = int(argv[0])
-    wp = False
+        raise SystemExit(
+            "usage: <N>|wp [algorithm|all] [--problem <name|all>]")
+    wp = argv[0] == "wp"
+    n = N_WP if wp else int(argv[0])
     request = "all"
-    for tok in argv[1:]:
-        if tok == "wp":
-            wp = True
+    problem_request = "all"
+    rest = list(argv[1:])
+    while rest:
+        tok = rest.pop(0)
+        if tok in ("--problem", "-s"):
+            if not rest:
+                raise SystemExit("--problem requires a value")
+            problem_request = rest.pop(0)
+        elif tok.startswith("--problem="):
+            problem_request = tok.split("=", 1)[1]
         else:
             request = tok
-    if request != "all" and request not in ALGORITHMS:
-        raise SystemExit(
-            "unknown algorithm '{0}' (expected one of: all, {1})".format(
-                request, ", ".join(ALGORITHMS)))
-    if request == "all":
-        algorithms = list(supported)
-    else:
-        algorithms = [a for a in supported if a == request]
-    return n, wp, algorithms
+    algorithms = resolve_algorithms(request, framework)
+    problems = resolve_problems(problem_request, framework)
+    return n, wp, algorithms, problems

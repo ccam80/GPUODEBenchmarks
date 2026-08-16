@@ -10,7 +10,7 @@ REM Cubie picks its backend from this at import time.
 set CUBIE_CUDA_BACKEND=mlir
 
 if /i "%ANALYSIS%"=="work-precision" (
-    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py 131072 wp "%ALGORITHM%"
+    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal
@@ -19,7 +19,7 @@ if /i "%ANALYSIS%"=="work-precision" (
 
 for %%a in (!NLIST!) do (
     echo No. of trajectories = %%a
-    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py %%a "%ALGORITHM%"
+    python GPU_ODE_CUBIE_MLIR\bench_cubie_mlir.py %%a "%ALGORITHM%" --problem "%PROBLEM%"
     if !errorlevel! neq 0 exit /b 1
 )
 

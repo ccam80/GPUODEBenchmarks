@@ -23,6 +23,7 @@
 #   ./run_full_dataset.sh -a overlap                # one analysis
 #   ./run_full_dataset.sh -a performance,numerical  # several analyses
 #   ./run_full_dataset.sh -g euler,tsit5            # several algorithms
+#   ./run_full_dataset.sh -s lorenz                 # one problem
 #   ./run_full_dataset.sh --resume-from jax         # restart at a package
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
 #   ./run_full_dataset.sh --no-lock-clocks          # sample clocks but do not pin
@@ -31,7 +32,8 @@
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
+#   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -49,6 +51,7 @@ DO_OVERLAP=true
 DO_PLOTS=true
 PACKAGE="all"
 ALGORITHM="all"
+PROBLEM="all"
 COOLDOWN=15
 RESUME_FROM=""
 ALLOW_UNKNOWN_GPU=false
@@ -98,6 +101,8 @@ while [ $# -gt 0 ]; do
                    PACKAGE="${2//-/_}"; shift 2;;
         -g|--algorithm) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    ALGORITHM="$2"; shift 2;;
+        -s|--problem) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
+                   PROBLEM="$2"; shift 2;;
         -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    set_analyses "$2"; shift 2;;
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
@@ -123,7 +128,12 @@ case "$PACKAGE" in
 esac
 case "$ALGORITHM" in
     ''|*[!a-z0-9,-]*)
-        echo "Unknown algorithm '$ALGORITHM' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        echo "-g/--algorithm must be 'all' or a comma list of algorithm names"
+        exit 1;;
+esac
+case "$PROBLEM" in
+    ''|*[!a-z0-9_,-]*)
+        echo "-s/--problem takes names from runner_scripts/problems.csv, got '$PROBLEM'"
         exit 1;;
 esac
 
@@ -157,14 +167,6 @@ if $HAS_JULIA && $HAS_CUBIE; then NE_PACKAGE=all
 elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
-
-# -g: "all" or a comma list; every token whitelisted.
-for alg in ${ALGORITHM//,/ }; do
-    case "$alg" in
-        all|euler|classical-rk4|tsit5|cash-karp-54) ;;
-        *) echo "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"; exit 1;;
-    esac
-done
 
 # -n: sweep ceiling or comma list of exact counts.
 case ",$NMAX," in
@@ -280,6 +282,7 @@ run_step() {
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
 echo "Algorithm   : $ALGORITHM"
+echo "Problems    : $PROBLEM"
 echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
 echo "Analyses    : performance=$DO_PERF work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
@@ -293,6 +296,7 @@ echo
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "nmax=$NMAX"
     echo "algorithm=$ALGORITHM"
+    echo "problem=$PROBLEM"
     echo "packages=${LANGUAGES[*]}"
     echo "git_rev=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "git_dirty=$(test -n "$(git status --porcelain 2>/dev/null)" && echo yes || echo no)"
@@ -320,7 +324,7 @@ if $DO_PERF; then
         fi
         CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM" -s "$PROBLEM"
         status=$?
         reached=$(max_n_reached "$lang")
         if [ "$status" -eq 0 ]; then
@@ -338,32 +342,23 @@ fi
 
 # ------------------------------------------------------------- work-precision
 if $DO_WP; then
-    # The work-precision sweeps score every point against a Float64 golden
-    # reference. It is machine independent and generated once, but nothing else
-    # creates it -- without it *every* framework's wp run aborts immediately on
-    # a missing-file error, so generate it up front rather than failing seven
-    # times over.
-    if [ ! -f data/numerical/golden_lorenz_131072.csv ]; then
-        # Reference generation is scored on accuracy, not speed.
-        CLOCK_CRITICAL=false; STEP_LABEL="wp:golden"
-        run_step "Golden reference for work-precision" "wp_golden.log" \
-            julia -t auto --project=. ./runner_scripts/golden/generate_golden.jl
-        status=$?
-        if [ "$status" -eq 0 ]; then
-            record "wp:golden" "OK" "-" "$status"
-        else
-            record "wp:golden" "FAILED" "wp sweeps cannot score" "$status"
-            echo "  → work-precision sweeps will fail without the golden reference"
-        fi
+    # Missing golden references are generated up front; accuracy, not speed.
+    CLOCK_CRITICAL=false; STEP_LABEL="wp:golden"
+    run_step "Golden references for work-precision" "wp_golden.log" \
+        julia -t auto --project=. ./runner_scripts/golden/generate_golden.jl --problem "$PROBLEM"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+        record "wp:golden" "OK" "-" "$status"
     else
-        record "wp:golden" "OK" "already present" "0"
+        record "wp:golden" "FAILED" "wp sweeps cannot score" "$status"
+        echo "  → work-precision sweeps will fail without the golden reference"
     fi
 
     skipping=false
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM" -s "$PROBLEM"
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"
@@ -378,7 +373,7 @@ elif $DO_NE; then
     # Equivalence is a correctness check; its clock does not have to be stable.
     CLOCK_CRITICAL=false; STEP_LABEL="ne"
     run_step "Numerical-equivalence suite ($NE_PACKAGE)" "numerical_equivalence.log" \
-        bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE"
+        bash ./run_numerical_equivalence.sh -p "$NE_PACKAGE" -s "$PROBLEM"
     status=$?
     case "$status" in
         0) record "ne" "OK" "errors and ratios in numerical_equivalence_*.csv" "$status";;

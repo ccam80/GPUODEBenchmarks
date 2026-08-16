@@ -53,7 +53,10 @@ def valid_metric(row):
 
 
 def load_finals(root, relative):
-    return np.loadtxt(root / relative, delimiter=",", skiprows=1, usecols=(1, 2, 3), dtype=np.float64)
+    """Final states of one point; column 0 is the trajectory index."""
+    data = np.loadtxt(root / relative, delimiter=",", skiprows=1,
+                      dtype=np.float64, ndmin=2)
+    return data[:, 1:]
 
 
 def timing_summary(rows, metrics=None):
@@ -344,9 +347,17 @@ def main():
                         help="Figure and report directory; default plots/<dataset-key>.")
     parser.add_argument("--report", type=Path, default=None,
                         help="Report path; default {} in the plots directory.".format(REPORT_NAME))
+    parser.add_argument("--problem", default=None,
+                        help="Problem name; taken from the output directory when omitted.")
     args = parser.parse_args()
-    key = args.key or (args.output.name if args.output else dataset_key())
+    key = args.key or (args.output.parent.name if args.output else dataset_key())
+    problem = args.problem or (args.output.name if args.output else None)
     root, plots_dir, report_path = output_paths(key, args.output, args.plots_dir, args.report)
+    if problem is not None and args.plots_dir is None:
+        plots_dir = plots_dir / problem
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        if args.report is None:
+            report_path = plots_dir / REPORT_NAME
     timings = read_rows(root / "cubie_timings.csv") + read_rows(root / "julia_timings.csv")
     metrics = read_rows(root / "cubie_metrics.csv") + read_rows(root / "julia_metrics.csv")
     valid_metrics = [row for row in metrics if valid_metric(row)]

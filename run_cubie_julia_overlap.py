@@ -33,6 +33,7 @@ from common import (  # noqa: E402 - suite helper bootstrap
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
     parse_ns, phases_for, prune_csv,
 )
+from problems import problem_names, resolve_problems  # noqa: E402
 
 CSV_KINDS = (("timings", TIMING_FIELDS), ("metrics", METRIC_FIELDS),
              ("failures", FAILURE_FIELDS))
@@ -61,6 +62,9 @@ def parser():
                    help="Continue the performance analysis at this N; rows below it are kept.")
     p.add_argument("--algorithm", choices=algorithm_names(), default="all",
                    help="Run one algorithm; the others keep their existing rows.")
+    p.add_argument("-s", "--problem", choices=["all"] + problem_names(),
+                   default="all",
+                   help="Run one problem; each gets its own output directory.")
     return p
 
 
@@ -76,14 +80,28 @@ def main():
     if args.from_n and args.analysis != "performance":
         parser().error("--from-n continues the performance analysis; pass -a performance")
     key = dataset_key()
-    output = (ROOT / "data" / "cubie_julia_overlap" / key).resolve()
+    problems = resolve_problems(args.problem, "cubie")
+    if not problems:
+        parser().error("no requested problem is in the overlap suite")
     cubie_python = existing_python()
     julia = os.environ.get("JULIA", "julia")
     phases = phases_for(args.analysis)
     packages = ("julia", "cubie") if args.package == "all" else (args.package,)
+    status = 0
+    for problem in problems:
+        status |= run_problem(problem, args, ns, key, packages, cubie_python,
+                              julia, phases)
+    return status
+
+
+def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
+    """One problem: the selected workers, then the analyzer."""
+    output = (ROOT / "data" / "cubie_julia_overlap" / key /
+              problem["problem"]).resolve()
     shared = ["--output", str(output),
               "--analysis", args.analysis, "--nmax", ",".join(str(n) for n in ns),
-              "--from-n", str(args.from_n), "--algorithm", args.algorithm]
+              "--from-n", str(args.from_n), "--algorithm", args.algorithm,
+              "--problem", problem["problem"]]
     commands = []
     if "julia" in packages:
         commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
@@ -91,7 +109,8 @@ def main():
     if "cubie" in packages:
         commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
     commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"),
-                                  "--output", str(output), "--key", key]))
+                                  "--output", str(output), "--key", key,
+                                  "--problem", problem["problem"]]))
 
     print("Output: {}".format(output))
     for label, command in commands:
@@ -120,7 +139,7 @@ def main():
             shutil.rmtree(stale, ignore_errors=True)
 
     manifest = {
-        "dataset_key": key,
+        "dataset_key": key, "problem": problem["problem"],
         "analysis": args.analysis, "package": args.package,
         "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
         "nmax": args.nmax, "performance_ns": ns, "from_n": args.from_n,

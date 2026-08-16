@@ -1,15 +1,7 @@
 #!/usr/bin/env python
-# coding: utf-8
-# %%
-# Benchmarking torchdiffeq ODE solvers for ensemble problems via vmap, once
-# per algorithm: euler/classical-rk4/tsit5, all fixed-step (torch.vmap cannot
-# trace the adaptive solvers' data-dependent control flow).
-# Usage: bench_torchdiffeq.py <N> [wp] [algorithm|all]
 
-# Created By: Utkarsh
-# Last Updated: 19 April 2023
+# torchdiffeq ensemble benchmarks via vmap, fixed-step only: bench_torchdiffeq.py <N>|wp [algorithm|all] [--problem <name|all>]
 
-# %%
 
 import torch
 import sys
@@ -21,22 +13,23 @@ import numpy as np
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
+from algorithms import supported_for
 from bench_key import dataset_key, data_dir
+from torch_systems import build_problem
 from wp_common import parse_bench_args, times_outfile
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = ("euler", "classical-rk4", "tsit5")
-SUPPORTED = ("euler", "classical-rk4", "tsit5")
+FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
-numberOfParameters, WP_MODE, ALGORITHMS = parse_bench_args(sys.argv[1:], SUPPORTED)
+numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+    sys.argv[1:], "pytorch")
 # Timed repeats per point; min is reported.
 REPEATS = 20
 
 # %%
 
 
-import torch.nn as nn
 from torchdiffeq import odeint
 from torchdiffeq._impl.odeint import SOLVERS
 from torchdiffeq._impl.solvers import FixedGridODESolver
@@ -91,63 +84,33 @@ print("CUDA enabled: ", torch.backends.cuda.is_built())
 
 
 # %%
-# Defining the Lorenz ODE problem
-class LorenzODE(torch.nn.Module):
-
-    def __init__(self, rho = torch.tensor(21.0)):
-        super(LorenzODE, self).__init__()
-        self.sigma = nn.Parameter(torch.as_tensor([10.0]))
-        self.rho = nn.Parameter(rho)
-        self.beta = nn.Parameter(torch.as_tensor([8/3]))
-
-    def forward(self, t, u):
-        x, y, z = u[0],u[1],u[2]
-        du1 = self.sigma[0] * (y - x)
-        du2 = x * (self.rho - z) - y
-        du3 = x * y - self.beta[0] * z
-        return torch.stack([du1, du2, du3])
-
-
-# %%
-# Define the solve without gradient calculations
-# Note: I was't able to JIT compile the code with this application, torchdiffeq + vmap
-def make_solve(algorithm, dt=2.0 ** -10):
+# torchdiffeq under vmap does not JIT compile, so the solve stays interpreted.
+def make_solve(problem, algorithm, dt=None):
     method = METHODS[algorithm]
+    module_factory, u0 = build_problem(problem)
+    dt = problem.timing_dt if dt is None else dt
+    # Endpoints only: the benchmark scores the final state.
+    t = torch.linspace(0, problem["duration"], 2).cuda()
 
     def solve(p):
         with torch.no_grad():
-            return odeint(LorenzODE(rho=p), u0, t, method=method,
+            return odeint(module_factory(p), u0, t, method=method,
                           options=dict(step_size=dt))
     return solve
 
-# Define the initial conditions and timepoints to save
-u0 = torch.tensor([1.0,0.0,0.0]).cuda()
-t = torch.linspace(0, 1.0, 2).cuda()
 
+def run_wp(problem, parameters):
+    """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
+    from wp_common import dts_for, load_golden, ensemble_error, wp_outfile
 
-# %%
-# Generate parameter list
-parameters = torch.linspace(0.0,21.0,numberOfParameters).cuda()
-
-
-# ========================================
-# WORK-PRECISION (wp) MODE
-# ========================================
-# Sweeps dt per algorithm at N=131072; see runner_scripts/wp_common.py.
-# wp timings synchronize the device so the full solve is measured.
-if WP_MODE:
-    from wp_common import dts_for, N_WP, load_golden, ensemble_error, wp_outfile
-
-    if numberOfParameters != N_WP:
-        sys.exit("wp mode must be run with N = {0}".format(N_WP))
-    golden = load_golden()
+    golden = load_golden(problem)
 
     for algorithm in ALGORITHMS:
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
-                             DATASET_KEY)
+                             DATASET_KEY, problem)
         with open(outfile, "w") as f:
-            for dt in dts_for(algorithm):
-                solve_dt = make_solve(algorithm, dt)
+            for dt in dts_for(algorithm, problem):
+                solve_dt = make_solve(problem, algorithm, dt)
 
                 def run():
                     traj = torch.vmap(solve_dt)(parameters)
@@ -158,53 +121,67 @@ if WP_MODE:
                 err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
                 res = timeit.repeat(run, repeat=5, number=1)
                 t_ms = min(res) * 1000
-                print("wp fixed {0} dt={1:g}: {2:.2f} ms, err={3:.3e}".format(
-                    algorithm, dt, t_ms, err))
+                print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}"
+                      .format(problem.name, algorithm, dt, t_ms, err))
                 f.write("{0:.10g} {1} {2:.10e}\n".format(dt, t_ms, err))
 
-    sys.exit(0)
+
+def run_times(problem, parameters):
+    """N-sweep timing benchmark."""
+    parameters_host = parameters.cpu().numpy()
+
+    for algorithm in ALGORITHMS:
+        solve = make_solve(problem, algorithm)
+
+        def with_transfers():
+            # .cuda() is the h2d, .cpu() the d2h.
+            p = torch.from_numpy(parameters_host).cuda()
+            out = torch.vmap(solve)(p).cpu()
+            torch.cuda.synchronize()
+            return out
+
+        def device_only():
+            # Params already resident, results left on device.
+            out = torch.vmap(solve)(parameters)
+            torch.cuda.synchronize()
+            return out
+
+        torch.vmap(solve)(parameters); torch.cuda.synchronize()  # warmup
+        best_time = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
+        best_time_dev = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
+        print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
+              "({:.1f} ms without transfers)".format(
+                  numberOfParameters, problem.name, algorithm, best_time,
+                  best_time_dev))
+
+        outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,
+                                DATASET_KEY, problem)
+        with open(outfile, "a+") as file:
+            file.write('{0} {1} {2}\n'.format(
+                numberOfParameters, best_time, best_time_dev))
+
+        # The pairwise numerical cross-check reads this fixed CSV name.
+        if numberOfParameters == 32768 and algorithm == "classical-rk4":
+            traj = torch.vmap(solve)(parameters)
+            # Extract final state values (last time point for each trajectory)
+            final_states = traj[:, -1, :].cpu().numpy()  # (trajectories, states)
+            np.savetxt(os.path.join(
+                data_dir("numerical", DATASET_KEY, problem=problem),
+                "pytorch.csv"), final_states, delimiter=',')
 
 
 # %%
-# N-sweep timing benchmark.
+if not PROBLEMS:
+    print("torchdiffeq runs none of the requested problems; skipping.")
+    sys.exit(0)
 
-parameters_host = parameters.cpu().numpy()
-
-for algorithm in ALGORITHMS:
-    solve = make_solve(algorithm)
-
-    def with_transfers():
-        # .cuda() is the h2d, .cpu() the d2h.
-        p = torch.from_numpy(parameters_host).cuda()
-        out = torch.vmap(solve)(p).cpu()
-        torch.cuda.synchronize()
-        return out
-
-    def device_only():
-        # Params already resident, results left on device.
-        out = torch.vmap(solve)(parameters)
-        torch.cuda.synchronize()
-        return out
-
-    torch.vmap(solve)(parameters); torch.cuda.synchronize()  # warmup
-    best_time = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
-    best_time_dev = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
-    print("{:} ODE solves ({}, fixed) completed in {:.1f} ms "
-          "({:.1f} ms without transfers)".format(
-              numberOfParameters, algorithm, best_time, best_time_dev))
-
-    outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm, DATASET_KEY)
-    with open(outfile, "a+") as file:
-        file.write('{0} {1} {2}\n'.format(
-            numberOfParameters, best_time, best_time_dev))
-
-    # The pairwise numerical cross-check reads this fixed CSV name.
-    if numberOfParameters == 32768 and algorithm == "classical-rk4":
-        traj = torch.vmap(solve)(parameters)
-        # Extract final state values (last time point for each trajectory)
-        final_states = traj[:, -1, :].cpu().numpy()  # shape: (trajectories, states)
-        np.savetxt(os.path.join(data_dir("numerical", DATASET_KEY), "pytorch.csv"),
-                   final_states, delimiter=',')
-
+for _problem in PROBLEMS:
+    # Generate parameter list
+    _parameters = torch.from_numpy(
+        _problem.sweep(numberOfParameters, dtype=np.float32)).cuda()
+    if WP_MODE:
+        run_wp(_problem, _parameters)
+    else:
+        run_times(_problem, _parameters)
 
 # %%

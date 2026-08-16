@@ -7,12 +7,14 @@ REM and the comparison report + plots.
 REM   -p, --package     all (default) | julia | cubie
 REM   --controller      all (default) | fixed | adaptive
 REM   --algorithm       all (default) | a cubie alias from algorithms.csv
+REM   -s, --problem     all (default) | comma list of names from runner_scripts\problems.csv
 
 pushd "%~dp0"
 
 set PACKAGE=all
 set CONTROLLER=all
 set ALGORITHM=all
+set PROBLEM=all
 
 :parse_loop
 if "%~1"=="" goto parse_done
@@ -40,6 +42,18 @@ if /i "%~1"=="--algorithm" (
     shift
     goto parse_loop
 )
+if /i "%~1"=="-s" (
+    set PROBLEM=%~2
+    shift
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--problem" (
+    set PROBLEM=%~2
+    shift
+    shift
+    goto parse_loop
+)
 echo Unknown option %~1
 popd
 exit /b 1
@@ -57,7 +71,7 @@ if /i not "%CONTROLLER%"=="all" if /i not "%CONTROLLER%"=="fixed" if /i not "%CO
 )
 
 echo =========================================
-echo Numerical equivalence (package: %PACKAGE%, controller: %CONTROLLER%, algorithm: %ALGORITHM%)
+echo Numerical equivalence (package: %PACKAGE%, controller: %CONTROLLER%, algorithm: %ALGORITHM%, problem: %PROBLEM%)
 echo =========================================
 
 if not exist "GPU_ODE_CUBIE\venv\Scripts\python.exe" (
@@ -68,18 +82,16 @@ if not exist "GPU_ODE_CUBIE\venv\Scripts\python.exe" (
 
 if /i "%PACKAGE%"=="cubie" goto cubie_sweeps
 
-if not exist "data\numerical\golden_ne_lorenz_1024.csv" (
-    echo --- Golden reference ^(Float64 Vern9, machine independent^) ---
-    julia -t auto --project=. runner_scripts\numerical_equivalence\generate_golden_ne.jl
-    if errorlevel 1 (
-        echo golden generation failed
-        popd
-        exit /b 1
-    )
+echo --- Golden references ^(Float64, machine independent^) ---
+julia -t auto --project=. runner_scripts\numerical_equivalence\generate_golden_ne.jl --problem "%PROBLEM%"
+if errorlevel 1 (
+    echo golden generation failed
+    popd
+    exit /b 1
 )
 
 echo --- DifferentialEquations.jl Float32 sweeps ^(CPU, machine independent^) ---
-julia -t auto --project=. runner_scripts\numerical_equivalence\ne_diffeq.jl --controller %CONTROLLER% --algorithm %ALGORITHM%
+julia -t auto --project=. runner_scripts\numerical_equivalence\ne_diffeq.jl --controller %CONTROLLER% --algorithm %ALGORITHM% --problem "%PROBLEM%"
 if errorlevel 1 (
     echo DifferentialEquations.jl sweeps failed
     popd
@@ -90,7 +102,7 @@ if errorlevel 1 (
 if /i "%PACKAGE%"=="julia" goto compare
 
 echo --- cubie Float32 sweeps ^(GPU, keyed per machine^) ---
-call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py --controller %CONTROLLER% --algorithm %ALGORITHM%
+call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py --controller %CONTROLLER% --algorithm %ALGORITHM% --problem "%PROBLEM%"
 if errorlevel 1 (
     echo cubie sweeps failed
     popd
@@ -99,7 +111,7 @@ if errorlevel 1 (
 
 :compare
 echo --- Comparison tables + plots ---
-call "GPU_ODE_CUBIE\venv\Scripts\python.exe" compare_numerical_equivalence.py
+call "GPU_ODE_CUBIE\venv\Scripts\python.exe" compare_numerical_equivalence.py --problem "%PROBLEM%"
 set compare_status=%errorlevel%
 
 popd

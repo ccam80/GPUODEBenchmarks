@@ -14,39 +14,36 @@ case "$ALGORITHM" in
     *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
 esac
 
-# Solver and trajectory count are compile-time constants, so each point is a rebuild.
-set_solver() {
-	sed -i "15d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "15 i #define SOLVER $1" ./GPU_ODE_MPGOS/Lorenz.cu
-}
-set_nt() {
-	sed -i "17d" ./GPU_ODE_MPGOS/Lorenz.cu
-	sed -i "17 i const int NT = $1;" ./GPU_ODE_MPGOS/Lorenz.cu
-}
-rebuild() {
+# Problem, solver and trajectory count are compile-time constants, so each
+# point is a rebuild.
+build() {
 	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/
+	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3"
 }
 
-if [ "$ANALYSIS" == "work-precision" ]; then
-	set_nt 131072
-	for solver in $SOLVERS
-	do
-		set_solver "$solver"
-		rebuild
-		./GPU_ODE_MPGOS/Lorenz.exe 131072 wp
-	done
+PROBLEMS=$(python3 ./runner_scripts/mpgos_problems.py "$PROBLEM")
+if [ -z "$PROBLEMS" ]; then
+	echo "MPGOS runs none of the requested problems; skipping."
 	exit 0
 fi
 
-for a in $NLIST
+for problem in $PROBLEMS
 do
-	echo "No. of trajectories = $a"
-	set_nt "$a"
-	for solver in $SOLVERS
+	if [ "$ANALYSIS" == "work-precision" ]; then
+		for solver in $SOLVERS
+		do
+			build "$problem" "$solver" 131072
+			./GPU_ODE_MPGOS/Bench.exe wp
+		done
+		continue
+	fi
+	for a in $NLIST
 	do
-		set_solver "$solver"
-		rebuild
-		./GPU_ODE_MPGOS/Lorenz.exe $a
+		echo "No. of trajectories = $a ($problem)"
+		for solver in $SOLVERS
+		do
+			build "$problem" "$solver" "$a"
+			./GPU_ODE_MPGOS/Bench.exe
+		done
 	done
 done

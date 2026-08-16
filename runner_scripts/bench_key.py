@@ -53,16 +53,22 @@ def dataset_key():
     return "{0}_{1}".format(_os_key(), _sanitize_gpu(_gpu_name_raw()))
 
 
-def data_dir(package, key=None, root=""):
-    """Directory holding one machine's files for a package; creates it."""
+def data_dir(package, key=None, root="", problem=None):
+    """Directory holding one machine's files for a package and problem; creates it."""
     d = os.path.join(root, "data", package, key or dataset_key())
+    if problem is not None:
+        d = os.path.join(d, problem["problem"] if isinstance(problem, dict)
+                         else problem)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def group_dir(group):
+def group_dir(group, problem=None):
     """Directory holding one group's plots and reports; creates it."""
     d = os.path.join("plots", group)
+    if problem is not None:
+        d = os.path.join(d, problem["problem"] if isinstance(problem, dict)
+                         else problem)
     os.makedirs(d, exist_ok=True)
     return d
 

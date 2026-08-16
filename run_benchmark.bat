@@ -5,7 +5,8 @@ REM Generate benchmark data for one package and one analysis.
 REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | work-precision
 REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-REM   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+REM   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
+REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
 
@@ -15,6 +16,7 @@ set PACKAGE=
 set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
+set PROBLEM=all
 set DEVICE=gpu
 set MODEL=ode
 
@@ -30,6 +32,8 @@ if /i "%~1"=="-n" set "PA_TARGET=NMAX"
 if /i "%~1"=="--nmax" set "PA_TARGET=NMAX"
 if /i "%~1"=="-g" set "PA_TARGET=ALGORITHM"
 if /i "%~1"=="--algorithm" set "PA_TARGET=ALGORITHM"
+if /i "%~1"=="-s" set "PA_TARGET=PROBLEM"
+if /i "%~1"=="--problem" set "PA_TARGET=PROBLEM"
 if /i "%~1"=="-d" set "PA_TARGET=DEVICE"
 if /i "%~1"=="--device" set "PA_TARGET=DEVICE"
 if /i "%~1"=="-m" set "PA_TARGET=MODEL"
@@ -81,31 +85,23 @@ if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
     exit /b 1
 )
 
-REM -g: "all" or a comma list; every token whitelisted.
+REM -g: "all" or a comma list; the bench scripts reject unknown names.
 set ALG_LIST=
 set ALG_HAS_ALL=
-set ALG_BAD=
 for %%g in (!ALGORITHM!) do (
     set "TOK=%%g"
-    set TOK_OK=
-    if "!TOK!"=="all" ( set ALG_HAS_ALL=1& set TOK_OK=1 )
-    if "!TOK!"=="euler" set TOK_OK=1
-    if "!TOK!"=="classical-rk4" set TOK_OK=1
-    if "!TOK!"=="tsit5" set TOK_OK=1
-    if "!TOK!"=="cash-karp-54" set TOK_OK=1
-    if not defined TOK_OK (
-        echo Unknown algorithm "!TOK!" ^(all^|euler^|classical-rk4^|tsit5^|cash-karp-54^)
-        set ALG_BAD=1
-    )
-    if defined TOK_OK if not defined ALG_HAS_ALL set "ALG_LIST=!ALG_LIST! !TOK!"
-)
-if defined ALG_BAD (
-    popd
-    exit /b 1
+    if "!TOK!"=="all" ( set ALG_HAS_ALL=1 ) else ( set "ALG_LIST=!ALG_LIST! !TOK!" )
 )
 if defined ALG_HAS_ALL set "ALG_LIST=all"
 if "!ALG_LIST!"=="" (
     echo -g/--algorithm requires a value
+    popd
+    exit /b 1
+)
+
+REM Problem names are validated by the frameworks against problems.csv.
+if "!PROBLEM!"=="" (
+    echo -s/--problem requires a value
     popd
     exit /b 1
 )
@@ -158,24 +154,39 @@ if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
 REM One runner invocation per requested algorithm; a failure does not stop the rest.
 set benchmark_exit=0
 for %%g in (!ALG_LIST!) do (
-    echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %%g^)...
+    echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %%g, %PROBLEM%^)...
 
-    REM Clear this machine's appended files for the analysis and algorithm being run.
+    REM Clear this machine's appended files for the analysis, algorithm and problems being run.
     if "%%g"=="all" (
         set "ALG_GLOB=*"
     ) else (
         set "ALG_GLOB=*_%%g"
     )
+    if /i "%PROBLEM%"=="all" (
+        set "PROBLEM_DIRS=*"
+    ) else (
+        set "PROBLEM_DIRS=!PROBLEM:,= !"
+    )
+    REM A bare * would expand to file names, so all-problems walks the key directory.
     if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
-        if /i "%ANALYSIS%"=="work-precision" (
-            del /q "data\%DATA_DIR%\!DATASET_KEY!\*_wp_!ALG_GLOB!.txt" 2>nul
+        if /i "%PROBLEM%"=="all" (
+            for /d %%d in ("data\%DATA_DIR%\!DATASET_KEY!\*") do call :clear_dir "%%d" "!ALG_GLOB!"
         ) else (
-            del /q "data\%DATA_DIR%\!DATASET_KEY!\*_times_!ALG_GLOB!.txt" 2>nul
+            for %%d in (!PROBLEM_DIRS!) do call :clear_dir "data\%DATA_DIR%\!DATASET_KEY!\%%d" "!ALG_GLOB!"
         )
     )
 
-    call "%RUNNER%" -a %ANALYSIS% -n "%NMAX%" -g %%g
+    call "%RUNNER%" -a %ANALYSIS% -n "%NMAX%" -g %%g -s "%PROBLEM%"
     if !errorlevel! neq 0 set benchmark_exit=1
 )
 popd
 endlocal & exit /b %benchmark_exit%
+
+REM Delete one problem directory's files for the analysis being run.
+:clear_dir
+if /i "%ANALYSIS%"=="work-precision" (
+    del /q "%~1\*_wp_%~2.txt" 2>nul
+) else (
+    del /q "%~1\*_times_%~2.txt" 2>nul
+)
+exit /b 0

@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Compare cubie against DifferentialEquations.jl per algorithm and dt.
-
-Consumes the numerical-equivalence (ne) sweep outputs (see
-runner_scripts/numerical_equivalence/): Float32 final states of the Lorenz
-ensemble for every mutually supported algorithm, from cubie (per-machine,
-data/numerical_equivalence/cubie/) and from raw DifferentialEquations.jl
-(machine-independent CPU reference, data/numerical_equivalence/julia/).
-
-Both stacks' errors are measured against the Float64 golden reference over
-the trajectories both of them solved, and reported as cubie/julia.
-
-Outputs, per dataset key found in the cubie directory:
-  <group>/numerical_equivalence_fixed.csv
-  <group>/numerical_equivalence_adaptive.csv
-  <group>/numerical_equivalence.png            (error vs dt)
-  <group>/numerical_equivalence_adaptive.png   (error vs tolerance)
-
-Run from the repo root (inside the GPU_ODE_CUBIE venv):
-    python compare_numerical_equivalence.py
-"""
+"""Compare cubie against DifferentialEquations.jl per problem, algorithm and dt; outputs land in plots/<group>/<problem>/."""
 
 import csv
 import os
@@ -26,10 +7,12 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "runner_scripts",
-    "numerical_equivalence"))
-from ne_common import (DTS_NE, TOLS_NE, load_algorithms, load_golden_ne,
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "runner_scripts"))
+sys.path.insert(0, os.path.join(_HERE, "runner_scripts", "numerical_equivalence"))
+from bench_key import group_dir  # noqa: E402
+from problems import problem_names, resolve_problems  # noqa: E402
+from ne_common import (TOLS_NE, dts_ne, load_algorithms, load_golden_ne,
                        ensemble_error_masked, julia_ne_file, cubie_ne_file,
                        julia_ne_adaptive_file, cubie_ne_adaptive_file,
                        read_ne_csv_masked, read_ne_adaptive_csv_masked,
@@ -45,8 +28,6 @@ if hasattr(sys.stdout, "reconfigure"):
 # region where error is float32 noise rather than truncation is visible.
 FLOOR_REL = 4e-6
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner_scripts"))
-from bench_key import group_dir  # noqa: E402
 
 
 def discover_keys():
@@ -68,11 +49,11 @@ def _ratio(err_c, err_j):
     return err_c / err_j
 
 
-def analyse_algorithm(row, key, golden_states):
+def analyse_algorithm(row, key, golden_states, problem):
     """Per-dt errors for one algorithm's fixed-step sweep."""
     alias = row["cubie_alias"]
-    jfile = julia_ne_file(alias)
-    cfile = cubie_ne_file(alias, key)
+    jfile = julia_ne_file(alias, problem)
+    cfile = cubie_ne_file(alias, key, problem)
     julia = read_ne_csv_masked(jfile) if os.path.isfile(jfile) else None
     cubie = read_ne_csv_masked(cfile) if os.path.isfile(cfile) else None
 
@@ -80,7 +61,7 @@ def analyse_algorithm(row, key, golden_states):
     # per-trajectory retcode flag; cubie signals a failed solve with NaN).
     # Per-side non-converged counts are reported alongside.
     points = []
-    for dt in DTS_NE:
+    for dt in dts_ne(problem):
         fc = cubie.get(dt) if cubie else None
         fj = julia.get(dt) if julia else None
         c_arr, c_conv = fc if fc is not None else (None, None)
@@ -107,14 +88,14 @@ def analyse_algorithm(row, key, golden_states):
     return {"row": row, "points": points}
 
 
-def analyse_adaptive(row, key, golden_states):
+def analyse_adaptive(row, key, golden_states, problem):
     """Per-tolerance errors for one algorithm's adaptive tiers."""
     alias = row["cubie_alias"]
-    jfile = julia_ne_adaptive_file(alias)
+    jfile = julia_ne_adaptive_file(alias, problem)
     julia = read_ne_adaptive_csv_masked(jfile) if os.path.isfile(jfile) else None
     tiers = {}
     for tier in ("default", "matched"):
-        cfile = cubie_ne_adaptive_file(alias, tier, key)
+        cfile = cubie_ne_adaptive_file(alias, tier, key, problem)
         tiers[tier] = (read_ne_adaptive_csv_masked(cfile)
                        if os.path.isfile(cfile) else None)
     if not any(tiers.values()):
@@ -204,7 +185,7 @@ def _grid(n):
     return fig, np.atleast_2d(axes), nrows, ncols
 
 
-def write_plot(key, results, scale, outfile):
+def write_plot(key, results, scale, outfile, problem):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -237,15 +218,15 @@ def write_plot(key, results, scale, outfile):
         ax.set_xlabel("dt")
     for r in range(nrows):
         axes[r][0].set_ylabel("ensemble l2 error")
-    fig.suptitle("Numerical equivalence, Float32 fixed-step Lorenz ensemble "
-                 "({0})".format(key))
+    fig.suptitle("Numerical equivalence, Float32 fixed-step {0} ensemble "
+                 "({1})".format(problem["display"], key))
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     fig.savefig(outfile, dpi=130)
     plt.close(fig)
 
 
-def write_adaptive_plot(key, adaptive_results, scale, outfile):
+def write_adaptive_plot(key, adaptive_results, scale, outfile, problem):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -276,19 +257,53 @@ def write_adaptive_plot(key, adaptive_results, scale, outfile):
         ax.set_xlabel("tolerance (atol = rtol)")
     for r in range(nrows):
         axes[r][0].set_ylabel("ensemble l2 error")
-    fig.suptitle("Adaptive numerical equivalence, Float32 Lorenz ensemble "
-                 "({0})".format(key))
+    fig.suptitle("Adaptive numerical equivalence, Float32 {0} ensemble "
+                 "({1})".format(problem["display"], key))
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     fig.savefig(outfile, dpi=130)
     plt.close(fig)
 
 
-def main():
-    algorithms = load_algorithms()
-    _, golden_states = load_golden_ne()
+def compare_problem(problem, algorithms, keys):
+    """Write the report and plots for one problem, once per dataset key."""
+    _, golden_states = load_golden_ne(problem)
     scale = float(np.sqrt(np.mean(golden_states ** 2)))
 
+    for key in sorted(keys):
+        results = [analyse_algorithm(row, key, golden_states, problem)
+                   for row in algorithms if runs_fixed(row)]
+        adaptive_results = [
+            res for res in (analyse_adaptive(row, key, golden_states, problem)
+                            for row in algorithms)
+            if res is not None]
+        outdir = group_dir(key, problem)
+
+        fixed_csv = os.path.join(outdir, "numerical_equivalence_fixed.csv")
+        plot = os.path.join(outdir, "numerical_equivalence.png")
+        write_fixed_csv(results, fixed_csv)
+        write_plot(key, results, scale, plot, problem)
+        print("[{0}/{1}] {2} algorithms -> {3}, {4}".format(
+            key, problem.name, len(results), fixed_csv, plot))
+
+        if adaptive_results:
+            adaptive_csv = os.path.join(
+                outdir, "numerical_equivalence_adaptive.csv")
+            aplot = os.path.join(outdir, "numerical_equivalence_adaptive.png")
+            write_adaptive_csv(adaptive_results, adaptive_csv)
+            write_adaptive_plot(key, adaptive_results, scale, aplot, problem)
+            print("[{0}/{1}] adaptive: {2} algorithms -> {3}, {4}".format(
+                key, problem.name, len(adaptive_results), adaptive_csv, aplot))
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--problem", choices=["all"] + problem_names(),
+                        default="all")
+    args = parser.parse_args()
+
+    algorithms = load_algorithms()
     keys = discover_keys()
     if not keys:
         print("No cubie ne outputs found in {0}; run "
@@ -296,30 +311,8 @@ def main():
               .format(CUBIE_NE_DIR))
         return 1
 
-    for key in sorted(keys):
-        results = [analyse_algorithm(row, key, golden_states)
-                   for row in algorithms if runs_fixed(row)]
-        adaptive_results = [
-            res for res in (analyse_adaptive(row, key, golden_states)
-                            for row in algorithms)
-            if res is not None]
-        outdir = group_dir(key)
-
-        fixed_csv = os.path.join(outdir, "numerical_equivalence_fixed.csv")
-        plot = os.path.join(outdir, "numerical_equivalence.png")
-        write_fixed_csv(results, fixed_csv)
-        write_plot(key, results, scale, plot)
-        print("[{0}] {1} algorithms -> {2}, {3}".format(
-            key, len(results), fixed_csv, plot))
-
-        if adaptive_results:
-            adaptive_csv = os.path.join(
-                outdir, "numerical_equivalence_adaptive.csv")
-            aplot = os.path.join(outdir, "numerical_equivalence_adaptive.png")
-            write_adaptive_csv(adaptive_results, adaptive_csv)
-            write_adaptive_plot(key, adaptive_results, scale, aplot)
-            print("[{0}] adaptive: {1} algorithms -> {2}, {3}".format(
-                key, len(adaptive_results), adaptive_csv, aplot))
+    for problem in resolve_problems(args.problem, "cubie"):
+        compare_problem(problem, algorithms, keys)
     return 0
 
 

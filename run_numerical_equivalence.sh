@@ -7,6 +7,7 @@
 #   -p, --package     all (default) | julia | cubie
 #   --controller      all (default) | fixed | adaptive
 #   --algorithm       all (default) | a cubie alias from algorithms.csv
+#   -s, --problem     all (default) | comma list of names from runner_scripts/problems.csv
 #
 # Exit code: non-zero if any step fails.
 
@@ -16,12 +17,14 @@ cd "$(dirname "$0")" || exit 1
 PACKAGE=all
 CONTROLLER=all
 ALGORITHM=all
+PROBLEM=all
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -p|--package)    PACKAGE=$2; shift 2;;
         --controller)    CONTROLLER=$2; shift 2;;
         --algorithm)     ALGORITHM=$2; shift 2;;
+        -s|--problem)    PROBLEM=$2; shift 2;;
         -h|--help)       sed -n '2,12p' "$0" | sed 's/^# \?//'; exit 0;;
         *) echo "Unknown option $1" >&2; exit 1;;
     esac
@@ -30,7 +33,7 @@ case "$PACKAGE" in all|julia|cubie) ;; *) echo "Unknown package '$PACKAGE' (all|
 case "$CONTROLLER" in all|fixed|adaptive) ;; *) echo "Unknown controller '$CONTROLLER' (all|fixed|adaptive)" >&2; exit 1;; esac
 
 echo "========================================="
-echo "Numerical equivalence (package: $PACKAGE, controller: $CONTROLLER, algorithm: $ALGORITHM)"
+echo "Numerical equivalence (package: $PACKAGE, controller: $CONTROLLER, algorithm: $ALGORITHM, problem: $PROBLEM)"
 echo "========================================="
 
 if [ -x ./GPU_ODE_CUBIE/venv/bin/python3 ] || [ -f ./GPU_ODE_CUBIE/venv/bin/python3 ]; then
@@ -43,13 +46,11 @@ else
 fi
 
 if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "julia" ]; then
-    if [ ! -f ./data/numerical/golden_ne_lorenz_1024.csv ]; then
-        echo "--- Golden reference (Float64 Vern9, machine independent) ---"
-        julia -t auto --project=. ./runner_scripts/numerical_equivalence/generate_golden_ne.jl || {
-            echo "golden generation failed" >&2; exit 1; }
-    fi
+    echo "--- Golden references (Float64, machine independent) ---"
+    julia -t auto --project=. ./runner_scripts/numerical_equivalence/generate_golden_ne.jl --problem "$PROBLEM" || {
+        echo "golden generation failed" >&2; exit 1; }
     echo "--- DifferentialEquations.jl Float32 sweeps (CPU, machine independent) ---"
-    julia -t auto --project=. ./runner_scripts/numerical_equivalence/ne_diffeq.jl --controller "$CONTROLLER" --algorithm "$ALGORITHM" || {
+    julia -t auto --project=. ./runner_scripts/numerical_equivalence/ne_diffeq.jl --controller "$CONTROLLER" --algorithm "$ALGORITHM" --problem "$PROBLEM" || {
         echo "DifferentialEquations.jl sweeps failed" >&2; exit 1; }
 fi
 
@@ -58,10 +59,10 @@ if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "cubie" ]; then
     # The venv carries both CUDA backends; the committed dataset is the numba-cuda one.
     export CUBIE_CUDA_BACKEND="${CUBIE_CUDA_BACKEND:-numba-cuda}"
     echo "    (cubie backend: $CUBIE_CUDA_BACKEND)"
-    "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py --controller "$CONTROLLER" --algorithm "$ALGORITHM" || {
+    "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py --controller "$CONTROLLER" --algorithm "$ALGORITHM" --problem "$PROBLEM" || {
         echo "cubie sweeps failed" >&2; exit 1; }
 fi
 
 echo "--- Comparison tables + plots ---"
-"$PYTHON" compare_numerical_equivalence.py
+"$PYTHON" compare_numerical_equivalence.py --problem "$PROBLEM"
 exit $?

@@ -1,13 +1,37 @@
 #!/usr/bin/env python3
-"""
-Cross-platform setup script for Julia environment for GPU ODE benchmarking.
-Works on Linux, Windows, and macOS.
-"""
+
+"""Instantiate the committed Julia environment, or re-resolve it with --update."""
+
+import argparse
 import os
 import sys
 import subprocess
 import shutil
 from pathlib import Path
+
+# Plots is required by runner_scripts/plot/*.jl.
+CORE_PACKAGES = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays", "Plots"]
+
+# Solver sub-libraries the numerical-equivalence suite needs beyond the umbrella.
+DIFFEQ_PACKAGES = [
+    "DiffEqBase",
+    "DiffEqDevTools",
+    "DiffEqGPU",
+    "OrdinaryDiffEq",
+    "OrdinaryDiffEqCore",
+    "OrdinaryDiffEqExplicitRK",
+    "OrdinaryDiffEqFIRK",
+    "OrdinaryDiffEqHighOrderRK",
+    "OrdinaryDiffEqLowOrderRK",
+    "OrdinaryDiffEqRosenbrock",
+    "OrdinaryDiffEqSDIRK",
+    "OrdinaryDiffEqVerner",
+    "RecursiveArrayTools",
+    "SciMLBase",
+    "SimpleDiffEq",
+]
+
+MODELING_PACKAGES = ["Catalyst", "ModelingToolkit", "ReactionNetworkImporters"]
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
@@ -29,112 +53,85 @@ def run_command(cmd, shell=False, check=True, cwd=None):
         return False
 
 
+def julia(code):
+    """Run one snippet in the repo's Julia project."""
+    return run_command(["julia", "--project=.", "-e", code])
+
+
+def add_packages(names):
+    """Add packages as a group, falling back to one at a time."""
+    pkg_list = ", ".join(f'"{name}"' for name in names)
+    if julia(f"using Pkg; Pkg.add([{pkg_list}])"):
+        return True
+    print("Warning: group add failed, trying individually...")
+    ok = True
+    for name in names:
+        print(f"Adding {name}...")
+        ok = julia(f'using Pkg; Pkg.add("{name}")') and ok
+    return ok
+
+
+def resolve_latest():
+    """Re-resolve the whole environment and rewrite Project/Manifest."""
+    # CUDA resolves first, against an empty project.
+    print("Adding CUDA package for GPU support...")
+    if not julia('using Pkg; Pkg.add("CUDA")'):
+        print("Failed to add CUDA package")
+        return False
+    print("Adding core utility packages...")
+    add_packages(CORE_PACKAGES)
+    print("Adding DiffEq packages...")
+    add_packages(DIFFEQ_PACKAGES)
+    print("Adding modeling packages...")
+    add_packages(MODELING_PACKAGES)
+    return True
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="re-resolve to the newest compatible versions and rewrite the "
+             "committed Project.toml/Manifest.toml",
+    )
+    args = parser.parse_args()
+
     script_dir = Path(__file__).parent.resolve()
     os.chdir(script_dir)
-    
+
     print("Setting up Julia environment...")
-    
+
     # Check if Julia is available
     if not shutil.which("julia"):
         print("Error: julia is not installed")
         print("Please install Julia from https://julialang.org/downloads/")
         return 1
-    
+
     print("Julia version:")
     if not run_command(["julia", "--version"]):
         return 1
-    
-    # Add CUDA first (before other dependencies to avoid compatibility issues)
-    print("Adding CUDA package for GPU support...")
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        'using Pkg; Pkg.add("CUDA")'
-    ]
-    if not run_command(julia_cmd):
-        print("Failed to add CUDA package")
-        return 1
-    
-    # Manually add all dependencies without using pinned versions
-    # Adding packages in groups for better efficiency while handling failures gracefully
-    print("Adding Julia packages manually (without pinned versions)...")
-    
-    # Group 1: Core utilities (less likely to conflict)
-    print("Adding core utility packages...")
-    # Plots is required by runner_scripts/plot/*.jl.
-    core_packages = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays",
-                     "Plots"]
-    pkg_list = ", ".join([f'"{p}"' for p in core_packages])
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        f'using Pkg; Pkg.add([{pkg_list}])'
-    ]
-    if not run_command(julia_cmd):
-        print("Warning: Failed to add some core packages, trying individually...")
-        for package in core_packages:
-            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
-            run_command(julia_cmd)
-    
-    # Group 2: DiffEq ecosystem packages
-    print("Adding DiffEq packages...")
-    diffeq_packages = [
-        "DiffEqBase",
-        "DiffEqDevTools",
-        "DiffEqGPU",
-        "OrdinaryDiffEq",
-        # Solver sub-libraries: the slim OrdinaryDiffEq v7 umbrella only
-        # re-exports the default solver set; the numerical-equivalence suite
-        # (runner_scripts/numerical_equivalence/) needs the rest explicitly.
-        "OrdinaryDiffEqCore",
-        "OrdinaryDiffEqExplicitRK",
-        "OrdinaryDiffEqFIRK",
-        "OrdinaryDiffEqHighOrderRK",
-        "OrdinaryDiffEqLowOrderRK",
-        "OrdinaryDiffEqRosenbrock",
-        "OrdinaryDiffEqSDIRK",
-        "OrdinaryDiffEqVerner",
-        "RecursiveArrayTools",
-        "SciMLBase",
-        "SimpleDiffEq"
-    ]
-    pkg_list = ", ".join([f'"{p}"' for p in diffeq_packages])
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        f'using Pkg; Pkg.add([{pkg_list}])'
-    ]
-    if not run_command(julia_cmd):
-        print("Warning: Failed to add some DiffEq packages, trying individually...")
-        for package in diffeq_packages:
-            julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
-            run_command(julia_cmd)
-    
-    # Group 3: Modeling packages (may have more dependencies)
-    print("Adding modeling packages...")
-    modeling_packages = ["Catalyst", "ModelingToolkit", "ReactionNetworkImporters"]
-    for package in modeling_packages:
-        print(f"Adding {package}...")
-        julia_cmd = ["julia", "--project=.", "-e", f'using Pkg; Pkg.add("{package}")']
-        if not run_command(julia_cmd):
-            print(f"Warning: Failed to add {package}")
-            # Continue with other packages even if one fails
-    
-    # Precompile all packages
+
+    manifest = script_dir / "Manifest.toml"
+    if args.update or not manifest.is_file():
+        if not manifest.is_file():
+            print("No Manifest.toml found; resolving from scratch.")
+        if not resolve_latest():
+            return 1
+    else:
+        print("Instantiating the pinned environment from Manifest.toml...")
+        if not julia("using Pkg; Pkg.instantiate()"):
+            print("Failed to instantiate the pinned environment")
+            return 1
+
     print("Precompiling packages...")
-    julia_cmd = [
-        "julia", "--project=.",
-        "-e",
-        "using Pkg; Pkg.precompile()"
-    ]
-    if not run_command(julia_cmd):
+    if not julia("using Pkg; Pkg.precompile()"):
         print("Warning: Precompilation had issues, but continuing...")
-    
+
     print("\nJulia environment setup complete!")
     print("To test the installation, run:")
     print("  julia --project=. -e 'using DiffEqGPU, CUDA'")
-    
+
     return 0
 
 

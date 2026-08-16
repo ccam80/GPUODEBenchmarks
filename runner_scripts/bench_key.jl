@@ -35,16 +35,22 @@ end
 "Return \"<os>_<gpu>\" for this machine."
 dataset_key() = string(_os_key(), "_", _sanitize_gpu(_gpu_name_raw()))
 
-"Directory holding one machine's files for a package; creates it."
-function data_dir(repo_root, package, key = dataset_key())
+"Directory holding one machine's files for a package and problem; creates it."
+function data_dir(repo_root, package, key = dataset_key(), problem = nothing)
     d = joinpath(repo_root, "data", package, key)
+    if problem !== nothing
+        d = joinpath(d, problem isa AbstractDict ? problem["problem"] : problem)
+    end
     mkpath(d)
     return d
 end
 
 "Directory holding one group's plots and reports; creates it."
-function group_dir(repo_root, group)
+function group_dir(repo_root, group, problem = nothing)
     d = joinpath(repo_root, "plots", group)
+    if problem !== nothing
+        d = joinpath(d, problem isa AbstractDict ? problem["problem"] : problem)
+    end
     mkpath(d)
     return d
 end

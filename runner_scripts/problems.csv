@@ -1,0 +1,4 @@
+problem,display,states,duration,sweep_parameter,sweep_min,sweep_max,sweep_scale,golden_algorithm,golden_tol,frameworks
+lorenz,Lorenz,3,1.0,rho,0.0,21.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda
+ring_modulator,Ring modulator,15,1.0e-3,Cs,2.0e-13,2.0e-9,log,RadauIIA9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp
+ring_modulator_index2,Ring modulator (index 2),15,1.0e-3,Uin1_amplitude,0.0,0.5,linear,RadauIIA9,1.0e-10,cubie|cubie_mlir|julia

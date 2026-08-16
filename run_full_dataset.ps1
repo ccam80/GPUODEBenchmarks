@@ -17,7 +17,8 @@
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
-#   -g, --algorithm all (default) | comma list of euler|classical-rk4|tsit5|cash-karp-54
+#   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
+#   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
@@ -38,6 +39,7 @@ $ClockTarget = ''        # "SM[,MEM]"; empty means use the per-GPU table
 $PlotAll = $false
 $Package = 'all'
 $Algorithm = 'all'
+$Problem = 'all'
 
 $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myokit_cuda')
 
@@ -87,6 +89,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '^(-n|--nmax)$' { $NMax = [string](Get-RequiredValue $args $i $args[$i]); $i++ }
         '^(-p|--package)$' { $Package = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^(-g|--algorithm)$' { $Algorithm = Get-RequiredValue $args $i $args[$i]; $i++ }
+        '^(-s|--problem)$' { $Problem = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^(-a|--analysis)$' { Set-Analyses (Get-RequiredValue $args $i $args[$i]); $i++ }
         '^--resume-from$' { $ResumeFrom = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
         '^--cooldown$' { $Cooldown = [int](Get-RequiredValue $args $i $args[$i]); $i++ }
@@ -127,7 +130,7 @@ elseif ($HasJulia) { $NePackage = 'julia' }
 elseif ($HasCubie) { $NePackage = 'cubie' }
 
 # -g: "all" or a comma list; every token whitelisted.
-$AllAlgorithms = @('all', 'euler', 'classical-rk4', 'tsit5', 'cash-karp-54')
+$AllAlgorithms = @('all') + (& python runner_scripts\algorithms.py)
 $algTokens = @($Algorithm.Split(',') | Where-Object { $_ })
 if ($algTokens.Count -eq 0) {
     Write-Host "-g/--algorithm requires a value"
@@ -135,11 +138,17 @@ if ($algTokens.Count -eq 0) {
 }
 foreach ($alg in $algTokens) {
     if ($AllAlgorithms -notcontains $alg) {
-        Write-Host "Unknown algorithm '$alg' (all|euler|classical-rk4|tsit5|cash-karp-54)"
+        Write-Host "Unknown algorithm '$alg'; see runner_scripts\algorithms.csv"
         exit 1
     }
 }
 if ($algTokens -contains 'all') { $Algorithm = 'all' }
+
+# -s: names are validated by the frameworks against problems.csv.
+if ($Problem -notmatch '^[a-z0-9_,-]+$') {
+    Write-Host "-s/--problem takes names from runner_scripts\problems.csv, got '$Problem'"
+    exit 1
+}
 
 # -n: sweep ceiling or comma list of exact counts.
 if ($NMax -notmatch '^\d+(,\d+)*$') {
@@ -258,6 +267,7 @@ function Invoke-Step {
 Write-Host "Dataset key : $DatasetKey"
 Write-Host "nmax        : $NMax"
 Write-Host "Algorithm   : $Algorithm"
+Write-Host "Problems    : $Problem"
 Write-Host "Packages    : $($Languages -join ', ')"
 Write-Host "Log dir     : $LogDir"
 Write-Host "Analyses    : performance=$DoPerf work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
@@ -275,6 +285,7 @@ $manifest = @(
     "started_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
     "nmax=$NMax"
     "algorithm=$Algorithm"
+    "problem=$Problem"
     "packages=$($Languages -join ',')"
     "git_rev=$gitRev"
     "git_dirty=$gitDirty"
@@ -306,7 +317,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n `"$NMax`" -g `"$Algorithm`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n `"$NMax`" -g `"$Algorithm`" -s `"$Problem`""
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -323,26 +334,21 @@ try {
 
     # --------------------------------------------------------- work-precision
     if ($DoWp) {
-        # The golden reference is generated once up front; every wp sweep needs it.
-        if (-not (Test-Path 'data\numerical\golden_lorenz_131072.csv')) {
-            # Reference generation is scored on accuracy, not speed.
-            $ClockCritical = $false; $StepLabel = 'wp:golden'
-            $status = Invoke-Step 'Golden reference for work-precision' 'wp_golden.log' `
-                'julia -t auto --project=. runner_scripts\golden\generate_golden.jl'
-            if ($status -eq 0) {
-                Add-Record 'wp:golden' 'OK' '-' "$status"
-            } else {
-                Add-Record 'wp:golden' 'FAILED' 'wp sweeps cannot score' "$status"
-                Write-Host '  -> work-precision sweeps will fail without the golden reference'
-            }
+        # Missing golden references are generated up front; accuracy, not speed.
+        $ClockCritical = $false; $StepLabel = 'wp:golden'
+        $status = Invoke-Step 'Golden references for work-precision' 'wp_golden.log' `
+            "julia -t auto --project=. runner_scripts\golden\generate_golden.jl --problem `"$Problem`""
+        if ($status -eq 0) {
+            Add-Record 'wp:golden' 'OK' '-' "$status"
         } else {
-            Add-Record 'wp:golden' 'OK' 'already present' '0'
+            Add-Record 'wp:golden' 'FAILED' 'wp sweeps cannot score' "$status"
+            Write-Host '  -> work-precision sweeps will fail without the golden reference'
         }
 
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`" -s `"$Problem`""
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
@@ -357,7 +363,7 @@ try {
             # Equivalence is a correctness check; its clock does not have to be stable.
             $ClockCritical = $false; $StepLabel = 'ne'
             $status = Invoke-Step "Numerical equivalence ($NePackage)" 'numerical_equivalence.log' `
-                ".\run_numerical_equivalence.bat -p $NePackage"
+                ".\run_numerical_equivalence.bat -p $NePackage -s `"$Problem`""
             # Exit 2 means a mismatching algorithm, not an infrastructure failure.
             switch ($status) {
                 0 { Add-Record 'ne' 'OK' 'all equivalent' "$status" }

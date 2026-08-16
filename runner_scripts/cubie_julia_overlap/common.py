@@ -10,19 +10,35 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
-GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
-GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_131072.csv"
-
 # Numerical grids and adaptive pins are shared with the NE suite.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from ne_common import (  # noqa: E402 - path bootstrap above
-    DTS_NE as NE_DTS, TOLS_NE as NE_TOLS, N_NE, DT0_NE as DT0,
-    DT_MIN_NE as DT_MIN, DT_MAX_NE as DT_MAX, controllers_equal,
+    TOLS_NE as NE_TOLS, N_NE, DT0_FRACTION as DT0,
+    DT_MIN_FRACTION as DT_MIN, DT_MAX_FRACTION as DT_MAX, controllers_equal,
     cubie_default_controller, read_ne_csv, read_ne_adaptive_csv,
 )
+from problems import NE_K  # noqa: E402 - path bootstrap above
+
+# The ne dt grid as duration fractions; the workers scale by the duration.
+NE_DTS = [2.0 ** -k for k in range(NE_K[0], NE_K[1] + 1)]
 
 CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
+
+
+def golden_ne(problem):
+    """Path of the ne golden reference for a problem row or name."""
+    name = problem["problem"] if isinstance(problem, dict) else problem
+    return REPO_ROOT / "data" / "numerical" / "golden_ne_{0}_{1}.csv".format(
+        name, N_NE)
+
+
+def golden_wp(problem):
+    """Path of the wp golden reference for a problem row or name."""
+    name = problem["problem"] if isinstance(problem, dict) else problem
+    return REPO_ROOT / "data" / "numerical" / "golden_{0}_{1}.csv".format(
+        name, N_WP)
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")
@@ -32,7 +48,8 @@ PHASES = ("performance", "numerical", "work_precision")
 def phases_for(analysis):
     return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
-# Protocol constants; mirrored in julia_worker.jl.
+# Protocol constants; mirrored in julia_worker.jl. dt values are fractions of
+# the problem duration.
 FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
 PERFORMANCE_REPEATS = 20
@@ -122,33 +139,16 @@ def timing_stats(values):
             "max_ms": float(np.max(a))}
 
 
-def _retire_stale_schema(path, fields):
-    """Move a CSV written under a different schema aside, keeping the data.
-
-    Timing rows changed from one-per-repeat to one-per-point. A file left
-    over from the old layout cannot be appended to or pruned coherently, so
-    it is renamed rather than silently mixed with new rows or deleted.
-    """
-    with path.open(newline="", encoding="utf-8") as handle:
-        header = next(csv.reader(handle), None)
-    if header is None or header == list(fields):
-        return False
-    target = path.with_name(path.stem + ".legacy" + path.suffix)
-    index = 1
-    while target.exists():
-        target = path.with_name("{}.legacy{}{}".format(path.stem, index, path.suffix))
-        index += 1
-    path.rename(target)
-    print("{} used the previous schema; moved to {} and starting fresh."
-          .format(path.name, target.name))
-    return True
+def scaled_dts(problem):
+    """Fixed step and the adaptive dt pins for a problem, in problem time."""
+    duration = problem["duration"]
+    return (duration * FIXED_DT, duration * DT0, duration * DT_MIN,
+            duration * DT_MAX)
 
 
 def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        _retire_stale_schema(path, fields)
     if not path.exists():
         with path.open("w", newline="", encoding="utf-8") as handle:
             csv.DictWriter(handle, fieldnames=fields).writeheader()

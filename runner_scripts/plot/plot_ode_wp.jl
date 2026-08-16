@@ -4,9 +4,9 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 
-# Reads data/<package>/<os>_<gpu>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
-# and emits one error-vs-time plot per (group, mode, algorithm) plus an "all"
-# overview per group into plots/<group>/. ARGS[1] overrides the data dir.
+# Reads data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
+# and emits one error-vs-time plot per (group, problem, mode, algorithm) plus an
+# "all" overview into plots/<group>/<problem>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
 
@@ -33,6 +33,7 @@ markers = Dict("Julia"=>:circle, "MPGOS"=>:utriangle, "JAX"=>:diamond,
 # One work-precision curve loaded from disk.
 struct WPSeries
     display::String
+    problem::String
     mode::String       # "fixed" or "adaptive"
     algorithm::String  # cubie-vocabulary method name, e.g. "classical-rk4"
     os::String
@@ -55,28 +56,33 @@ function collect_series(base_path, frameworks)
             parts = split(key, '_')
             length(parts) == 2 || continue
             os, gpu = String(parts[1]), String(parts[2])
-            for fname in sort(readdir(kpath))
-                m = match(pat, fname)
-                m === nothing && continue
-                mode = String(m.captures[1])
-                algorithm = String(m.captures[2])
-                fpath = joinpath(kpath, fname)
-                # readdlm raises on a file with no data rows, so screen those out.
-                isempty(strip(read(fpath, String))) && continue
-                data = readdlm(fpath)
-                isempty(data) && continue
-                setting = Float64.(data[:, 1])
-                err = Float64.(data[:, 3])
-                time_s = Float64.(data[:, 2]) .* 1e-3
-                # Drop non-positive errors (log axis). Order points along the
-                # sweep (loose -> tight setting) so the float32 roundoff U-turn
-                # in the fixed curves is traced rather than folded onto itself.
-                keep = err .> 0
-                setting, err, time_s = setting[keep], err[keep], time_s[keep]
-                isempty(err) && continue
-                order = sortperm(setting, rev = true)
-                push!(series, WPSeries(display, mode, algorithm, os, gpu, key,
-                                       err[order], time_s[order]))
+            for problem in sort(readdir(kpath))
+                ppath = joinpath(kpath, problem)
+                isdir(ppath) || continue
+                for fname in sort(readdir(ppath))
+                    m = match(pat, fname)
+                    m === nothing && continue
+                    mode = String(m.captures[1])
+                    algorithm = String(m.captures[2])
+                    fpath = joinpath(ppath, fname)
+                    # readdlm raises on a file with no data rows, so screen those out.
+                    isempty(strip(read(fpath, String))) && continue
+                    data = readdlm(fpath)
+                    isempty(data) && continue
+                    setting = Float64.(data[:, 1])
+                    err = Float64.(data[:, 3])
+                    time_s = Float64.(data[:, 2]) .* 1e-3
+                    # Drop non-positive errors (log axis). Order points along the
+                    # sweep (loose -> tight setting) so the float32 roundoff U-turn
+                    # in the fixed curves is traced rather than folded onto itself.
+                    keep = err .> 0
+                    setting, err, time_s = setting[keep], err[keep], time_s[keep]
+                    isempty(err) && continue
+                    order = sortperm(setting, rev = true)
+                    push!(series, WPSeries(display, problem, mode, algorithm,
+                                           os, gpu, key, err[order],
+                                           time_s[order]))
+                end
             end
         end
     end
@@ -84,9 +90,9 @@ function collect_series(base_path, frameworks)
 end
 
 # Draw one plot; alg_label "all" mixes algorithms and labels them per series.
-function render_plot(sel, group_label, mode_label, alg_label, plots_dir, multikey)
+function render_plot(sel, group_label, problem, mode_label, alg_label, plots_dir, multikey)
     if isempty(sel)
-        println("Skipping empty plot: wp_$(mode_label)_$(alg_label)_$(group_label)")
+        println("Skipping empty plot: $(problem)_wp_$(mode_label)_$(alg_label)_$(group_label)")
         return
     end
     gr(size = (810, 540))
@@ -95,7 +101,7 @@ function render_plot(sel, group_label, mode_label, alg_label, plots_dir, multike
     algword = alg_label == "all" ? "all algorithms" : alg_label
     plt = plot(xaxis = :log, yaxis = :log, linewidth = 2,
         ylabel = "Time (s)", xlabel = "Error (ensemble l2, final state)",
-        title = "Lorenz WP, N=131072, $(modeword), $(algword) ($(group_label))",
+        title = "$(problem) WP, N=131072, $(modeword), $(algword) ($(group_label))",
         titlefontsize = 12, legend = :outertopright, dpi = 600)
 
     for s in sel
@@ -108,10 +114,10 @@ function render_plot(sel, group_label, mode_label, alg_label, plots_dir, multike
             marker = markers[s.display], linestyle = ls)
     end
 
-    outdir = joinpath(plots_dir, group_label)
+    outdir = joinpath(plots_dir, group_label, problem)
     isdir(outdir) || mkpath(outdir)
     algpart = alg_label == "all" ? "" : "_$(alg_label)"
-    outfile = joinpath(outdir, "Lorenz_wp_$(mode_label)$(algpart).png")
+    outfile = joinpath(outdir, "wp_$(mode_label)$(algpart).png")
     savefig(plt, outfile)
     println("Saved $(outfile)")
 end
@@ -148,14 +154,17 @@ function main()
     add_group!("all", series)
     for (label, sel) in groups
         multikey = length(unique(s.key for s in sel)) > 1
-        for mode in ("fixed", "adaptive")
-            msel = filter(s -> s.mode == mode, sel)
-            for alg in sort(unique(s.algorithm for s in msel))
-                render_plot(filter(s -> s.algorithm == alg, msel),
-                            label, mode, alg, plots_dir, multikey)
+        for problem in sort(unique(s.problem for s in sel))
+            psel = filter(s -> s.problem == problem, sel)
+            for mode in ("fixed", "adaptive")
+                msel = filter(s -> s.mode == mode, psel)
+                for alg in sort(unique(s.algorithm for s in msel))
+                    render_plot(filter(s -> s.algorithm == alg, msel),
+                                label, problem, mode, alg, plots_dir, multikey)
+                end
             end
+            render_plot(psel, label, problem, "all", "all", plots_dir, multikey)
         end
-        render_plot(sel, label, "all", "all", plots_dir, multikey)
     end
 end
 
