@@ -105,23 +105,6 @@ if "!PACKAGES!"=="" (
     set ARG_BAD=1
 )
 
-for %%g in (!ALGORITHM!) do (
-    set "TOK=%%g"
-    set TOK_OK=
-    if "!TOK!"=="all" set TOK_OK=1
-    if "!TOK!"=="euler" set TOK_OK=1
-    if "!TOK!"=="classical-rk4" set TOK_OK=1
-    if "!TOK!"=="tsit5" set TOK_OK=1
-    if not defined TOK_OK (
-        python runner_scripts\algorithms.py --check "!TOK!" >nul 2>&1
-        if not errorlevel 1 set TOK_OK=1
-    )
-    if not defined TOK_OK (
-        echo Unknown algorithm "!TOK!"; see runner_scripts\algorithms.csv
-        set ARG_BAD=1
-    )
-)
-
 if "!NMAX!"=="" (
     echo -n/--nmax must be a positive integer or a comma list of them
     set ARG_BAD=1

@@ -11,7 +11,7 @@ from algorithms import (  # noqa: E402
     algorithm_names, get_algorithm, load_algorithms, resolve_algorithms,
     supported_for,
 )
-from wp_common import parse_bench_args  # noqa: E402
+from wp_common import N_WP, parse_bench_args  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -58,11 +58,16 @@ class RegistryTests(unittest.TestCase):
 class ParseTests(unittest.TestCase):
     def test_bench_args_resolve_both_axes(self):
         n, wp, algorithms, problems = parse_bench_args(
-            ["1024", "wp", "kvaerno3", "--problem", "lorenz"], "cubie")
-        self.assertEqual(1024, n)
+            ["wp", "kvaerno3", "--problem", "lorenz"], "cubie")
+        self.assertEqual(N_WP, n)
         self.assertTrue(wp)
         self.assertEqual(["kvaerno3"], algorithms)
         self.assertEqual(["lorenz"], [p.name for p in problems])
+
+    def test_a_timing_count_parses_without_wp(self):
+        n, wp, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
+        self.assertEqual(1024, n)
+        self.assertFalse(wp)
 
     def test_an_algorithm_the_framework_lacks_yields_an_empty_list(self):
         _, _, algorithms, _ = parse_bench_args(

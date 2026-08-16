@@ -76,12 +76,6 @@ done
 $HAS_ALL_PACKAGES && PACKAGES="$ALL_PACKAGES"
 [ -n "$PACKAGES" ] || { echo "-p/--package requires a value" >&2; exit 1; }
 
-for alg in ${ALGORITHM//,/ }; do
-    case "$alg" in
-        all) ;;
-        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1;;
-    esac
-done
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'" >&2

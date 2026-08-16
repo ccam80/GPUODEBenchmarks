@@ -5,7 +5,7 @@ source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
 # Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 131072 wp "$ALGORITHM" --problem "$PROBLEM"
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate
     exit 0
 fi

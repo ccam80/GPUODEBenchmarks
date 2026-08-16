@@ -2,7 +2,6 @@
 
 import csv
 import os
-import sys
 
 ALGORITHMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "algorithms.csv")
@@ -66,10 +65,5 @@ def resolve_algorithms(request, framework):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--check":
-        for token in sys.argv[2].split(","):
-            if token and token != "all":
-                get_algorithm(token)
-    else:
-        for row in load_algorithms():
-            print(row["algorithm"])
+    for row in load_algorithms():
+        print(row["algorithm"])

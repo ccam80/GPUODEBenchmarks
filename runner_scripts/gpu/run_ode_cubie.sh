@@ -7,7 +7,7 @@ source ./GPU_ODE_CUBIE/venv/bin/activate
 export CUBIE_CUDA_BACKEND=numba-cuda
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_CUBIE/bench_cubie.py 131072 wp "$ALGORITHM" --problem "$PROBLEM"
+    python3 ./GPU_ODE_CUBIE/bench_cubie.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate
     exit 0
 fi

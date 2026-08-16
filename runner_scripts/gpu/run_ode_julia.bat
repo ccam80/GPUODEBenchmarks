@@ -5,7 +5,7 @@ call "%~dp0..\parse_args.bat"
 if errorlevel 1 exit /b 1
 
 if /i "%ANALYSIS%"=="work-precision" (
-    julia --project=. GPU_ODE_Julia\bench_ode_gpu.jl 131072 wp "%ALGORITHM%" --problem "%PROBLEM%"
+    julia --project=. GPU_ODE_Julia\bench_ode_gpu.jl wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1
     endlocal
     exit /b 0

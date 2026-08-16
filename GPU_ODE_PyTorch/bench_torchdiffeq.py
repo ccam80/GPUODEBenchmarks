@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# torchdiffeq ensemble benchmarks via vmap, fixed-step only: bench_torchdiffeq.py <N> [wp] [algorithm|all] [--problem <name|all>]
+# torchdiffeq ensemble benchmarks via vmap, fixed-step only: bench_torchdiffeq.py <N>|wp [algorithm|all] [--problem <name|all>]
 
 
 import torch
@@ -101,10 +101,8 @@ def make_solve(problem, algorithm, dt=None):
 
 def run_wp(problem, parameters):
     """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import dts_for, N_WP, load_golden, ensemble_error, wp_outfile
+    from wp_common import dts_for, load_golden, ensemble_error, wp_outfile
 
-    if numberOfParameters != N_WP:
-        sys.exit("wp mode must be run with N = {0}".format(N_WP))
     golden = load_golden(problem)
 
     for algorithm in ALGORITHMS:

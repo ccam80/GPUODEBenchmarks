@@ -91,11 +91,9 @@ def _failed(exc, what):
 
 def _run_wp(problem, opts, system, grid):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
+    from wp_common import (dts_for, TOLS, load_golden, ensemble_error,
                            wp_outfile)
 
-    if opts["n"] != N_WP:
-        sys.exit("wp mode must be run with N = {0}".format(N_WP))
     duration = problem["duration"]
     golden = load_golden(problem)
 

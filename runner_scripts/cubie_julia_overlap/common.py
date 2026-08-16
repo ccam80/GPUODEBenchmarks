@@ -139,28 +139,6 @@ def timing_stats(values):
             "max_ms": float(np.max(a))}
 
 
-def _retire_stale_schema(path, fields):
-    """Move a CSV written under a different schema aside, keeping the data.
-
-    Timing rows changed from one-per-repeat to one-per-point. A file left
-    over from the old layout cannot be appended to or pruned coherently, so
-    it is renamed rather than silently mixed with new rows or deleted.
-    """
-    with path.open(newline="", encoding="utf-8") as handle:
-        header = next(csv.reader(handle), None)
-    if header is None or header == list(fields):
-        return False
-    target = path.with_name(path.stem + ".legacy" + path.suffix)
-    index = 1
-    while target.exists():
-        target = path.with_name("{}.legacy{}{}".format(path.stem, index, path.suffix))
-        index += 1
-    path.rename(target)
-    print("{} used the previous schema; moved to {} and starting fresh."
-          .format(path.name, target.name))
-    return True
-
-
 def scaled_dts(problem):
     """Fixed step and the adaptive dt pins for a problem, in problem time."""
     duration = problem["duration"]
@@ -171,8 +149,6 @@ def scaled_dts(problem):
 def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        _retire_stale_schema(path, fields)
     if not path.exists():
         with path.open("w", newline="", encoding="utf-8") as handle:
             csv.DictWriter(handle, fieldnames=fields).writeheader()

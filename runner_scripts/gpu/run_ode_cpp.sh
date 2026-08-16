@@ -33,7 +33,7 @@ do
 		for solver in $SOLVERS
 		do
 			build "$problem" "$solver" 131072
-			./GPU_ODE_MPGOS/Bench.exe 131072 wp
+			./GPU_ODE_MPGOS/Bench.exe wp
 		done
 		continue
 	fi
@@ -43,7 +43,7 @@ do
 		for solver in $SOLVERS
 		do
 			build "$problem" "$solver" "$a"
-			./GPU_ODE_MPGOS/Bench.exe $a
+			./GPU_ODE_MPGOS/Bench.exe
 		done
 	done
 done

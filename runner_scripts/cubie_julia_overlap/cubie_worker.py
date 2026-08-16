@@ -95,11 +95,7 @@ def make_solver(system, alias, mode, setting, order, family, tier, pins):
         settings["step_controller"] = controller.pop("step_controller")
     solver = qb.Solver(system, **settings, **common)
     if controller:
-        result = solver.update(controller, silent=True)
-        if result is None or not isinstance(result, (set, list, tuple, dict)):
-            raise TypeError("Solver.update must return recognized setting names; got {}"
-                            .format(type(result).__name__))
-        recognised = set(result)
+        recognised = set(solver.update(controller, silent=True))
         ignored = set(controller) - recognised
         if ignored:
             raise ValueError("Cubie ignored PI controller settings: " + ", ".join(sorted(ignored)))

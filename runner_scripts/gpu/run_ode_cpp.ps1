@@ -90,9 +90,9 @@ function Invoke-Point {
     param([string]$ProblemName, [string]$Solver, [long]$Nt, [switch]$Wp)
     Build-Project -ProblemName $ProblemName -Solver $Solver -Nt $Nt
     if ($Wp) {
-        & "GPU_ODE_MPGOS\Bench.exe" $Nt wp
+        & "GPU_ODE_MPGOS\Bench.exe" wp
     } else {
-        & "GPU_ODE_MPGOS\Bench.exe" $Nt
+        & "GPU_ODE_MPGOS\Bench.exe"
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Bench.exe ($ProblemName, $Solver) failed with exit code $LASTEXITCODE"

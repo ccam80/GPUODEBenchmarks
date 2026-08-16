@@ -157,14 +157,9 @@ int main(int argc, char *argv[])
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
 
-	// `<exe> 131072 wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
-	if (argc > 2 && string(argv[2]) == string("wp"))
+	// `<exe> wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
+	if (argc > 1 && string(argv[1]) == string("wp"))
 	{
-		if (NT != 131072)
-		{
-			cerr << "wp mode must be built with NT = 131072" << endl;
-			return 1;
-		}
 		vector< vector<double> > golden(NT, vector<double>(SD, 0.0));
 		{
 			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_131072.csv";

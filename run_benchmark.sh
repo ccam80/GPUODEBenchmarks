@@ -56,11 +56,11 @@ case "$ALGORITHM" in
 esac
 ALG_LIST=
 ALG_HAS_ALL=false
+# The bench scripts reject unknown algorithm names.
 for alg in ${ALGORITHM//,/ }; do
     case "$alg" in
         all) ALG_HAS_ALL=true;;
-        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1
-           ALG_LIST="$ALG_LIST $alg";;
+        *) ALG_LIST="$ALG_LIST $alg";;
     esac
 done
 $ALG_HAS_ALL && ALG_LIST=all

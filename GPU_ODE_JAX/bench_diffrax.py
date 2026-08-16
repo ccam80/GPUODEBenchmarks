@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Diffrax ensemble benchmarks via vmap: bench_diffrax.py <N> [wp] [algorithm|all] [--problem <name|all>]
+# Diffrax ensemble benchmarks via vmap: bench_diffrax.py <N>|wp [algorithm|all] [--problem <name|all>]
 
 from collections.abc import Callable
 from typing import ClassVar
@@ -170,11 +170,9 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
 
 def run_wp(problem, parameterList):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
+    from wp_common import (dts_for, TOLS, load_golden, ensemble_error,
                            wp_outfile)
 
-    if numberOfParameters != N_WP:
-        sys.exit("wp mode must be run with N = {0}".format(N_WP))
     golden = load_golden(problem)
 
     def bench(m, setting, outfh):

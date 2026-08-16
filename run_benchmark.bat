@@ -85,30 +85,12 @@ if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
     exit /b 1
 )
 
-REM -g: "all" or a comma list; every token whitelisted.
+REM -g: "all" or a comma list; the bench scripts reject unknown names.
 set ALG_LIST=
 set ALG_HAS_ALL=
-set ALG_BAD=
 for %%g in (!ALGORITHM!) do (
     set "TOK=%%g"
-    set TOK_OK=
-    if "!TOK!"=="all" ( set ALG_HAS_ALL=1& set TOK_OK=1 )
-    if "!TOK!"=="euler" set TOK_OK=1
-    if "!TOK!"=="classical-rk4" set TOK_OK=1
-    if "!TOK!"=="tsit5" set TOK_OK=1
-    if not defined TOK_OK (
-        python runner_scripts\algorithms.py --check "!TOK!" >nul 2>&1
-        if not errorlevel 1 set TOK_OK=1
-    )
-    if not defined TOK_OK (
-        echo Unknown algorithm "!TOK!"; see runner_scripts\algorithms.csv
-        set ALG_BAD=1
-    )
-    if defined TOK_OK if not defined ALG_HAS_ALL set "ALG_LIST=!ALG_LIST! !TOK!"
-)
-if defined ALG_BAD (
-    popd
-    exit /b 1
+    if "!TOK!"=="all" ( set ALG_HAS_ALL=1 ) else ( set "ALG_LIST=!ALG_LIST! !TOK!" )
 )
 if defined ALG_HAS_ALL set "ALG_LIST=all"
 if "!ALG_LIST!"=="" (

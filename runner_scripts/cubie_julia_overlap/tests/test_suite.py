@@ -156,22 +156,7 @@ class TimingStatsTests(unittest.TestCase):
         for field in ("min_ms", "p05_ms", "median_ms", "p95_ms", "max_ms"):
             self.assertAlmostEqual(stats[field], 7.5)
 
-    def test_stale_schema_is_retired_rather_than_mixed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cubie_timings.csv"
-            with path.open("w", newline="") as handle:
-                writer = csv.writer(handle)
-                writer.writerow(["framework", "algorithm", "sample", "time_ms"])
-                writer.writerow(["cubie", "tsit5", "0", "1.0"])
-            common.ensure_csv(path, common.TIMING_FIELDS)
-            with path.open(newline="") as handle:
-                self.assertEqual(next(csv.reader(handle)), common.TIMING_FIELDS)
-                self.assertEqual(list(csv.reader(handle)), [])
-            legacy = Path(tmp) / "cubie_timings.legacy.csv"
-            self.assertTrue(legacy.exists())
-            self.assertIn("time_ms", legacy.read_text())
-
-    def test_a_matching_header_is_left_alone(self):
+    def test_an_existing_file_is_left_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = common.ensure_csv(Path(tmp) / "cubie_timings.csv",
                                      common.TIMING_FIELDS)
@@ -180,7 +165,6 @@ class TimingStatsTests(unittest.TestCase):
             common.ensure_csv(path, common.TIMING_FIELDS)
             with path.open(newline="") as handle:
                 self.assertEqual(len(list(csv.DictReader(handle))), 1)
-            self.assertFalse((Path(tmp) / "cubie_timings.legacy.csv").exists())
 
 
 class AnalysisTests(unittest.TestCase):

@@ -168,13 +168,6 @@ elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
 
-# -g: "all" or a comma list; every token whitelisted.
-for alg in ${ALGORITHM//,/ }; do
-    case "$alg" in
-        all) ;;
-        *) python3 ./runner_scripts/algorithms.py --check "$alg" || exit 1;;
-    esac
-done
 
 # -n: sweep ceiling or comma list of exact counts.
 case ",$NMAX," in

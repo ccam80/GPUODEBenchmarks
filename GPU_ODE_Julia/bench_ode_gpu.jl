@@ -7,11 +7,10 @@ using CUDA
 using BenchmarkTools, DiffEqGPU, OrdinaryDiffEq, StaticArrays
 using CSV, DataFrames, DelimitedFiles
 
-# CLI: <N> [wp] [algorithm|all] [--problem <name|all>]
+# CLI: <N>|wp [algorithm|all] [--problem <name|all>]; wp always runs at N_WP.
 @show ARGS
 #settings
 CUDA.allowscalar(false)
-numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 
 # Dataset key "<os>_<gpu>" keys output files per machine.
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
@@ -26,8 +25,7 @@ requested_problem = "all"
 let i = 2
     while i <= length(ARGS)
         tok = ARGS[i]
-        if tok == "wp"
-        elseif tok == "--problem" || tok == "-s"
+        if tok == "--problem" || tok == "-s"
             i += 1
             i <= length(ARGS) || error("--problem requires a value")
             global requested_problem = ARGS[i]
@@ -55,10 +53,12 @@ end
 
 # Fixed sample count to match the other frameworks.
 const REPEATS = 20
-const WP_MODE = "wp" in ARGS
+const WP_MODE = !isempty(ARGS) && ARGS[1] == "wp"
 # Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
 const TIMING_TOL = 1.0f-8
 const N_WP = 131072
+numberOfParameters = isinteractive() ? 8192 :
+                     (WP_MODE ? N_WP : parse(Int64, ARGS[1]))
 
 "DiffEqGPU kernel solver for an algorithm name; autodiff off matches the overlap suite."
 function gpu_solver(algorithm)
@@ -100,7 +100,6 @@ end
 
 # Sweeps fixed dt and adaptive tolerance at N=N_WP; grids mirror runner_scripts/wp_common.py.
 function run_wp(problem)
-    numberOfParameters == N_WP || error("wp mode must be run with N = $(N_WP)")
     golden = readdlm(
         joinpath(REPO_ROOT, "data", "numerical",
             "golden_$(problem["problem"])_$(N_WP).csv"), ',', Float64)

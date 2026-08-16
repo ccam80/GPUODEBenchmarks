@@ -70,20 +70,18 @@ def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N> [wp] [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); names this framework lacks yield empty lists."""
+    """Parse <N>|wp [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); wp mode always runs at N_WP."""
     if not argv:
         raise SystemExit(
-            "usage: <N> [wp] [algorithm|all] [--problem <name|all>]")
-    n = int(argv[0])
-    wp = False
+            "usage: <N>|wp [algorithm|all] [--problem <name|all>]")
+    wp = argv[0] == "wp"
+    n = N_WP if wp else int(argv[0])
     request = "all"
     problem_request = "all"
     rest = list(argv[1:])
     while rest:
         tok = rest.pop(0)
-        if tok == "wp":
-            wp = True
-        elif tok in ("--problem", "-s"):
+        if tok in ("--problem", "-s"):
             if not rest:
                 raise SystemExit("--problem requires a value")
             problem_request = rest.pop(0)

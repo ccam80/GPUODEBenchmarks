@@ -17,7 +17,6 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
 from bench_key import data_dir, dataset_key  # noqa: E402
 from wp_common import (  # noqa: E402
-    N_WP,
     dts_for,
     ensemble_error,
     load_golden,
@@ -87,8 +86,6 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
 
 def run_work_precision(model, problem, cell_count):
     """Write the fixed-step Myokit-CUDA work-precision sweep."""
-    if cell_count != N_WP:
-        raise SystemExit("wp mode must be run with N = {0}".format(N_WP))
     golden = load_golden(problem)
     sweep = problem.sweep(cell_count, dtype=np.float32)
     output = wp_outfile(
@@ -171,7 +168,8 @@ def run_problem(problem, cell_count, wp_mode):
     with timing_file.open("a", encoding="utf-8") as handle:
         handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
 
-    if cell_count == N_WP:
+    # The pairwise numerical cross-check reads this fixed CSV name.
+    if cell_count == 32768:
         numerical_file = (
             Path(data_dir("numerical", DATASET_KEY, REPO_ROOT, problem))
             / "myokit_cuda.csv"
@@ -184,7 +182,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
         raise SystemExit(
-            "usage: bench_myokit_cuda.py <trajectory-count> [wp] "
+            "usage: bench_myokit_cuda.py <N>|wp "
             "[algorithm|all] [--problem <name|all>]"
         )
     cell_count, wp_mode, algorithms, problems = parse_bench_args(

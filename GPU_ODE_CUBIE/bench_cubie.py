@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Cubie benchmarks on the stock numba-cuda backend: bench_cubie.py <N> [wp] [algorithm|all] [--problem <name|all>]"""
+"""Cubie benchmarks on the stock numba-cuda backend: bench_cubie.py <N>|wp [algorithm|all] [--problem <name|all>]"""
 
 import os
 import sys

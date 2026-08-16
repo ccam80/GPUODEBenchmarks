@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Cubie benchmarks on the numba-cuda-mlir backend: bench_cubie_mlir.py <N> [wp] [algorithm|all] [--problem <name|all>]"""
+"""Cubie benchmarks on the numba-cuda-mlir backend: bench_cubie_mlir.py <N>|wp [algorithm|all] [--problem <name|all>]"""
 
 import os
 import sys

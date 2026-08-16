@@ -10,7 +10,7 @@ REM The venv is shared with the MLIR suite; cubie picks its backend from this at
 set CUBIE_CUDA_BACKEND=numba-cuda
 
 if /i "%ANALYSIS%"=="work-precision" (
-    python GPU_ODE_CUBIE\bench_cubie.py 131072 wp "%ALGORITHM%" --problem "%PROBLEM%"
+    python GPU_ODE_CUBIE\bench_cubie.py wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1
     call deactivate
     endlocal
