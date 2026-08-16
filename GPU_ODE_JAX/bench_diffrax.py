@@ -78,7 +78,7 @@ class ClassicalRK4(AbstractERK):
 
 
 def make_solver(algorithm, tol):
-    """Diffrax solver; implicit stages converge to the protocol's Newton tolerance."""
+    """Diffrax solver; implicit stages converge to the protocol Newton tolerance."""
     if algorithm == "euler":
         return diffrax.Euler()
     if algorithm == "classical-rk4":
@@ -153,10 +153,7 @@ def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
 
 
 def make_controller(algorithm, tol):
-    """Diffrax controller matching the shared adaptive protocol.
-
-    Diffrax scales the gain exponent by ``error_order``, so passing the
-    algorithm order plus one reproduces cubie's ``kp / (order + 1)``."""
+    """Protocol controller; error_order is the algorithm order plus one so the gain exponent is kp / (order + 1)."""
     return diffrax.PIDController(
         rtol=tol,
         atol=tol,

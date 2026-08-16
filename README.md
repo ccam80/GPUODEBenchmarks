@@ -219,17 +219,16 @@ How much of that each framework can be told:
 | gain exponent | set | set | fixed PI, 7/(10·order) and 2/(5·order) | fixed 1/order |
 | error norm | RMS | RMS | RMS | max |
 
-DiffEqGPU's kernel solvers build their controller inside the kernel
+DiffEqGPU builds its controller inside the kernel
 (`build_adaptive_controller_cache`), so `vectorized_asolve` takes tolerances
-and the initial step but no controller settings: Julia matches on tolerance
-and start step only. Two further differences are not settable anywhere:
-diffrax never shrinks an accepted step, and MPGOS scales its step from the
-worst single component rather than the RMS.
+and the initial step and nothing else. Diffrax never shrinks an accepted
+step, and MPGOS scales its step from the worst single component rather than
+the RMS.
 
-Float32 sets the floor: `eps(Float32)` is 1.2e-7, so the tightest points of
-the tolerance grid, and the `timing_tol` of 1e-8, ask for accuracy the
-working precision cannot resolve. Cubie warns (`newton_rtol is at or above
-the step controller rtol`) from 1e-7 down.
+`eps(Float32)` is 1.2e-7, below which a relative tolerance is unreachable:
+that covers the last points of the tolerance grid and the 1e-8 `timing_tol`.
+Cubie warns `newton_rtol is at or above the step controller rtol` from 1e-7
+down.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);

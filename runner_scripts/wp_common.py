@@ -24,11 +24,9 @@ def load_protocol():
 
 PROTOCOL = load_protocol()
 
-# The step gain is safety * rms_error ** (-kp / (order + 1)), clamped to
-# [min_gain, max_gain]; the N-sweep runs adaptive points at TIMING_TOL.
+# Tolerance of the adaptive points in the N-sweep.
 TIMING_TOL = PROTOCOL["timing_tol"]
-# Fixed-step runs carry a tolerance only for implicit stage solves, which
-# converge to newton_tol_factor times the step tolerance.
+# Fixed-step tolerance, used only by implicit stage solves.
 FIXED_TOL = PROTOCOL["fixed_tol"]
 NEWTON_TOL_FACTOR = PROTOCOL["newton_tol_factor"]
 ADAPTIVE = {name: PROTOCOL[name] for name in
