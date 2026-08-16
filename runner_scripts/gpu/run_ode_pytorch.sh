@@ -5,7 +5,7 @@ source ./GPU_ODE_PyTorch/venv/bin/activate
 
 # Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 32768 wp "$ALGORITHM"
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py 131072 wp "$ALGORITHM"
     deactivate
     exit 0
 fi

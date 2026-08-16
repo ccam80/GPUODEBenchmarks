@@ -5,12 +5,24 @@ from __future__ import annotations
 import csv
 import json
 import math
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 GOLDEN_NE = REPO_ROOT / "data" / "numerical" / "golden_ne_lorenz_1024.csv"
-GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_32768.csv"
+GOLDEN_WP = REPO_ROOT / "data" / "numerical" / "golden_lorenz_131072.csv"
+
+# Numerical grids and adaptive pins are shared with the NE suite.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                       / "numerical_equivalence"))
+from ne_common import (  # noqa: E402 - path bootstrap above
+    DTS_NE as NE_DTS, TOLS_NE as NE_TOLS, N_NE, DT0_NE as DT0,
+    DT_MIN_NE as DT_MIN, DT_MAX_NE as DT_MAX, controllers_equal,
+    cubie_default_controller, read_ne_csv, read_ne_adaptive_csv,
+)
+
+CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")
@@ -25,15 +37,13 @@ FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
 PERFORMANCE_REPEATS = 20
 WORK_REPEATS = 20
-NE_DTS = [2.0 ** -k for k in range(1, 14)]
-NE_TOLS = [10.0 ** -k for k in range(2, 7)]
 WP_DTS = [2.0 ** -k for k in range(4, 14)]
 WP_TOLS = [10.0 ** -k for k in range(2, 9)]
-N_NE = 1024
-N_WP = 32768
-DT0 = 0.01
-DT_MIN = 1.0e-12
-DT_MAX = 1.0e3
+# Mirrors runner_scripts/wp_common.py.
+N_WP = 131072
+
+# Overlap family labels -> ne_common family keys.
+NE_FAMILY = {"ERK": "erk", "ESDIRK": "dirk", "Rosenbrock-W": "rosenbrock"}
 
 # "transfers": "both" includes h2d and d2h, "none" includes neither.
 # One row per timed point: the workers reduce their repeats before writing, so

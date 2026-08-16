@@ -7,7 +7,7 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 export CUBIE_CUDA_BACKEND=mlir
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 32768 wp "$ALGORITHM"
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py 131072 wp "$ALGORITHM"
     deactivate
     exit 0
 fi

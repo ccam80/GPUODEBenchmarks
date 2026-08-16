@@ -324,7 +324,7 @@ try {
     # --------------------------------------------------------- work-precision
     if ($DoWp) {
         # The golden reference is generated once up front; every wp sweep needs it.
-        if (-not (Test-Path 'data\numerical\golden_lorenz_32768.csv')) {
+        if (-not (Test-Path 'data\numerical\golden_lorenz_131072.csv')) {
             # Reference generation is scored on accuracy, not speed.
             $ClockCritical = $false; $StepLabel = 'wp:golden'
             $status = Invoke-Step 'Golden reference for work-precision' 'wp_golden.log' `

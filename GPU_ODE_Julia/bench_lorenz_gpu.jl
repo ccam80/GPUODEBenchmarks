@@ -62,16 +62,16 @@ probs = cu(probs_host)
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# `bench_lorenz_gpu.jl 32768 wp` sweeps fixed dt / adaptive tolerance at
-# N=32768 and records "<setting> <time_ms> <error-vs-golden>" per point.
+# `bench_lorenz_gpu.jl 131072 wp` sweeps fixed dt / adaptive tolerance at
+# N=131072 and records "<setting> <time_ms> <error-vs-golden>" per point.
 # Grids and protocol mirror runner_scripts/wp_common.py — keep in sync.
 if "wp" in ARGS
     using DelimitedFiles
 
-    numberOfParameters == 32768 || error("wp mode must be run with N = 32768")
+    numberOfParameters == 131072 || error("wp mode must be run with N = 131072")
     golden = readdlm(
         joinpath(dirname(@__DIR__), "data", "numerical",
-            "golden_lorenz_32768.csv"), ',', Float64)
+            "golden_lorenz_131072.csv"), ',', Float64)
 
     # l2-at-final error over the ensemble, in Float64.
     function ensemble_error(us)
@@ -137,7 +137,7 @@ const REPEATS = 20
 # Device-only: probs already resident, results left there.
 data_dev = @benchmark begin
     CUDA.@sync DiffEqGPU.vectorized_solve($probs, $prob, GPUTsit5(),
-                           saveat=1.0f0, save_everystep=false, dt = 0.001f0)
+                           saveat=1.0f0, save_everystep=false, dt = 2.0f0^-10)
 end samples=REPEATS evals=1 seconds=1e9
 data = @benchmark begin
     # From my rookie reading of the DiffEqGPU "solve" wrapper, which causes 
@@ -154,7 +154,7 @@ data = @benchmark begin
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs_d, $prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
-                           dt = 0.001f0)
+                           dt = 2.0f0^-10)
         ts = Array(sol[1])
         us = Array(sol[2])
     end samples=REPEATS evals=1 seconds=1e9
@@ -173,7 +173,7 @@ if !isinteractive() && numberOfParameters == 32768
     CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob, GPUTsit5(),
                            saveat=1.0f0,
                            save_everystep=false,
-                           dt = 0.001f0)
+                           dt = 2.0f0^-10)
     # Extract final state values for each trajectory
     using CSV, DataFrames
     # final_states = zeros(Float32, numberOfParameters, 3)

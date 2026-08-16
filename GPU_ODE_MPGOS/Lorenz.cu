@@ -147,13 +147,14 @@ int main(int argc, char *argv[])
 	ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> ScanLorenz(SelectedDevice);
 	
 	ScanLorenz.SolverOption(ThreadsPerBlock, BlockSize);
-	ScanLorenz.SolverOption(InitialTimeStep, 1.0e-3);
+	// Shared fixed-run dt, 2^-10; also the adaptive build's initial step.
+	ScanLorenz.SolverOption(InitialTimeStep, 9.765625e-4);
 
 	// ========================================
 	// WORK-PRECISION (wp) MODE
 	// ========================================
-	// `Lorenz.exe 32768 wp` sweeps the fixed step size (RK4 build) or the
-	// adaptive tolerance (RKCK45 build) at NT=32768 and records
+	// `Lorenz.exe 131072 wp` sweeps the fixed step size (RK4 build) or the
+	// adaptive tolerance (RKCK45 build) at NT=131072 and records
 	// "<setting> <time_ms> <error-vs-golden>" per point. dt and tolerances are
 	// runtime SolverOptions, so only the solver family needs a rebuild. Grids
 	// and protocol mirror runner_scripts/wp_common.py — keep in sync. wp takes
@@ -161,14 +162,14 @@ int main(int argc, char *argv[])
 	// transfer variant.
 	if (argc > 2 && string(argv[2]) == string("wp"))
 	{
-		if (NT != 32768)
+		if (NT != 131072)
 		{
-			cerr << "wp mode must be built with NT = 32768" << endl;
+			cerr << "wp mode must be built with NT = 131072" << endl;
 			return 1;
 		}
 		vector<double> gx(NT), gy(NT), gz(NT);
 		{
-			ifstream gf("./data/numerical/golden_lorenz_32768.csv");
+			ifstream gf("./data/numerical/golden_lorenz_131072.csv");
 			if (!gf)
 			{
 				cerr << "golden reference missing - run "

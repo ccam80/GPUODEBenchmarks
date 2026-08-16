@@ -83,7 +83,7 @@ initial_conditions = {
 }
 
 
-def make_fixed_solver(algorithm, dt=0.001):
+def make_fixed_solver(algorithm, dt=2.0 ** -10):
     return qb.Solver(
         lorenz_system,
         algorithm=algorithm,
@@ -126,7 +126,7 @@ gc.collect()
 # ========================================
 # WORK-PRECISION (wp) MODE
 # ========================================
-# Sweeps dt / tolerance per algorithm at N=32768; see runner_scripts/wp_common.py.
+# Sweeps dt / tolerance per algorithm at N=131072; see runner_scripts/wp_common.py.
 if WP_MODE:
     from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            wp_outfile)

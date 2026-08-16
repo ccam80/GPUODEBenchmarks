@@ -5,7 +5,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 source ./GPU_ODE_JAX/venv/bin/activate
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_JAX/bench_diffrax.py 32768 wp "$ALGORITHM"
+    python3 ./GPU_ODE_JAX/bench_diffrax.py 131072 wp "$ALGORITHM"
     deactivate
     exit 0
 fi

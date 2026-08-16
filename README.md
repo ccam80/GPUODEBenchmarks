@@ -701,7 +701,7 @@ For more details, see `data/numerical/README.md`.
 The trajectory-scaling benchmarks above measure *time only*; the
 work-precision (`wp`) mode additionally measures *solution error* against a
 golden reference, giving DiffEqDevTools-style error-vs-runtime curves for
-every framework at a fixed ensemble size of N = 32768.
+every framework at a fixed ensemble size of N = 131072.
 
 ### Golden reference
 
@@ -712,7 +712,7 @@ checkout:
 
 ```bash
 julia -t auto --project=. runner_scripts/golden/generate_golden.jl
-# -> data/numerical/golden_lorenz_32768.csv (machine independent, no dataset key)
+# -> data/numerical/golden_lorenz_131072.csv (machine independent, no dataset key)
 ```
 
 Because the frameworks build their rho grids independently (and differ by
@@ -739,7 +739,7 @@ writers).
 ./run_benchmark.sh -p julia      -d gpu -m ode -a work-precision
 ./run_benchmark.sh -p pytorch    -d gpu -m ode -a work-precision   # fixed-dt only: torch.vmap cannot trace adaptive solvers
 ./run_benchmark.sh -p jax        -d gpu -m ode -a work-precision   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
-./run_benchmark.sh -p cpp        -d gpu -m ode -a work-precision   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=32768
+./run_benchmark.sh -p cpp        -d gpu -m ode -a work-precision   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=131072
 ```
 
 (`run_benchmark.bat -p <package> -d gpu -m ode -a work-precision` on Windows.) To run every
@@ -774,13 +774,15 @@ discovers all keyed wp files and writes one algorithm-matched figure per
 The work-precision curves compare error against *runtime*; the
 numerical-equivalence (`ne`) suite instead compares error against *dt*, per
 algorithm, to answer a different question: **does each cubie algorithm
-actually calculate what its named method should?** Every algorithm mutually
-supported by cubie and DifferentialEquations.jl (the mapping lives in
-`runner_scripts/numerical_equivalence/algorithms.csv`) integrates the same
-Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1]) fixed-step at every
-dyadic dt from 1/16 to 1/8192 — **both stacks in Float32** — and the final
-states are compared against the Float64 golden reference and against each
-other.
+actually calculate what its named method should?** Every implicit-family
+algorithm mutually supported by cubie and DifferentialEquations.jl (the
+mapping lives in `runner_scripts/numerical_equivalence/algorithms.csv`)
+integrates the same Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1])
+fixed-step at every dyadic dt from 1/2 to 1/8192 — **both stacks in
+Float32** — and the final states are compared against the Float64 golden
+reference and against each other. erk-family algorithms run only the
+adaptive sweep. The small-dt end of the grid resolves the fp-precision
+tail.
 
 Float32 discipline on the Julia side is enforced, not assumed: u0, tspan, dt
 and the parameter vector are constructed as Float32 (the rho grid is read
@@ -827,8 +829,8 @@ julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
 #   -> data/numerical_equivalence/julia/<algorithm>_adaptive.csv   (adaptive sweep)
 #   -> data/numerical_equivalence/julia/controller_constants.csv   (resolved defaults)
 GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
-#   -> data/numerical_equivalence/cubie/<algorithm>_<os>_<gpu>.csv
-#   -> data/numerical_equivalence/cubie/<algorithm>_adaptive_<tier>_<os>_<gpu>.csv
+#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<algorithm>.csv
+#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<algorithm>_adaptive_<tier>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
 #   -> plots/<os>_<gpu>/numerical_equivalence_fixed.csv
 #   -> plots/<os>_<gpu>/numerical_equivalence_adaptive.csv
@@ -841,17 +843,18 @@ The fixed-step sweep deliberately removes the step-size controller to
 isolate each tableau; the adaptive sweep tests the opposite composite —
 embedded estimator + error norm + controller — under real controller
 dynamics. Every algorithm with an embedded error estimate on *both* sides
-(the runners derive this programmatically: cubie's
-`tableau.has_error_estimate`, OrdinaryDiffEq's `isadaptive`) integrates the
-ensemble at atol = rtol over 1e-2 .. 1e-8, in Float32, with pinned initial
-dt and dt bounds, and errors are compared against the golden reference as
-error-vs-tolerance curves.
+(the `adaptive` column of `algorithms.csv`, cross-checked at runtime
+against cubie's `tableau.has_error_estimate` and OrdinaryDiffEq's
+`isadaptive`) integrates the ensemble at atol = rtol over 1e-2 .. 1e-8, in
+Float32, with pinned initial dt and dt bounds, and errors are compared
+against the golden reference as error-vs-tolerance curves. Both runners
+skip algorithms outside that mutual set.
 
 Cubie runs each algorithm twice:
 
-* **default** — cubie's own PI controller defaults: how cubie really
-  behaves out of the box. Compared to the Julia run (its own per-algorithm
-  default controller) as curve tracking within a factor.
+* **default** — cubie's shipped controller defaults, compared to the
+  Julia run's own per-algorithm defaults as curve tracking within a
+  factor.
 * **matched** — controller type, gains, safety factor and gain clamps
   mirrored from the constants DifferentialEquations.jl resolved for that
   algorithm (exported to `controller_constants.csv`; the gain mapping
@@ -859,7 +862,9 @@ Cubie runs each algorithm twice:
   stacks' different exponent conventions — derivation in
   `GPU_ODE_CUBIE/numerical_equivalence.py`). This tier exists to isolate
   how much of the difference between the two stacks comes from the step
-  controller rather than the algorithm.
+  controller rather than the algorithm. When the matched constants equal
+  cubie's own defaults, the matched file is written from the default
+  tier's results.
 
 Both sweeps write per-algorithm CSVs holding, per dt or per tolerance, the
 ensemble l2 error of each implementation against the golden reference and

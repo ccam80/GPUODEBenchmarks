@@ -33,7 +33,7 @@ from ne_common import (DTS_NE, TOLS_NE, load_algorithms, load_golden_ne,
                        ensemble_error_masked, julia_ne_file, cubie_ne_file,
                        julia_ne_adaptive_file, cubie_ne_adaptive_file,
                        read_ne_csv_masked, read_ne_adaptive_csv_masked,
-                       CUBIE_NE_DIR)
+                       runs_fixed, CUBIE_NE_DIR)
 
 # Windows consoles default to a legacy codepage (cp1252) that cannot encode
 # the glyphs printed below; force UTF-8 where supported.
@@ -298,7 +298,7 @@ def main():
 
     for key in sorted(keys):
         results = [analyse_algorithm(row, key, golden_states)
-                   for row in algorithms]
+                   for row in algorithms if runs_fixed(row)]
         adaptive_results = [
             res for res in (analyse_adaptive(row, key, golden_states)
                             for row in algorithms)

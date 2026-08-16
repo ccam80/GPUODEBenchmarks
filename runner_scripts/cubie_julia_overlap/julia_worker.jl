@@ -20,7 +20,7 @@ const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
 const PERFORMANCE_REPEATS = 20
 const WORK_REPEATS = 20
-const N_WP = 32768
+const N_WP = 131072
 
 function cli_args(args)
     out = Dict{String, String}()
@@ -62,7 +62,7 @@ function protocol()
     ns = parse_ns(NMAX, FROM_N)
     return (performance_ns = ns, performance_repeats = PERFORMANCE_REPEATS,
         ne_n = 1024, ne_dts = [2.0^-k for k in 1:13],
-        ne_tols = [10.0^-k for k in 2:6], wp_n = N_WP,
+        ne_tols = [10.0^-k for k in 2:8], wp_n = N_WP,
         wp_dts = [2.0^-k for k in 4:13], wp_tols = [10.0^-k for k in 2:8],
         work_repeats = WORK_REPEATS)
 end
@@ -125,7 +125,7 @@ const TSPAN = (0.0f0, 1.0f0)
 const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
     "golden_ne_lorenz_1024.csv"), ',', Float64)
 const golden_wp_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_lorenz_32768.csv"), ',', Float64)
+    "golden_lorenz_131072.csv"), ',', Float64)
 
 function rho_grid(kind, n)
     if kind == "numerical"
@@ -250,7 +250,10 @@ for row in table
             end
             repeats = PROTOCOL.performance_repeats
         elseif phase == "numerical"
-            append!(points, [("fixed", "dt", dt, PROTOCOL.ne_n) for dt in PROTOCOL.ne_dts])
+            # erk-family rows run no fixed numerical sweep.
+            if uppercase(String(row.family)) != "ERK"
+                append!(points, [("fixed", "dt", dt, PROTOCOL.ne_n) for dt in PROTOCOL.ne_dts])
+            end
             append!(points, [("adaptive", "tol", tol, PROTOCOL.ne_n) for tol in PROTOCOL.ne_tols])
         else
             append!(points, [("fixed", "dt", dt, PROTOCOL.wp_n) for dt in PROTOCOL.wp_dts])
@@ -270,9 +273,21 @@ for row in table
             end
             try
                 probs_host, probs, prob = build_problems(phase, n)
-                # Warm both paths.
+                if phase == "numerical"
+                    # Accuracy only: one untimed solve.
+                    finals, _ = solve_end_to_end(probs_host, prob, alg, mode, setting)
+                    finite, failed = finite_counts(finals)
+                    finals_path = write_finals(alias, mode, tier, setting_kind,
+                        setting, finals)
+                    append_row(METRIC_FILE, "julia", alias, phase, mode, tier, n,
+                        setting_kind, setting,
+                        golden_rmse(finals, golden_ne_all[1:n, 2:4]),
+                        finite, failed, finals_path)
+                    println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
+                    continue
+                end
+                # One warmup covers both transfer paths.
                 solve_end_to_end(probs_host, prob, alg, mode, setting)
-                solve_device_only(probs, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, 3)
                 # Each transfer variant runs as an unbroken block, so one
                 # variant's samples are never separated by the other's
@@ -299,12 +314,10 @@ for row in table
                     append_row(METRIC_FILE, "julia", alias, phase, mode, tier,
                         n, setting_kind, setting, "", finite, failed, "")
                 else
-                    golden = phase == "numerical" ? golden_ne_all[1:n, 2:4] : golden_wp_all[1:n, :]
-                    finals_path = phase == "numerical" ?
-                        write_finals(alias, mode, tier, setting_kind, setting, finals) : ""
                     append_row(METRIC_FILE, "julia", alias, phase, mode, tier, n,
-                        setting_kind, setting, golden_rmse(finals, golden),
-                        finite, failed, finals_path)
+                        setting_kind, setting,
+                        golden_rmse(finals, golden_wp_all[1:n, :]),
+                        finite, failed, "")
                 end
                 println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
             catch err
