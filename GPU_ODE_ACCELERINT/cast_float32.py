@@ -50,6 +50,13 @@ _LIMITS = {
 }
 
 
+def _always():
+    """Rules applied at both precisions; makes the loop schedule OMP_SCHEDULE-selectable."""
+    return [("omp schedule",
+             re.compile(r"(#pragma omp parallel for\b[^\n]*)"),
+             r"\1 schedule(runtime)")]
+
+
 def _rules():
     """(name, compiled pattern, replacement) in application order."""
     rules = [("double -> float", re.compile(r"\bdouble\b"), "float")]
@@ -77,7 +84,7 @@ def main(argv):
     precision = argv[3] if len(argv) == 4 else "single"
     if precision not in ("single", "double"):
         raise SystemExit("precision must be single or double")
-    rules = _rules() if precision == "single" else []
+    rules = _always() + (_rules() if precision == "single" else [])
     counts = {}
     for relative in SOURCES:
         src = os.path.join(src_root, relative)
