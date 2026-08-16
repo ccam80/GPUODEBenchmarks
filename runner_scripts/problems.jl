@@ -3,9 +3,14 @@
 const PROBLEMS_CSV = joinpath(@__DIR__, "problems.csv")
 const DEFAULT_PROBLEM = "lorenz"
 
-const _INT_FIELDS = ("states", "dae_index", "wp_k_min", "wp_k_max",
-    "euler_k_min", "euler_k_max", "ne_k_min", "ne_k_max")
+const _INT_FIELDS = ("states",)
 const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
+
+# Dyadic dt-grid exponents as duration fractions; mirrored in problems.py.
+const WP_K = (4, 13)
+const EULER_K = (8, 17)
+const NE_K = (1, 13)
+const TIMING_DT_K = 10
 
 "Every problem in declaration order, as a vector of Dict{String,Any}."
 function load_problems()
@@ -49,20 +54,18 @@ function resolve_problems(request, framework = nothing)
     return [row for row in selected if framework in row["frameworks"]]
 end
 
-"Fixed step used by the N-sweep: 1000 steps for every problem."
-problem_timing_dt(problem) = problem["duration"] / 1000.0
+"Fixed step used by the N-sweep: duration * 2^-10."
+problem_timing_dt(problem) = problem["duration"] * 2.0^-TIMING_DT_K
 
 "Fixed-step dt grid for the work-precision sweep."
 function problem_dts(problem, algorithm = nothing)
-    lo, hi = algorithm == "euler" ?
-             (problem["euler_k_min"], problem["euler_k_max"]) :
-             (problem["wp_k_min"], problem["wp_k_max"])
+    lo, hi = algorithm == "euler" ? EULER_K : WP_K
     return [problem["duration"] * 2.0^-k for k in lo:hi]
 end
 
 "Fixed-step dt grid for the numerical-equivalence sweep."
 problem_ne_dts(problem) = [problem["duration"] * 2.0^-k
-                           for k in problem["ne_k_min"]:problem["ne_k_max"]]
+                           for k in NE_K[1]:NE_K[2]]
 
 "The ensemble parameter grid: n values over the sweep range."
 function problem_sweep(problem, n)

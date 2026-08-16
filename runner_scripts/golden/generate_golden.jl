@@ -10,7 +10,7 @@ using DelimitedFiles
 include(joinpath(dirname(@__DIR__), "problems.jl"))
 include(joinpath(dirname(@__DIR__), "reference_systems.jl"))
 
-const N = 32768
+const N = 131072
 
 requested = "all"
 force = false

@@ -5,12 +5,14 @@
 #
 # * fixed:    error-vs-dt convergence study, fixed-step at every dt in the
 #             dyadic grid. Isolates the tableau from the controller.
-# * adaptive: error-vs-tolerance study at atol = rtol in TOLS, each algorithm
-#             under its DEFAULT step-size controller — solver performance
-#             under real controller dynamics. Per-trajectory accept/reject
-#             counts are recorded, and the resolved controller constants are
-#             exported (controller_constants.csv) so the cubie runner can
-#             mirror them exactly for its "matched" tier.
+#             erk-family rows are excluded.
+# * adaptive: error-vs-tolerance study at atol = rtol in TOLS over the
+#             mutual adaptive set (the csv's `adaptive` column), each
+#             algorithm under its DEFAULT step-size controller — solver
+#             performance under real controller dynamics. Per-trajectory
+#             accept/reject counts are recorded, and the resolved controller
+#             constants are exported (controller_constants.csv) so the cubie
+#             runner can mirror them exactly for its "matched" tier.
 #
 # The protocol mirrors ne_common.py; keep the two in sync.
 #
@@ -200,6 +202,10 @@ function run_fixed(ctx)
     for row in TABLE
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
+        if String(row.family) == "erk"
+            println("=== fixed $(alias): skipped (no fixed sweep for erk)")
+            continue
+        end
         println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row.order)) ===")
         alg = try
             eval(Meta.parse(expr))
@@ -262,6 +268,12 @@ function run_adaptive(ctx)
     for row in TABLE
         alias = String(row.cubie_alias)
         expr = String(row.julia_expr)
+        # Only the mutual adaptive set runs.
+        if lowercase(string(row.adaptive)) != "true"
+            println("=== adaptive $(alias): skipped (not in the mutual " *
+                    "adaptive set)")
+            continue
+        end
         alg = try
             eval(Meta.parse(expr))
         catch err

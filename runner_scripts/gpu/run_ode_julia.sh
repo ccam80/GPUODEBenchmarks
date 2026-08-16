@@ -4,7 +4,7 @@ set -e
 unset LD_LIBRARY_PATH
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl 32768 wp "$ALGORITHM" --problem "$PROBLEM"
+    julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl 131072 wp "$ALGORITHM" --problem "$PROBLEM"
     exit 0
 fi
 

@@ -17,7 +17,6 @@ numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "problems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "protocol.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 const DATASET_KEY = dataset_key()
 const REPO_ROOT = dirname(@__DIR__)
@@ -58,7 +57,9 @@ end
 const REPEATS = 20
 const WP_MODE = "wp" in ARGS
 # The kernel solvers fix their own controller; only the tolerance is shared.
-const TIMING_TOL = Float32(load_protocol()["timing_tol"])
+# Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
+const TIMING_TOL = 1.0f-8
+const N_WP = 131072
 
 "DiffEqGPU kernel solver for an algorithm name; autodiff off matches the overlap suite."
 function gpu_solver(algorithm)
@@ -98,12 +99,12 @@ function failed(what, err)
     return NaN
 end
 
-# Sweeps fixed dt and adaptive tolerance at N=32768; grids mirror runner_scripts/wp_common.py.
+# Sweeps fixed dt and adaptive tolerance at N=N_WP; grids mirror runner_scripts/wp_common.py.
 function run_wp(problem)
-    numberOfParameters == 32768 || error("wp mode must be run with N = 32768")
+    numberOfParameters == N_WP || error("wp mode must be run with N = $(N_WP)")
     golden = readdlm(
         joinpath(REPO_ROOT, "data", "numerical",
-            "golden_$(problem["problem"])_32768.csv"), ',', Float64)
+            "golden_$(problem["problem"])_$(N_WP).csv"), ',', Float64)
     nstates = problem["states"]
     prob, _, probs, duration = build_probs(problem)
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)

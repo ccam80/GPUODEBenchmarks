@@ -23,8 +23,15 @@ the rest:
 - `--algorithm` runs one row of `algorithms.csv`; other rows stay.
 
 `manifest.json` records the commands of the last run. Protocol settings live in
-`common.py`, mirrored in `julia_worker.jl`. The CSVs record the analysis in a
-`phase` column, where `work-precision` is written `work_precision`.
+`common.py` (numerical grids and adaptive pins shared with the NE suite's
+`ne_common.py`), mirrored in `julia_worker.jl`. The CSVs record the analysis
+in a `phase` column, where `work-precision` is written `work_precision`.
+
+The `numerical` phase's cubie side is imported from
+`data/numerical_equivalence/cubie/<dataset-key>/` — run
+`run_numerical_equivalence` first. The DiffEqGPU side solves untimed, one
+pass per point. erk-family rows run no fixed numerical sweep. The `pi`
+comparison tier is skipped where it equals cubie's shipped defaults.
 
 The executable overlap table is `algorithms.csv`. The complete eight-method
 DiffEqGPU ODE inventory, including the three exclusions, is

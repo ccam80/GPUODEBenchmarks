@@ -8,9 +8,18 @@ PROBLEMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 DEFAULT_PROBLEM = "lorenz"
 
-_INT_FIELDS = ("states", "dae_index", "wp_k_min", "wp_k_max",
-               "euler_k_min", "euler_k_max", "ne_k_min", "ne_k_max")
+_INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
+
+# Dyadic dt-grid exponents, applied as fractions of the problem duration so
+# every dt, save and end boundary is exact in binary floating point. Euler
+# gets a finer grid: a first-order method needs far smaller dt for errors in
+# the same range as the order >= 4 methods. Mirrored in problems.jl.
+WP_K = (4, 13)
+EULER_K = (8, 17)
+NE_K = (1, 13)
+# Fixed step of the timed N-sweep: 2^-10 of the duration, mirrored dyadic.
+TIMING_DT_K = 10
 
 
 class Problem(dict):
@@ -26,19 +35,18 @@ class Problem(dict):
 
     @property
     def timing_dt(self):
-        """Fixed step used by the N-sweep: 1000 steps for every problem."""
-        return self["duration"] / 1000.0
+        """Fixed step used by the N-sweep: duration * 2^-10."""
+        return self["duration"] * 2.0 ** -TIMING_DT_K
 
     def dts(self, algorithm=None):
         """Fixed-step dt grid for the work-precision sweep."""
-        lo, hi = (self["euler_k_min"], self["euler_k_max"]) \
-            if algorithm == "euler" else (self["wp_k_min"], self["wp_k_max"])
+        lo, hi = EULER_K if algorithm == "euler" else WP_K
         return [self["duration"] * 2.0 ** -k for k in range(lo, hi + 1)]
 
     def ne_dts(self):
         """Fixed-step dt grid for the numerical-equivalence sweep."""
         return [self["duration"] * 2.0 ** -k
-                for k in range(self["ne_k_min"], self["ne_k_max"] + 1)]
+                for k in range(NE_K[0], NE_K[1] + 1)]
 
     def sweep(self, n, dtype=None):
         """The ensemble parameter grid: n values over the sweep range."""
@@ -54,10 +62,6 @@ class Problem(dict):
 
     def supports(self, framework):
         return framework in self["frameworks"]
-
-    @property
-    def is_dae(self):
-        return self["dae_index"] > 0
 
 
 def load_problems():

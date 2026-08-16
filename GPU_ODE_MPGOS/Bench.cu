@@ -37,8 +37,8 @@ const int NIA  = 0;     // NumberOfIntegerAccessories
 const int NDO  = 10;     // NumberOfPointsOfDenseOutput
 
 const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
-// The N sweep takes 1000 steps, matching the other frameworks.
-const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION / 1000.0);
+// The N sweep steps duration * 2^-10, matching the other frameworks.
+const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION / 1024.0);
 
 void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
 void Logspace(vector<PRECISION>&, PRECISION, PRECISION, int);
@@ -157,17 +157,17 @@ int main(int argc, char *argv[])
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
 
-	// `<exe> 32768 wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
+	// `<exe> 131072 wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
 	if (argc > 2 && string(argv[2]) == string("wp"))
 	{
-		if (NT != 32768)
+		if (NT != 131072)
 		{
-			cerr << "wp mode must be built with NT = 32768" << endl;
+			cerr << "wp mode must be built with NT = 131072" << endl;
 			return 1;
 		}
 		vector< vector<double> > golden(NT, vector<double>(SD, 0.0));
 		{
-			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_32768.csv";
+			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_131072.csv";
 			ifstream gf(gpath.c_str());
 			if (!gf)
 			{

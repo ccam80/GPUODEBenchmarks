@@ -104,7 +104,7 @@ Enter-VsEnvironment
 foreach ($problemName in $Problems) {
     if ($Analysis -eq 'work-precision') {
         foreach ($solver in $Solvers) {
-            Invoke-Point -ProblemName $problemName -Solver $solver -Nt 32768 -Wp
+            Invoke-Point -ProblemName $problemName -Solver $solver -Nt 131072 -Wp
         }
         continue
     }

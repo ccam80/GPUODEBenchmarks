@@ -32,8 +32,8 @@ do
 	if [ "$ANALYSIS" == "work-precision" ]; then
 		for solver in $SOLVERS
 		do
-			build "$problem" "$solver" 32768
-			./GPU_ODE_MPGOS/Bench.exe 32768 wp
+			build "$problem" "$solver" 131072
+			./GPU_ODE_MPGOS/Bench.exe 131072 wp
 		done
 		continue
 	fi

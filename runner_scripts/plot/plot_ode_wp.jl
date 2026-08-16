@@ -101,7 +101,7 @@ function render_plot(sel, group_label, problem, mode_label, alg_label, plots_dir
     algword = alg_label == "all" ? "all algorithms" : alg_label
     plt = plot(xaxis = :log, yaxis = :log, linewidth = 2,
         ylabel = "Time (s)", xlabel = "Error (ensemble l2, final state)",
-        title = "$(problem) WP, N=32768, $(modeword), $(algword) ($(group_label))",
+        title = "$(problem) WP, N=131072, $(modeword), $(algword) ($(group_label))",
         titlefontsize = 12, legend = :outertopright, dpi = 600)
 
     for s in sel

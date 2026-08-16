@@ -31,7 +31,6 @@ class RegistryTests(unittest.TestCase):
             self.assertGreater(row["duration"], 0.0)
             self.assertGreater(row["golden_tol"], 0.0)
             self.assertIn(row["sweep_scale"], ("linear", "log"))
-            self.assertIn(row["class"], ("stiff", "nonstiff"))
 
     def test_unknown_problem_exits(self):
         with self.assertRaises(SystemExit):
@@ -64,9 +63,9 @@ class GridTests(unittest.TestCase):
         self.assertLess(dts_for("euler", self.problem)[-1],
                         dts_for("tsit5", self.problem)[-1])
 
-    def test_timing_dt_takes_a_thousand_steps(self):
-        self.assertAlmostEqual(self.problem["duration"] / 1000.0,
-                               self.problem.timing_dt)
+    def test_timing_dt_is_a_dyadic_fraction_of_the_duration(self):
+        self.assertEqual(self.problem["duration"] * 2.0 ** -10,
+                         self.problem.timing_dt)
 
     def test_sweep_spans_the_range(self):
         for row in load_problems():
@@ -89,12 +88,6 @@ class GridTests(unittest.TestCase):
         row["sweep_scale"], row["sweep_min"] = "log", 0.0
         with self.assertRaises(SystemExit):
             row.sweep(4)
-
-    def test_dae_rows_declare_an_index(self):
-        for row in load_problems():
-            self.assertEqual(row.is_dae, row["dae_index"] > 0)
-            if row["class"] == "nonstiff":
-                self.assertEqual(0, row["dae_index"])
 
 
 class PathTests(unittest.TestCase):

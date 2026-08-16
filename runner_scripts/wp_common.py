@@ -1,6 +1,5 @@
 """Work-precision sweep protocol: setting, time and error rows under data/<package>/<key>/<problem>/, mirrored by the Julia and MPGOS writers."""
 
-import csv
 import os
 
 import numpy as np
@@ -11,21 +10,11 @@ from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
-N_WP = 32768
+N_WP = 131072
 
-def load_protocol():
-    """The shared settings in protocol.csv, mirrored by protocol.jl."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "protocol.csv")
-    with open(path, newline="", encoding="utf-8") as handle:
-        return {row["setting"]: float(row["value"])
-                for row in csv.DictReader(handle)}
-
-
-PROTOCOL = load_protocol()
-
-# Tolerance of the adaptive points in the N-sweep.
-TIMING_TOL = PROTOCOL["timing_tol"]
+# Tolerance of the adaptive points in the N-sweep; mirrored in the Julia
+# and MPGOS writers.
+TIMING_TOL = 1.0e-8
 
 
 def _row(problem):

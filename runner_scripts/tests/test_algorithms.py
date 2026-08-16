@@ -11,7 +11,7 @@ from algorithms import (  # noqa: E402
     algorithm_names, get_algorithm, load_algorithms, resolve_algorithms,
     supported_for,
 )
-from wp_common import PROTOCOL, TIMING_TOL, parse_bench_args  # noqa: E402
+from wp_common import parse_bench_args  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -53,12 +53,6 @@ class RegistryTests(unittest.TestCase):
     def test_resolve_all_is_the_framework_set(self):
         self.assertEqual(list(supported_for("jax")),
                          resolve_algorithms("all", "jax"))
-
-
-class ProtocolTests(unittest.TestCase):
-    def test_the_timing_tolerance_comes_from_the_protocol_file(self):
-        self.assertEqual(PROTOCOL["timing_tol"], TIMING_TOL)
-        self.assertGreater(TIMING_TOL, 0.0)
 
 
 class ParseTests(unittest.TestCase):

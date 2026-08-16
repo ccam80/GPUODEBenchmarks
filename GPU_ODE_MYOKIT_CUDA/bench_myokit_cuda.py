@@ -29,8 +29,8 @@ from wp_common import (  # noqa: E402
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 DATASET_KEY = dataset_key()
-# The N-sweep runs 1000 steps for every problem.
-STANDARD_STEPS = 1000
+# The N-sweep steps duration * 2^-10, so 1024 steps keep the span exact.
+STANDARD_STEPS = 1024
 # Timed repeats per point; min is reported.
 REPEATS = 20
 # Myokit's generated CUDA kernel is forward Euler only.
