@@ -1,13 +1,5 @@
 #!/usr/bin/env python
-"""Rewrite accelerInt's double-precision C sources to single precision.
-
-Reads the files listed in SOURCES from an accelerInt checkout, applies the
-substitutions below and writes the result to the build directory. Prints a
-per-rule substitution count so the cast is auditable. With precision "double"
-the files are copied unchanged, which is the reference build.
-
-    python cast_float32.py <accelerInt-checkout> <output-dir> [single|double]
-"""
+"""Usage: cast_float32.py <accelerInt-checkout> <output-dir> [single|double]"""
 
 import os
 import re

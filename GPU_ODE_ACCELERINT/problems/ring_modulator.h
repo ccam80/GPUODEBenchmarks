@@ -1,5 +1,4 @@
 // Ring modulator (Test Set for IVP Solvers II-3); Cs is swept.
-// Mirrors GPU_ODE_MPGOS/problems/ring_modulator.cuh.
 
 #ifndef PROBLEM_RING_MODULATOR_H
 #define PROBLEM_RING_MODULATOR_H

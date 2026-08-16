@@ -1,5 +1,4 @@
-// Compare the problem's analytic Jacobian against a central difference of its RHS.
-// Runs in double precision so the difference quotient is the accurate side.
+// Checks the analytic Jacobian against a central difference of the RHS, in double.
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,9 +1,6 @@
-# accelerInt radau2a built at single or double precision, without SCons.
-#
-#   make PROBLEM=ring_modulator PRECISION=single RTOL=1e-4 ATOL=1e-6
-#   ./build/radau2a-ring_modulator-single <num_threads> <num_IVPs>
-#
-# ATOL and RTOL are compile-time constants, so a tolerance sweep is one build per point.
+# make PROBLEM=ring_modulator PRECISION=single RTOL=1e-6 ATOL=1e-6
+# ./build/radau2a-<problem>-<precision> <num_threads> <num_IVPs>
+# ATOL and RTOL are compile-time constants: one build per tolerance.
 
 ACCELERINT ?= accelerInt-src
 BUILD      ?= build
@@ -68,8 +65,7 @@ else
   JAC_SRC := src/jacob.c
 endif
 
-# src/status.c replaces radau2a_props.c, whose check_error exits on the first
-# failing trajectory.
+# src/status.c supplies check_error in place of radau2a_props.c.
 LOCAL_SRC := src/dydt.c src/ics.c src/sparse_multiplier.c src/status.c $(JAC_SRC)
 CAST_SRC  := $(GENERIC)/solver_main.c $(GENERIC)/solver_generic.c \
              $(GENERIC)/solver_interface.c $(GENERIC)/complexInverse.c \
@@ -80,8 +76,7 @@ VPATH := src:problems:$(GENERIC):$(RADAU)
 
 .PHONY: all build clean distclean cast check
 
-# Two phases: VPATH is scanned at startup, so the cast has to finish before the
-# recipe that compiles its output is parsed.
+# VPATH is scanned at startup, so the cast runs in its own make invocation.
 all:
 	@$(MAKE) --no-print-directory cast
 	@$(MAKE) --no-print-directory build

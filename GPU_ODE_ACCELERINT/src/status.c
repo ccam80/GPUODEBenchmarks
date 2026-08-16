@@ -1,6 +1,4 @@
-// Replaces accelerInt's check_error, which exits the process on the first
-// failing trajectory. A trajectory that fails to converge is a result, so the
-// code is recorded and the run continues.
+// Records each trajectory's return code and reports the tally at exit.
 
 #include <stdio.h>
 #include <stdlib.h>
