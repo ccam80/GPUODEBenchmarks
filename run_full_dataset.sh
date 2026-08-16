@@ -168,7 +168,6 @@ elif $HAS_JULIA; then NE_PACKAGE=julia
 elif $HAS_CUBIE; then NE_PACKAGE=cubie
 fi
 
-
 # -n: sweep ceiling or comma list of exact counts.
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
