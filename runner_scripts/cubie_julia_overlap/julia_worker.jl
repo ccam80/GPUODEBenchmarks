@@ -240,8 +240,7 @@ for row in table
     for phase in phases
         points = Tuple{String, String, Float64, Int}[]
         repeats = 1
-        # dt fractions scale by the duration here, so the recorded setting
-        # is the absolute dt the cubie worker records for the same point.
+        # Scale dt fractions by the duration; the recorded setting is the absolute dt.
         if phase == "performance"
             for n in PROTOCOL.performance_ns
                 push!(points, ("fixed", "dt", DURATION * FIXED_DT, n))

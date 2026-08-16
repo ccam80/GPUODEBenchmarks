@@ -12,8 +12,7 @@ TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 131072
 
-# Tolerance of the adaptive points in the N-sweep; mirrored in the Julia
-# and MPGOS writers.
+# Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
 TIMING_TOL = 1.0e-8
 
 

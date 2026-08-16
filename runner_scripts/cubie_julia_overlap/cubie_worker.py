@@ -141,11 +141,7 @@ def to_device_inputs(initials, parameters):
 
 def import_numerical_from_ne(output, alias, family, problem, metric_file,
                              failure):
-    """Import the NE suite's cubie finals as numerical-phase metric rows.
-
-    Reads data/numerical_equivalence/cubie/<key>/<problem>/; erk-family rows
-    import the adaptive default tier only.
-    """
+    """Import the NE suite's cubie finals; erk rows import the adaptive default tier only."""
     key = dataset_key()
     nstates = problem["states"]
     golden = np.loadtxt(golden_ne(problem), delimiter=",",

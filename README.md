@@ -199,8 +199,8 @@ comparison is what each package delivers for a requested accuracy, which is
 why the figures plot achieved error rather than step counts. Adaptive points
 take `atol = rtol` from `TIMING_TOL` in `runner_scripts/wp_common.py` for the
 N-sweep and from the `TOLS` grid for work-precision, and start from the
-problem's timing dt. Nothing else is set: every package, cubie included,
-runs its shipped step-controller defaults.
+problem's timing dt. Nothing else is set: every package runs its shipped
+step-controller defaults.
 
 Controllers are matched in one place only, the cubie against
 DifferentialEquations.jl overlap suite, which repeats each comparison with

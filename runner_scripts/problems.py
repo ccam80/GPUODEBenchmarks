@@ -11,14 +11,12 @@ DEFAULT_PROBLEM = "lorenz"
 _INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
-# Dyadic dt-grid exponents, applied as fractions of the problem duration so
-# every dt, save and end boundary is exact in binary floating point. Euler
-# gets a finer grid: a first-order method needs far smaller dt for errors in
-# the same range as the order >= 4 methods. Mirrored in problems.jl.
+# Dyadic dt-grid exponents as duration fractions; mirrored in problems.jl.
 WP_K = (4, 13)
+# Euler runs a finer grid than the higher-order methods.
 EULER_K = (8, 17)
 NE_K = (1, 13)
-# Fixed step of the timed N-sweep: 2^-10 of the duration.
+# Timed N-sweep fixed step: duration * 2^-10.
 TIMING_DT_K = 10
 
 

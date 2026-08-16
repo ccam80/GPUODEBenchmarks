@@ -56,7 +56,6 @@ end
 # Fixed sample count to match the other frameworks.
 const REPEATS = 20
 const WP_MODE = "wp" in ARGS
-# The kernel solvers fix their own controller; only the tolerance is shared.
 # Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
 const TIMING_TOL = 1.0f-8
 const N_WP = 131072

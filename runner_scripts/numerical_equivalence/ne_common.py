@@ -7,9 +7,7 @@ import numpy as np
 
 from problems import DEFAULT_PROBLEM, get_problem
 
-# Dyadic dt grids come from the problems module as duration fractions; they
-# extend the wp grid with coarser steps so high-order methods have a visible
-# convergence region, and the small-dt end resolves the fp-precision tail.
+# Dyadic dt grids come from the problems module as duration fractions.
 
 # Adaptive sweep: atol = rtol tolerance grid.
 TOLS_NE = [10.0 ** -k for k in range(2, 9)]
