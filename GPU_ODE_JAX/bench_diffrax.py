@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import diffrax
 import jax
+import optimistix as optx
 import jax.numpy as jnp
 import numpy as np
 import os
@@ -75,7 +76,8 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
-def make_solver(algorithm):
+def make_solver(algorithm, fixed_tol=None):
+    """Diffrax solver; a fixed step size leaves nothing for an implicit solver to take its root-finder tolerances from, so fixed_tol supplies them."""
     if algorithm == "euler":
         return diffrax.Euler()
     if algorithm == "classical-rk4":
@@ -83,7 +85,10 @@ def make_solver(algorithm):
     if algorithm == "tsit5":
         return diffrax.Tsit5()
     if algorithm == "kvaerno3":
-        return diffrax.Kvaerno3()
+        if fixed_tol is None:
+            return diffrax.Kvaerno3()
+        return diffrax.Kvaerno3(root_finder=diffrax.VeryChord(
+            rtol=fixed_tol, atol=fixed_tol, norm=optx.rms_norm))
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
@@ -130,7 +135,7 @@ def best_times_ms(solve, args, label):
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm)
+    solver = make_solver(algorithm, fixed_tol=TIMING_TOL)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0

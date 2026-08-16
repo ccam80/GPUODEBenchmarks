@@ -210,8 +210,10 @@ cubie's controller set to Julia's (`pi_controller` in
 `eps(Float32)` is 1.2e-7, so the tightest points of the tolerance grid and
 the 1e-8 `timing_tol` ask for more than the working precision resolves.
 Cubie warns `newton_rtol is at or above the step controller rtol` from 1e-7
-down. Diffrax refuses to build a fixed-step implicit solver without an
-explicit stage tolerance, so its fixed `kvaerno3` point records NaN.
+down. A fixed step leaves diffrax's implicit solvers nothing to take their
+root-finder tolerances from, so the bench passes the run's tolerance the way
+an adaptive controller would; its chord iteration still diverges on lorenz,
+and that point records NaN.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
