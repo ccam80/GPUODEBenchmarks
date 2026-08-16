@@ -36,6 +36,13 @@ const int NA   = 0;     // NumberOfAccessories
 const int NIA  = 0;     // NumberOfIntegerAccessories
 const int NDO  = 10;     // NumberOfPointsOfDenseOutput
 
+// Adaptive protocol constants; runner_scripts/protocol.csv is the source.
+#define PROTOCOL_TIMING_TOL 1.0e-8
+#define PROTOCOL_DT_MIN 1.0e-12
+#define PROTOCOL_DT_MAX 1.0e3
+#define PROTOCOL_MAX_GAIN 5.0
+#define PROTOCOL_MIN_GAIN 0.1
+
 const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
 // The N sweep takes 1000 steps, matching the other frameworks.
 const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION / 1000.0);
@@ -156,6 +163,16 @@ int main(int argc, char *argv[])
 
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
+	// Adaptive protocol, kept equal to runner_scripts/protocol.csv.
+	Scan.SolverOption(MinimumTimeStep, PROTOCOL_DT_MIN);
+	Scan.SolverOption(MaximumTimeStep, PROTOCOL_DT_MAX);
+	Scan.SolverOption(TimeStepGrowLimit, PROTOCOL_MAX_GAIN);
+	Scan.SolverOption(TimeStepShrinkLimit, PROTOCOL_MIN_GAIN);
+	for (int c = 0; c < SD; c++)
+	{
+		Scan.SolverOption(RelativeTolerance, c, PROTOCOL_TIMING_TOL);
+		Scan.SolverOption(AbsoluteTolerance, c, PROTOCOL_TIMING_TOL);
+	}
 
 	// `<exe> 32768 wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
 	if (argc > 2 && string(argv[2]) == string("wp"))

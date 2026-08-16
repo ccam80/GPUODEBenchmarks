@@ -192,6 +192,45 @@ Every algorithm is run against every problem its framework defines. An
 algorithm that cannot integrate a system records a NaN time and a NaN error
 for that point and the sweep continues; the plots drop non-finite points.
 
+### Adaptive protocol
+
+`runner_scripts/protocol.csv` holds the adaptive settings, read by
+`wp_common.py` and `protocol.jl` and mirrored by the `PROTOCOL_*` macros in
+`GPU_ODE_MPGOS/Bench.cu`. Every framework starts at the problem's timing dt,
+takes `atol = rtol` from the sweep (`timing_tol` for the N-sweep, the `TOLS`
+grid for work-precision), and scales its step by
+
+```
+    gain = clamp(safety * rms_error ** (-kp / (order + 1)), min_gain, max_gain)
+```
+
+over the same error norm: `rms(err / (atol + rtol * max(|y|, |y_prev|)))`,
+accepted when it is at most 1. Implicit stage solves converge to
+`newton_tol_factor` times the step tolerance, floored at the working epsilon.
+
+How much of that each framework can be told:
+
+| Setting | CUBIE | JAX | Julia | MPGOS |
+|---|---|---|---|---|
+| `atol`, `rtol`, initial dt | set | set | set | set |
+| `dt_min`, `dt_max` | set | set | fixed (unbounded) | set |
+| `min_gain`, `max_gain` | set | set | fixed 0.2, 10 | set |
+| `safety` | set | set | fixed 0.9 | fixed 0.9 |
+| gain exponent | set | set | fixed PI, 7/(10·order) and 2/(5·order) | fixed 1/order |
+| error norm | RMS | RMS | RMS | max |
+
+DiffEqGPU's kernel solvers build their controller inside the kernel
+(`build_adaptive_controller_cache`), so `vectorized_asolve` takes tolerances
+and the initial step but no controller settings: Julia matches on tolerance
+and start step only. Two further differences are not settable anywhere:
+diffrax never shrinks an accepted step, and MPGOS scales its step from the
+worst single component rather than the RMS.
+
+Float32 sets the floor: `eps(Float32)` is 1.2e-7, so the tightest points of
+the tolerance grid, and the `timing_tol` of 1e-8, ask for accuracy the
+working precision cannot resolve. Cubie warns (`newton_rtol is at or above
+the step controller rtol`) from 1e-7 down.
+
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
 a framework that does not support a requested algorithm skips cleanly:

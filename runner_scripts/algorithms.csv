@@ -1,8 +1,8 @@
-algorithm,display,family,fixed,adaptive
-euler,Euler,explicit,cubie|cubie_mlir|jax|pytorch|myokit_cuda,
-classical-rk4,RK4,explicit,cubie|cubie_mlir|jax|pytorch|cpp,
-tsit5,Tsit5,explicit,cubie|cubie_mlir|jax|pytorch|julia,cubie|cubie_mlir|jax|julia
-cash-karp-54,Cash-Karp 5(4),explicit,,cubie|cubie_mlir|cpp
-rosenbrock23_sciml,Rosenbrock23,implicit,cubie|cubie_mlir|julia,cubie|cubie_mlir|julia
-kvaerno3,Kvaerno3,implicit,cubie|cubie_mlir|jax|julia,cubie|cubie_mlir|jax|julia
-radau_iia_5,Radau IIA 5,implicit,cubie|cubie_mlir,cubie|cubie_mlir
+algorithm,display,family,order,fixed,adaptive
+euler,Euler,explicit,1,cubie|cubie_mlir|jax|pytorch|myokit_cuda,
+classical-rk4,RK4,explicit,4,cubie|cubie_mlir|jax|pytorch|cpp,
+tsit5,Tsit5,explicit,5,cubie|cubie_mlir|jax|pytorch|julia,cubie|cubie_mlir|jax|julia
+cash-karp-54,Cash-Karp 5(4),explicit,5,,cubie|cubie_mlir|cpp
+rosenbrock23_sciml,Rosenbrock23,implicit,2,cubie|cubie_mlir|julia,cubie|cubie_mlir|julia
+kvaerno3,Kvaerno3,implicit,3,cubie|cubie_mlir|jax|julia,cubie|cubie_mlir|jax|julia
+radau_iia_5,Radau IIA 5,implicit,5,cubie|cubie_mlir,cubie|cubie_mlir

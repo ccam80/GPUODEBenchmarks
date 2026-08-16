@@ -8,6 +8,7 @@ ALGORITHMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "algorithms.csv")
 
 _MODES = ("fixed", "adaptive")
+_INT_FIELDS = ("order",)
 
 
 class Algorithm(dict):
@@ -29,6 +30,8 @@ def load_algorithms():
         rows = list(csv.DictReader(handle))
     algorithms = []
     for row in rows:
+        for field in _INT_FIELDS:
+            row[field] = int(row[field])
         for mode in _MODES:
             row[mode] = tuple(f for f in row[mode].split("|") if f)
         algorithms.append(Algorithm(row))

@@ -1,6 +1,7 @@
 """Registry tests: the algorithm table and the per-framework subsets."""
 
 import os
+import re
 import sys
 import unittest
 
@@ -11,7 +12,9 @@ from algorithms import (  # noqa: E402
     algorithm_names, get_algorithm, load_algorithms, resolve_algorithms,
     supported_for,
 )
-from wp_common import parse_bench_args  # noqa: E402
+from wp_common import (  # noqa: E402
+    ADAPTIVE, PROTOCOL, TIMING_TOL, parse_bench_args,
+)
 
 
 class RegistryTests(unittest.TestCase):
@@ -53,6 +56,32 @@ class RegistryTests(unittest.TestCase):
     def test_resolve_all_is_the_framework_set(self):
         self.assertEqual(list(supported_for("jax")),
                          resolve_algorithms("all", "jax"))
+
+
+class ProtocolTests(unittest.TestCase):
+    def test_every_algorithm_declares_a_positive_order(self):
+        for row in load_algorithms():
+            self.assertIsInstance(row["order"], int)
+            self.assertGreater(row["order"], 0)
+
+    def test_the_adaptive_settings_are_the_protocol_file(self):
+        for name, value in ADAPTIVE.items():
+            self.assertEqual(PROTOCOL[name], value)
+        self.assertEqual(PROTOCOL["timing_tol"], TIMING_TOL)
+
+    def test_mpgos_defines_the_same_protocol(self):
+        source = os.path.join(os.path.dirname(os.path.dirname(HERE)),
+                              "GPU_ODE_MPGOS", "Bench.cu")
+        with open(source, encoding="utf-8") as handle:
+            text = handle.read()
+        macros = {"timing_tol": "PROTOCOL_TIMING_TOL",
+                  "dt_min": "PROTOCOL_DT_MIN", "dt_max": "PROTOCOL_DT_MAX",
+                  "max_gain": "PROTOCOL_MAX_GAIN",
+                  "min_gain": "PROTOCOL_MIN_GAIN"}
+        for name, macro in macros.items():
+            found = re.search(r"#define {0} ([0-9.eE+-]+)".format(macro), text)
+            self.assertIsNotNone(found, macro)
+            self.assertEqual(PROTOCOL[name], float(found.group(1)))
 
 
 class ParseTests(unittest.TestCase):

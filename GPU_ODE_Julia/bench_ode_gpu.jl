@@ -17,6 +17,7 @@ numberOfParameters = isinteractive() ? 8192 : parse(Int64, ARGS[1])
 include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "problems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "protocol.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 const DATASET_KEY = dataset_key()
 const REPO_ROOT = dirname(@__DIR__)
@@ -56,6 +57,8 @@ end
 # Fixed sample count to match the other frameworks.
 const REPEATS = 20
 const WP_MODE = "wp" in ARGS
+# The kernel solvers fix their own controller; only the tolerance is shared.
+const TIMING_TOL = Float32(load_protocol()["timing_tol"])
 
 "DiffEqGPU kernel solver for an algorithm name; autodiff off matches the overlap suite."
 function gpu_solver(algorithm)
@@ -220,13 +223,13 @@ function run_times(problem)
                 data_dev = @benchmark begin
                     CUDA.@sync DiffEqGPU.vectorized_asolve($probs, $prob,
                         $solver, saveat = $duration, save_everystep = false,
-                        reltol = 1.0f-8, abstol = 1.0f-8, dt = $dt0)
+                        reltol = TIMING_TOL, abstol = TIMING_TOL, dt = $dt0)
                 end samples=REPEATS evals=1 seconds=1e9
                 data = @benchmark begin
                     probs_d = cu($probs_host)
                     CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs_d, $prob,
                         $solver, saveat = $duration, save_everystep = false,
-                        reltol = 1.0f-8, abstol = 1.0f-8, dt = $dt0)
+                        reltol = TIMING_TOL, abstol = TIMING_TOL, dt = $dt0)
                     ts = Array(sol[1])
                     us = Array(sol[2])
                 end samples=REPEATS evals=1 seconds=1e9
@@ -248,7 +251,7 @@ function run_times(problem)
                algorithm == "tsit5"
                 CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob, solver,
                     saveat = duration, save_everystep = false,
-                    reltol = 1.0f-8, abstol = 1.0f-8, dt = dt0)
+                    reltol = TIMING_TOL, abstol = TIMING_TOL, dt = dt0)
                 write_finals(problem, sol, "julia_adaptive.csv")
             end
         end

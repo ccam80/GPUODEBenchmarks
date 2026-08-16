@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import diffrax
 import jax
+import optimistix as optx
 import jax.numpy as jnp
 import numpy as np
 import os
@@ -20,10 +21,11 @@ from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolatio
 # additively populated across machines without clobbering each other.
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-from algorithms import supported_for
+from algorithms import get_algorithm, supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from wp_common import parse_bench_args, times_outfile
+from wp_common import (ADAPTIVE, FIXED_TOL, NEWTON_TOL_FACTOR, TIMING_TOL,
+                       parse_bench_args, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -75,7 +77,8 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
-def make_solver(algorithm):
+def make_solver(algorithm, tol):
+    """Diffrax solver; implicit stages converge to the protocol's Newton tolerance."""
     if algorithm == "euler":
         return diffrax.Euler()
     if algorithm == "classical-rk4":
@@ -83,7 +86,12 @@ def make_solver(algorithm):
     if algorithm == "tsit5":
         return diffrax.Tsit5()
     if algorithm == "kvaerno3":
-        return diffrax.Kvaerno3()
+        # A relative tolerance below the working epsilon is unreachable.
+        newton_tol = max(tol * NEWTON_TOL_FACTOR,
+                         float(np.finfo(np.float32).eps))
+        # Newton, matching cubie's stage solver rather than diffrax's chord.
+        return diffrax.Kvaerno3(
+            root_finder=optx.Newton(rtol=newton_tol, atol=newton_tol))
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
@@ -130,7 +138,7 @@ def best_times_ms(solve, args, label):
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm)
+    solver = make_solver(algorithm, FIXED_TOL)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0
@@ -144,11 +152,33 @@ def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
     return main
 
 
-def make_adaptive(problem, algorithm, tol=1e-8, max_steps=65536):
-    solver = make_solver(algorithm)
+def make_controller(algorithm, tol):
+    """Diffrax controller matching the shared adaptive protocol.
+
+    Diffrax scales the gain exponent by ``error_order``, so passing the
+    algorithm order plus one reproduces cubie's ``kp / (order + 1)``."""
+    return diffrax.PIDController(
+        rtol=tol,
+        atol=tol,
+        icoeff=ADAPTIVE["kp"],
+        pcoeff=ADAPTIVE["ki"],
+        dcoeff=ADAPTIVE["kd"],
+        error_order=get_algorithm(algorithm)["order"] + 1,
+        safety=ADAPTIVE["safety"],
+        factormin=ADAPTIVE["min_gain"],
+        factormax=ADAPTIVE["max_gain"],
+        dtmin=ADAPTIVE["dt_min"],
+        dtmax=ADAPTIVE["dt_max"],
+        norm=optx.rms_norm,
+    )
+
+
+def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
+    solver = make_solver(algorithm, tol)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt
+    controller = make_controller(algorithm, tol)
 
     @jax.jit
     @jax.vmap
@@ -156,7 +186,7 @@ def make_adaptive(problem, algorithm, tol=1e-8, max_steps=65536):
         terms = diffrax.ODETerm(vector_field(p))
         return diffrax.diffeqsolve(
             terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps,
-            stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
+            stepsize_controller=controller)
     return main
 
 

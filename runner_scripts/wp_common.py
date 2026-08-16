@@ -1,5 +1,6 @@
 """Work-precision sweep protocol: setting, time and error rows under data/<package>/<key>/<problem>/, mirrored by the Julia and MPGOS writers."""
 
+import csv
 import os
 
 import numpy as np
@@ -11,6 +12,28 @@ from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 32768
+
+def load_protocol():
+    """The adaptive settings in protocol.csv, mirrored by protocol.jl."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "protocol.csv")
+    with open(path, newline="", encoding="utf-8") as handle:
+        return {row["setting"]: float(row["value"])
+                for row in csv.DictReader(handle)}
+
+
+PROTOCOL = load_protocol()
+
+# The step gain is safety * rms_error ** (-kp / (order + 1)), clamped to
+# [min_gain, max_gain]; the N-sweep runs adaptive points at TIMING_TOL.
+TIMING_TOL = PROTOCOL["timing_tol"]
+# Fixed-step runs carry a tolerance only for implicit stage solves, which
+# converge to newton_tol_factor times the step tolerance.
+FIXED_TOL = PROTOCOL["fixed_tol"]
+NEWTON_TOL_FACTOR = PROTOCOL["newton_tol_factor"]
+ADAPTIVE = {name: PROTOCOL[name] for name in
+            ("kp", "ki", "kd", "safety", "min_gain", "max_gain", "dt_min",
+             "dt_max")}
 
 
 def _row(problem):
