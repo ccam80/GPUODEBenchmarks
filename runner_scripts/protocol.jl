@@ -1,8 +1,8 @@
-# The adaptive protocol every framework runs, mirrored by wp_common.py.
+# Settings shared by every framework, mirrored by wp_common.py.
 
 const PROTOCOL_CSV = joinpath(@__DIR__, "protocol.csv")
 
-"Adaptive settings as a name to value dictionary."
+"Shared settings as a name to value dictionary."
 function load_protocol()
     lines = filter(!isempty, strip.(readlines(PROTOCOL_CSV)))
     settings = Dict{String, Float64}()

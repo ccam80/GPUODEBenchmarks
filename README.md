@@ -192,43 +192,26 @@ Every algorithm is run against every problem its framework defines. An
 algorithm that cannot integrate a system records a NaN time and a NaN error
 for that point and the sweep continues; the plots drop non-finite points.
 
-### Adaptive protocol
+### Adaptive settings
 
-`runner_scripts/protocol.csv` holds the adaptive settings, read by
-`wp_common.py` and `protocol.jl` and mirrored by the `PROTOCOL_*` macros in
-`GPU_ODE_MPGOS/Bench.cu`. Every framework starts at the problem's timing dt,
-takes `atol = rtol` from the sweep (`timing_tol` for the N-sweep, the `TOLS`
-grid for work-precision), and scales its step by
+Every framework is given the same tolerance and its own step controller: the
+comparison is what each package delivers for a requested accuracy, which is
+why the figures plot achieved error rather than step counts. Adaptive points
+take `atol = rtol` from `timing_tol` in `runner_scripts/protocol.csv` for the
+N-sweep and from the `TOLS` grid for work-precision, and start from the
+problem's timing dt. Nothing else is set, with one exception: cubie's
+explicit solvers run an I-only controller at `kp = 6/5`.
 
-```
-    gain = clamp(safety * rms_error ** (-kp / (order + 1)), min_gain, max_gain)
-```
+Controllers are matched in one place only, the cubie against
+DifferentialEquations.jl overlap suite, which repeats each comparison with
+cubie's controller set to Julia's (`pi_controller` in
+`runner_scripts/cubie_julia_overlap/common.py`).
 
-over the same error norm: `rms(err / (atol + rtol * max(|y|, |y_prev|)))`,
-accepted when it is at most 1. Implicit stage solves converge to
-`newton_tol_factor` times the step tolerance, floored at the working epsilon.
-
-How much of that each framework can be told:
-
-| Setting | CUBIE | JAX | Julia | MPGOS |
-|---|---|---|---|---|
-| `atol`, `rtol`, initial dt | set | set | set | set |
-| `dt_min`, `dt_max` | set | set | fixed (unbounded) | set |
-| `min_gain`, `max_gain` | set | set | fixed 0.2, 10 | set |
-| `safety` | set | set | fixed 0.9 | fixed 0.9 |
-| gain exponent | set | set | fixed PI, 7/(10·order) and 2/(5·order) | fixed 1/order |
-| error norm | RMS | RMS | RMS | max |
-
-DiffEqGPU builds its controller inside the kernel
-(`build_adaptive_controller_cache`), so `vectorized_asolve` takes tolerances
-and the initial step and nothing else. Diffrax never shrinks an accepted
-step, and MPGOS scales its step from the worst single component rather than
-the RMS.
-
-`eps(Float32)` is 1.2e-7, below which a relative tolerance is unreachable:
-that covers the last points of the tolerance grid and the 1e-8 `timing_tol`.
+`eps(Float32)` is 1.2e-7, so the tightest points of the tolerance grid and
+the 1e-8 `timing_tol` ask for more than the working precision resolves.
 Cubie warns `newton_rtol is at or above the step controller rtol` from 1e-7
-down.
+down. Diffrax refuses to build a fixed-step implicit solver without an
+explicit stage tolerance, so its fixed `kvaerno3` point records NaN.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);

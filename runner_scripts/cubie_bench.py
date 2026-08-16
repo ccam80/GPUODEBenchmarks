@@ -14,8 +14,10 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
-from wp_common import (ADAPTIVE, FIXED_TOL, TIMING_TOL, parse_bench_args,
-                       times_outfile)
+from wp_common import TIMING_TOL, parse_bench_args, times_outfile
+
+# Cubie's explicit solvers are moving to an I-only controller with this gain.
+I_CONTROLLER = {"kp": 6 / 5, "ki": 0.0, "kd": 0.0}
 
 # Timed repeats per point; min is reported.
 REPEATS = 20
@@ -29,8 +31,6 @@ def _make_fixed_solver(system, problem, algorithm, dt=None):
         system,
         algorithm=algorithm,
         dt=problem.timing_dt if dt is None else dt,
-        atol=FIXED_TOL,
-        rtol=FIXED_TOL,
         save_every=problem["duration"],
         step_controller='fixed',
         output_types=output_types(system),
@@ -50,7 +50,7 @@ def _make_adaptive_solver(system, problem, algorithm, tol=TIMING_TOL):
         step_controller='pid',
         output_types=output_types(system),
         time_logging_level=None,
-        **ADAPTIVE,
+        **I_CONTROLLER,
     )
 
 

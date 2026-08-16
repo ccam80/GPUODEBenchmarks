@@ -16,7 +16,6 @@ function load_algorithms()
             push!(fields, "")
         end
         row = Dict{String, Any}(zip(header, fields))
-        row["order"] = parse(Int, row["order"])
         for mode in _MODES
             row[mode] = String.(filter(!isempty, split(row[mode], '|')))
         end

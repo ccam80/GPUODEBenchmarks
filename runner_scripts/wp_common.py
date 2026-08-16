@@ -14,7 +14,7 @@ TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 N_WP = 32768
 
 def load_protocol():
-    """The adaptive settings in protocol.csv, mirrored by protocol.jl."""
+    """The shared settings in protocol.csv, mirrored by protocol.jl."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "protocol.csv")
     with open(path, newline="", encoding="utf-8") as handle:
@@ -26,12 +26,6 @@ PROTOCOL = load_protocol()
 
 # Tolerance of the adaptive points in the N-sweep.
 TIMING_TOL = PROTOCOL["timing_tol"]
-# Fixed-step tolerance, used only by implicit stage solves.
-FIXED_TOL = PROTOCOL["fixed_tol"]
-NEWTON_TOL_FACTOR = PROTOCOL["newton_tol_factor"]
-ADAPTIVE = {name: PROTOCOL[name] for name in
-            ("kp", "ki", "kd", "safety", "min_gain", "max_gain", "dt_min",
-             "dt_max")}
 
 
 def _row(problem):
