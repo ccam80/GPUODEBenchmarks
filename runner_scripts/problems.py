@@ -18,7 +18,7 @@ _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 WP_K = (4, 13)
 EULER_K = (8, 17)
 NE_K = (1, 13)
-# Fixed step of the timed N-sweep: 2^-10 of the duration, mirrored dyadic.
+# Fixed step of the timed N-sweep: 2^-10 of the duration.
 TIMING_DT_K = 10
 
 

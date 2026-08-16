@@ -16,10 +16,9 @@ runner_scripts/numerical_equivalence/ne_common.py):
     - "matched" tier: controller constants mirrored from the Julia run's
       resolved defaults (data/numerical_equivalence/julia/
       controller_constants.csv, written by ne_diffeq.jl), so both stacks
-      run identical controller type, gains and tolerances. Divergence
-      between the two stacks in this tier is the CI-gate signal. When the
-      matched settings equal the default tier's, the default results are
-      written for the matched file.
+      run identical controller type, gains and tolerances, isolating
+      controller-caused error. When the matched settings equal the default
+      tier's, the default results are written for the matched file.
 
 Run from the repo root (inside the GPU_ODE_CUBIE venv):
     python GPU_ODE_CUBIE/numerical_equivalence.py [fixed|adaptive|all]
