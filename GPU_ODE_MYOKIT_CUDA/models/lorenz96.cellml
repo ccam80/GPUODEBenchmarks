@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model
+    name="lorenz96"
+    xmlns="http://www.cellml.org/cellml/1.1#"
+    xmlns:cellml="http://www.cellml.org/cellml/1.1#">
+  <component name="environment">
+    <variable
+        name="time"
+        units="dimensionless"
+        public_interface="out"/>
+  </component>
+
+  <component name="lorenz96">
+    <variable
+        name="time"
+        units="dimensionless"
+        public_interface="in"/>
+    <variable name="x1" units="dimensionless" initial_value="9"/>
+    <variable name="x2" units="dimensionless" initial_value="8"/>
+    <variable name="x3" units="dimensionless" initial_value="8"/>
+    <variable name="x4" units="dimensionless" initial_value="8"/>
+    <variable name="x5" units="dimensionless" initial_value="8"/>
+    <variable name="x6" units="dimensionless" initial_value="8"/>
+    <variable name="x7" units="dimensionless" initial_value="8"/>
+    <variable name="x8" units="dimensionless" initial_value="8"/>
+    <variable name="x9" units="dimensionless" initial_value="8"/>
+    <variable name="x10" units="dimensionless" initial_value="8"/>
+    <variable name="x11" units="dimensionless" initial_value="8"/>
+    <variable name="x12" units="dimensionless" initial_value="8"/>
+    <variable name="x13" units="dimensionless" initial_value="8"/>
+    <variable name="x14" units="dimensionless" initial_value="8"/>
+    <variable name="x15" units="dimensionless" initial_value="8"/>
+    <variable name="x16" units="dimensionless" initial_value="8"/>
+    <variable name="x17" units="dimensionless" initial_value="8"/>
+    <variable name="x18" units="dimensionless" initial_value="8"/>
+    <variable name="x19" units="dimensionless" initial_value="8"/>
+    <variable name="x20" units="dimensionless" initial_value="8"/>
+    <variable name="x21" units="dimensionless" initial_value="8"/>
+    <variable name="x22" units="dimensionless" initial_value="8"/>
+    <variable name="x23" units="dimensionless" initial_value="8"/>
+    <variable name="x24" units="dimensionless" initial_value="8"/>
+    <variable name="x25" units="dimensionless" initial_value="8"/>
+    <variable name="x26" units="dimensionless" initial_value="8"/>
+    <variable name="x27" units="dimensionless" initial_value="8"/>
+    <variable name="x28" units="dimensionless" initial_value="8"/>
+    <variable name="x29" units="dimensionless" initial_value="8"/>
+    <variable name="x30" units="dimensionless" initial_value="8"/>
+    <variable name="x31" units="dimensionless" initial_value="8"/>
+    <variable name="x32" units="dimensionless" initial_value="8"/>
+    <variable name="x33" units="dimensionless" initial_value="8"/>
+    <variable name="x34" units="dimensionless" initial_value="8"/>
+    <variable name="x35" units="dimensionless" initial_value="8"/>
+    <variable name="x36" units="dimensionless" initial_value="8"/>
+    <variable name="x37" units="dimensionless" initial_value="8"/>
+    <variable name="x38" units="dimensionless" initial_value="8"/>
+    <variable name="x39" units="dimensionless" initial_value="8"/>
+    <variable name="x40" units="dimensionless" initial_value="8"/>
+    <variable name="F" units="dimensionless" initial_value="8"/>
+
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x1</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x2</ci><ci>x39</ci></apply><ci>x40</ci></apply><ci>x1</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x2</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x3</ci><ci>x40</ci></apply><ci>x1</ci></apply><ci>x2</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x3</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x4</ci><ci>x1</ci></apply><ci>x2</ci></apply><ci>x3</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x4</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x5</ci><ci>x2</ci></apply><ci>x3</ci></apply><ci>x4</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x5</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x6</ci><ci>x3</ci></apply><ci>x4</ci></apply><ci>x5</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x6</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x7</ci><ci>x4</ci></apply><ci>x5</ci></apply><ci>x6</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x7</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x8</ci><ci>x5</ci></apply><ci>x6</ci></apply><ci>x7</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x8</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x9</ci><ci>x6</ci></apply><ci>x7</ci></apply><ci>x8</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x9</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x10</ci><ci>x7</ci></apply><ci>x8</ci></apply><ci>x9</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x10</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x11</ci><ci>x8</ci></apply><ci>x9</ci></apply><ci>x10</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x11</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x12</ci><ci>x9</ci></apply><ci>x10</ci></apply><ci>x11</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x12</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x13</ci><ci>x10</ci></apply><ci>x11</ci></apply><ci>x12</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x13</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x14</ci><ci>x11</ci></apply><ci>x12</ci></apply><ci>x13</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x14</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x15</ci><ci>x12</ci></apply><ci>x13</ci></apply><ci>x14</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x15</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x16</ci><ci>x13</ci></apply><ci>x14</ci></apply><ci>x15</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x16</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x17</ci><ci>x14</ci></apply><ci>x15</ci></apply><ci>x16</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x17</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x18</ci><ci>x15</ci></apply><ci>x16</ci></apply><ci>x17</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x18</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x19</ci><ci>x16</ci></apply><ci>x17</ci></apply><ci>x18</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x19</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x20</ci><ci>x17</ci></apply><ci>x18</ci></apply><ci>x19</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x20</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x21</ci><ci>x18</ci></apply><ci>x19</ci></apply><ci>x20</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x21</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x22</ci><ci>x19</ci></apply><ci>x20</ci></apply><ci>x21</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x22</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x23</ci><ci>x20</ci></apply><ci>x21</ci></apply><ci>x22</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x23</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x24</ci><ci>x21</ci></apply><ci>x22</ci></apply><ci>x23</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x24</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x25</ci><ci>x22</ci></apply><ci>x23</ci></apply><ci>x24</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x25</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x26</ci><ci>x23</ci></apply><ci>x24</ci></apply><ci>x25</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x26</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x27</ci><ci>x24</ci></apply><ci>x25</ci></apply><ci>x26</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x27</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x28</ci><ci>x25</ci></apply><ci>x26</ci></apply><ci>x27</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x28</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x29</ci><ci>x26</ci></apply><ci>x27</ci></apply><ci>x28</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x29</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x30</ci><ci>x27</ci></apply><ci>x28</ci></apply><ci>x29</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x30</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x31</ci><ci>x28</ci></apply><ci>x29</ci></apply><ci>x30</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x31</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x32</ci><ci>x29</ci></apply><ci>x30</ci></apply><ci>x31</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x32</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x33</ci><ci>x30</ci></apply><ci>x31</ci></apply><ci>x32</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x33</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x34</ci><ci>x31</ci></apply><ci>x32</ci></apply><ci>x33</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x34</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x35</ci><ci>x32</ci></apply><ci>x33</ci></apply><ci>x34</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x35</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x36</ci><ci>x33</ci></apply><ci>x34</ci></apply><ci>x35</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x36</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x37</ci><ci>x34</ci></apply><ci>x35</ci></apply><ci>x36</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x37</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x38</ci><ci>x35</ci></apply><ci>x36</ci></apply><ci>x37</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x38</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x39</ci><ci>x36</ci></apply><ci>x37</ci></apply><ci>x38</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x39</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x40</ci><ci>x37</ci></apply><ci>x38</ci></apply><ci>x39</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x40</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x1</ci><ci>x38</ci></apply><ci>x39</ci></apply><ci>x40</ci></apply><ci>F</ci></apply></apply>
+    </math>
+  </component>
+
+  <connection>
+    <map_components component_1="environment" component_2="lorenz96"/>
+    <map_variables variable_1="time" variable_2="time"/>
+  </connection>
+</model>

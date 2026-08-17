@@ -38,6 +38,11 @@ ALGORITHM = "euler"
 # problem -> (CellML component, ordered state variable names)
 MODELS = {
     "lorenz": ("lorenz", ("lorenz.x", "lorenz.y", "lorenz.z")),
+    "lorenz96": ("lorenz96", tuple(
+        "lorenz96.x{0}".format(i) for i in range(1, 41))),
+    "pleiades": ("pleiades", tuple(
+        "pleiades.{0}{1}".format(prefix, i)
+        for prefix in ("x", "y", "u", "v") for i in range(1, 8))),
 }
 
 

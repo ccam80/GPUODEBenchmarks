@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model
+    name="pleiades"
+    xmlns="http://www.cellml.org/cellml/1.1#"
+    xmlns:cellml="http://www.cellml.org/cellml/1.1#">
+  <component name="environment">
+    <variable
+        name="time"
+        units="dimensionless"
+        public_interface="out"/>
+  </component>
+
+  <component name="pleiades">
+    <variable
+        name="time"
+        units="dimensionless"
+        public_interface="in"/>
+    <variable name="x1" units="dimensionless" initial_value="3"/>
+    <variable name="x2" units="dimensionless" initial_value="3"/>
+    <variable name="x3" units="dimensionless" initial_value="-1"/>
+    <variable name="x4" units="dimensionless" initial_value="-3"/>
+    <variable name="x5" units="dimensionless" initial_value="2"/>
+    <variable name="x6" units="dimensionless" initial_value="-2"/>
+    <variable name="x7" units="dimensionless" initial_value="2"/>
+    <variable name="y1" units="dimensionless" initial_value="3"/>
+    <variable name="y2" units="dimensionless" initial_value="-3"/>
+    <variable name="y3" units="dimensionless" initial_value="2"/>
+    <variable name="y4" units="dimensionless" initial_value="0"/>
+    <variable name="y5" units="dimensionless" initial_value="0"/>
+    <variable name="y6" units="dimensionless" initial_value="-4"/>
+    <variable name="y7" units="dimensionless" initial_value="4"/>
+    <variable name="u1" units="dimensionless" initial_value="0"/>
+    <variable name="u2" units="dimensionless" initial_value="0"/>
+    <variable name="u3" units="dimensionless" initial_value="0"/>
+    <variable name="u4" units="dimensionless" initial_value="0"/>
+    <variable name="u5" units="dimensionless" initial_value="0"/>
+    <variable name="u6" units="dimensionless" initial_value="1.75"/>
+    <variable name="u7" units="dimensionless" initial_value="-1.5"/>
+    <variable name="v1" units="dimensionless" initial_value="0"/>
+    <variable name="v2" units="dimensionless" initial_value="0"/>
+    <variable name="v3" units="dimensionless" initial_value="0"/>
+    <variable name="v4" units="dimensionless" initial_value="-1.25"/>
+    <variable name="v5" units="dimensionless" initial_value="1"/>
+    <variable name="v6" units="dimensionless" initial_value="0"/>
+    <variable name="v7" units="dimensionless" initial_value="0"/>
+    <variable name="m1" units="dimensionless" initial_value="1"/>
+    <variable name="m2" units="dimensionless" initial_value="2"/>
+    <variable name="m3" units="dimensionless" initial_value="3"/>
+    <variable name="m4" units="dimensionless" initial_value="4"/>
+    <variable name="m5" units="dimensionless" initial_value="5"/>
+    <variable name="m6" units="dimensionless" initial_value="6"/>
+    <variable name="m7" units="dimensionless" initial_value="7"/>
+    <variable name="w12" units="dimensionless"/>
+    <variable name="w13" units="dimensionless"/>
+    <variable name="w14" units="dimensionless"/>
+    <variable name="w15" units="dimensionless"/>
+    <variable name="w16" units="dimensionless"/>
+    <variable name="w17" units="dimensionless"/>
+    <variable name="w23" units="dimensionless"/>
+    <variable name="w24" units="dimensionless"/>
+    <variable name="w25" units="dimensionless"/>
+    <variable name="w26" units="dimensionless"/>
+    <variable name="w27" units="dimensionless"/>
+    <variable name="w34" units="dimensionless"/>
+    <variable name="w35" units="dimensionless"/>
+    <variable name="w36" units="dimensionless"/>
+    <variable name="w37" units="dimensionless"/>
+    <variable name="w45" units="dimensionless"/>
+    <variable name="w46" units="dimensionless"/>
+    <variable name="w47" units="dimensionless"/>
+    <variable name="w56" units="dimensionless"/>
+    <variable name="w57" units="dimensionless"/>
+    <variable name="w67" units="dimensionless"/>
+
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <apply><eq/><ci>w12</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x2</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y2</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w13</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x3</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y3</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w14</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x4</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y4</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w15</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x5</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y5</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w16</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x6</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y6</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w17</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x1</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y1</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w23</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x2</ci><ci>x3</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y2</ci><ci>y3</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w24</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x2</ci><ci>x4</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y2</ci><ci>y4</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w25</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x2</ci><ci>x5</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y2</ci><ci>y5</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w26</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x2</ci><ci>x6</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y2</ci><ci>y6</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w27</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x2</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y2</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w34</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x3</ci><ci>x4</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y3</ci><ci>y4</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w35</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x3</ci><ci>x5</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y3</ci><ci>y5</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w36</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x3</ci><ci>x6</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y3</ci><ci>y6</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w37</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x3</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y3</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w45</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x4</ci><ci>x5</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y4</ci><ci>y5</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w46</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x4</ci><ci>x6</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y4</ci><ci>y6</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w47</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x4</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y4</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w56</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x5</ci><ci>x6</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y5</ci><ci>y6</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w57</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x5</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y5</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><ci>w67</ci><apply><power/><apply><plus/><apply><power/><apply><minus/><ci>x6</ci><ci>x7</ci></apply><cn cellml:units="dimensionless">2</cn></apply><apply><power/><apply><minus/><ci>y6</ci><ci>y7</ci></apply><cn cellml:units="dimensionless">2</cn></apply></apply><cn cellml:units="dimensionless">1.5</cn></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x1</ci></apply><ci>u1</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x2</ci></apply><ci>u2</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x3</ci></apply><ci>u3</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x4</ci></apply><ci>u4</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x5</ci></apply><ci>u5</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x6</ci></apply><ci>u6</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x7</ci></apply><ci>u7</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y1</ci></apply><ci>v1</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y2</ci></apply><ci>v2</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y3</ci></apply><ci>v3</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y4</ci></apply><ci>v4</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y5</ci></apply><ci>v5</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y6</ci></apply><ci>v6</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>y7</ci></apply><ci>v7</ci></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u1</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x1</ci></apply></apply><ci>w12</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x1</ci></apply></apply><ci>w13</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x1</ci></apply></apply><ci>w14</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x1</ci></apply></apply><ci>w15</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x1</ci></apply></apply><ci>w16</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x1</ci></apply></apply><ci>w17</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u2</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x2</ci></apply></apply><ci>w12</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x2</ci></apply></apply><ci>w23</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x2</ci></apply></apply><ci>w24</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x2</ci></apply></apply><ci>w25</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x2</ci></apply></apply><ci>w26</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x2</ci></apply></apply><ci>w27</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u3</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x3</ci></apply></apply><ci>w13</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x3</ci></apply></apply><ci>w23</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x3</ci></apply></apply><ci>w34</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x3</ci></apply></apply><ci>w35</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x3</ci></apply></apply><ci>w36</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x3</ci></apply></apply><ci>w37</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u4</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x4</ci></apply></apply><ci>w14</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x4</ci></apply></apply><ci>w24</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x4</ci></apply></apply><ci>w34</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x4</ci></apply></apply><ci>w45</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x4</ci></apply></apply><ci>w46</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x4</ci></apply></apply><ci>w47</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u5</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x5</ci></apply></apply><ci>w15</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x5</ci></apply></apply><ci>w25</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x5</ci></apply></apply><ci>w35</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x5</ci></apply></apply><ci>w45</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x5</ci></apply></apply><ci>w56</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x5</ci></apply></apply><ci>w57</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u6</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x6</ci></apply></apply><ci>w16</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x6</ci></apply></apply><ci>w26</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x6</ci></apply></apply><ci>w36</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x6</ci></apply></apply><ci>w46</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x6</ci></apply></apply><ci>w56</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>x7</ci><ci>x6</ci></apply></apply><ci>w67</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>u7</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>x1</ci><ci>x7</ci></apply></apply><ci>w17</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>x2</ci><ci>x7</ci></apply></apply><ci>w27</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>x3</ci><ci>x7</ci></apply></apply><ci>w37</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>x4</ci><ci>x7</ci></apply></apply><ci>w47</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>x5</ci><ci>x7</ci></apply></apply><ci>w57</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>x6</ci><ci>x7</ci></apply></apply><ci>w67</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v1</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y1</ci></apply></apply><ci>w12</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y1</ci></apply></apply><ci>w13</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y1</ci></apply></apply><ci>w14</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y1</ci></apply></apply><ci>w15</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y1</ci></apply></apply><ci>w16</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y1</ci></apply></apply><ci>w17</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v2</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y2</ci></apply></apply><ci>w12</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y2</ci></apply></apply><ci>w23</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y2</ci></apply></apply><ci>w24</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y2</ci></apply></apply><ci>w25</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y2</ci></apply></apply><ci>w26</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y2</ci></apply></apply><ci>w27</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v3</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y3</ci></apply></apply><ci>w13</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y3</ci></apply></apply><ci>w23</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y3</ci></apply></apply><ci>w34</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y3</ci></apply></apply><ci>w35</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y3</ci></apply></apply><ci>w36</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y3</ci></apply></apply><ci>w37</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v4</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y4</ci></apply></apply><ci>w14</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y4</ci></apply></apply><ci>w24</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y4</ci></apply></apply><ci>w34</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y4</ci></apply></apply><ci>w45</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y4</ci></apply></apply><ci>w46</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y4</ci></apply></apply><ci>w47</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v5</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y5</ci></apply></apply><ci>w15</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y5</ci></apply></apply><ci>w25</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y5</ci></apply></apply><ci>w35</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y5</ci></apply></apply><ci>w45</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y5</ci></apply></apply><ci>w56</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y5</ci></apply></apply><ci>w57</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v6</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y6</ci></apply></apply><ci>w16</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y6</ci></apply></apply><ci>w26</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y6</ci></apply></apply><ci>w36</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y6</ci></apply></apply><ci>w46</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y6</ci></apply></apply><ci>w56</ci></apply><apply><divide/><apply><times/><ci>m7</ci><apply><minus/><ci>y7</ci><ci>y6</ci></apply></apply><ci>w67</ci></apply></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>v7</ci></apply><apply><plus/><apply><divide/><apply><times/><ci>m1</ci><apply><minus/><ci>y1</ci><ci>y7</ci></apply></apply><ci>w17</ci></apply><apply><divide/><apply><times/><ci>m2</ci><apply><minus/><ci>y2</ci><ci>y7</ci></apply></apply><ci>w27</ci></apply><apply><divide/><apply><times/><ci>m3</ci><apply><minus/><ci>y3</ci><ci>y7</ci></apply></apply><ci>w37</ci></apply><apply><divide/><apply><times/><ci>m4</ci><apply><minus/><ci>y4</ci><ci>y7</ci></apply></apply><ci>w47</ci></apply><apply><divide/><apply><times/><ci>m5</ci><apply><minus/><ci>y5</ci><ci>y7</ci></apply></apply><ci>w57</ci></apply><apply><divide/><apply><times/><ci>m6</ci><apply><minus/><ci>y6</ci><ci>y7</ci></apply></apply><ci>w67</ci></apply></apply></apply>
+    </math>
+  </component>
+
+  <connection>
+    <map_components component_1="environment" component_2="pleiades"/>
+    <map_variables variable_1="time" variable_2="time"/>
+  </connection>
+</model>

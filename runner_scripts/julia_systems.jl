@@ -26,6 +26,124 @@ end
 
 lorenz_tgrad(u, p, t) = @SVector [0.0f0, 0.0f0, 0.0f0]
 
+"Lorenz 96 with cyclic coupling; the swept forcing F is p[1]."
+function lorenz96_rhs(u, p, t)
+    return SVector(ntuple(
+        i -> (u[mod1(i + 1, 40)] - u[mod1(i - 2, 40)]) * u[mod1(i - 1, 40)] -
+             u[i] + p[1],
+        Val(40)))
+end
+
+function lorenz96_rhs!(du, u, p, t)
+    du .= lorenz96_rhs(u, p, t)
+    return nothing
+end
+
+# Uniform state x_i = 8 with x_1 perturbed to 9, so every swept F moves at t = 0.
+const LORENZ96_U0_F = SVector{40, Float32}(i == 1 ? 9.0f0 : 8.0f0
+                                           for i in 1:40)
+
+# Pleiades masses 2..7; the swept m1 is p[1].
+const PLEI_MASS_F = (2.0f0, 3.0f0, 4.0f0, 5.0f0, 6.0f0, 7.0f0)
+
+"Seven-body planar gravitation, u = (x, y, x', y'); the swept m1 is p[1]."
+function pleiades_rhs(u, p, t)
+    accel = ntuple(Val(7)) do i
+        sumx = 0.0f0
+        sumy = 0.0f0
+        for j in 1:7
+            j == i && continue
+            mj = j == 1 ? p[1] : PLEI_MASS_F[j - 1]
+            rij = (u[i] - u[j])^2 + (u[i + 7] - u[j + 7])^2
+            rij32 = rij * sqrt(rij)
+            sumx += mj * (u[j] - u[i]) / rij32
+            sumy += mj * (u[j + 7] - u[i + 7]) / rij32
+        end
+        (sumx, sumy)
+    end
+    return SVector(ntuple(Val(28)) do i
+        i <= 14 && return u[i + 14]
+        i <= 21 && return accel[i - 14][1]
+        return accel[i - 21][2]
+    end)
+end
+
+function pleiades_rhs!(du, u, p, t)
+    du .= pleiades_rhs(u, p, t)
+    return nothing
+end
+
+const PLEI_U0_F = SVector{28, Float32}(3.0f0, 3.0f0, -1.0f0, -3.0f0, 2.0f0,
+    -2.0f0, 2.0f0, 3.0f0, -3.0f0, 2.0f0, 0.0f0, 0.0f0, -4.0f0, 4.0f0,
+    0.0f0, 0.0f0, 0.0f0, 0.0f0, 0.0f0, 1.75f0, -1.5f0,
+    0.0f0, 0.0f0, 0.0f0, -1.25f0, 1.0f0, 0.0f0, 0.0f0)
+
+# Pollution problem rate constants k2..k25 (k1 is swept).
+const POLLU_K_F = (26.6f0, 1.23f4, 8.6f-4, 8.2f-4, 1.5f4, 1.3f-4, 2.4f4,
+    1.65f4, 9.0f3, 2.2f-2, 1.2f4, 1.88f0, 1.63f4, 4.8f6, 3.5f-4, 1.75f-2,
+    1.0f8, 4.44f11, 1.24f3, 2.1f0, 5.78f0, 4.74f-2, 1.78f3, 3.12f0)
+
+"Verwer's air pollution mechanism; the swept photolysis rate k1 is p[1]."
+function pollu_rhs(u, p, t)
+    k = POLLU_K_F
+    r1 = p[1] * u[1]
+    r2 = k[1] * u[2] * u[4]
+    r3 = k[2] * u[5] * u[2]
+    r4 = k[3] * u[7]
+    r5 = k[4] * u[7]
+    r6 = k[5] * u[7] * u[6]
+    r7 = k[6] * u[9]
+    r8 = k[7] * u[9] * u[6]
+    r9 = k[8] * u[11] * u[2]
+    r10 = k[9] * u[11] * u[1]
+    r11 = k[10] * u[13]
+    r12 = k[11] * u[10] * u[2]
+    r13 = k[12] * u[14]
+    r14 = k[13] * u[1] * u[6]
+    r15 = k[14] * u[3]
+    r16 = k[15] * u[4]
+    r17 = k[16] * u[4]
+    r18 = k[17] * u[16]
+    r19 = k[18] * u[16]
+    r20 = k[19] * u[17] * u[6]
+    r21 = k[20] * u[19]
+    r22 = k[21] * u[19]
+    r23 = k[22] * u[1] * u[4]
+    r24 = k[23] * u[19] * u[1]
+    r25 = k[24] * u[20]
+    return @SVector [
+        -r1 - r10 - r14 - r23 - r24 + r2 + r3 + r9 + r11 + r12 + r22 + r25,
+        -r2 - r3 - r9 - r12 + r1 + r21,
+        -r15 + r1 + r17 + r19 + r22,
+        -r2 - r16 - r17 - r23 + r15,
+        -r3 + 2.0f0 * r4 + r6 + r7 + r13 + r20,
+        -r6 - r8 - r14 - r20 + r3 + 2.0f0 * r18,
+        -r4 - r5 - r6 + r13,
+        r4 + r5 + r6 + r7,
+        -r7 - r8,
+        -r12 + r7 + r9,
+        -r9 - r10 + r8 + r11,
+        r9,
+        -r11 + r10,
+        -r13 + r12,
+        r14,
+        -r18 - r19 + r16,
+        -r20,
+        r20,
+        -r21 - r22 - r24 + r23 + r25,
+        -r25 + r24,
+    ]
+end
+
+function pollu_rhs!(du, u, p, t)
+    du .= pollu_rhs(u, p, t)
+    return nothing
+end
+
+const POLLU_U0_F = SVector{20, Float32}(0.0f0, 0.2f0, 0.0f0, 0.04f0, 0.0f0,
+    0.0f0, 0.1f0, 0.3f0, 0.01f0, 0.0f0, 0.0f0, 0.0f0, 0.0f0, 0.0f0, 0.0f0,
+    0.0f0, 0.007f0, 0.0f0, 0.0f0, 0.0f0)
+
 # Ring modulator constants (Test Set for IVP Solvers, problem II-3).
 const RM_C_F = 1.6f-8
 const RM_CP_F = 1.0f-8
@@ -100,6 +218,15 @@ const JULIA_SYSTEMS = Dict{String, Any}(
     "lorenz" => (rhs = lorenz_rhs, rhs! = lorenz_rhs!,
         jac = lorenz_jac, tgrad = lorenz_tgrad,
         u0 = @SVector([1.0f0, 0.0f0, 0.0f0]), mass_matrix = nothing),
+    "lorenz96" => (rhs = lorenz96_rhs, rhs! = lorenz96_rhs!,
+        jac = nothing, tgrad = nothing, u0 = LORENZ96_U0_F,
+        mass_matrix = nothing),
+    "pleiades" => (rhs = pleiades_rhs, rhs! = pleiades_rhs!,
+        jac = nothing, tgrad = nothing, u0 = PLEI_U0_F,
+        mass_matrix = nothing),
+    "pollu" => (rhs = pollu_rhs, rhs! = pollu_rhs!,
+        jac = nothing, tgrad = nothing, u0 = POLLU_U0_F,
+        mass_matrix = nothing),
     "ring_modulator" => (rhs = ring_modulator_rhs, rhs! = ring_modulator_rhs!,
         jac = nothing, tgrad = nothing, u0 = RM_U0_F, mass_matrix = nothing),
     "ring_modulator_index2" => (rhs = ring_modulator_index2_rhs,
