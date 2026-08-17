@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
 from bench_key import data_dir, dataset_key  # noqa: E402
 from wp_common import (  # noqa: E402
+    WATCHDOG_SECONDS,
     dts_for,
     ensemble_error,
     load_golden,
@@ -46,8 +47,28 @@ MODELS = {
 }
 
 
+def _capped_min_ms(run, repeats, setup=None):
+    """Best-of-repeats after one warm-up; (ms, first_result), ms None on breach."""
+    best = None
+    first = None
+    for attempt in range(repeats + 1):
+        if setup is not None and attempt:
+            setup()
+        started = timeit.default_timer()
+        result = run()
+        elapsed = timeit.default_timer() - started
+        if attempt == 0:
+            first = result
+        if elapsed > WATCHDOG_SECONDS:
+            return None, first
+        if attempt and (best is None or elapsed < best):
+            best = elapsed
+    return best * 1000.0, first
+
+
 def timed_solve(model, cell_count, rho, dt, step_count, repeats):
-    """Warm up, then return (with_transfers_ms, device_only_ms, finals)."""
+    """Warm up, then return (with_transfers_ms, device_only_ms, finals);
+    the times are NaN when a run breaches the watchdog."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -58,13 +79,9 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
             diffusion_values=rho,
         )
 
-    finals = run()
-    elapsed = timeit.repeat(
-        run,
-        setup="gc.enable()",
-        repeat=repeats,
-        number=1,
-    )
+    elapsed_ms, finals = _capped_min_ms(run, repeats)
+    if elapsed_ms is None:
+        return float("nan"), float("nan"), finals
 
     device_states, device_diffusion = model.to_device(initial_states, rho)
     pristine = device_states.copy()
@@ -78,15 +95,10 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
         # Untimed: reset the integrated-in-place state between timed runs.
         device_states[...] = pristine
 
-    run_on_device()
-    restore()
-    elapsed_dev = timeit.repeat(
-        run_on_device,
-        setup=restore,
-        repeat=repeats,
-        number=1,
-    )
-    return min(elapsed) * 1000.0, min(elapsed_dev) * 1000.0, finals
+    elapsed_dev_ms, _ = _capped_min_ms(run_on_device, repeats, setup=restore)
+    if elapsed_dev_ms is None:
+        return elapsed_ms, float("nan"), finals
+    return elapsed_ms, elapsed_dev_ms, finals
 
 
 def run_work_precision(model, problem, cell_count):
@@ -102,7 +114,12 @@ def run_work_precision(model, problem, cell_count):
         problem,
     )
     with open(output, "w", encoding="utf-8") as handle:
+        # Later settings are slower, so a breach abandons the leg.
+        breached = False
         for dt in dts_for(ALGORITHM, problem):
+            if breached:
+                handle.write("{0:.10g} nan nan\n".format(dt))
+                continue
             step_count = int(round(problem["duration"] / dt))
             elapsed_ms, _, finals = timed_solve(
                 model,
@@ -112,7 +129,13 @@ def run_work_precision(model, problem, cell_count):
                 step_count,
                 repeats=20,
             )
-            error = ensemble_error(finals, golden)
+            if np.isnan(elapsed_ms):
+                print("WATCHDOG wp fixed dt={0:g}: run exceeded the cap"
+                      .format(dt))
+                breached = True
+                error = float("nan")
+            else:
+                error = ensemble_error(finals, golden)
             print(
                 "wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}"
                 .format(dt, elapsed_ms, error)
@@ -122,6 +145,7 @@ def run_work_precision(model, problem, cell_count):
                     dt, elapsed_ms, error
                 )
             )
+            handle.flush()
 
 
 def load_model(problem):
@@ -174,7 +198,7 @@ def run_problem(problem, cell_count, wp_mode):
         handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
 
     # The pairwise numerical cross-check reads this fixed CSV name.
-    if cell_count == 32768:
+    if cell_count == 32768 and np.isfinite(elapsed_ms):
         numerical_file = (
             Path(data_dir("numerical", DATASET_KEY, REPO_ROOT, problem))
             / "myokit_cuda.csv"

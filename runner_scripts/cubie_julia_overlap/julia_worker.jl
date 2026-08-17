@@ -17,6 +17,7 @@ const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
 # Protocol constants; mirrored in common.py. dt values are fractions of the duration.
 const FIXED_DT = 2.0^-10
 const ADAPTIVE_TOL = 1.0e-8
@@ -152,15 +153,32 @@ function run_solve(probs, prob, alg, mode, setting)
     end
 end
 
+# The armed point's identity, for the watchdog's failure row.
+const WATCHDOG_POINT = Ref(("", "", "", "", 0, "", NaN))
+
+function watchdog_breach()
+    alias, phase, mode, tier, n, setting_kind, setting = WATCHDOG_POINT[]
+    append_row(FAILURE_FILE, "julia", alias, phase, mode, tier, n,
+        setting_kind, setting, "Watchdog",
+        "run never returned within $(WATCHDOG_SECONDS) s")
+    println("WATCHDOG julia $(alias) $(phase) $(mode) " *
+            "$(setting_kind)=$(setting): run never returned")
+end
+
 "Time one solve including the h2d and d2h transfers; the reshape is untimed."
 function solve_end_to_end(probs_host, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
-    probs = cu(probs_host)
-    sol = run_solve(probs, prob, alg, mode, setting)
-    host_us = Array(sol[2])
-    CUDA.synchronize()
+    host_us = run_watchdogged(watchdog_breach) do
+        probs = cu(probs_host)
+        sol = run_solve(probs, prob, alg, mode, setting)
+        us = Array(sol[2])
+        CUDA.synchronize()
+        us
+    end
     elapsed_ms = (time_ns() - start) / 1.0e6
+    elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
+        error("watchdog: run exceeded $(WATCHDOG_SECONDS) s")
     final_vectors = host_us[end, :]
     finals = Matrix{Float32}(undef, length(final_vectors), NSTATES)
     for i in eachindex(final_vectors)
@@ -176,9 +194,14 @@ end
 function solve_device_only(probs, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
-    run_solve(probs, prob, alg, mode, setting)
-    CUDA.synchronize()
-    return (time_ns() - start) / 1.0e6
+    run_watchdogged(watchdog_breach) do
+        run_solve(probs, prob, alg, mode, setting)
+        CUDA.synchronize()
+    end
+    elapsed_ms = (time_ns() - start) / 1.0e6
+    elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
+        error("watchdog: run exceeded $(WATCHDOG_SECONDS) s")
+    return elapsed_ms
 end
 
 function finite_counts(finals)
@@ -269,6 +292,8 @@ for row in table
                         "N=$(n): at or above the N=$(oom_ceiling[mode]) out-of-memory ceiling")
                 continue
             end
+            WATCHDOG_POINT[] = (alias, phase, mode, tier, n, setting_kind,
+                Float64(setting))
             try
                 probs_host, probs, prob = build_problems(phase, n)
                 if phase == "numerical"

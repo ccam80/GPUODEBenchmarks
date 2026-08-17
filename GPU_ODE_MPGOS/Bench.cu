@@ -30,10 +30,10 @@ const int NT = NT_VALUE;
 const int SD   = PROBLEM_SD;   // SystemDimension
 const int NCP  = PROBLEM_NCP;  // NumberOfControlParameters
 const int NSP  = 0;     // NumberOfSharedParameters
-const int NISP = 0;     // NumberOfIntegerSharedParameters
+const int NISP = 1;     // NumberOfIntegerSharedParameters (run budget)
 const int NE   = 0;     // NumberOfEvents
 const int NA   = 0;     // NumberOfAccessories
-const int NIA  = 0;     // NumberOfIntegerAccessories
+const int NIA  = 1;     // NumberOfIntegerAccessories (start clock)
 const int NDO  = 10;     // NumberOfPointsOfDenseOutput
 
 const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
@@ -47,10 +47,15 @@ void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&,
 void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <mutex>
+#include <sstream>
+#include <thread>
 
 // Dataset key "<os>_<gpu>" from nvidia-smi, sanitised as in runner_scripts/bench_key.*.
 static std::string DatasetKey()
@@ -127,10 +132,64 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
+// Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
+static double WatchdogSeconds()
+{
+	const char* env = std::getenv("BENCH_WATCHDOG_SECONDS");
+	return env ? atof(env) : 120.0;
+}
+
+static std::mutex WatchdogLock;
+static std::string WatchdogFile;
+static std::vector<std::string> WatchdogRows;
+static std::atomic<long long> WatchdogDeadlineMs(0);   // 0 = disarmed
+
+static long long NowMs()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Rows the watchdog appends to the file when the armed run never returns.
+// Margin over the soft cap: the device-side budget ends runs near the cap,
+// so the hard exit only fires when a kernel truly never returns.
+static void ArmWatchdog(const std::string& file, const std::vector<std::string>& rows)
+{
+	std::lock_guard<std::mutex> hold(WatchdogLock);
+	WatchdogFile = file;
+	WatchdogRows = rows;
+	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
+}
+
+static void DisarmWatchdog()
+{
+	WatchdogDeadlineMs = 0;
+}
+
+static void WatchdogMain()
+{
+	for (;;)
+	{
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		long long deadline = WatchdogDeadlineMs;
+		if (deadline == 0 || NowMs() < deadline) continue;
+		std::lock_guard<std::mutex> hold(WatchdogLock);
+		std::ofstream out(WatchdogFile.c_str(), std::ios::app);
+		for (size_t i = 0; i < WatchdogRows.size(); ++i)
+			out << WatchdogRows[i] << "\n";
+		out.close();
+		std::cout << "WATCHDOG " << PROBLEM_NAME
+		          << ": run never returned" << std::endl;
+		std::_Exit(0);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int NumberOfProblems = NT;
 	int BlockSize        = 32;
+
+	std::thread(WatchdogMain).detach();
 
 	ListCUDADevices();
 
@@ -156,6 +215,15 @@ int main(int argc, char *argv[])
 
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
+
+	// Device-side run budget in 2^21-cycle units; see problems/stubs.cuh.
+	// The 1.25 margin keeps budget-terminated solves above the host cap, so
+	// they land as recorded breaches whatever the actual boost clock is.
+	int ClockKHz = 0;
+	cudaDeviceGetAttribute(&ClockKHz, cudaDevAttrClockRate, SelectedDevice);
+	if (ClockKHz <= 0) ClockKHz = 3000000;
+	long long BudgetCycles = (long long)(WatchdogSeconds() * 1.25 * ClockKHz * 1000.0);
+	Scan.SetHost(IntegerSharedParameters, 0, (int)(BudgetCycles >> WATCHDOG_CLOCK_SHIFT));
 
 	// `<exe> wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
 	if (argc > 1 && string(argv[1]) == string("wp"))
@@ -189,7 +257,8 @@ int main(int argc, char *argv[])
 		// Filenames carry the cubie-vocabulary algorithm name.
 		string Mode = FixedMode ? "fixed" : "adaptive";
 		string Algorithm = FixedMode ? "classical-rk4" : "cash-karp-54";
-		ofstream wpfile((DataDir("CPP") + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt").c_str());
+		const std::string WpPath = DataDir("CPP") + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
+		ofstream wpfile(WpPath.c_str());
 		wpfile.precision(12);
 
 		const int Repeats = 10;
@@ -206,6 +275,17 @@ int main(int argc, char *argv[])
 				}
 			}
 
+			// Later settings are slower, so a breach abandons the sweep as NaN rows.
+			std::vector<std::string> NanRows;
+			for (size_t sj = si; sj < Settings.size(); sj++)
+			{
+				std::ostringstream row;
+				row.precision(12);
+				row << Settings[sj] << " nan nan";
+				NanRows.push_back(row.str());
+			}
+
+			bool Breached = false;
 			double BestMs = 1.0e300;
 			for (int r = 0; r <= Repeats; r++)
 			{
@@ -213,6 +293,7 @@ int main(int argc, char *argv[])
 				FillSolverObject(Scan, Parameters_R_Values, NT);
 				Scan.SynchroniseFromHostToDevice(All);
 
+				ArmWatchdog(WpPath, NanRows);
 				auto T0 = std::chrono::steady_clock::now();
 				Scan.Solve();
 				Scan.InsertSynchronisationPoint();
@@ -221,6 +302,7 @@ int main(int argc, char *argv[])
 				Scan.SynchroniseFromDeviceToHost(ActualState);
 				Scan.SynchroniseDevice();
 				auto T1 = std::chrono::steady_clock::now();
+				DisarmWatchdog();
 
 				cudaError_t WpErr = cudaGetLastError();
 				if (WpErr != cudaSuccess)
@@ -231,7 +313,18 @@ int main(int argc, char *argv[])
 				}
 
 				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+				if (Ms > WatchdogSeconds() * 1000.0) { Breached = true; break; }
 				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up
+			}
+
+			if (Breached)
+			{
+				for (size_t i = 0; i < NanRows.size(); ++i)
+					wpfile << NanRows[i] << "\n";
+				wpfile.flush();
+				cout << "WATCHDOG wp setting=" << Setting
+				     << ": run exceeded the cap" << endl;
+				break;
 			}
 
 			double Sum2 = 0.0;
@@ -244,6 +337,7 @@ int main(int argc, char *argv[])
 			double Err = sqrt(Sum2 / (NT * (double)SD));
 
 			wpfile << Setting << " " << BestMs << " " << scientific << Err << fixed << "\n";
+			wpfile.flush();
 			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
 			     << " ms, err=" << scientific << Err << fixed << endl;
 		}
@@ -256,6 +350,17 @@ int main(int argc, char *argv[])
 	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
 	const int TimingRepeats = 20;
 
+	const std::string TimesPath = DataDir("CPP") +
+		(SOLVER == RK4 ? "MPGOS_times_fixed_classical-rk4.txt"
+		               : "MPGOS_times_adaptive_cash-karp-54.txt");
+	std::vector<std::string> TimesNanRow;
+	{
+		std::ostringstream row;
+		row << NT << "\tnan\tnan";
+		TimesNanRow.push_back(row.str());
+	}
+	bool TimesBreached = false;
+
 	// Device-only timing: the untimed h2d resets the in-place solver state.
 	double ElapsedDeviceMs = 1.0e300;
 	for (int r = 0; r <= TimingRepeats; r++)
@@ -263,23 +368,27 @@ int main(int argc, char *argv[])
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 		Scan.SynchroniseFromHostToDevice(All);
 
+		ArmWatchdog(TimesPath, TimesNanRow);
 		auto T0 = std::chrono::steady_clock::now();
 		Scan.Solve();
 		Scan.InsertSynchronisationPoint();
 		Scan.SynchroniseSolver();
 		Scan.SynchroniseDevice();
 		auto T1 = std::chrono::steady_clock::now();
+		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
 	}
 
 	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
-	for (int r = 0; r <= TimingRepeats; r++)
+	for (int r = 0; !TimesBreached && r <= TimingRepeats; r++)
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 
+		ArmWatchdog(TimesPath, TimesNanRow);
 		auto T0 = std::chrono::steady_clock::now();
 		Scan.SynchroniseFromHostToDevice(All);
 		Scan.Solve();
@@ -288,9 +397,20 @@ int main(int argc, char *argv[])
 		Scan.SynchroniseFromDeviceToHost(ActualState);
 		Scan.SynchroniseDevice();
 		auto T1 = std::chrono::steady_clock::now();
+		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
+	}
+
+	if (TimesBreached)
+	{
+		std::ofstream out(TimesPath.c_str(), std::ios::app);
+		out << TimesNanRow[0] << "\n";
+		out.close();
+		cout << "WATCHDOG N=" << NT << ": run exceeded the cap" << endl;
+		return 0;
 	}
 
 	// Untimed full d2h for the ActualTime print and SaveData.

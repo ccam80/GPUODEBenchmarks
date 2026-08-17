@@ -6,8 +6,8 @@
 #define PROBLEM_SD 28
 #define PROBLEM_NCP 1
 #define PROBLEM_DURATION 3.0
-#define PROBLEM_SWEEP_MIN 0.9
-#define PROBLEM_SWEEP_MAX 1.1
+#define PROBLEM_SWEEP_MIN 0.5
+#define PROBLEM_SWEEP_MAX 2.0
 #define PROBLEM_SWEEP_LOG 0
 
 template <class Precision>

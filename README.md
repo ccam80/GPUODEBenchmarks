@@ -245,7 +245,7 @@ floating point.
 |---|---|---|---|---|
 | `lorenz` | 3 | 1 | `rho` over [0, 21], linear | non-stiff |
 | `lorenz96` | 40 | 1 | `F` over [0, 16], linear | non-stiff |
-| `pleiades` | 28 | 3 | `m1` over [0.9, 1.1], linear | non-stiff |
+| `pleiades` | 28 | 3 | `m1` over [0.5, 2], linear | non-stiff |
 | `pollu` | 20 | 60 | `k1` over [3.5e-2, 3.5], log | stiff |
 | `ring_modulator` | 15 | 1e-3 | `Cs` over [2e-13, 2e-9], log | stiff |
 | `ring_modulator_index2` | 15 | 1e-3 | `Uin1_amplitude` over [0, 0.5], linear | stiff, index 2 |
@@ -258,14 +258,15 @@ cyclic 40-state forcing model; the Pleiades is the seven-body celestial
 mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
 Verwer's 25-reaction atmospheric mechanism.
 
-Sweep ranges keep every ensemble member integrable in Float32: the Pleiades
-`m1` range stays clear of two-body close approaches, and `pollu` lists no
-`cpp` or `julia` because MPGOS and the DiffEqGPU kernel solvers carry no
-step cap and cannot cross a mode needing ~6e-12 steps over a 60-unit
-interval. Cubie and diffrax abort such solves, and those failures, like
-the fixed-step explicit overflows, are recorded as NaN rows. The `pollu`
-right-hand sides for Julia and MPGOS still ship in `julia_systems.jl` and
-`problems/pollu.cuh`.
+Every benchmark solve runs under a watchdog: a run that exceeds
+`BENCH_WATCHDOG_SECONDS` (default 120) is recorded as a NaN row and the
+leg's remaining solves are abandoned — the rest of a point's timed repeats,
+and for a work-precision sweep the remaining (slower) settings. Runs that
+return too late are cut off in-process; a solve that never returns (a
+solver ground below Float32 time resolution has no step cap in MPGOS or
+the DiffEqGPU kernels) is caught by a hard watchdog that writes the NaN
+rows and exits the process, so the Julia runner launches one process per
+algorithm and the drivers continue with the next leg.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
