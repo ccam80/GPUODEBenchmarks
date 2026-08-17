@@ -1,5 +1,6 @@
 accelerInt-src/
 build/
+toolchain/
 log/
 sweep.bin
 status.bin

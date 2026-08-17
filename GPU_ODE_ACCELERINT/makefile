@@ -34,24 +34,41 @@ else
   $(error unknown PRECISION '$(PRECISION)'; expected single or double)
 endif
 
+LU       ?= lapack
 RTOL     ?= 1e-4
 ATOL     ?= 1e-6
 END_TIME ?= $(DURATION)
 T_STEP   ?= $(DURATION)
 N_RA     ?= 10
 
+# TOOLCHAIN=mingw builds a native Windows binary against the bundled OpenBLAS.
+TOOLCHAIN ?= posix
+ifeq ($(TOOLCHAIN),mingw)
+  MINGW    := toolchain/mingw64/bin
+  OPENBLAS := toolchain/openblas
+  CC       := $(MINGW)/gcc
+  # WIN32 selects timer.h's QueryPerformanceCounter branch; mingw defines only _WIN32.
+  PLAT_DEF := -DWIN32
+  PLAT_LIB := -L$(OPENBLAS)/lib -lopenblas
+  EXE      := .exe
+else
+  CC       ?= gcc
+  PLAT_DEF :=
+  PLAT_LIB := -llapack -lblas
+  EXE      :=
+endif
+
 CAST    := $(BUILD)/accelerInt-$(PRECISION)
 GENERIC := $(CAST)/generic
 RADAU   := $(CAST)/radau2a
-OBJDIR  := $(BUILD)/$(PROBLEM)-$(PRECISION)-$(JAC)$(if $(filter 1,$(LOG)),-log)
-TARGET  := $(BUILD)/radau2a-$(PROBLEM)-$(PRECISION)$(if $(filter 1,$(LOG)),-log)
+OBJDIR  := $(BUILD)/$(TOOLCHAIN)-$(PROBLEM)-$(PRECISION)-$(JAC)-$(LU)$(if $(filter 1,$(LOG)),-log)
+TARGET  := $(BUILD)/radau2a-$(TOOLCHAIN)-$(PROBLEM)-$(PRECISION)-$(LU)$(if $(filter 1,$(LOG)),-log)$(EXE)
 
-CC      ?= gcc
 # gnu99: generic/timer.h uses timersub(). RADAU2A: selects radau2a_props.h, which defines STRIDE.
-CFLAGS  := -O3 -std=gnu99 -fopenmp -DRADAU2A -D$(PROBLEM_DEF) $(PREC_DEF) \
+CFLAGS  := -O3 -std=gnu99 -fopenmp -DRADAU2A -D$(PROBLEM_DEF) $(PREC_DEF) $(PLAT_DEF) \
            -I$(OBJDIR) -Isrc -Iproblems -I$(GENERIC) -I$(RADAU)
 LDFLAGS := -fopenmp
-LDLIBS  := -llapack -lblas -lm
+LDLIBS  := $(PLAT_LIB) -lm
 
 # LOG=1 writes the initial and final states to log/radau2a-int-log.bin.
 ifeq ($(LOG),1)
@@ -65,8 +82,17 @@ else
   JAC_SRC := src/jacob.c
 endif
 
+# LU=local supplies getrf/getrs from src/lu_local.c instead of linking a LAPACK.
+ifeq ($(LU),local)
+  LU_SRC   := src/lu_local.c
+  LINK_LIB := -lm
+else
+  LU_SRC   :=
+  LINK_LIB := $(LDLIBS)
+endif
+
 # src/status.c supplies check_error in place of radau2a_props.c.
-LOCAL_SRC := src/dydt.c src/ics.c src/sparse_multiplier.c src/status.c $(JAC_SRC)
+LOCAL_SRC := src/dydt.c src/ics.c src/sparse_multiplier.c src/status.c $(LU_SRC) $(JAC_SRC)
 CAST_SRC  := $(GENERIC)/solver_main.c $(GENERIC)/solver_generic.c \
              $(GENERIC)/solver_interface.c $(GENERIC)/complexInverse.c \
              $(RADAU)/radau2a.c $(RADAU)/radau2a_init.c
@@ -115,20 +141,20 @@ $(OBJDIR)/%.o: %.c $(OBJDIR)/solver_options.h $(CAST)/.stamp
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJ)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(LDFLAGS) $^ $(LINK_LIB) -o $@
 
 # Checks the analytic Jacobian against a central difference of the RHS.
-check: $(BUILD)/jac_check-$(PROBLEM)
+check: $(BUILD)/jac_check-$(PROBLEM)$(EXE)
 	./$<
 
-$(BUILD)/jac_check-$(PROBLEM): tests/jac_check.c src/dydt.c src/jacob.c $(OBJDIR)/solver_options.h
+$(BUILD)/jac_check-$(PROBLEM)$(EXE): tests/jac_check.c src/dydt.c src/jacob.c $(OBJDIR)/solver_options.h
 	@mkdir -p $(BUILD)
 	$(CC) -O2 -std=gnu99 -DRADAU2A -D$(PROBLEM_DEF) -DACC_DOUBLE \
 	  -I$(OBJDIR) -Isrc -Iproblems \
 	  tests/jac_check.c src/dydt.c src/jacob.c -lm -o $@
 
 clean:
-	rm -rf $(BUILD)/lorenz-* $(BUILD)/ring_modulator-* $(BUILD)/radau2a-* $(BUILD)/jac_check-*
+	rm -rf $(BUILD)/*-lorenz-* $(BUILD)/*-ring_modulator-* $(BUILD)/radau2a-* $(BUILD)/jac_check-*
 
 distclean:
 	rm -rf $(BUILD) $(ACCELERINT)
