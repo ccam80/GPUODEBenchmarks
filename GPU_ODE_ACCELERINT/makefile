@@ -15,7 +15,7 @@ ifeq ($(PROBLEM),lorenz)
 else ifeq ($(PROBLEM),ring_modulator)
   PROBLEM_DEF := PROBLEM_RING_MODULATOR
   DURATION    := 1.0e-3
-  JAC         ?= fd
+  JAC         ?= analytic
 else
   $(error unknown PROBLEM '$(PROBLEM)'; expected lorenz or ring_modulator)
 endif
@@ -136,7 +136,7 @@ $(OBJDIR)/solver_options.h:
 	  '#define SAME_IC' \
 	  '#endif' > $@
 
-$(OBJDIR)/%.o: %.c $(OBJDIR)/solver_options.h $(CAST)/.stamp
+$(OBJDIR)/%.o: %.c $(OBJDIR)/solver_options.h $(CAST)/.stamp $(wildcard problems/*.h) $(wildcard src/*.h)
 	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -147,7 +147,7 @@ $(TARGET): $(OBJ)
 check: $(BUILD)/jac_check-$(PROBLEM)$(EXE)
 	./$<
 
-$(BUILD)/jac_check-$(PROBLEM)$(EXE): tests/jac_check.c src/dydt.c src/jacob.c $(OBJDIR)/solver_options.h
+$(BUILD)/jac_check-$(PROBLEM)$(EXE): tests/jac_check.c src/dydt.c src/jacob.c $(OBJDIR)/solver_options.h $(wildcard problems/*.h) $(wildcard src/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) -O2 -std=gnu99 -DRADAU2A -D$(PROBLEM_DEF) -DACC_DOUBLE \
 	  -I$(OBJDIR) -Isrc -Iproblems \

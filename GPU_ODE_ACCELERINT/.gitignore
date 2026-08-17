@@ -4,3 +4,4 @@ toolchain/
 log/
 sweep.bin
 status.bin
+generated/
