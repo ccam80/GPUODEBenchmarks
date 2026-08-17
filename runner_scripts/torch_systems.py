@@ -40,7 +40,7 @@ class _Lorenz96ODE(torch.nn.Module):
 
 
 def _lorenz96(problem):
-    # Uniform state 8 with x1 perturbed to 9, so every swept F moves at t = 0.
+    # Uniform state 8 with x1 perturbed to 9.
     u0 = torch.full((40,), 8.0)
     u0[0] = 9.0
     return _Lorenz96ODE, u0.cuda()

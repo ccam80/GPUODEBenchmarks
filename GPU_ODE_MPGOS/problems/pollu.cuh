@@ -1,8 +1,7 @@
 #ifndef PROBLEM_POLLU_CUH
 #define PROBLEM_POLLU_CUH
 
-// Pollution problem (Test Set for IVP Solvers): 25 reactions over 20 species,
-// the photolysis rate k1 swept.
+// Pollution problem: 25 reactions over 20 species, the rate k1 swept.
 #define PROBLEM_NAME "pollu"
 #define PROBLEM_SD 20
 #define PROBLEM_NCP 1

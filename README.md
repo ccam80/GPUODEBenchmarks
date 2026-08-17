@@ -254,26 +254,18 @@ floating point.
 Except for the two Lorenz systems, the problems come from Mazzia and
 Magherini's Bari *Test Set for IVP Solvers*, transcribed from its Fortran
 sources with their canonical initial states and intervals. Lorenz 96 is the
-cyclic 40-state forcing model started from a uniform state with one component
-perturbed; the Pleiades is the seven-body celestial mechanics problem with
-masses (m1, 2, ..., 7); the pollution problem is Verwer's 25-reaction
-atmospheric mechanism whose photolysis rate `k1` is swept.
+cyclic 40-state forcing model; the Pleiades is the seven-body celestial
+mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
+Verwer's 25-reaction atmospheric mechanism.
 
-Sweep ranges keep every ensemble member integrable. The Pleiades `m1` range
-is [0.9, 1.1] because wider mass perturbations drive two-body close
-approaches below Float32 resolution (at `m1 = 1.578` the minimum pairwise
-distance falls to 2e-7 versus 0.034 nominally), which pins adaptive
-integrators at their minimum step with `t + dt == t` in Float32. The
-pollution problem carries a permanent fast eigenvalue of about `-(k18 + k19)
-= -4.4e11`, so explicit adaptive solvers need ~6e-12 steps across the full
-60-unit interval: `cpp` and `julia` are not in its frameworks column because
-MPGOS and the DiffEqGPU kernel solvers have no iteration cap and never
-terminate there (MPGOS confirmed empirically), while cubie aborts via its
-step-too-small/stagnation guards and diffrax via `max_steps` — those
-failures are recorded as NaN rows. Fixed-step explicit runs overflow to NaN
-within a few steps everywhere, which is likewise a recorded result. The
-`pollu` right-hand sides for Julia and MPGOS still ship in
-`julia_systems.jl` and `problems/pollu.cuh` for manual capped runs.
+Sweep ranges keep every ensemble member integrable in Float32: the Pleiades
+`m1` range stays clear of two-body close approaches, and `pollu` lists no
+`cpp` or `julia` because MPGOS and the DiffEqGPU kernel solvers carry no
+step cap and cannot cross a mode needing ~6e-12 steps over a 60-unit
+interval. Cubie and diffrax abort such solves, and those failures, like
+the fixed-step explicit overflows, are recorded as NaN rows. The `pollu`
+right-hand sides for Julia and MPGOS still ship in `julia_systems.jl` and
+`problems/pollu.cuh`.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
@@ -286,12 +278,13 @@ cubie rejects the explicit algorithms and `kvaerno3` on a singular mass
 matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
 
 The NAND gate is the test set's index-0 implicit DE `C(y) y' = f(y, t)`
-whose capacitance matrix is state-dependent and non-diagonal. No benchmarked
-framework can express that left-hand side — cubie's DSL accepts only `dX` or
-residual left-hand sides without derivative terms — so its `frameworks`
-column is empty and only the Float64 golden (fully implicit DFBDF with
-tstops on the pulse corners) integrates it. Golden references are Float64
-solves under each problem's `golden_algorithm` at its `golden_tol`.
+with a state-dependent, non-diagonal capacitance matrix. No benchmarked
+framework expresses that left-hand side, so its `frameworks` column is
+empty and only the Float64 golden (fully implicit DFBDF with tstops on the
+pulse corners) integrates it. Golden references are Float64 solves under
+each problem's `golden_algorithm` at its `golden_tol`, and
+`runner_scripts/golden/verify_references.jl` checks them against the
+published test-set reference values.
 
 Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
 framework skips cleanly when a requested problem is not in its list:
@@ -307,9 +300,6 @@ framework's system module: `runner_scripts/{cubie,jax,torch,julia}_systems.*`
 and `reference_systems.jl` for the Float64 golden, a
 `GPU_ODE_MPGOS/problems/<name>.cuh` header, and a CellML model under
 `GPU_ODE_MYOKIT_CUDA/models/` for the Myokit suite.
-`runner_scripts/golden/verify_references.jl` checks every golden
-configuration against the published test-set reference values and the
-Float32 right-hand sides against their Float64 twins.
 
 ### Generating the complete dataset
 

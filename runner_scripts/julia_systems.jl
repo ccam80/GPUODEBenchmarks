@@ -39,7 +39,7 @@ function lorenz96_rhs!(du, u, p, t)
     return nothing
 end
 
-# Uniform state x_i = 8 with x_1 perturbed to 9, so every swept F moves at t = 0.
+# Uniform state 8 with x1 perturbed to 9.
 const LORENZ96_U0_F = SVector{40, Float32}(i == 1 ? 9.0f0 : 8.0f0
                                            for i in 1:40)
 

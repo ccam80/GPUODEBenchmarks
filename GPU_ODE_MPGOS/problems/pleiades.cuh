@@ -1,8 +1,7 @@
 #ifndef PROBLEM_PLEIADES_CUH
 #define PROBLEM_PLEIADES_CUH
 
-// Pleiades (Test Set for IVP Solvers): seven-body planar gravitation,
-// X = (x1..x7, y1..y7, x'1..x'7, y'1..y'7), the mass m1 swept.
+// Pleiades: seven-body gravitation, X = (x, y, x', y') per star, m1 swept.
 #define PROBLEM_NAME "pleiades"
 #define PROBLEM_SD 28
 #define PROBLEM_NCP 1

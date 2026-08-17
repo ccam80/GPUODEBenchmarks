@@ -90,7 +90,7 @@ def _lorenz96(problem, precision, name):
         im2 = (i - 3) % n + 1
         lines.append("dx{0} = (x{1} - x{2}) * x{3} - x{0} + F".format(
             i, ip1, im2, im1))
-    # Uniform state 8 with x1 perturbed to 9, so every swept F moves at t = 0.
+    # Uniform state 8 with x1 perturbed to 9.
     states = {"x{0}".format(i): 9.0 if i == 1 else 8.0
               for i in range(1, n + 1)}
     system = qb.create_ODE_system(
@@ -273,8 +273,7 @@ _ORDER = {
     "ring_modulator_index2": RING_ORDER,
 }
 
-# No nand_gate builder: cubie's DSL cannot express the C(y) y' left-hand side
-# (linear combinations of derivatives with state-dependent coefficients).
+# nand_gate has no builder: the DSL cannot express its C(y) y' left-hand side.
 _BUILDERS = {
     "lorenz": _lorenz,
     "lorenz96": _lorenz96,

@@ -1,8 +1,4 @@
-# Verify each problem's golden configuration (reference_systems.jl plus the
-# golden_algorithm/golden_tol columns) against the published Test Set for IVP
-# Solvers reference values, and the Float32 GPU right-hand sides against
-# their Float64 twins. Lorenz 96 is not in the test set, so its golden is
-# checked against an independent implicit integrator instead.
+# Golden configurations vs the published Test Set values; Float32 rhs vs Float64 twins.
 #
 # Usage: julia --project=. runner_scripts/golden/verify_references.jl
 
@@ -60,6 +56,7 @@ for (name, p, ref) in (("pollu", 0.35, POLLU_REF),
     println("$(name): max |golden - published| = $(err)  ($(round(t; digits=2)) s/solve)")
 end
 
+# Lorenz 96 has no published value; compare two independent integrators.
 let problem = get_problem("lorenz96")
     system = reference_system(problem)
     prob = reference_problem(system, problem, 8.0)

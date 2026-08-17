@@ -23,7 +23,7 @@ function lorenz96_reference(u, p, t)
             u[i] + p[1] for i in 1:n]
 end
 
-# Uniform state x_i = 8 with x_1 perturbed to 9, so every swept F moves at t = 0.
+# Uniform state 8 with x1 perturbed to 9.
 const LORENZ96_U0 = [i == 1 ? 9.0 : 8.0 for i in 1:40]
 
 # Pleiades (Test Set for IVP Solvers, celestial mechanics): u = (x, y, x', y').
@@ -182,9 +182,7 @@ end
 const RM_INDEX2_MASS = Diagonal([1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
 
-# NAND gate (Test Set for IVP Solvers): C(y) y' = f(y, t), an index-0 IDE
-# whose capacitance matrix is state-dependent and non-diagonal, transcribed
-# from nand.f including its enhancement-type beta asymmetry.
+# NAND gate (Test Set for IVP Solvers): C(y) y' = f(y, t), index-0 IDE.
 const NAND_RGS = 4.0
 const NAND_RGD = 4.0
 const NAND_RBS = 10.0
@@ -228,7 +226,7 @@ nand_ibdbs(v) = v <= 0.0 ? -NAND_CURIS * (exp(v / NAND_VTH) - 1.0) : zero(v)
 function nand_gdsp(ned, vds, vgs, vbs)
     vt0, cgamma, phi, beta = ned == 1 ? (-2.43, 0.2, 1.28, 5.35e-4) :
                              (0.2, 0.035, 1.01, 1.748e-3)
-    # nand.f signals ierr = -1 here; a NaN makes the solver reject the step.
+    # Outside the sqrt domain: return NaN so the solver rejects the step.
     phi - vbs < 0.0 && return oftype(vbs, NaN)
     vte = vt0 + cgamma * (sqrt(phi - vbs) - sqrt(phi))
     vgs - vte <= 0.0 && return zero(vte)
@@ -240,7 +238,7 @@ end
 function nand_gdsm(ned, vds, vgd, vbd)
     vt0, cgamma, phi, beta = ned == 1 ? (-2.43, 0.2, 1.28, 5.35e-4) :
                              (0.2, 0.035, 1.01, 1.748e-4)
-    # nand.f signals ierr = -1 here; a NaN makes the solver reject the step.
+    # Outside the sqrt domain: return NaN so the solver rejects the step.
     phi - vbd < 0.0 && return oftype(vbd, NaN)
     vte = vt0 + cgamma * (sqrt(phi - vbd) - sqrt(phi))
     vgd - vte <= 0.0 && return zero(vte)
@@ -347,7 +345,7 @@ const REFERENCE_SYSTEMS = Dict{String, Any}(
     # A mass matrix needs the mutating form, so this one keeps a plain vector.
     "ring_modulator_index2" => (rhs = ring_modulator_index2_reference!,
         u0 = zeros(15), mass_matrix = RM_INDEX2_MASS),
-    # Fully implicit: no framework expresses C(y) y', so only the golden runs.
+    # Fully implicit; only the golden generator integrates it.
     "nand_gate" => (residual = nand_residual!, u0 = NAND_U0, du0 = nand_du0,
         tstops = collect(0.0:5.0:80.0), mass_matrix = nothing),
 )

@@ -30,7 +30,7 @@ class _Lorenz96(eqx.Module):
 
 
 def _lorenz96(problem):
-    # Uniform state 8 with x1 perturbed to 9, so every swept F moves at t = 0.
+    # Uniform state 8 with x1 perturbed to 9.
     y0 = jnp.full(40, 8.0).at[0].set(9.0)
     return _Lorenz96, y0
 
