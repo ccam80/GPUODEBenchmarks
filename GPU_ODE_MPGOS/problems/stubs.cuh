@@ -1,10 +1,7 @@
 #ifndef PROBLEM_STUBS_CUH
 #define PROBLEM_STUBS_CUH
 
-// The event and accessory hooks MPGOS requires. The initialization and
-// after-step hooks carry the per-thread run budget: sPARi[0] holds the cycle
-// budget in 2^21-cycle units and ACCi[0] the thread's start clock, so a
-// thread whose budget is spent poisons its state and jumps to the end time.
+// MPGOS hooks; sPARi[0] is the run budget in 2^21-cycle units, ACCi[0] the thread's start clock.
 #define WATCHDOG_CLOCK_SHIFT 21
 
 template <class Precision>

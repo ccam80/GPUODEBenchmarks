@@ -6,8 +6,7 @@ const WATCHDOG_SECONDS = parse(Float64,
 "Run f() under the watchdog; when it never returns, run on_breach() and hard-exit."
 function run_watchdogged(f, on_breach)
     finished = Threads.Atomic{Bool}(false)
-    # Margin over the soft cap: a run finishing just past it is still
-    # recorded in-process; the hard exit is for runs that never return.
+    # Margin over the soft cap: only never-returning runs reach the hard exit.
     timer = Timer(WATCHDOG_SECONDS * 2.0 + 30.0) do _
         finished[] && return
         try

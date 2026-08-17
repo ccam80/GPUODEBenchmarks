@@ -258,15 +258,14 @@ cyclic 40-state forcing model; the Pleiades is the seven-body celestial
 mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
 Verwer's 25-reaction atmospheric mechanism.
 
-Every benchmark solve runs under a watchdog: a run that exceeds
-`BENCH_WATCHDOG_SECONDS` (default 120) is recorded as a NaN row and the
-leg's remaining solves are abandoned — the rest of a point's timed repeats,
-and for a work-precision sweep the remaining (slower) settings. Runs that
-return too late are cut off in-process; a solve that never returns (a
-solver ground below Float32 time resolution has no step cap in MPGOS or
-the DiffEqGPU kernels) is caught by a hard watchdog that writes the NaN
-rows and exits the process, so the Julia runner launches one process per
-algorithm and the drivers continue with the next leg.
+Every benchmark solve runs under `BENCH_WATCHDOG_SECONDS` (default 120): a
+run over the cap is recorded as a NaN row and the leg's remaining solves
+are abandoned, including a work-precision sweep's remaining settings.
+MPGOS kernels end themselves through a device-side cycle budget in
+`problems/stubs.cuh`; a solve that never returns is caught by a hard
+watchdog that writes the NaN rows and exits the process, and the Julia
+runner launches one process per algorithm so an exit abandons only that
+leg.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows

@@ -164,8 +164,7 @@ def _run_times(problem, opts, system, grid):
     device = {}
 
     def bench_times(solver):
-        """Best-of-REPEATS (with_transfers_ms, device_only_ms, solution);
-        the times are None when a run breaches the watchdog."""
+        """(with_transfers_ms, device_only_ms, solution); times None on a breach."""
         from wp_common import timed_min_ms
 
         initials_array, parameter_array = grid(solver)

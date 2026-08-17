@@ -150,9 +150,7 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Rows the watchdog appends to the file when the armed run never returns.
-// Margin over the soft cap: the device-side budget ends runs near the cap,
-// so the hard exit only fires when a kernel truly never returns.
+// Arm with the rows to append if the run never returns; margin over the soft cap.
 static void ArmWatchdog(const std::string& file, const std::vector<std::string>& rows)
 {
 	std::lock_guard<std::mutex> hold(WatchdogLock);
@@ -216,9 +214,7 @@ int main(int argc, char *argv[])
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
 
-	// Device-side run budget in 2^21-cycle units; see problems/stubs.cuh.
-	// The 1.25 margin keeps budget-terminated solves above the host cap, so
-	// they land as recorded breaches whatever the actual boost clock is.
+	// Device-side run budget, 1.25 over the host cap; see problems/stubs.cuh.
 	int ClockKHz = 0;
 	cudaDeviceGetAttribute(&ClockKHz, cudaDevAttrClockRate, SelectedDevice);
 	if (ClockKHz <= 0) ClockKHz = 3000000;

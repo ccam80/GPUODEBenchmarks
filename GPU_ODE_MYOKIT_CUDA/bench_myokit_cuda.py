@@ -67,8 +67,7 @@ def _capped_min_ms(run, repeats, setup=None):
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats):
-    """Warm up, then return (with_transfers_ms, device_only_ms, finals);
-    the times are NaN when a run breaches the watchdog."""
+    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach."""
     initial_states = model.initial_states(cell_count)
 
     def run():
