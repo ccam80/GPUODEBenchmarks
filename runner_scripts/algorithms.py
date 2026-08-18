@@ -65,5 +65,12 @@ def resolve_algorithms(request, framework):
 
 
 if __name__ == "__main__":
-    for row in load_algorithms():
-        print(row["algorithm"])
+    import sys
+    if len(sys.argv) > 1:
+        # <framework> [request]: the resolved algorithm names, one per line.
+        request = sys.argv[2] if len(sys.argv) > 2 else "all"
+        for name in resolve_algorithms(request, sys.argv[1]):
+            print(name)
+    else:
+        for row in load_algorithms():
+            print(row["algorithm"])

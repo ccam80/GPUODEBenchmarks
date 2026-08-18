@@ -11,7 +11,6 @@ import optimistix as optx
 import jax.numpy as jnp
 import numpy as np
 import os
-import timeit
 import sys
 
 from diffrax import AbstractERK, ButcherTableau
@@ -24,7 +23,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from wp_common import TIMING_TOL, parse_bench_args, times_outfile
+from wp_common import (TIMING_TOL, parse_bench_args, timed_min_ms,
+                       times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -123,8 +123,14 @@ def best_times_ms(solve, args, label):
         return jax.block_until_ready(solve(args))
 
     try:
-        both = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
-        none = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
+        both, _ = timed_min_ms(with_transfers, REPEATS)
+        none = None
+        if both is not None:
+            none, _ = timed_min_ms(device_only, REPEATS)
+        if both is None or none is None:
+            print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
+                label, numberOfParameters))
+            return (float("nan") if both is None else both, float("nan"))
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
             label, numberOfParameters, type(err).__name__, err))
@@ -171,19 +177,21 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
 def run_wp(problem, parameterList):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
     from wp_common import (dts_for, TOLS, load_golden, ensemble_error,
-                           wp_outfile)
+                           timed_min_ms, wp_outfile)
 
     golden = load_golden(problem)
 
     def bench(m, setting, outfh):
+        """Write one row; False when a run breached the watchdog."""
+        breached = False
         try:
-            sol = m(parameterList)
-            jax.block_until_ready(sol.ys)  # warm-up (JIT) + numerical result
-            err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
-            res = timeit.repeat(
-                lambda: jax.block_until_ready(m(parameterList).ys),
-                repeat=20, number=1)
-            t_ms = min(res) * 1000
+            t_ms, sol = timed_min_ms(
+                lambda: jax.block_until_ready(m(parameterList)), 20)
+            if t_ms is None:
+                breached = True
+                t_ms, err = float("nan"), float("nan")
+            else:
+                err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
         except Exception as err_exc:
             print("FAILED wp {0} setting={1:g}: {2}".format(
                 problem.name, setting, err_exc))
@@ -191,22 +199,35 @@ def run_wp(problem, parameterList):
         print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}".format(
             problem.name, setting, t_ms, err))
         outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
+        outfh.flush()
+        return not breached
+
+    def sweep(outfile, settings, make):
+        # Later settings are slower, so a breach abandons the leg as NaN rows.
+        with open(outfile, "w") as f:
+            breached = False
+            for setting in settings:
+                if breached:
+                    f.write("{0:.10g} nan nan\n".format(setting))
+                    continue
+                if not bench(make(setting), setting, f):
+                    print("WATCHDOG wp {0} setting={1:g}: run exceeded "
+                          "the cap".format(problem.name, setting))
+                    breached = True
 
     for algorithm in ALGORITHMS:
         if algorithm in FIXED_ALGORITHMS:
-            outfile = wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY,
-                                 problem)
-            with open(outfile, "w") as f:
-                for dt in dts_for(algorithm, problem):
-                    # max_steps covers the finest euler dt (2^17 steps).
-                    bench(make_fixed(problem, algorithm, dt,
-                                     max_steps=262144), dt, f)
+            # max_steps covers the finest euler dt (2^17 steps).
+            sweep(wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY,
+                             problem),
+                  dts_for(algorithm, problem),
+                  lambda dt: make_fixed(problem, algorithm, dt,
+                                        max_steps=262144))
         if algorithm in ADAPTIVE_ALGORITHMS:
-            outfile = wp_outfile("JAX", "Jax", "adaptive", algorithm,
-                                 DATASET_KEY, problem)
-            with open(outfile, "w") as f:
-                for tol in TOLS:
-                    bench(make_adaptive(problem, algorithm, tol), tol, f)
+            sweep(wp_outfile("JAX", "Jax", "adaptive", algorithm, DATASET_KEY,
+                             problem),
+                  TOLS,
+                  lambda tol: make_adaptive(problem, algorithm, tol))
 
 
 def run_times(problem, parameterList):

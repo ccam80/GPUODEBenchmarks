@@ -15,6 +15,24 @@ N_WP = 131072
 # Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
 TIMING_TOL = 1.0e-8
 
+# Per-run wall-clock ceiling in seconds; mirrored by the Julia and MPGOS writers.
+WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))
+
+
+def timed_min_ms(run, repeats):
+    """Best-of-repeats wall time in ms after one warm-up; None on a breach."""
+    import timeit
+    best = None
+    for attempt in range(repeats + 1):
+        elapsed = timeit.default_timer()
+        result = run()
+        elapsed = timeit.default_timer() - elapsed
+        if elapsed > WATCHDOG_SECONDS:
+            return None, result
+        if attempt and (best is None or elapsed < best):
+            best = elapsed
+    return best * 1000.0, result
+
 
 def _row(problem):
     """Accept a problem row or a problem name."""

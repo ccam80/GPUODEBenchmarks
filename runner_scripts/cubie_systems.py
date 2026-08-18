@@ -80,6 +80,145 @@ def _lorenz(problem, precision, name):
     return system, {"x": 1.0, "y": 0.0, "z": 0.0}
 
 
+def _lorenz96(problem, precision, name):
+    """Cyclic 40-state Lorenz 96; the swept forcing F drives every row."""
+    n = 40
+    lines = []
+    for i in range(1, n + 1):
+        ip1 = i % n + 1
+        im1 = (i - 2) % n + 1
+        im2 = (i - 3) % n + 1
+        lines.append("dx{0} = (x{1} - x{2}) * x{3} - x{0} + F".format(
+            i, ip1, im2, im1))
+    # Uniform state 8 with x1 perturbed to 9.
+    states = {"x{0}".format(i): 9.0 if i == 1 else 8.0
+              for i in range(1, n + 1)}
+    system = qb.create_ODE_system(
+        "\n".join(lines),
+        states=dict(states),
+        parameters={"F": 8.0},
+        name=name,
+        precision=precision,
+    )
+    return system, dict(states)
+
+
+# Pleiades initial state (Test Set for IVP Solvers): x, y, x', y' per star.
+PLEIADES_X0 = (3.0, 3.0, -1.0, -3.0, 2.0, -2.0, 2.0)
+PLEIADES_Y0 = (3.0, -3.0, 2.0, 0.0, 0.0, -4.0, 4.0)
+PLEIADES_U0 = (0.0, 0.0, 0.0, 0.0, 0.0, 1.75, -1.5)
+PLEIADES_V0 = (0.0, 0.0, 0.0, -1.25, 1.0, 0.0, 0.0)
+
+
+def _pleiades(problem, precision, name):
+    """Seven-body planar gravitation with masses (m1, 2, ..., 7); m1 swept."""
+    lines = []
+    for i in range(1, 8):
+        for j in range(i + 1, 8):
+            lines.append("q{0}{1} = (x{0} - x{1})**2 + (y{0} - y{1})**2"
+                         .format(i, j))
+            lines.append("w{0}{1} = q{0}{1} * sqrt(q{0}{1})".format(i, j))
+    for i in range(1, 8):
+        lines.append("dx{0} = u{0}".format(i))
+        lines.append("dy{0} = v{0}".format(i))
+    for i in range(1, 8):
+        ax, ay = [], []
+        for j in range(1, 8):
+            if j == i:
+                continue
+            pair = "w{0}{1}".format(min(i, j), max(i, j))
+            ax.append("m{0} * (x{0} - x{1}) / {2}".format(j, i, pair))
+            ay.append("m{0} * (y{0} - y{1}) / {2}".format(j, i, pair))
+        lines.append("du{0} = {1}".format(i, " + ".join(ax)))
+        lines.append("dv{0} = {1}".format(i, " + ".join(ay)))
+    states = {}
+    for prefix, values in (("x", PLEIADES_X0), ("y", PLEIADES_Y0),
+                           ("u", PLEIADES_U0), ("v", PLEIADES_V0)):
+        for i, value in enumerate(values, start=1):
+            states["{0}{1}".format(prefix, i)] = value
+    system = qb.create_ODE_system(
+        "\n".join(lines),
+        states=dict(states),
+        parameters={"m1": 1.0},
+        constants={"m{0}".format(j): float(j) for j in range(2, 8)},
+        name=name,
+        precision=precision,
+    )
+    return system, dict(states)
+
+
+# Pollution problem rate constants k2..k25 (k1 is swept).
+POLLU_CONSTANTS = {
+    "k2": 26.6, "k3": 1.23e4, "k4": 8.6e-4, "k5": 8.2e-4, "k6": 1.5e4,
+    "k7": 1.3e-4, "k8": 2.4e4, "k9": 1.65e4, "k10": 9.0e3, "k11": 2.2e-2,
+    "k12": 1.2e4, "k13": 1.88, "k14": 1.63e4, "k15": 4.8e6, "k16": 3.5e-4,
+    "k17": 1.75e-2, "k18": 1.0e8, "k19": 4.44e11, "k20": 1.24e3, "k21": 2.1,
+    "k22": 5.78, "k23": 4.74e-2, "k24": 1.78e3, "k25": 3.12,
+}
+
+POLLU_STATES = {"y{0}".format(i): 0.0 for i in range(1, 21)}
+POLLU_STATES.update(y2=0.2, y4=0.04, y7=0.1, y8=0.3, y9=0.01, y17=0.007)
+
+
+def _pollu(problem, precision, name):
+    """Verwer's air pollution mechanism; the swept photolysis rate is k1."""
+    system = qb.create_ODE_system(
+        """
+        r1 = k1 * y1
+        r2 = k2 * y2 * y4
+        r3 = k3 * y5 * y2
+        r4 = k4 * y7
+        r5 = k5 * y7
+        r6 = k6 * y7 * y6
+        r7 = k7 * y9
+        r8 = k8 * y9 * y6
+        r9 = k9 * y11 * y2
+        r10 = k10 * y11 * y1
+        r11 = k11 * y13
+        r12 = k12 * y10 * y2
+        r13 = k13 * y14
+        r14 = k14 * y1 * y6
+        r15 = k15 * y3
+        r16 = k16 * y4
+        r17 = k17 * y4
+        r18 = k18 * y16
+        r19 = k19 * y16
+        r20 = k20 * y17 * y6
+        r21 = k21 * y19
+        r22 = k22 * y19
+        r23 = k23 * y1 * y4
+        r24 = k24 * y19 * y1
+        r25 = k25 * y20
+        dy1 = -r1 - r10 - r14 - r23 - r24 + r2 + r3 + r9 + r11 + r12 + r22 + r25
+        dy2 = -r2 - r3 - r9 - r12 + r1 + r21
+        dy3 = -r15 + r1 + r17 + r19 + r22
+        dy4 = -r2 - r16 - r17 - r23 + r15
+        dy5 = -r3 + 2.0 * r4 + r6 + r7 + r13 + r20
+        dy6 = -r6 - r8 - r14 - r20 + r3 + 2.0 * r18
+        dy7 = -r4 - r5 - r6 + r13
+        dy8 = r4 + r5 + r6 + r7
+        dy9 = -r7 - r8
+        dy10 = -r12 + r7 + r9
+        dy11 = -r9 - r10 + r8 + r11
+        dy12 = r9
+        dy13 = -r11 + r10
+        dy14 = -r13 + r12
+        dy15 = r14
+        dy16 = -r18 - r19 + r16
+        dy17 = -r20
+        dy18 = r20
+        dy19 = -r21 - r22 - r24 + r23 + r25
+        dy20 = -r25 + r24
+        """,
+        states=dict(POLLU_STATES),
+        parameters={"k1": 0.35},
+        constants=dict(POLLU_CONSTANTS),
+        name=name,
+        precision=precision,
+    )
+    return system, dict(POLLU_STATES)
+
+
 def _ring_modulator(problem, precision, name):
     """Stiff 15-state ODE form; the swept Cs stays above zero."""
     equations = RING_AUXILIARIES + """
@@ -116,23 +255,118 @@ def _ring_modulator_index2(problem, precision, name):
         observables=list(RING_INDEX2_OBSERVABLES),
         name=name,
         precision=precision,
-        simplify=True,
     )
     # Simplification tears states out, so the grid takes the retained set.
     return system, state_defaults(system)
 
 
+# NAND gate (Test Set for IVP Solvers): C(y) y' = f(y, t) in natural form.
+NAND_STATES = {"y1": 5.0, "y2": 5.0, "y3": -2.5, "y4": -2.5, "y5": 5.0,
+               "y6": 3.62385, "y7": 5.0, "y8": -2.5, "y9": -2.5,
+               "y10": 3.62385, "y11": 0.0, "y12": 3.62385, "y13": -2.5,
+               "y14": -2.5}
+
+NAND_CONSTANTS = {
+    "rgs": 4.0, "rgd": 4.0, "rbs": 10.0, "rbd": 10.0, "cgs": 0.6e-4,
+    "cgd": 0.6e-4, "cbd": 2.4e-5, "c9": 0.5e-4, "delta": 0.2e-1,
+    "curis": 1.0e-14, "vth": 25.85, "vbb": -2.5, "phib": 0.87,
+    "vt0d": -2.43, "cgammad": 0.2, "phid": 1.28, "betad": 5.35e-4,
+    "vt0e": 0.2, "cgammae": 0.035, "phie": 1.01, "betaep": 1.748e-3,
+    "betaem": 1.748e-4, "period1": 20.0, "period2": 40.0,
+}
+
+# Input pulses, junction terms and drain currents, then the network rows.
+NAND_EQUATIONS = """
+    tp1 = t - period1 * floor(t / period1)
+    v1 = Piecewise((0.0, tp1 <= 5.0), (tp1 - 5.0, tp1 <= 10.0), (5.0, tp1 <= 15.0), (20.0 - tp1, True))
+    v1d = Piecewise((0.0, tp1 <= 5.0), (1.0, tp1 <= 10.0), (0.0, tp1 <= 15.0), (-1.0, True))
+    tp2 = t - period2 * floor(t / period2)
+    v2 = Piecewise((0.0, tp2 <= 15.0), (tp2 - 15.0, tp2 <= 20.0), (5.0, tp2 <= 35.0), (40.0 - tp2, True))
+    v2d = Piecewise((0.0, tp2 <= 15.0), (1.0, tp2 <= 20.0), (0.0, tp2 <= 35.0), (-1.0, True))
+    cb35 = Piecewise((cbd / sqrt(1.0 - (y3 - y5) / phib), y3 - y5 <= 0.0), (cbd * (1.0 + (y3 - y5) / (2.0 * phib)), True))
+    cb4 = Piecewise((cbd / sqrt(1.0 - (y4 - VDD) / phib), y4 - VDD <= 0.0), (cbd * (1.0 + (y4 - VDD) / (2.0 * phib)), True))
+    cb95 = Piecewise((cbd / sqrt(1.0 - (y9 - y5) / phib), y9 - y5 <= 0.0), (cbd * (1.0 + (y9 - y5) / (2.0 * phib)), True))
+    cb810 = Piecewise((cbd / sqrt(1.0 - (y8 - y10) / phib), y8 - y10 <= 0.0), (cbd * (1.0 + (y8 - y10) / (2.0 * phib)), True))
+    cb13 = Piecewise((cbd / sqrt(1.0 - y13 / phib), y13 <= 0.0), (cbd * (1.0 + y13 / (2.0 * phib)), True))
+    cb1410 = Piecewise((cbd / sqrt(1.0 - (y14 - y10) / phib), y14 - y10 <= 0.0), (cbd * (1.0 + (y14 - y10) / (2.0 * phib)), True))
+    ibs35 = Piecewise((-curis * (exp((y3 - y5) / vth) - 1.0), y3 - y5 <= 0.0), (0.0, True))
+    ibd4 = Piecewise((-curis * (exp((y4 - VDD) / vth) - 1.0), y4 - VDD <= 0.0), (0.0, True))
+    ibs810 = Piecewise((-curis * (exp((y8 - y10) / vth) - 1.0), y8 - y10 <= 0.0), (0.0, True))
+    ibd95 = Piecewise((-curis * (exp((y9 - y5) / vth) - 1.0), y9 - y5 <= 0.0), (0.0, True))
+    ibs13 = Piecewise((-curis * (exp(y13 / vth) - 1.0), y13 <= 0.0), (0.0, True))
+    ibd1410 = Piecewise((-curis * (exp((y14 - y10) / vth) - 1.0), y14 - y10 <= 0.0), (0.0, True))
+    vte1p = vt0d + cgammad * (sqrt(phid - (y3 - y5)) - sqrt(phid))
+    vte1m = vt0d + cgammad * (sqrt(phid - (y4 - VDD)) - sqrt(phid))
+    gds1p = Piecewise((0.0, (y5 - y1) - vte1p <= 0.0), (-betad * ((y5 - y1) - vte1p)**2 * (1.0 + delta * (y2 - y1)), (y5 - y1) - vte1p <= (y2 - y1)), (-betad * (y2 - y1) * (2.0 * ((y5 - y1) - vte1p) - (y2 - y1)) * (1.0 + delta * (y2 - y1)), True))
+    gds1m = Piecewise((0.0, (y5 - y2) - vte1m <= 0.0), (betad * ((y5 - y2) - vte1m)**2 * (1.0 - delta * (y2 - y1)), (y5 - y2) - vte1m <= -(y2 - y1)), (-betad * (y2 - y1) * (2.0 * ((y5 - y2) - vte1m) + (y2 - y1)) * (1.0 - delta * (y2 - y1)), True))
+    ids1 = Piecewise((gds1p, y2 - y1 > 0.0), (gds1m, y2 - y1 < 0.0), (0.0, True))
+    vte2p = vt0e + cgammae * (sqrt(phie - (y8 - y10)) - sqrt(phie))
+    vte2m = vt0e + cgammae * (sqrt(phie - (y9 - y5)) - sqrt(phie))
+    gds2p = Piecewise((0.0, (v1 - y6) - vte2p <= 0.0), (-betaep * ((v1 - y6) - vte2p)**2 * (1.0 + delta * (y7 - y6)), (v1 - y6) - vte2p <= (y7 - y6)), (-betaep * (y7 - y6) * (2.0 * ((v1 - y6) - vte2p) - (y7 - y6)) * (1.0 + delta * (y7 - y6)), True))
+    gds2m = Piecewise((0.0, (v1 - y7) - vte2m <= 0.0), (betaem * ((v1 - y7) - vte2m)**2 * (1.0 - delta * (y7 - y6)), (v1 - y7) - vte2m <= -(y7 - y6)), (-betaem * (y7 - y6) * (2.0 * ((v1 - y7) - vte2m) + (y7 - y6)) * (1.0 - delta * (y7 - y6)), True))
+    ids2 = Piecewise((gds2p, y7 - y6 > 0.0), (gds2m, y7 - y6 < 0.0), (0.0, True))
+    vte3p = vt0e + cgammae * (sqrt(phie - y13) - sqrt(phie))
+    vte3m = vt0e + cgammae * (sqrt(phie - (y14 - y10)) - sqrt(phie))
+    gds3p = Piecewise((0.0, (v2 - y11) - vte3p <= 0.0), (-betaep * ((v2 - y11) - vte3p)**2 * (1.0 + delta * (y12 - y11)), (v2 - y11) - vte3p <= (y12 - y11)), (-betaep * (y12 - y11) * (2.0 * ((v2 - y11) - vte3p) - (y12 - y11)) * (1.0 + delta * (y12 - y11)), True))
+    gds3m = Piecewise((0.0, (v2 - y12) - vte3m <= 0.0), (betaem * ((v2 - y12) - vte3m)**2 * (1.0 - delta * (y12 - y11)), (v2 - y12) - vte3m <= -(y12 - y11)), (-betaem * (y12 - y11) * (2.0 * ((v2 - y12) - vte3m) + (y12 - y11)) * (1.0 - delta * (y12 - y11)), True))
+    ids3 = Piecewise((gds3p, y12 - y11 > 0.0), (gds3m, y12 - y11 < 0.0), (0.0, True))
+    cgs * dy1 - cgs * dy5 = -(y1 - y5) / rgs - ids1
+    cgd * dy2 - cgd * dy5 = -(y2 - VDD) / rgd + ids1
+    cb35 * dy3 - cb35 * dy5 = -(y3 - vbb) / rbs + ibs35
+    cb4 * dy4 = -(y4 - vbb) / rbd + ibd4
+    -cgs * dy1 - cgd * dy2 - cb35 * dy3 + (cgs + cgd + cb35 + cb95 + c9) * dy5 - cb95 * dy9 = -(y5 - y1) / rgs - ibs35 - (y5 - y7) / rgd - ibd95
+    cgs * dy6 = cgs * v1d - (y6 - y10) / rgs - ids2
+    cgd * dy7 = cgd * v1d - (y7 - y5) / rgd + ids2
+    cb810 * dy8 - cb810 * dy10 = -(y8 - vbb) / rbs + ibs810
+    -cb95 * dy5 + cb95 * dy9 = -(y9 - vbb) / rbd + ibd95
+    -cb810 * dy8 + (cb810 + cb1410 + c9) * dy10 - cb1410 * dy14 = -(y10 - y6) / rgs - ibs810 - (y10 - y12) / rgd - ibd1410
+    cgs * dy11 = cgs * v2d - y11 / rgs - ids3
+    cgd * dy12 = cgd * v2d - (y12 - y10) / rgd + ids3
+    cb13 * dy13 = -(y13 - vbb) / rbs + ibs13
+    -cb1410 * dy10 + cb1410 * dy14 = -(y14 - vbb) / rbd + ibd1410
+"""
+
+
+def _nand_gate(problem, precision, name):
+    """Index-0 implicit DE; the swept supply voltage is VDD."""
+    system = qb.create_ODE_system(
+        NAND_EQUATIONS,
+        states=dict(NAND_STATES),
+        parameters={"VDD": 5.0},
+        constants=dict(NAND_CONSTANTS),
+        name=name,
+        precision=precision,
+    )
+    # Simplification introduces derivative states, so merge onto the
+    # retained set; the introduced states keep their 0.0 defaults.
+    initial = state_defaults(system)
+    for key, value in NAND_STATES.items():
+        if key in initial:
+            initial[key] = value
+    return system, initial
+
+
 # The problem's own variables, in the order the golden reference stores them.
 _ORDER = {
     "lorenz": ("x", "y", "z"),
+    "lorenz96": tuple("x{0}".format(i) for i in range(1, 41)),
+    "pleiades": tuple("{0}{1}".format(prefix, i)
+                      for prefix in ("x", "y", "u", "v")
+                      for i in range(1, 8)),
+    "pollu": tuple("y{0}".format(i) for i in range(1, 21)),
     "ring_modulator": RING_ORDER,
     "ring_modulator_index2": RING_ORDER,
+    "nand_gate": tuple("y{0}".format(i) for i in range(1, 15)),
 }
 
 _BUILDERS = {
     "lorenz": _lorenz,
+    "lorenz96": _lorenz96,
+    "pleiades": _pleiades,
+    "pollu": _pollu,
     "ring_modulator": _ring_modulator,
     "ring_modulator_index2": _ring_modulator_index2,
+    "nand_gate": _nand_gate,
 }
 
 
@@ -178,13 +412,16 @@ def final_states(system, solution, problem):
     finals = np.asarray(solution.state[-1, :, :]).T
     if len(state_names) == len(order) and list(state_names) == list(order):
         return finals
-    observable_names = _names(system.indices.observables.index_map)
-    observables = np.asarray(solution.observables[-1, :, :]).T
+    observable_names, observables = [], None
     columns = []
     for name in order:
         if name in state_names:
             columns.append(finals[:, state_names.index(name)])
-        elif name in observable_names:
+            continue
+        if observables is None:
+            observable_names = _names(system.indices.observables.index_map)
+            observables = np.asarray(solution.observables[-1, :, :]).T
+        if name in observable_names:
             columns.append(observables[:, observable_names.index(name)])
         else:
             raise SystemExit(

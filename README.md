@@ -244,20 +244,57 @@ floating point.
 | Problem | States | Duration | Swept parameter | Class |
 |---|---|---|---|---|
 | `lorenz` | 3 | 1 | `rho` over [0, 21], linear | non-stiff |
+| `lorenz96` | 40 | 1 | `F` over [0, 16], linear | non-stiff |
+| `pleiades` | 28 | 3 | `m1` over [0.5, 2], linear | non-stiff |
+| `pollu` | 20 | 60 | `k1` over [3.5e-2, 3.5], log | stiff |
 | `ring_modulator` | 15 | 1e-3 | `Cs` over [2e-13, 2e-9], log | stiff |
 | `ring_modulator_index2` | 15 | 1e-3 | `Uin1_amplitude` over [0, 0.5], linear | stiff, index 2 |
+| `nand_gate` | 14 | 80 | `VDD` over [4, 6], linear | implicit DE |
 
-The ring modulator is problem II-3 of the Bari *Test Set for IVP Solvers*: a
-15-state circuit model whose stiffness scales with `1/Cs`. At `Cs = 0` the
-four capacitor rows become algebraic and the system is an index-2 DAE, which
-is a separate row sweeping the `Uin1` amplitude instead. Cubie derives the
-mass matrix during parsing and tears the algebraic states out by structural
-simplification; the torn variables are recorded as observables, so the full
-15-variable state is still compared against the golden. Only fully implicit
-stages integrate it: cubie rejects the explicit algorithms and `kvaerno3` on
-a singular mass matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
-Golden references are Float64 solves under each problem's `golden_algorithm`
-at its `golden_tol`.
+Except for the two Lorenz systems, the problems come from Mazzia and
+Magherini's Bari *Test Set for IVP Solvers*, transcribed from its Fortran
+sources with their canonical initial states and intervals. Lorenz 96 is the
+cyclic 40-state forcing model; the Pleiades is the seven-body celestial
+mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
+Verwer's 25-reaction atmospheric mechanism.
+
+Every benchmark solve runs under `BENCH_WATCHDOG_SECONDS` (default 120): a
+run over the cap is recorded as a NaN row and the leg's remaining solves
+are abandoned, including a work-precision sweep's remaining settings.
+MPGOS kernels end themselves through a device-side cycle budget in
+`problems/stubs.cuh`; a solve that never returns is caught by a hard
+watchdog that writes the NaN rows and exits the process, and the Julia
+runner launches one process per algorithm so an exit abandons only that
+leg.
+
+The ring modulator is problem II-3 of the test set: a 15-state circuit model
+whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
+become algebraic and the system is an index-2 DAE, which is a separate row
+sweeping the `Uin1` amplitude instead. Cubie derives the mass matrix during
+parsing and tears the algebraic states out by structural simplification; the
+torn variables are recorded as observables, so the full 15-variable state is
+still compared against the golden. Only fully implicit stages integrate it:
+cubie rejects the explicit algorithms and `kvaerno3` on a singular mass
+matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
+
+The Julia systems are defined once as ModelingToolkit models
+(`runner_scripts/julia_systems.jl`): `mtkcompile` transforms the raw
+equations and every numeric artifact the suites use — right-hand sides,
+symbolic jacobians, time gradients, mass matrices, variable orderings — is
+generated from the compiled system and handed to DiffEqGPU as plain
+callables. The index-2 ring modulator is the same equation set with
+`Cs = 0` substituted at definition, which derives its singular mass matrix.
+
+The NAND gate is the test set's index-0 implicit DE `C(y) y' = f(y, t)`
+with a state-dependent, non-diagonal capacitance matrix. Cubie takes it in
+natural form and ModelingToolkit compiles it to fourteen node potentials
+plus eight derivative states behind a constant singular mass matrix, so its
+`frameworks` column is `cubie|cubie_mlir|julia`; the remaining frameworks
+have no formulation for that left-hand side. The Float64 golden integrates
+it as a fully implicit DFBDF `DAEProblem` with tstops on the pulse corners.
+Golden references are Float64 solves under each problem's
+`golden_algorithm` at its `golden_tol`, checked against the published
+test-set values by `runner_scripts/golden/verify_references.jl`.
 
 Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
 framework skips cleanly when a requested problem is not in its list:

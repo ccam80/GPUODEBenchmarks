@@ -142,13 +142,17 @@ function setup(problem)
     system = julia_system(problem)
     duration = Float32(problem["duration"])
     u0 = Vector{Float32}(system.u0)
-    f = system.mass_matrix === nothing ? ODEFunction{true}(system.rhs!) :
-        ODEFunction{true}(system.rhs!; mass_matrix = system.mass_matrix)
+    f = system.mass_matrix === nothing ?
+        ODEFunction{true}(system.rhs!; jac = system.jac!) :
+        ODEFunction{true}(system.rhs!; jac = system.jac!,
+            mass_matrix = system.mass_matrix)
     prob = ODEProblem{true}(f, u0, (0.0f0, duration), Float32[sweep32[1]])
     # SciMLBase's current ensemble API passes an EnsembleContext (with .sim_id)
     # as the second argument of prob_func/output_func.
     eprob = EnsembleProblem(prob;
-        prob_func = (pr, ctx) -> remake(pr, p = Float32[sweep32[ctx.sim_id]]),
+        prob_func = (pr, ctx) -> remake(pr,
+            u0 = Vector{Float32}(system.u0_for(sweep32[ctx.sim_id])),
+            p = Float32[sweep32[ctx.sim_id]]),
         output_func = (sol, ctx) -> ((sol.u[end], sol.retcode,
             sol.stats.naccept, sol.stats.nreject), false),
         safetycopy = false)
@@ -156,6 +160,7 @@ function setup(problem)
     outdir = joinpath(REPO_ROOT, "data", "numerical_equivalence", "julia", name)
     mkpath(outdir)
     return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
+        golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
         dts = problem_dts_ne(problem),
         dt0 = duration * DT0_FRACTION, dtmin = duration * DT_MIN_FRACTION,
@@ -164,9 +169,9 @@ end
 
 problem_dts_ne(problem) = problem_ne_dts(problem)
 
-"Final states, step counts and retcodes of one ensemble solve."
-function collect_finals(sim, nstates)
-    finals = Matrix{Float32}(undef, N_NE, nstates)
+"Final states in golden order, step counts and retcodes of one ensemble solve."
+function collect_finals(sim, ctx)
+    finals = Matrix{Float32}(undef, N_NE, ctx.nstates)
     naccept = Vector{Int}(undef, N_NE)
     nreject = Vector{Int}(undef, N_NE)
     converged = Vector{Bool}(undef, N_NE)
@@ -176,7 +181,7 @@ function collect_finals(sim, nstates)
         eltype(u_end) === Float32 || error(
             "Float32 discipline violated: trajectory $(i) returned " *
             "eltype $(eltype(u_end))")
-        finals[i, :] .= u_end
+        finals[i, :] .= u_end[ctx.golden_index]
         naccept[i] = na
         nreject[i] = nr
         ok = retcode == SciMLBase.ReturnCode.Success
@@ -229,7 +234,7 @@ function run_fixed(ctx)
                     trajectories = N_NE, dt = Float32(dt), adaptive = false,
                     abstol = 1.0f-6, reltol = 1.0f-3,
                     save_everystep = false, save_start = false, dense = false)
-                finals, _, _, n_bad, converged = collect_finals(sim, ctx.nstates)
+                finals, _, _, n_bad, converged = collect_finals(sim, ctx)
                 err = ensemble_err(finals, ctx.golden_states)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  dt=%-12g err=%.6e%s\n", dt, err, note)
@@ -324,7 +329,7 @@ function run_adaptive(ctx)
                     dtmin = ctx.dtmin, dtmax = ctx.dtmax,
                     save_everystep = false, save_start = false, dense = false)
                 finals, naccept, nreject, n_bad, converged =
-                    collect_finals(sim, ctx.nstates)
+                    collect_finals(sim, ctx)
                 err = ensemble_err(finals, ctx.golden_states)
                 note = n_bad == 0 ? "" : " ($(n_bad) non-Success retcodes)"
                 @printf("  tol=%-8g err=%.6e steps(med)=%d%s\n", tol, err,

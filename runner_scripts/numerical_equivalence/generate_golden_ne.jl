@@ -42,9 +42,6 @@ function generate(problem)
     system = reference_system(problem)
     nstates = problem["states"]
     grid = Float64.(Float32.(problem_sweep(problem, N)))
-    f = system.mass_matrix === nothing ? ODEFunction(system.rhs) :
-        ODEFunction(system.rhs; mass_matrix = system.mass_matrix)
-    prob = ODEProblem(f, system.u0, (0.0, problem["duration"]), [grid[1]])
     solver = reference_solver(problem["golden_algorithm"])
     tol = problem["golden_tol"]
 
@@ -54,10 +51,13 @@ function generate(problem)
     out = Matrix{Float64}(undef, N, nstates + 1)
     out[:, 1] .= grid
     @time Threads.@threads for i in 1:N
+        # Per-value construction keeps DAE initial derivatives consistent.
+        prob = reference_problem(system, problem, grid[i])
         # Stiff references need far more steps than the default cap allows.
-        sol = solve(remake(prob, p = [grid[i]]), solver;
+        sol = solve(prob, solver;
             abstol = tol, reltol = tol, save_everystep = false,
-            save_start = false, dense = false, maxiters = 10^8)
+            save_start = false, dense = false, maxiters = 10^8,
+            reference_solve_kwargs(system)...)
         out[i, 2:end] .= sol.u[end]
     end
 

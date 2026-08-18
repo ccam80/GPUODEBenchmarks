@@ -5,7 +5,6 @@
 import gc
 import os
 import sys
-import timeit
 
 import numpy as np
 from numba import cuda
@@ -92,12 +91,13 @@ def _failed(exc, what):
 def _run_wp(problem, opts, system, grid):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
     from wp_common import (dts_for, TOLS, load_golden, ensemble_error,
-                           wp_outfile)
+                           timed_min_ms, wp_outfile)
 
     duration = problem["duration"]
     golden = load_golden(problem)
 
     def bench_solver(solver, repeats=REPEATS):
+        """(best_ms, err); best_ms is None when a run breaches the watchdog."""
         initials_array, parameter_array = grid(solver)
 
         def run():
@@ -107,53 +107,53 @@ def _run_wp(problem, opts, system, grid):
                 blocksize=64,
                 duration=duration,
             )
-        solution = run()  # warm-up (JIT compilation) + numerical result
+        best_ms, solution = timed_min_ms(run, repeats)
+        if best_ms is None:
+            return None, float("nan")
         err = ensemble_error(final_states(system, solution, problem),
                              golden)
-        res = timeit.repeat(run, setup='gc.enable()', repeat=repeats, number=1)
-        return min(res) * 1000, err
+        return best_ms, err
+
+    def sweep(mode, make_solver, settings):
+        outfile = wp_outfile(opts["framework_dir"], opts["prefix"], mode,
+                             algorithm, opts["dataset_key"], problem)
+        with open(outfile, "w") as f:
+            breached = False
+            for setting in settings:
+                t_ms, err = float("nan"), float("nan")
+                solver = None
+                if not breached:
+                    try:
+                        solver = make_solver(setting)
+                        t_ms, err = bench_solver(solver)
+                    except Exception as exc:
+                        t_ms, err = _failed(
+                            exc, f"{problem.name} {mode} {algorithm} "
+                            f"setting={setting:g}")
+                    if t_ms is None:
+                        # Later settings are slower, so the leg is abandoned.
+                        print(f"WATCHDOG {problem.name} {mode} {algorithm} "
+                              f"setting={setting:g}: run exceeded the cap")
+                        breached = True
+                        t_ms = float("nan")
+                print(f"wp {problem.name} {mode} {algorithm} "
+                      f"setting={setting:g}: {t_ms:.2f} ms, err={err:.3e}")
+                f.write(f"{setting:.10g} {t_ms} {err:.10e}\n")
+                f.flush()
+                if solver is not None:
+                    _release(solver)
 
     for algorithm in opts["algorithms"]:
         if algorithm in opts["fixed"]:
-            outfile = wp_outfile(opts["framework_dir"], opts["prefix"],
-                                 "fixed", algorithm, opts["dataset_key"],
-                                 problem)
-            with open(outfile, "w") as f:
-                for dt in dts_for(algorithm, problem):
-                    solver = None
-                    try:
-                        solver = _make_fixed_solver(system, problem,
-                                                    algorithm, dt)
-                        t_ms, err = bench_solver(solver)
-                    except Exception as exc:
-                        t_ms, err = _failed(
-                            exc, f"{problem.name} fixed {algorithm} dt={dt:g}")
-                    print(f"wp {problem.name} fixed {algorithm} dt={dt:g}: "
-                          f"{t_ms:.2f} ms, err={err:.3e}")
-                    f.write(f"{dt:.10g} {t_ms} {err:.10e}\n")
-                    if solver is not None:
-                        _release(solver)
-
+            sweep("fixed",
+                  lambda dt: _make_fixed_solver(system, problem, algorithm,
+                                                dt),
+                  dts_for(algorithm, problem))
         if algorithm in opts["adaptive"]:
-            outfile = wp_outfile(opts["framework_dir"], opts["prefix"],
-                                 "adaptive", algorithm, opts["dataset_key"],
-                                 problem)
-            with open(outfile, "w") as f:
-                for tol in TOLS:
-                    solver = None
-                    try:
-                        solver = _make_adaptive_solver(system, problem,
-                                                       algorithm, tol)
-                        t_ms, err = bench_solver(solver)
-                    except Exception as exc:
-                        t_ms, err = _failed(
-                            exc,
-                            f"{problem.name} adaptive {algorithm} tol={tol:g}")
-                    print(f"wp {problem.name} adaptive {algorithm} "
-                          f"tol={tol:g}: {t_ms:.2f} ms, err={err:.3e}")
-                    f.write(f"{tol:.10g} {t_ms} {err:.10e}\n")
-                    if solver is not None:
-                        _release(solver)
+            sweep("adaptive",
+                  lambda tol: _make_adaptive_solver(system, problem,
+                                                    algorithm, tol),
+                  TOLS)
 
 
 def _run_times(problem, opts, system, grid):
@@ -164,7 +164,9 @@ def _run_times(problem, opts, system, grid):
     device = {}
 
     def bench_times(solver):
-        """Best-of-REPEATS (with_transfers_ms, device_only_ms, solution)."""
+        """(with_transfers_ms, device_only_ms, solution); times None on a breach."""
+        from wp_common import timed_min_ms
+
         initials_array, parameter_array = grid(solver)
         if not device:
             # Uploaded once so the device-only timing excludes the h2d.
@@ -191,15 +193,11 @@ def _run_times(problem, opts, system, grid):
             cuda.synchronize()
             return solution
 
-        # Warm-up runs (JIT compilation), one per timed path
-        solution = with_transfers()
-        _ = device_only()
-
-        res = timeit.repeat(with_transfers, setup='gc.enable()',
-                            repeat=REPEATS, number=1)
-        res_dev = timeit.repeat(device_only, setup='gc.enable()',
-                                repeat=REPEATS, number=1)
-        return min(res) * 1000, min(res_dev) * 1000, solution
+        best, solution = timed_min_ms(with_transfers, REPEATS)
+        if best is None:
+            return None, None, None
+        best_dev, _ = timed_min_ms(device_only, REPEATS)
+        return best, best_dev, solution
 
     def save_numerical(solution, name):
         """Final states for the 32768-run numerical cross-check."""
@@ -220,8 +218,15 @@ def _run_times(problem, opts, system, grid):
                           else _make_adaptive_solver(system, problem,
                                                      algorithm))
                 best, best_dev, solution = bench_times(solver)
-                print(f"{n} ODE solves ({algorithm}, {mode}) completed in "
-                      f"{best:.1f} ms ({best_dev:.1f} ms without transfers)")
+                if best is None or best_dev is None:
+                    print(f"WATCHDOG {problem.name} {mode} {algorithm} "
+                          f"N={n}: run exceeded the cap")
+                    best = best if best is not None else float("nan")
+                    best_dev = float("nan") if best_dev is None else best_dev
+                else:
+                    print(f"{n} ODE solves ({algorithm}, {mode}) completed "
+                          f"in {best:.1f} ms ({best_dev:.1f} ms without "
+                          "transfers)")
             except Exception as exc:
                 best, best_dev = _failed(
                     exc, f"{problem.name} {mode} {algorithm} N={n}")

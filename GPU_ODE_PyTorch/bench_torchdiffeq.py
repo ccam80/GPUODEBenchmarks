@@ -6,7 +6,6 @@
 import torch
 import sys
 import os
-import timeit
 import numpy as np
 
 # Dataset key ("<os>_<gpu>") so output files are keyed per machine and can be
@@ -101,7 +100,8 @@ def make_solve(problem, algorithm, dt=None):
 
 def run_wp(problem, parameters):
     """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import dts_for, load_golden, ensemble_error, wp_outfile
+    from wp_common import (dts_for, load_golden, ensemble_error, timed_min_ms,
+                           wp_outfile)
 
     golden = load_golden(problem)
 
@@ -109,7 +109,12 @@ def run_wp(problem, parameters):
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
                              DATASET_KEY, problem)
         with open(outfile, "w") as f:
+            # Later settings are slower, so a breach abandons the leg.
+            breached = False
             for dt in dts_for(algorithm, problem):
+                if breached:
+                    f.write("{0:.10g} nan nan\n".format(dt))
+                    continue
                 solve_dt = make_solve(problem, algorithm, dt)
 
                 def run():
@@ -117,13 +122,18 @@ def run_wp(problem, parameters):
                     torch.cuda.synchronize()
                     return traj
 
-                traj = run()  # warm-up + numerical result
-                err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
-                res = timeit.repeat(run, repeat=5, number=1)
-                t_ms = min(res) * 1000
+                t_ms, traj = timed_min_ms(run, 5)
+                if t_ms is None:
+                    print("WATCHDOG wp {0} fixed {1} dt={2:g}: run exceeded "
+                          "the cap".format(problem.name, algorithm, dt))
+                    breached = True
+                    t_ms, err = float("nan"), float("nan")
+                else:
+                    err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
                 print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}"
                       .format(problem.name, algorithm, dt, t_ms, err))
                 f.write("{0:.10g} {1} {2:.10e}\n".format(dt, t_ms, err))
+                f.flush()
 
 
 def run_times(problem, parameters):
@@ -146,13 +156,21 @@ def run_times(problem, parameters):
             torch.cuda.synchronize()
             return out
 
-        torch.vmap(solve)(parameters); torch.cuda.synchronize()  # warmup
-        best_time = min(timeit.repeat(with_transfers, repeat=REPEATS, number=1)) * 1000
-        best_time_dev = min(timeit.repeat(device_only, repeat=REPEATS, number=1)) * 1000
-        print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
-              "({:.1f} ms without transfers)".format(
-                  numberOfParameters, problem.name, algorithm, best_time,
-                  best_time_dev))
+        from wp_common import timed_min_ms
+        best_time, _ = timed_min_ms(with_transfers, REPEATS)
+        best_time_dev = None
+        if best_time is not None:
+            best_time_dev, _ = timed_min_ms(device_only, REPEATS)
+        if best_time is None or best_time_dev is None:
+            print("WATCHDOG {0} fixed {1} N={2}: run exceeded the cap".format(
+                problem.name, algorithm, numberOfParameters))
+            best_time = float("nan") if best_time is None else best_time
+            best_time_dev = float("nan")
+        else:
+            print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
+                  "({:.1f} ms without transfers)".format(
+                      numberOfParameters, problem.name, algorithm, best_time,
+                      best_time_dev))
 
         outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                 DATASET_KEY, problem)
@@ -161,7 +179,8 @@ def run_times(problem, parameters):
                 numberOfParameters, best_time, best_time_dev))
 
         # The pairwise numerical cross-check reads this fixed CSV name.
-        if numberOfParameters == 32768 and algorithm == "classical-rk4":
+        if (numberOfParameters == 32768 and algorithm == "classical-rk4"
+                and np.isfinite(best_time)):
             traj = torch.vmap(solve)(parameters)
             # Extract final state values (last time point for each trajectory)
             final_states = traj[:, -1, :].cpu().numpy()  # (trajectories, states)
