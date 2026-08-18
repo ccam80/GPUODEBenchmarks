@@ -67,7 +67,8 @@ let problem = get_problem("lorenz96")
     println("lorenz96: max |Vern9 - RadauIIA9| = $(maximum(abs.(a .- b)))")
 end
 
-# Float32 GPU right-hand sides against the Float64 references at random states.
+# Float32 GPU right-hand sides against the Float64 references at random
+# states, mapped through each compiled system's golden index.
 using Random
 rng = MersenneTwister(7)
 for (name, nstates, p) in (("lorenz96", 40, 8.0), ("pleiades", 28, 1.0),
@@ -79,10 +80,13 @@ for (name, nstates, p) in (("lorenz96", 40, 8.0), ("pleiades", 28, 1.0),
         u = randn(rng, nstates) .* 2.0 .+ 0.5
         name == "pollu" && (u = abs.(u) .* 0.05)
         du64 = system64.rhs(u, [p], 0.3)
-        du32 = system32.rhs(SVector{nstates, Float32}(Float32.(u)),
+        umtk = zeros(Float32, system32.n)
+        umtk[system32.golden_index] .= Float32.(u)
+        du32 = system32.rhs(SVector{system32.n, Float32}(umtk),
             SVector{1, Float32}(Float32(p)), 0.3f0)
+        got = Float64.(du32[system32.golden_index])
         scale = max.(abs.(du64), 1.0)
-        worst = max(worst, maximum(abs.(Float64.(du32) .- du64) ./ scale))
+        worst = max(worst, maximum(abs.(got .- du64) ./ scale))
     end
     println("$(name): worst relative Float32-vs-Float64 rhs deviation = $(worst)")
 end

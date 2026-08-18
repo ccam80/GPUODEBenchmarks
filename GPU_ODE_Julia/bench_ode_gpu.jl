@@ -70,11 +70,11 @@ function gpu_solver(algorithm)
 end
 
 "Ensemble l2-at-final error against the Float64 golden reference."
-function ensemble_error(us, golden, nstates)
+function ensemble_error(system, us, golden)
     final = Array(us[end, :])
-    m = Matrix{Float64}(undef, length(final), nstates)
+    m = Matrix{Float64}(undef, length(final), length(system.golden_index))
     for i in eachindex(final)
-        m[i, :] .= Float64.(final[i])
+        m[i, :] .= Float64.(final[i][system.golden_index])
     end
     return sqrt(sum(abs2, m .- golden) / length(m))
 end
@@ -82,15 +82,19 @@ end
 function build_probs(problem)
     system = julia_system(problem)
     duration = Float32(problem["duration"])
-    f = system.mass_matrix === nothing ? ODEFunction{false}(system.rhs) :
-        ODEFunction{false}(system.rhs; mass_matrix = system.mass_matrix)
+    f = system.mass_matrix === nothing ?
+        ODEFunction{false}(system.rhs; jac = system.jac,
+            tgrad = system.tgrad) :
+        ODEFunction{false}(system.rhs; jac = system.jac,
+            tgrad = system.tgrad, mass_matrix = system.mass_matrix)
     prob = ODEProblem{false}(f, system.u0, (0.0f0, duration),
         @SArray [Float32(problem["sweep_max"])])
     grid = Float32.(collect(problem_sweep(problem, numberOfParameters)))
     probs_host = map(1:numberOfParameters) do i
-        DiffEqGPU.make_prob_compatible(remake(prob, p = @SVector [grid[i]]))
+        DiffEqGPU.make_prob_compatible(remake(prob,
+            u0 = system.u0_for(grid[i]), p = @SVector [grid[i]]))
     end
-    return prob, probs_host, cu(probs_host), duration
+    return system, prob, probs_host, cu(probs_host), duration
 end
 
 "An algorithm that cannot run this system is a NaN row, not an aborted run."
@@ -100,7 +104,7 @@ function failed(what, err)
 end
 
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
-function wp_sweep(solve_once, path, settings, golden, nstates, label)
+function wp_sweep(solve_once, system, path, settings, golden, label)
     open(path, "w") do io
         breached = false
         for (index, setting) in enumerate(settings)
@@ -121,7 +125,7 @@ function wp_sweep(solve_once, path, settings, golden, nstates, label)
                 if warm > WATCHDOG_SECONDS
                     (NaN, NaN)
                 else
-                    e = ensemble_error(sol[2], golden, nstates)
+                    e = ensemble_error(system, sol[2], golden)
                     t = watchdogged_min_ms(() -> solve_once(setting),
                         on_breach, REPEATS)
                     (t, isnan(t) ? NaN : e)
@@ -145,8 +149,7 @@ function run_wp(problem)
     golden = readdlm(
         joinpath(REPO_ROOT, "data", "numerical",
             "golden_$(problem["problem"])_$(N_WP).csv"), ',', Float64)
-    nstates = problem["states"]
-    prob, probs_host, probs, duration = build_probs(problem)
+    system, prob, probs_host, probs, duration = build_probs(problem)
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
     dt0 = Float32(problem_timing_dt(problem))
 
@@ -155,8 +158,9 @@ function run_wp(problem)
         label = "$(problem["problem"]) $(algorithm)"
 
         if algorithm in FIXED_ALGORITHMS
-            wp_sweep(joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
-                collect(problem_dts(problem)), golden, nstates,
+            wp_sweep(system,
+                joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
+                collect(problem_dts(problem)), golden,
                 "$(label) fixed") do dt
                 CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob,
                     solver; saveat = duration, save_everystep = false,
@@ -168,8 +172,9 @@ function run_wp(problem)
         end
 
         if algorithm in ADAPTIVE_ALGORITHMS
-            wp_sweep(joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
-                [10.0^-k for k in 2:8], golden, nstates,
+            wp_sweep(system,
+                joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
+                [10.0^-k for k in 2:8], golden,
                 "$(label) adaptive") do tol
                 CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
                     solver; saveat = duration, save_everystep = false,
@@ -183,7 +188,7 @@ function run_wp(problem)
 end
 
 function run_times(problem)
-    prob, probs_host, probs, duration = build_probs(problem)
+    system, prob, probs_host, probs, duration = build_probs(problem)
     dt0 = Float32(problem_timing_dt(problem))
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
 
@@ -250,7 +255,7 @@ function run_times(problem)
             if ran && !isinteractive() && numberOfParameters == 32768 &&
                algorithm == "tsit5"
                 sol = device_solve()
-                write_finals(problem, sol,
+                write_finals(system, problem, sol,
                     mode == "fixed" ? "julia_fixed.csv" : "julia_adaptive.csv")
             end
 
@@ -261,9 +266,10 @@ function run_times(problem)
 end
 
 "Write the per-trajectory final states for the pairwise numerical check."
-function write_finals(problem, sol, name)
+function write_finals(system, problem, sol, name)
     final_states = Array(sol[2][end, :])  # convert to CPU Array
-    df = DataFrame([Tuple(s) for s in final_states], :auto)
+    df = DataFrame([Tuple(s[system.golden_index]) for s in final_states],
+        :auto)
     CSV.write(joinpath(data_dir(REPO_ROOT, "numerical", DATASET_KEY, problem),
             name), df, header = false)
 end

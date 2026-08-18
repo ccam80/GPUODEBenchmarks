@@ -20,6 +20,7 @@ include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
 # Protocol constants; mirrored in common.py. dt values are fractions of the duration.
 const FIXED_DT = 2.0^-10
+const DT0 = 1.0e-2
 const ADAPTIVE_TOL = 1.0e-8
 const PERFORMANCE_REPEATS = 20
 const WORK_REPEATS = 20
@@ -113,8 +114,11 @@ function append_row(path, values...)
 end
 
 const SYSTEM = julia_system(PROBLEM)
-const ODEF = ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
-    tgrad = SYSTEM.tgrad)
+const ODEF = SYSTEM.mass_matrix === nothing ?
+             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
+    tgrad = SYSTEM.tgrad) :
+             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
+    tgrad = SYSTEM.tgrad, mass_matrix = SYSTEM.mass_matrix)
 const U0 = SYSTEM.u0
 const TSPAN = (0.0f0, DURATION)
 
@@ -136,7 +140,8 @@ function build_problems(kind, n)
     sweep = sweep_grid(kind, n)
     prob = ODEProblem{false}(ODEF, U0, TSPAN, @SVector [sweep[1]])
     probs = map(eachindex(sweep)) do i
-        DiffEqGPU.make_prob_compatible(remake(prob, p = @SVector [sweep[i]]))
+        DiffEqGPU.make_prob_compatible(remake(prob,
+            u0 = SYSTEM.u0_for(sweep[i]), p = @SVector [sweep[i]]))
     end
     # Host vector is returned too so the end-to-end timing can re-upload it.
     return probs, cu(probs), prob
@@ -182,7 +187,7 @@ function solve_end_to_end(probs_host, prob, alg, mode, setting)
     final_vectors = host_us[end, :]
     finals = Matrix{Float32}(undef, length(final_vectors), NSTATES)
     for i in eachindex(final_vectors)
-        finals[i, :] .= final_vectors[i]
+        finals[i, :] .= final_vectors[i][SYSTEM.golden_index]
     end
     size(finals) == (length(probs_host), NSTATES) || error(
         "unexpected final-state size $(size(finals)); expected " *

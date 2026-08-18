@@ -277,13 +277,22 @@ still compared against the golden. Only fully implicit stages integrate it:
 cubie rejects the explicit algorithms and `kvaerno3` on a singular mass
 matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
 
+The Julia systems are defined once as ModelingToolkit models
+(`runner_scripts/julia_systems.jl`): `mtkcompile` transforms the raw
+equations and every numeric artifact the suites use — right-hand sides,
+symbolic jacobians, time gradients, mass matrices, variable orderings — is
+generated from the compiled system and handed to DiffEqGPU as plain
+callables. The index-2 ring modulator is the same equation set with
+`Cs = 0` substituted at definition, which derives its singular mass matrix.
+
 The NAND gate is the test set's index-0 implicit DE `C(y) y' = f(y, t)`
 with a state-dependent, non-diagonal capacitance matrix. Cubie takes it in
-natural form, restructuring it to fourteen node potentials plus eight
-derivative states; no other framework has a formulation for that left-hand
-side, so its `frameworks` column is `cubie|cubie_mlir`. The Float64 golden
-integrates it as a fully implicit DFBDF `DAEProblem` with tstops on the
-pulse corners. Golden references are Float64 solves under each problem's
+natural form and ModelingToolkit compiles it to fourteen node potentials
+plus eight derivative states behind a constant singular mass matrix, so its
+`frameworks` column is `cubie|cubie_mlir|julia`; the remaining frameworks
+have no formulation for that left-hand side. The Float64 golden integrates
+it as a fully implicit DFBDF `DAEProblem` with tstops on the pulse corners.
+Golden references are Float64 solves under each problem's
 `golden_algorithm` at its `golden_tol`, checked against the published
 test-set values by `runner_scripts/golden/verify_references.jl`.
 
