@@ -31,7 +31,7 @@ DATASET_KEY = dataset_key()
 FIXED_ALGORITHMS = supported_for("jax", "fixed")
 ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
 
-numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "jax")
 # Timed repeats per point; min is reported.
 REPEATS = 20
@@ -92,25 +92,25 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
-def best_times_ms(solve, args, label):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only); exits 1 without recording when the solve does not fit in device memory."""
+def best_times_ms(solve, args, label, n):
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too."""
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
-            label, numberOfParameters, type(err).__name__, err))
-        return float("nan"), float("nan")
+            label, n, type(err).__name__, err))
+        return float("nan"), float("nan"), True
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
     if usage is not None:
         needed = (usage.temp_size_in_bytes + usage.argument_size_in_bytes
                   + usage.output_size_in_bytes - usage.alias_size_in_bytes)
         print("{0} at N={1}: needs {2:.2f} GiB, device limit {3:.2f} GiB".format(
-            label, numberOfParameters, needed / 2**30, limit / 2**30))
+            label, n, needed / 2**30, limit / 2**30))
         if needed > limit:
             print("ERROR: the {0} solve does not fit in device memory at "
-                  "N={1}; no timing recorded.".format(label, numberOfParameters))
-            sys.exit(1)
+                  "N={1}; no timing recorded.".format(label, n))
+            return float("nan"), float("nan"), True
 
     host_args = np.asarray(jax.device_get(args))
 
@@ -129,13 +129,14 @@ def best_times_ms(solve, args, label):
             none, _ = timed_min_ms(device_only, REPEATS)
         if both is None or none is None:
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
-                label, numberOfParameters))
-            return (float("nan") if both is None else both, float("nan"))
+                label, n))
+            return (float("nan") if both is None else both, float("nan"),
+                    True)
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
-            label, numberOfParameters, type(err).__name__, err))
-        return float("nan"), float("nan")
-    return both, none
+            label, n, type(err).__name__, err))
+        return float("nan"), float("nan"), False
+    return both, none, False
 
 
 # %%
@@ -216,6 +217,8 @@ def run_wp(problem, parameterList):
                     breached = True
 
     for algorithm in ALGORITHMS:
+        if not problem.runs("jax", algorithm):
+            continue
         if algorithm in FIXED_ALGORITHMS:
             # max_steps covers the finest euler dt (2^17 steps).
             sweep(wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY,
@@ -230,44 +233,50 @@ def run_wp(problem, parameterList):
                   lambda tol: make_adaptive(problem, algorithm, tol))
 
 
-def run_times(problem, parameterList):
-    """N-sweep: use jax.vmap to compute parallel solutions of the ODE."""
+def run_times(problem):
+    """N-sweep: one leg per (algorithm, mode), sizes ascending on one jitted
+    ensemble; jax retraces per batch shape, everything else is retained."""
     for algorithm in ALGORITHMS:
-        if algorithm in FIXED_ALGORITHMS:
-            main = make_fixed(problem, algorithm)
-            best_time, best_time_dev = best_times_ms(
-                main, parameterList, "fixed {0}".format(algorithm))
-            print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
-                  "({:.1f} ms without transfers)".format(
-                      numberOfParameters, problem.name, algorithm, best_time,
-                      best_time_dev))
-            outfile = times_outfile("JAX", "Jax", "fixed", algorithm,
+        if not problem.runs("jax", algorithm):
+            continue
+        for mode in ("fixed", "adaptive"):
+            supported = (FIXED_ALGORITHMS if mode == "fixed"
+                         else ADAPTIVE_ALGORITHMS)
+            if algorithm not in supported:
+                continue
+            main = (make_fixed(problem, algorithm) if mode == "fixed"
+                    else make_adaptive(problem, algorithm))
+            outfile = times_outfile("JAX", "Jax", mode, algorithm,
                                     DATASET_KEY, problem)
             with open(outfile, "a+") as file:
-                file.write('{0} {1} {2}\n'.format(
-                    numberOfParameters, best_time, best_time_dev))
-            # The pairwise numerical cross-check reads this fixed CSV name.
-            if (numberOfParameters == 32768 and algorithm == "tsit5"
-                    and np.isfinite(best_time)):
-                sol = main(parameterList)
-                final_states = np.array(sol.ys[:, -1, :])
-                np.savetxt(os.path.join(
-                    data_dir("numerical", DATASET_KEY, problem=problem),
-                    "jax.csv"), final_states, delimiter=',')
-
-        if algorithm in ADAPTIVE_ALGORITHMS:
-            main = make_adaptive(problem, algorithm)
-            best_time, best_time_dev = best_times_ms(
-                main, parameterList, "adaptive {0}".format(algorithm))
-            print("{:} ODE solves ({}, {}, adaptive) completed in {:.1f} ms "
-                  "({:.1f} ms without transfers)".format(
-                      numberOfParameters, problem.name, algorithm, best_time,
-                      best_time_dev))
-            outfile = times_outfile("JAX", "Jax", "adaptive", algorithm,
-                                    DATASET_KEY, problem)
-            with open(outfile, "a+") as file:
-                file.write('{0} {1} {2}\n'.format(
-                    numberOfParameters, best_time, best_time_dev))
+                for index, n in enumerate(NS):
+                    parameterList = jnp.asarray(problem.sweep(n))
+                    best_time, best_time_dev, abandon = best_times_ms(
+                        main, parameterList,
+                        "{0} {1}".format(mode, algorithm), n)
+                    print("{:} ODE solves ({}, {}, {}) completed in {:.1f} "
+                          "ms ({:.1f} ms without transfers)".format(
+                              n, problem.name, algorithm, mode, best_time,
+                              best_time_dev))
+                    file.write('{0} {1} {2}\n'.format(
+                        n, best_time, best_time_dev))
+                    file.flush()
+                    # The pairwise numerical cross-check reads this fixed CSV name.
+                    if (mode == "fixed" and n == 32768
+                            and algorithm == "tsit5"
+                            and np.isfinite(best_time)):
+                        sol = main(parameterList)
+                        final_states = np.array(sol.ys[:, -1, :])
+                        np.savetxt(os.path.join(
+                            data_dir("numerical", DATASET_KEY,
+                                     problem=problem),
+                            "jax.csv"), final_states, delimiter=',')
+                    if abandon:
+                        # Larger sizes are slower or bigger, so the leg ends.
+                        for rest in NS[index + 1:]:
+                            file.write('{0} nan nan\n'.format(rest))
+                        file.flush()
+                        break
 
 
 # %%
@@ -276,9 +285,8 @@ if not PROBLEMS:
     sys.exit(0)
 
 for _problem in PROBLEMS:
-    # Setting up parameters for parallel simulation
-    _parameters = jnp.asarray(_problem.sweep(numberOfParameters))
     if WP_MODE:
-        run_wp(_problem, _parameters)
+        # Setting up parameters for parallel simulation
+        run_wp(_problem, jnp.asarray(_problem.sweep(NS[0])))
     else:
-        run_times(_problem, _parameters)
+        run_times(_problem)

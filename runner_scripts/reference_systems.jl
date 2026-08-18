@@ -16,15 +16,15 @@ function lorenz_reference(u, p, t)
     return [du1, du2, du3]
 end
 
-"Lorenz 96 with cyclic coupling; the swept forcing F is p[1]."
+"Lorenz 96 with cyclic coupling, sized by u; the swept forcing F is p[1]."
 function lorenz96_reference(u, p, t)
-    n = 40
+    n = length(u)
     return [(u[mod1(i + 1, n)] - u[mod1(i - 2, n)]) * u[mod1(i - 1, n)] -
             u[i] + p[1] for i in 1:n]
 end
 
 # Uniform state 8 with x1 perturbed to 9.
-const LORENZ96_U0 = [i == 1 ? 9.0 : 8.0 for i in 1:40]
+lorenz96_u0(n) = [i == 1 ? 9.0 : 8.0 for i in 1:n]
 
 # Pleiades (Test Set for IVP Solvers, celestial mechanics): u = (x, y, x', y').
 "Seven-body planar gravitation with masses (m1, 2, ..., 7); the swept m1 is p[1]."
@@ -335,7 +335,9 @@ const NAND_U0 = [5.0, 5.0, NAND_VBB, NAND_VBB, 5.0, 3.62385, 5.0, NAND_VBB,
 const REFERENCE_SYSTEMS = Dict{String, Any}(
     "lorenz" => (rhs = lorenz_reference, u0 = [1.0, 0.0, 0.0],
         mass_matrix = nothing),
-    "lorenz96" => (rhs = lorenz96_reference, u0 = LORENZ96_U0,
+    "lorenz96" => (rhs = lorenz96_reference, u0 = lorenz96_u0(40),
+        mass_matrix = nothing),
+    "lorenz96_20" => (rhs = lorenz96_reference, u0 = lorenz96_u0(20),
         mass_matrix = nothing),
     "pleiades" => (rhs = pleiades_reference, u0 = PLEIADES_U0,
         mass_matrix = nothing),

@@ -10,10 +10,10 @@ if [ "$ANALYSIS" == "work-precision" ]; then
     exit 0
 fi
 
-for a in $NLIST
-do
-    echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_JAX/bench_diffrax.py $a "$ALGORITHM" --problem "$PROBLEM"
-done
+# The whole ascending N sweep runs in one process so compiled kernels are
+# reused across sizes.
+NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+echo "N sweep = $NLIST_CSV"
+python3 ./GPU_ODE_JAX/bench_diffrax.py "$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
 
 deactivate
