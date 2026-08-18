@@ -161,8 +161,7 @@ def _run_wp(problem, opts, system, grid):
 
 
 def _run_times(problem, opts, system, grid):
-    """N-sweep timing: one leg per (algorithm, mode), sizes ascending on one
-    compiled solver."""
+    """N-sweep timing: each (algorithm, mode) leg walks the sizes ascending on one solver."""
     from wp_common import timed_min_ms
 
     duration = problem["duration"]

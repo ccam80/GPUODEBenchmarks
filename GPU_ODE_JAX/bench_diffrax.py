@@ -234,8 +234,7 @@ def run_wp(problem, parameterList):
 
 
 def run_times(problem):
-    """N-sweep: one leg per (algorithm, mode), sizes ascending on one jitted
-    ensemble; jax retraces per batch shape, everything else is retained."""
+    """N-sweep: each (algorithm, mode) leg walks the sizes ascending on one jitted ensemble."""
     for algorithm in ALGORITHMS:
         if not problem.runs("jax", algorithm):
             continue

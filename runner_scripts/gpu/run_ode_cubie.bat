@@ -17,8 +17,7 @@ if /i "%ANALYSIS%"=="work-precision" (
     exit /b 0
 )
 
-REM The whole ascending N sweep runs in one process so compiled
-REM kernels are reused across sizes.
+REM The whole ascending N sweep runs in one process on kernels compiled once.
 set "NLIST_CSV=!NLIST: =,!"
 if "!NLIST_CSV:~0,1!"=="," set "NLIST_CSV=!NLIST_CSV:~1!"
 echo N sweep = !NLIST_CSV!

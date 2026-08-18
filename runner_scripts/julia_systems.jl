@@ -86,8 +86,7 @@ function _lorenz_entry()
 end
 
 # --- lorenz 96 -------------------------------------------------------------
-# The state count is a parameter: lorenz96 runs the canonical 40, lorenz96_20
-# the largest size the DiffEqGPU kernel-path implicit solvers handle.
+# n is the state count: 40 for lorenz96, 20 for lorenz96_20.
 function _lorenz96_entry(n)
     @parameters F = 8.0f0
     @variables (x(t))[1:n]

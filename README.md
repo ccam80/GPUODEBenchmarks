@@ -259,32 +259,28 @@ cyclic 40-state forcing model; the Pleiades is the seven-body celestial
 mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
 Verwer's 25-reaction atmospheric mechanism.
 
-The performance sweep runs each package's whole ascending N list inside one
-process, one `(problem, algorithm, mode)` leg at a time, so a kernel
-compiles once and is reused across every trajectory count; only the
-per-size ensembles are rebuilt, and MPGOS — whose trajectory count is a
-compile-time constant — still rebuilds per point, one solver at a time.
+The performance sweep runs each package's whole ascending N list inside
+one process, one `(problem, algorithm, mode)` leg at a time: kernels
+compile once per leg and only the per-size ensembles are rebuilt. MPGOS's
+trajectory count is a compile-time constant, so it rebuilds per point, one
+solver at a time.
 
 Every benchmark solve runs under `BENCH_WATCHDOG_SECONDS` (default 120): a
 run over the cap is recorded as a NaN row and the leg's remaining solves
 are abandoned — the remaining work-precision settings, or the remaining
-trajectory counts of an N sweep, which only grow slower. MPGOS kernels end
-themselves through a device-side cycle budget in `problems/stubs.cuh`; a
-solve that never returns is caught by a hard watchdog that records every
-row its process can no longer reach as NaN and exits, and the Julia runner
-launches one process per problem and algorithm so an exit abandons only
-that pair.
+trajectory counts of an N sweep. MPGOS kernels end themselves through a
+device-side cycle budget in `problems/stubs.cuh`; a solve that never
+returns is caught by a hard watchdog that records every row its process
+can no longer reach as NaN and exits, and the Julia runner launches one
+process per problem and algorithm so an exit abandons only that pair.
 
 The `exclusions` column lists `framework:algorithm` pairs a problem never
 attempts. `lorenz96` carries `julia:rosenbrock23_sciml|julia:kvaerno3`:
 DiffEqGPU's kernel-path implicit solvers inline a fully unrolled
 StaticArrays LU whose compile time roughly doubles with every four states
-(35 s at n = 16, 70 s at 20, 205 s at 24 for the first solve on an RTX
-4070 SUPER), reaching the better part of an hour per leg at n = 40 — and
-the compile cannot be interrupted by the watchdog, which is how a full run
-loses hours to legs that then breach anyway. `lorenz96_20` is the same
-model at the largest size whose compile still fits inside the 120 s cap,
-kept as the stiff-solver head-to-head between cubie and DiffEqGPU.
+and cannot be interrupted by the watchdog. `lorenz96_20` is the same model
+at the largest size whose compile fits the 120 s cap, the stiff-solver
+head-to-head between cubie and DiffEqGPU.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows

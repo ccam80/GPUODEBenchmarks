@@ -169,8 +169,7 @@ def load_model(problem):
 
 
 def run_problem(problem, cell_counts, wp_mode):
-    """The ascending N sweep or the fixed work-precision sweep for a problem,
-    on one compiled model."""
+    """The ascending N sweep or the work-precision sweep, on one compiled model."""
     model = load_model(problem)
     if wp_mode:
         run_work_precision(model, problem, cell_counts[0])
