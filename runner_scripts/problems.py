@@ -61,6 +61,11 @@ class Problem(dict):
     def supports(self, framework):
         return framework in self["frameworks"]
 
+    def runs(self, framework, algorithm):
+        """True unless the (framework, algorithm) pair is excluded here."""
+        return (self.supports(framework)
+                and (framework, algorithm) not in self["exclusions"])
+
 
 def load_problems():
     """Every problem in declaration order."""
@@ -73,6 +78,10 @@ def load_problems():
         for field in _FLOAT_FIELDS:
             row[field] = float(row[field])
         row["frameworks"] = tuple(row["frameworks"].split("|"))
+        # framework:algorithm pairs this problem never attempts.
+        row["exclusions"] = frozenset(
+            tuple(token.split(":", 1))
+            for token in (row.get("exclusions") or "").split("|") if token)
         problems.append(Problem(row))
     return problems
 
@@ -102,5 +111,12 @@ def resolve_problems(request, framework=None):
 
 
 if __name__ == "__main__":
-    for row in load_problems():
-        print(row["problem"])
+    import sys
+    if len(sys.argv) > 1:
+        # <framework> [request]: the resolved problem names, one per line.
+        request = sys.argv[2] if len(sys.argv) > 2 else "all"
+        for row in resolve_problems(request, sys.argv[1]):
+            print(row["problem"])
+    else:
+        for row in load_problems():
+            print(row["problem"])

@@ -108,9 +108,11 @@ foreach ($problemName in $Problems) {
         }
         continue
     }
-    foreach ($a in $NValues) {
-        Write-Host "No. of trajectories = $a ($problemName)"
-        foreach ($solver in $Solvers) {
+    # One solver walks the whole N sweep before the next builds; NT is a
+    # compile-time constant, so each point is still a rebuild.
+    foreach ($solver in $Solvers) {
+        foreach ($a in $NValues) {
+            Write-Host "No. of trajectories = $a ($problemName, $solver)"
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
         }
     }

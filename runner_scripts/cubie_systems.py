@@ -81,8 +81,8 @@ def _lorenz(problem, precision, name):
 
 
 def _lorenz96(problem, precision, name):
-    """Cyclic 40-state Lorenz 96; the swept forcing F drives every row."""
-    n = 40
+    """Cyclic Lorenz 96 sized by the row's states; F drives every row."""
+    n = problem["states"]
     lines = []
     for i in range(1, n + 1):
         ip1 = i % n + 1
@@ -350,6 +350,7 @@ def _nand_gate(problem, precision, name):
 _ORDER = {
     "lorenz": ("x", "y", "z"),
     "lorenz96": tuple("x{0}".format(i) for i in range(1, 41)),
+    "lorenz96_20": tuple("x{0}".format(i) for i in range(1, 21)),
     "pleiades": tuple("{0}{1}".format(prefix, i)
                       for prefix in ("x", "y", "u", "v")
                       for i in range(1, 8)),
@@ -362,6 +363,7 @@ _ORDER = {
 _BUILDERS = {
     "lorenz": _lorenz,
     "lorenz96": _lorenz96,
+    "lorenz96_20": _lorenz96,
     "pleiades": _pleiades,
     "pollu": _pollu,
     "ring_modulator": _ring_modulator,

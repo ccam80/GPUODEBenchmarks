@@ -168,41 +168,54 @@ def load_model(problem):
     return model
 
 
-def run_problem(problem, cell_count, wp_mode):
-    """One timing point or the fixed work-precision sweep for a problem."""
+def run_problem(problem, cell_counts, wp_mode):
+    """The ascending N sweep or the fixed work-precision sweep for a problem,
+    on one compiled model."""
     model = load_model(problem)
     if wp_mode:
-        run_work_precision(model, problem, cell_count)
+        run_work_precision(model, problem, cell_counts[0])
         return
-
-    sweep = problem.sweep(cell_count, dtype=np.float32)
-    elapsed_ms, elapsed_dev_ms, finals = timed_solve(
-        model,
-        cell_count,
-        sweep,
-        problem.timing_dt,
-        STANDARD_STEPS,
-        repeats=REPEATS,
-    )
-    print(
-        "{0} {1} solves with Myokit-CUDA Euler completed in {2:.1f} ms "
-        "({3:.1f} ms without transfers)"
-        .format(cell_count, problem.name, elapsed_ms, elapsed_dev_ms)
-    )
 
     timing_file = Path(times_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY, problem
     ))
     with timing_file.open("a", encoding="utf-8") as handle:
-        handle.write("{0} {1} {2}\n".format(cell_count, elapsed_ms, elapsed_dev_ms))
+        for index, cell_count in enumerate(cell_counts):
+            sweep = problem.sweep(cell_count, dtype=np.float32)
+            elapsed_ms, elapsed_dev_ms, finals = timed_solve(
+                model,
+                cell_count,
+                sweep,
+                problem.timing_dt,
+                STANDARD_STEPS,
+                repeats=REPEATS,
+            )
+            print(
+                "{0} {1} solves with Myokit-CUDA Euler completed in "
+                "{2:.1f} ms ({3:.1f} ms without transfers)"
+                .format(cell_count, problem.name, elapsed_ms, elapsed_dev_ms)
+            )
+            handle.write("{0} {1} {2}\n".format(
+                cell_count, elapsed_ms, elapsed_dev_ms))
+            handle.flush()
 
-    # The pairwise numerical cross-check reads this fixed CSV name.
-    if cell_count == 32768 and np.isfinite(elapsed_ms):
-        numerical_file = (
-            Path(data_dir("numerical", DATASET_KEY, REPO_ROOT, problem))
-            / "myokit_cuda.csv"
-        )
-        np.savetxt(numerical_file, finals, delimiter=",")
+            # The pairwise numerical cross-check reads this fixed CSV name.
+            if cell_count == 32768 and np.isfinite(elapsed_ms):
+                numerical_file = (
+                    Path(data_dir("numerical", DATASET_KEY, REPO_ROOT,
+                                  problem))
+                    / "myokit_cuda.csv"
+                )
+                np.savetxt(numerical_file, finals, delimiter=",")
+
+            if not np.isfinite(elapsed_ms):
+                # Larger sizes are slower, so the sweep is abandoned.
+                print("WATCHDOG {0} fixed {1} N={2}: run exceeded the cap"
+                      .format(problem.name, ALGORITHM, cell_count))
+                for rest in cell_counts[index + 1:]:
+                    handle.write("{0} nan nan\n".format(rest))
+                handle.flush()
+                break
 
 
 def main(argv=None):
@@ -210,10 +223,10 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
         raise SystemExit(
-            "usage: bench_myokit_cuda.py <N>|wp "
+            "usage: bench_myokit_cuda.py <N|N,N,...>|wp "
             "[algorithm|all] [--problem <name|all>]"
         )
-    cell_count, wp_mode, algorithms, problems = parse_bench_args(
+    cell_counts, wp_mode, algorithms, problems = parse_bench_args(
         argv, "myokit_cuda"
     )
     if not algorithms:
@@ -225,7 +238,9 @@ def main(argv=None):
 
     os.chdir(REPO_ROOT)
     for problem in problems:
-        run_problem(problem, cell_count, wp_mode)
+        if not problem.runs("myokit_cuda", ALGORITHM):
+            continue
+        run_problem(problem, cell_counts, wp_mode)
     return 0
 
 

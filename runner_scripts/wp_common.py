@@ -88,12 +88,13 @@ def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N>|wp [algorithm|all] [--problem <name|all>] into (n, wp, algorithms, problems); wp mode always runs at N_WP."""
+    """Parse <N|N,N,...>|wp [algorithm|all] [--problem <name|all>] into (ns, wp, algorithms, problems); wp mode always runs at N_WP."""
     if not argv:
         raise SystemExit(
-            "usage: <N>|wp [algorithm|all] [--problem <name|all>]")
+            "usage: <N|N,N,...>|wp [algorithm|all] [--problem <name|all>]")
     wp = argv[0] == "wp"
-    n = N_WP if wp else int(argv[0])
+    # Ascending, so each leg walks its sweep on kernels compiled once.
+    ns = [N_WP] if wp else sorted(int(tok) for tok in argv[0].split(","))
     request = "all"
     problem_request = "all"
     rest = list(argv[1:])
@@ -109,4 +110,4 @@ def parse_bench_args(argv, framework):
             request = tok
     algorithms = resolve_algorithms(request, framework)
     problems = resolve_problems(problem_request, framework)
-    return n, wp, algorithms, problems
+    return ns, wp, algorithms, problems

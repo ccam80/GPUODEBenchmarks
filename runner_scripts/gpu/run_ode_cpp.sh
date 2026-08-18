@@ -37,11 +37,13 @@ do
 		done
 		continue
 	fi
-	for a in $NLIST
+	# One solver walks the whole N sweep before the next builds; NT is a
+	# compile-time constant, so each point is still a rebuild.
+	for solver in $SOLVERS
 	do
-		echo "No. of trajectories = $a ($problem)"
-		for solver in $SOLVERS
+		for a in $NLIST
 		do
+			echo "No. of trajectories = $a ($problem, $solver)"
 			build "$problem" "$solver" "$a"
 			./GPU_ODE_MPGOS/Bench.exe
 		done

@@ -3,7 +3,8 @@ set -e
 . "$(dirname "$0")/../parse_args.sh" "$@"
 unset LD_LIBRARY_PATH
 
-# One julia process per algorithm, so a watchdog exit only abandons that leg.
+# One julia process per (problem, algorithm), so a watchdog exit only abandons
+# that leg; the process runs the whole N sweep on kernels compiled once.
 ALGO_LIST=$(python3 ./runner_scripts/algorithms.py julia "$ALGORITHM")
 if [ -z "$ALGO_LIST" ]; then
     echo "Julia (DiffEqGPU kernel path) runs none of the requested algorithms; skipping."
@@ -18,11 +19,18 @@ if [ "$ANALYSIS" == "work-precision" ]; then
     exit 0
 fi
 
-for a in $NLIST
+PROBLEM_LIST=$(python3 ./runner_scripts/problems.py julia "$PROBLEM")
+if [ -z "$PROBLEM_LIST" ]; then
+    echo "Julia runs none of the requested problems; skipping."
+    exit 0
+fi
+
+NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+for p in $PROBLEM_LIST
 do
-    echo "No. of trajectories = $a"
     for g in $ALGO_LIST
     do
-        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl $a "$g" --problem "$PROBLEM"
+        echo "Problem $p, algorithm $g, N sweep = $NLIST_CSV"
+        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl "$NLIST_CSV" "$g" --problem "$p"
     done
 done

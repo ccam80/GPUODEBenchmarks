@@ -19,6 +19,10 @@ function load_problems()
     problems = Dict{String, Any}[]
     for line in lines[2:end]
         fields = String.(split(line, ','))
+        # A trailing empty field is dropped by split, so pad the row out.
+        while length(fields) < length(header)
+            push!(fields, "")
+        end
         row = Dict{String, Any}(zip(header, fields))
         for field in _INT_FIELDS
             row[field] = parse(Int, row[field])
@@ -27,6 +31,9 @@ function load_problems()
             row[field] = parse(Float64, row[field])
         end
         row["frameworks"] = String.(split(row["frameworks"], '|'))
+        # framework:algorithm pairs this problem never attempts.
+        row["exclusions"] = Set(String.(filter(!isempty,
+            split(row["exclusions"], '|'))))
         push!(problems, row)
     end
     return problems
@@ -52,6 +59,12 @@ function resolve_problems(request, framework = nothing)
     end
     framework === nothing && return selected
     return [row for row in selected if framework in row["frameworks"]]
+end
+
+"True unless the (framework, algorithm) pair is excluded for this problem."
+function problem_runs(row, framework, algorithm)
+    return framework in row["frameworks"] &&
+           !("$(framework):$(algorithm)" in row["exclusions"])
 end
 
 "Fixed step used by the N-sweep: duration * 2^-10."

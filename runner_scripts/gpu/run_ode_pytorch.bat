@@ -15,11 +15,13 @@ if /i "%ANALYSIS%"=="work-precision" (
     exit /b 0
 )
 
-for %%a in (!NLIST!) do (
-    echo No. of trajectories = %%a
-    python GPU_ODE_PyTorch\bench_torchdiffeq.py %%a "%ALGORITHM%" --problem "%PROBLEM%"
-    if !errorlevel! neq 0 exit /b 1
-)
+REM The whole ascending N sweep runs in one process so compiled
+REM kernels are reused across sizes.
+set "NLIST_CSV=!NLIST: =,!"
+if "!NLIST_CSV:~0,1!"=="," set "NLIST_CSV=!NLIST_CSV:~1!"
+echo N sweep = !NLIST_CSV!
+python GPU_ODE_PyTorch\bench_torchdiffeq.py "!NLIST_CSV!" "%ALGORITHM%" --problem "%PROBLEM%"
+if !errorlevel! neq 0 exit /b 1
 
 call deactivate
 endlocal
