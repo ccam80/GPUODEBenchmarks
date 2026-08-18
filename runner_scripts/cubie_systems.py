@@ -255,10 +255,98 @@ def _ring_modulator_index2(problem, precision, name):
         observables=list(RING_INDEX2_OBSERVABLES),
         name=name,
         precision=precision,
-        simplify=True,
     )
     # Simplification tears states out, so the grid takes the retained set.
     return system, state_defaults(system)
+
+
+# NAND gate (Test Set for IVP Solvers): C(y) y' = f(y, t) in natural form.
+NAND_STATES = {"y1": 5.0, "y2": 5.0, "y3": -2.5, "y4": -2.5, "y5": 5.0,
+               "y6": 3.62385, "y7": 5.0, "y8": -2.5, "y9": -2.5,
+               "y10": 3.62385, "y11": 0.0, "y12": 3.62385, "y13": -2.5,
+               "y14": -2.5}
+
+NAND_CONSTANTS = {
+    "rgs": 4.0, "rgd": 4.0, "rbs": 10.0, "rbd": 10.0, "cgs": 0.6e-4,
+    "cgd": 0.6e-4, "cbd": 2.4e-5, "c9": 0.5e-4, "delta": 0.2e-1,
+    "curis": 1.0e-14, "vth": 25.85, "vbb": -2.5, "phib": 0.87,
+    "vt0d": -2.43, "cgammad": 0.2, "phid": 1.28, "betad": 5.35e-4,
+    "vt0e": 0.2, "cgammae": 0.035, "phie": 1.01, "betaep": 1.748e-3,
+    "betaem": 1.748e-4, "period1": 20.0, "period2": 40.0,
+}
+
+# Trapezoidal input pulses, junction capacitances CBD/CBS, junction currents
+# IBS/IBD and Shichman-Hodges drain currents, then the network rows with the
+# capacitance couplings on the left-hand side; nand.f's enhancement-type beta
+# differs between the VDS > 0 and VDS < 0 branches.
+NAND_EQUATIONS = """
+    tp1 = t - period1 * floor(t / period1)
+    v1 = Piecewise((0.0, tp1 <= 5.0), (tp1 - 5.0, tp1 <= 10.0), (5.0, tp1 <= 15.0), (20.0 - tp1, True))
+    v1d = Piecewise((0.0, tp1 <= 5.0), (1.0, tp1 <= 10.0), (0.0, tp1 <= 15.0), (-1.0, True))
+    tp2 = t - period2 * floor(t / period2)
+    v2 = Piecewise((0.0, tp2 <= 15.0), (tp2 - 15.0, tp2 <= 20.0), (5.0, tp2 <= 35.0), (40.0 - tp2, True))
+    v2d = Piecewise((0.0, tp2 <= 15.0), (1.0, tp2 <= 20.0), (0.0, tp2 <= 35.0), (-1.0, True))
+    cb35 = Piecewise((cbd / sqrt(1.0 - (y3 - y5) / phib), y3 - y5 <= 0.0), (cbd * (1.0 + (y3 - y5) / (2.0 * phib)), True))
+    cb4 = Piecewise((cbd / sqrt(1.0 - (y4 - VDD) / phib), y4 - VDD <= 0.0), (cbd * (1.0 + (y4 - VDD) / (2.0 * phib)), True))
+    cb95 = Piecewise((cbd / sqrt(1.0 - (y9 - y5) / phib), y9 - y5 <= 0.0), (cbd * (1.0 + (y9 - y5) / (2.0 * phib)), True))
+    cb810 = Piecewise((cbd / sqrt(1.0 - (y8 - y10) / phib), y8 - y10 <= 0.0), (cbd * (1.0 + (y8 - y10) / (2.0 * phib)), True))
+    cb13 = Piecewise((cbd / sqrt(1.0 - y13 / phib), y13 <= 0.0), (cbd * (1.0 + y13 / (2.0 * phib)), True))
+    cb1410 = Piecewise((cbd / sqrt(1.0 - (y14 - y10) / phib), y14 - y10 <= 0.0), (cbd * (1.0 + (y14 - y10) / (2.0 * phib)), True))
+    ibs35 = Piecewise((-curis * (exp((y3 - y5) / vth) - 1.0), y3 - y5 <= 0.0), (0.0, True))
+    ibd4 = Piecewise((-curis * (exp((y4 - VDD) / vth) - 1.0), y4 - VDD <= 0.0), (0.0, True))
+    ibs810 = Piecewise((-curis * (exp((y8 - y10) / vth) - 1.0), y8 - y10 <= 0.0), (0.0, True))
+    ibd95 = Piecewise((-curis * (exp((y9 - y5) / vth) - 1.0), y9 - y5 <= 0.0), (0.0, True))
+    ibs13 = Piecewise((-curis * (exp(y13 / vth) - 1.0), y13 <= 0.0), (0.0, True))
+    ibd1410 = Piecewise((-curis * (exp((y14 - y10) / vth) - 1.0), y14 - y10 <= 0.0), (0.0, True))
+    vte1p = vt0d + cgammad * (sqrt(phid - (y3 - y5)) - sqrt(phid))
+    vte1m = vt0d + cgammad * (sqrt(phid - (y4 - VDD)) - sqrt(phid))
+    gds1p = Piecewise((0.0, (y5 - y1) - vte1p <= 0.0), (-betad * ((y5 - y1) - vte1p)**2 * (1.0 + delta * (y2 - y1)), (y5 - y1) - vte1p <= (y2 - y1)), (-betad * (y2 - y1) * (2.0 * ((y5 - y1) - vte1p) - (y2 - y1)) * (1.0 + delta * (y2 - y1)), True))
+    gds1m = Piecewise((0.0, (y5 - y2) - vte1m <= 0.0), (betad * ((y5 - y2) - vte1m)**2 * (1.0 - delta * (y2 - y1)), (y5 - y2) - vte1m <= -(y2 - y1)), (-betad * (y2 - y1) * (2.0 * ((y5 - y2) - vte1m) + (y2 - y1)) * (1.0 - delta * (y2 - y1)), True))
+    ids1 = Piecewise((gds1p, y2 - y1 > 0.0), (gds1m, y2 - y1 < 0.0), (0.0, True))
+    vte2p = vt0e + cgammae * (sqrt(phie - (y8 - y10)) - sqrt(phie))
+    vte2m = vt0e + cgammae * (sqrt(phie - (y9 - y5)) - sqrt(phie))
+    gds2p = Piecewise((0.0, (v1 - y6) - vte2p <= 0.0), (-betaep * ((v1 - y6) - vte2p)**2 * (1.0 + delta * (y7 - y6)), (v1 - y6) - vte2p <= (y7 - y6)), (-betaep * (y7 - y6) * (2.0 * ((v1 - y6) - vte2p) - (y7 - y6)) * (1.0 + delta * (y7 - y6)), True))
+    gds2m = Piecewise((0.0, (v1 - y7) - vte2m <= 0.0), (betaem * ((v1 - y7) - vte2m)**2 * (1.0 - delta * (y7 - y6)), (v1 - y7) - vte2m <= -(y7 - y6)), (-betaem * (y7 - y6) * (2.0 * ((v1 - y7) - vte2m) + (y7 - y6)) * (1.0 - delta * (y7 - y6)), True))
+    ids2 = Piecewise((gds2p, y7 - y6 > 0.0), (gds2m, y7 - y6 < 0.0), (0.0, True))
+    vte3p = vt0e + cgammae * (sqrt(phie - y13) - sqrt(phie))
+    vte3m = vt0e + cgammae * (sqrt(phie - (y14 - y10)) - sqrt(phie))
+    gds3p = Piecewise((0.0, (v2 - y11) - vte3p <= 0.0), (-betaep * ((v2 - y11) - vte3p)**2 * (1.0 + delta * (y12 - y11)), (v2 - y11) - vte3p <= (y12 - y11)), (-betaep * (y12 - y11) * (2.0 * ((v2 - y11) - vte3p) - (y12 - y11)) * (1.0 + delta * (y12 - y11)), True))
+    gds3m = Piecewise((0.0, (v2 - y12) - vte3m <= 0.0), (betaem * ((v2 - y12) - vte3m)**2 * (1.0 - delta * (y12 - y11)), (v2 - y12) - vte3m <= -(y12 - y11)), (-betaem * (y12 - y11) * (2.0 * ((v2 - y12) - vte3m) + (y12 - y11)) * (1.0 - delta * (y12 - y11)), True))
+    ids3 = Piecewise((gds3p, y12 - y11 > 0.0), (gds3m, y12 - y11 < 0.0), (0.0, True))
+    cgs * dy1 - cgs * dy5 = -(y1 - y5) / rgs - ids1
+    cgd * dy2 - cgd * dy5 = -(y2 - VDD) / rgd + ids1
+    cb35 * dy3 - cb35 * dy5 = -(y3 - vbb) / rbs + ibs35
+    cb4 * dy4 = -(y4 - vbb) / rbd + ibd4
+    -cgs * dy1 - cgd * dy2 - cb35 * dy3 + (cgs + cgd + cb35 + cb95 + c9) * dy5 - cb95 * dy9 = -(y5 - y1) / rgs - ibs35 - (y5 - y7) / rgd - ibd95
+    cgs * dy6 = cgs * v1d - (y6 - y10) / rgs - ids2
+    cgd * dy7 = cgd * v1d - (y7 - y5) / rgd + ids2
+    cb810 * dy8 - cb810 * dy10 = -(y8 - vbb) / rbs + ibs810
+    -cb95 * dy5 + cb95 * dy9 = -(y9 - vbb) / rbd + ibd95
+    -cb810 * dy8 + (cb810 + cb1410 + c9) * dy10 - cb1410 * dy14 = -(y10 - y6) / rgs - ibs810 - (y10 - y12) / rgd - ibd1410
+    cgs * dy11 = cgs * v2d - y11 / rgs - ids3
+    cgd * dy12 = cgd * v2d - (y12 - y10) / rgd + ids3
+    cb13 * dy13 = -(y13 - vbb) / rbs + ibs13
+    -cb1410 * dy10 + cb1410 * dy14 = -(y14 - vbb) / rbd + ibd1410
+"""
+
+
+def _nand_gate(problem, precision, name):
+    """Index-0 implicit DE; the swept supply voltage is VDD."""
+    system = qb.create_ODE_system(
+        NAND_EQUATIONS,
+        states=dict(NAND_STATES),
+        parameters={"VDD": 5.0},
+        constants=dict(NAND_CONSTANTS),
+        name=name,
+        precision=precision,
+    )
+    # Simplification introduces derivative states, so merge onto the
+    # retained set; the introduced states keep their 0.0 defaults.
+    initial = state_defaults(system)
+    for key, value in NAND_STATES.items():
+        if key in initial:
+            initial[key] = value
+    return system, initial
 
 
 # The problem's own variables, in the order the golden reference stores them.
@@ -271,9 +359,9 @@ _ORDER = {
     "pollu": tuple("y{0}".format(i) for i in range(1, 21)),
     "ring_modulator": RING_ORDER,
     "ring_modulator_index2": RING_ORDER,
+    "nand_gate": tuple("y{0}".format(i) for i in range(1, 15)),
 }
 
-# nand_gate has no builder: the DSL cannot express its C(y) y' left-hand side.
 _BUILDERS = {
     "lorenz": _lorenz,
     "lorenz96": _lorenz96,
@@ -281,6 +369,7 @@ _BUILDERS = {
     "pollu": _pollu,
     "ring_modulator": _ring_modulator,
     "ring_modulator_index2": _ring_modulator_index2,
+    "nand_gate": _nand_gate,
 }
 
 
@@ -326,13 +415,16 @@ def final_states(system, solution, problem):
     finals = np.asarray(solution.state[-1, :, :]).T
     if len(state_names) == len(order) and list(state_names) == list(order):
         return finals
-    observable_names = _names(system.indices.observables.index_map)
-    observables = np.asarray(solution.observables[-1, :, :]).T
+    observable_names, observables = [], None
     columns = []
     for name in order:
         if name in state_names:
             columns.append(finals[:, state_names.index(name)])
-        elif name in observable_names:
+            continue
+        if observables is None:
+            observable_names = _names(system.indices.observables.index_map)
+            observables = np.asarray(solution.observables[-1, :, :]).T
+        if name in observable_names:
             columns.append(observables[:, observable_names.index(name)])
         else:
             raise SystemExit(

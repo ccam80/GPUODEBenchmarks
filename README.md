@@ -278,13 +278,15 @@ cubie rejects the explicit algorithms and `kvaerno3` on a singular mass
 matrix, leaving `rosenbrock23_sciml` and `radau_iia_5`.
 
 The NAND gate is the test set's index-0 implicit DE `C(y) y' = f(y, t)`
-with a state-dependent, non-diagonal capacitance matrix. No benchmarked
-framework expresses that left-hand side, so its `frameworks` column is
-empty and only the Float64 golden (fully implicit DFBDF with tstops on the
-pulse corners) integrates it. Golden references are Float64 solves under
-each problem's `golden_algorithm` at its `golden_tol`, and
-`runner_scripts/golden/verify_references.jl` checks them against the
-published test-set reference values.
+with a state-dependent, non-diagonal capacitance matrix. Cubie (0.6.0+)
+takes it in natural form and restructures it during parsing, adding eight
+derivative states to the original fourteen; the other frameworks have no
+formulation for that left-hand side, so its `frameworks` column is
+`cubie|cubie_mlir`. The Float64 golden integrates it as a fully implicit
+DFBDF `DAEProblem` with tstops on the pulse corners. Golden references are
+Float64 solves under each problem's `golden_algorithm` at its
+`golden_tol`, and `runner_scripts/golden/verify_references.jl` checks them
+against the published test-set reference values.
 
 Every entry point takes `-s <problem>` (default `all`, or a comma list), and a
 framework skips cleanly when a requested problem is not in its list:
