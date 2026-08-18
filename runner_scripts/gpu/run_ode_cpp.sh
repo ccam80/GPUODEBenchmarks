@@ -37,8 +37,7 @@ do
 		done
 		continue
 	fi
-	# One solver walks the whole N sweep before the next builds; NT is a
-	# compile-time constant, so each point is still a rebuild.
+	# NT is a compile-time constant, so every point is a rebuild.
 	for solver in $SOLVERS
 	do
 		for a in $NLIST

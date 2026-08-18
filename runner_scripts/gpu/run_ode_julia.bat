@@ -4,9 +4,7 @@ set "PA_RAW=%*"
 call "%~dp0..\parse_args.bat"
 if errorlevel 1 exit /b 1
 
-REM One julia process per (problem, algorithm), so a watchdog exit only
-REM abandons that leg; the process runs the whole N sweep on kernels
-REM compiled once.
+REM One julia process per (problem, algorithm) runs that pair's whole N sweep.
 set "ALGO_LIST="
 for /f "usebackq delims=" %%g in (`python runner_scripts\algorithms.py julia "%ALGORITHM%"`) do (
     set "ALGO_LIST=!ALGO_LIST! %%g"

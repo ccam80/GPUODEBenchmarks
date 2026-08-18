@@ -251,8 +251,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             us = Array(sol[2])
             sol
         end
-        # A never-returning run hard-exits the process; every row this
-        # process no longer reaches is recorded as NaN first.
+        # Record NaN rows for everything this process will no longer reach.
         on_breach = () -> begin
             nan_rows(outfile, NS[index:end])
             for (later_algorithm, later_mode) in later_legs()
@@ -297,8 +296,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         println("Minimum time: " * string(t_ms) * " ms")
 
         if breached
-            # The run returned but exceeded the cap, so every larger sweep
-            # size would breach too.
+            # Larger sweep sizes are slower, so the leg ends here.
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run exceeded the cap")
             nan_rows(outfile, NS[(index + 1):end])
