@@ -32,6 +32,7 @@ __forceinline__ __device__ void PerThread_ErrorController_RKCK45(\
 			int&       r_UpdateStep, \
 			int&       r_IsFinite, \
 			int&       r_TerminateSimulation, \
+			int&       r_MinStepReached, \
 			Precision& r_NewTimeStep, \
 			Struct_SolverOptions<Precision> SolverOptions)
 {
@@ -70,7 +71,18 @@ __forceinline__ __device__ void PerThread_ErrorController_RKCK45(\
 	{
 		if ( r_TimeStep < (SolverOptions.MinimumTimeStep*static_cast<Precision>(1.01)) )
 		{
-			printf("Warning: Minimum step size reached! Continue with fixed minimum step size! Tolerance cannot be guaranteed!, thread id: %d, time step: %+6.5e, min step size: %+6.5e \n", tid, r_TimeStep, SolverOptions.MinimumTimeStep);
+			// Local change to upstream MPGOS: warn once per thread, not once per
+			// step. A trajectory pinned at the minimum step re-enters this branch
+			// every step for the rest of the solve, so the unguarded printf emits
+			// millions of identical lines -- one sweep produced 7.0e6 lines / 1.26 GB,
+			// nearly all of it from pleiades. The latched flag also lets the host
+			// tell "hit the floor" apart from "ran clean", so such a run can be
+			// discounted like a failed one rather than scored as a valid timing.
+			if ( r_MinStepReached == 0 )
+			{
+				printf("Warning: Minimum step size reached! Continue with fixed minimum step size! Tolerance cannot be guaranteed!, thread id: %d, time step: %+6.5e, min step size: %+6.5e \n", tid, r_TimeStep, SolverOptions.MinimumTimeStep);
+				r_MinStepReached = 1;
+			}
 			r_UpdateStep = 1;
 		}
 	}

@@ -113,6 +113,7 @@ __global__ void SingleSystem_PerThread(Struct_ThreadConfiguration ThreadConfigur
 		int       r_UserDefinedTermination;
 		int       r_UpdateStep;
 		int       r_EndTimeDomainReached;
+		int       r_MinStepReached;
 		
 		#pragma unroll
 		for (int i=0; i<2; i++)
@@ -142,6 +143,7 @@ __global__ void SingleSystem_PerThread(Struct_ThreadConfiguration ThreadConfigur
 		r_NumberOfSkippedStores  = 0;
 		r_TerminateSimulation    = 0;
 		r_UserDefinedTermination = 0;
+		r_MinStepReached         = 0;
 		
 		
 		// INITIALISATION -----------------------------------------------------
@@ -262,6 +264,7 @@ __global__ void SingleSystem_PerThread(Struct_ThreadConfiguration ThreadConfigur
 					r_UpdateStep, \
 					r_IsFinite, \
 					r_TerminateSimulation, \
+					r_MinStepReached, \
 					r_NewTimeStep, \
 					SolverOptions);
 			}
