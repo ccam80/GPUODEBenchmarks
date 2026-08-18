@@ -275,10 +275,7 @@ NAND_CONSTANTS = {
     "betaem": 1.748e-4, "period1": 20.0, "period2": 40.0,
 }
 
-# Trapezoidal input pulses, junction capacitances CBD/CBS, junction currents
-# IBS/IBD and Shichman-Hodges drain currents, then the network rows with the
-# capacitance couplings on the left-hand side; nand.f's enhancement-type beta
-# differs between the VDS > 0 and VDS < 0 branches.
+# Input pulses, junction terms and drain currents, then the network rows.
 NAND_EQUATIONS = """
     tp1 = t - period1 * floor(t / period1)
     v1 = Piecewise((0.0, tp1 <= 5.0), (tp1 - 5.0, tp1 <= 10.0), (5.0, tp1 <= 15.0), (20.0 - tp1, True))
