@@ -258,6 +258,18 @@ cyclic 40-state forcing model; the Pleiades is the seven-body celestial
 mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
 Verwer's 25-reaction atmospheric mechanism.
 
+Swept ranges are deliberately wide enough that solvers fail inside them. The
+Pleiades `m1` range is the clearest case: past roughly m1 = 1.5 the mass
+perturbation drives two-body encounters whose closest approach falls below
+Float32 resolution, and adaptive integrators pin at their minimum step for the
+rest of the solve. That is the intended test, not an accident — narrowing the
+range to keep every trajectory comfortable would report a solver as converging
+on a set chosen so it cannot fail. A run that bottoms out on the step floor is
+a *failed* run and should be discounted the same way an errored Julia or cubie
+solve is, rather than excluded in advance by shrinking the parameter space. An
+earlier commit message (`db2f6ca`) describes narrowing this range to
+[0.9, 1.1]; that narrowing was intentionally reverted and the message is stale.
+
 Every benchmark solve runs under `BENCH_WATCHDOG_SECONDS` (default 120): a
 run over the cap is recorded as a NaN row and the leg's remaining solves
 are abandoned, including a work-precision sweep's remaining settings.
