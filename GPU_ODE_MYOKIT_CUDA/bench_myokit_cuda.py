@@ -169,8 +169,7 @@ def load_model(problem):
 
 
 def run_warm(problems):
-    """Compile each model, including the states-sweep sizes, so CuPy's
-    kernel cache is hot."""
+    """Compile each model, including the states-sweep sizes."""
     import timeit
 
     from problems import STATES_PROBLEM, states_row
