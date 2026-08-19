@@ -22,20 +22,23 @@ function _golden_index(sys, golden_vars)
     return [findfirst(u -> isequal(v, u), us) for v in golden_vars]
 end
 
+# Codegen options for generate_*; GPU_ODE_JuliaKernels overrides them.
+SYSTEMS_CODEGEN = (expression = Val(false),)
+
 "Compile a raw system and generate the numeric artifacts every suite uses."
 function _build_entry(raw; u0map, golden_vars, consistent_u0 = false)
     sys = mtkcompile(raw; split = false)
     n = length(unknowns(sys))
-    rhs, rhs! = ModelingToolkit.generate_rhs(sys; expression = Val(false))
+    rhs, rhs! = ModelingToolkit.generate_rhs(sys; SYSTEMS_CODEGEN...)
     # Piecewise expressions can defeat symbolic differentiation; the solvers
     # fall back to finite differences when a derivative is nothing.
     jac, jac! = try
-        ModelingToolkit.generate_jacobian(sys; expression = Val(false))
+        ModelingToolkit.generate_jacobian(sys; SYSTEMS_CODEGEN...)
     catch
         nothing, nothing
     end
     tgrad = try
-        ModelingToolkit.generate_tgrad(sys; expression = Val(false))[1]
+        ModelingToolkit.generate_tgrad(sys; SYSTEMS_CODEGEN...)[1]
     catch
         nothing
     end

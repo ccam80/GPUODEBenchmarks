@@ -1027,6 +1027,12 @@ git-tree-sha1 = "83cf05ab16a73219e5f6bd1bdfa9848fa24ac627"
 uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
 version = "0.2.0"
 
+[[deps.GPU_ODE_JuliaKernels]]
+deps = ["CUDA", "DiffEqGPU", "LinearAlgebra", "ModelingToolkit", "PrecompileTools", "SciMLBase", "StaticArrays"]
+path = "GPU_ODE_JuliaKernels"
+uuid = "b3c4e5d6-8a91-4f27-9d3c-2e7a61c0f4b2"
+version = "0.1.0"
+
 [[deps.GPUCompiler]]
 deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "PrecompileTools", "Preferences", "REPL", "Scratch", "Serialization", "TOML", "Tracy", "UUIDs"]
 git-tree-sha1 = "5e54ec63c34bcc878558b173c411b8efe6b08344"

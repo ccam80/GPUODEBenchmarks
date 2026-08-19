@@ -7,6 +7,7 @@ using CUDA
 using DiffEqGPU, OrdinaryDiffEq, StaticArrays
 using CSV, DataFrames, DelimitedFiles
 using FileWatching.Pidfile: mkpidlock
+using GPU_ODE_JuliaKernels
 
 # CLI: <N|N,N,...>|wp|states:<nstates>:<N> [algorithm|all] [--problem <name|all>].
 @show ARGS
@@ -18,7 +19,10 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "problems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
+# Precompiled entries take precedence over runtime-built ones.
+merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
 const REPO_ROOT = dirname(@__DIR__)
 
@@ -68,14 +72,6 @@ const NS = isinteractive() ? [8192] :
             (STATES_MODE ? [STATES_ARGS[2]] :
              sort(parse.(Int64, split(ARGS[1], ',')))))
 
-"DiffEqGPU kernel solver for an algorithm name; autodiff off matches the overlap suite."
-function gpu_solver(algorithm)
-    algorithm == "tsit5" && return GPUTsit5()
-    algorithm == "rosenbrock23_sciml" && return GPURosenbrock23(autodiff = Val(false))
-    algorithm == "kvaerno3" && return GPUKvaerno3(autodiff = Val(false))
-    error("no DiffEqGPU kernel solver for '$(algorithm)'")
-end
-
 "Modes the algorithm runs under this framework, fixed first."
 algorithm_modes(algorithm) = [mode
                               for (mode, list) in
@@ -91,31 +87,6 @@ function ensemble_error(system, us, golden)
         m[i, :] .= Float64.(final[i][system.golden_index])
     end
     return sqrt(sum(abs2, m .- golden) / length(m))
-end
-
-"The per-problem pieces every sweep size shares."
-build_prob(problem) = build_prob_parts(julia_system(problem), problem)
-
-function build_prob_parts(system, problem)
-    duration = Float32(problem["duration"])
-    f = system.mass_matrix === nothing ?
-        ODEFunction{false}(system.rhs; jac = system.jac,
-            tgrad = system.tgrad) :
-        ODEFunction{false}(system.rhs; jac = system.jac,
-            tgrad = system.tgrad, mass_matrix = system.mass_matrix)
-    prob = ODEProblem{false}(f, system.u0, (0.0f0, duration),
-        @SArray [Float32(problem["sweep_max"])])
-    return system, prob, duration
-end
-
-"Host and device ensembles for one sweep size; data only, no new kernels."
-function build_ensemble(system, prob, problem, n)
-    grid = Float32.(collect(problem_sweep(problem, n)))
-    probs_host = map(1:n) do i
-        DiffEqGPU.make_prob_compatible(remake(prob,
-            u0 = system.u0_for(grid[i]), p = @SVector [grid[i]]))
-    end
-    return probs_host, cu(probs_host)
 end
 
 "An algorithm that cannot run this system is a NaN row, not an aborted run."
@@ -344,7 +315,10 @@ end
 # One system size per process; the driver enforces the compile budget and
 # backfills rows for processes that never wrote them.
 function run_states(nstates, n)
-    entry = _lorenz96_entry(nstates)
+    # 40 and 20 states are the registered lorenz96 rows.
+    entry = nstates == 40 ? julia_system("lorenz96") :
+            nstates == 20 ? julia_system("lorenz96_20") :
+            _lorenz96_entry(nstates)
     row = copy(get_problem("lorenz96"))
     row["states"] = nstates
     system, prob, duration = build_prob_parts(entry, row)
