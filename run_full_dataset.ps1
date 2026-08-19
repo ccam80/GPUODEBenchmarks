@@ -314,7 +314,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $false; $StepLabel = "warm:$lang"
             $status = Invoke-Step "Warm caches: $lang" "warm_$lang.log" `
-                ".un_benchmark.bat -p $lang -d gpu -m ode -a warm -n `"$NMax`" -g `"$Algorithm`" -s `"$Problem`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a warm -n `"$NMax`" -g `"$Algorithm`" -s `"$Problem`""
             if ($status -eq 0) { Add-Record "warm:$lang" 'OK' '-' "$status" }
             else { Add-Record "warm:$lang" 'FAILED' '-' "$status" }
         }
@@ -352,7 +352,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "states:$lang"
             $status = Invoke-Step "States sweep: $lang" "states_$lang.log" `
-                ".un_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`""
             if ($status -eq 0) { Add-Record "states:$lang" 'OK' '-' "$status" }
             else { Add-Record "states:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
