@@ -72,7 +72,10 @@ class DriverHarness(object):
         self.tmp = tempfile.mkdtemp(prefix="jd_test_")
         case.addCleanup(self._cleanup)
         self.behaviors = behaviors
+        self.free_ram_gb = 999.0
         self.spawned = []
+        self.live = []
+        self.max_concurrent = 0
         self.outfiles = {}
         legs = [(mode, algorithm) for algorithm in algorithms
                 for mode in ("fixed", "adaptive")]
@@ -87,6 +90,9 @@ class DriverHarness(object):
             behavior = self.behaviors.get((nstates, algorithm), "ok")
             proc = FakeProc(nstates, algorithm, self.outfiles, behavior)
             self.spawned.append((nstates, algorithm))
+            self.live = [p for p in self.live if p.poll() is None]
+            self.live.append(proc)
+            self.max_concurrent = max(self.max_concurrent, len(self.live))
             marker = env.get("BENCH_STATES_MARKER", "")
             if behavior != "hang" and marker:
                 open(marker, "w").close()
@@ -95,6 +101,8 @@ class DriverHarness(object):
         patches = [
             mock.patch.object(julia_driver.subprocess, "Popen", fake_popen),
             mock.patch.object(julia_driver.time, "sleep", lambda _s: None),
+            mock.patch.object(julia_driver, "_available_ram_gb",
+                              lambda: self.free_ram_gb),
             mock.patch.object(julia_driver, "resolve_states_grid",
                               lambda token: list(grid)),
             mock.patch.object(julia_driver, "resolve_algorithms",
@@ -178,6 +186,15 @@ class StatesDriverTests(unittest.TestCase):
         self.assertEqual([r[0] for r in rows], ["4", "8", "16"])
         self.assertTrue(all(r[1].lower() == "nan" for r in rows))
         self.assertNotIn((8, "tsit5"), harness.spawned)
+
+    def test_low_ram_serializes_spawns(self):
+        harness = DriverHarness(self, {}, grid=(4, 8, 16))
+        harness.free_ram_gb = 5.0
+        self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
+        self.assertEqual(harness.max_concurrent, 1)
+        rows = harness.rows("fixed", "tsit5")
+        self.assertEqual([r[0] for r in rows], ["4", "8", "16"])
+        self.assertTrue(all(r[1] == "12.5" for r in rows))
 
     def test_torn_last_line_is_backfilled(self):
         harness = DriverHarness(
