@@ -1,3 +1,0 @@
-# Binds only because GPUCompiler sits in this project's [extras].
-[GPUCompiler]
-disk_cache = "true"

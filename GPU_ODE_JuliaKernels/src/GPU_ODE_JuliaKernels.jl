@@ -64,7 +64,7 @@ end
         @compile_workload begin
             for row in resolve_problems("all", "julia")
                 for algorithm in supported_algorithms("julia")
-                    problem_runs(row, "julia", algorithm) || continue
+                    problem_supports(row, "julia") || continue
                     elapsed = @elapsed try
                         _warm_leg(row, algorithm)
                     catch err

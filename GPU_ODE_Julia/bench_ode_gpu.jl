@@ -166,7 +166,7 @@ function run_wp(problem)
     dt0 = Float32(problem_timing_dt(problem))
 
     for algorithm in ALGORITHMS
-        problem_runs(problem, "julia", algorithm) || continue
+        problem_supports(problem, "julia") || continue
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
 
@@ -398,7 +398,7 @@ end
 
 function run_times(problem)
     legs = [(algorithm, mode) for algorithm in ALGORITHMS
-            if problem_runs(problem, "julia", algorithm)
+            if problem_supports(problem, "julia")
             for mode in algorithm_modes(algorithm)]
     if isempty(legs)
         println("Julia runs none of the requested algorithms on ",

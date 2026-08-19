@@ -146,7 +146,7 @@ def _run_wp(problem, opts, system, grid):
                     _release(solver)
 
     for algorithm in opts["algorithms"]:
-        if not problem.runs(opts["framework"], algorithm):
+        if not problem.supports(opts["framework"]):
             continue
         if algorithm in opts["fixed"]:
             sweep("fixed",
@@ -212,7 +212,7 @@ def _run_times(problem, opts, system, grid):
         file.flush()
 
     for algorithm in opts["algorithms"]:
-        if not problem.runs(opts["framework"], algorithm):
+        if not problem.supports(opts["framework"]):
             continue
         for mode in ("fixed", "adaptive"):
             if algorithm not in opts[mode]:
@@ -273,7 +273,7 @@ def _warm_legs(opts, problems):
     legs = []
     for problem in problems:
         for algorithm in opts["algorithms"]:
-            if not problem.runs(opts["framework"], algorithm):
+            if not problem.supports(opts["framework"]):
                 continue
             if algorithm in opts["fixed"]:
                 legs.append((problem.name, "fixed", algorithm, None))

@@ -106,7 +106,7 @@ def run_wp(problem, parameters):
     golden = load_golden(problem)
 
     for algorithm in ALGORITHMS:
-        if not problem.runs("pytorch", algorithm):
+        if not problem.supports("pytorch"):
             continue
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
                              DATASET_KEY, problem)
@@ -143,7 +143,7 @@ def run_times(problem):
     from wp_common import timed_min_ms
 
     for algorithm in ALGORITHMS:
-        if not problem.runs("pytorch", algorithm):
+        if not problem.supports("pytorch"):
             continue
         solve = make_solve(problem, algorithm)
         outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,

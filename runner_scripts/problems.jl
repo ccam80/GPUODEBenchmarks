@@ -31,9 +31,6 @@ function load_problems()
             row[field] = parse(Float64, row[field])
         end
         row["frameworks"] = String.(split(row["frameworks"], '|'))
-        # framework:algorithm pairs this problem never attempts.
-        row["exclusions"] = Set(String.(filter(!isempty,
-            split(row["exclusions"], '|'))))
         push!(problems, row)
     end
     return problems
@@ -61,11 +58,8 @@ function resolve_problems(request, framework = nothing)
     return [row for row in selected if framework in row["frameworks"]]
 end
 
-"True unless the (framework, algorithm) pair is excluded for this problem."
-function problem_runs(row, framework, algorithm)
-    return framework in row["frameworks"] &&
-           !("$(framework):$(algorithm)" in row["exclusions"])
-end
+"True when the framework runs this problem."
+problem_supports(row, framework) = framework in row["frameworks"]
 
 "Fixed step used by the N-sweep: duration * 2^-10."
 problem_timing_dt(problem) = problem["duration"] * 2.0^-TIMING_DT_K

@@ -188,7 +188,7 @@ def run_warm(problems):
             print("FAILED warm {0}: {1}".format(label, exc))
 
     for problem in problems:
-        if not problem.runs("myokit_cuda", ALGORITHM):
+        if not problem.supports("myokit_cuda"):
             continue
         warm_one(lambda: load_model(problem), problem, problem.name)
 
@@ -386,7 +386,7 @@ def main(argv=None):
         run_states(cell_counts)
         return 0
     for problem in problems:
-        if not problem.runs("myokit_cuda", ALGORITHM):
+        if not problem.supports("myokit_cuda"):
             continue
         run_problem(problem, cell_counts, analysis == "wp")
     return 0

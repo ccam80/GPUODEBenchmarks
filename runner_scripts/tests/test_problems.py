@@ -47,15 +47,11 @@ class RegistryTests(unittest.TestCase):
         names = [r.name for r in resolve_problems(DEFAULT_PROBLEM)]
         self.assertEqual([DEFAULT_PROBLEM], names)
 
-    def test_exclusions_gate_framework_algorithm_pairs(self):
+    def test_supports_gates_frameworks(self):
         row = get_problem("lorenz96")
-        self.assertTrue(row.runs("julia", "tsit5"))
-        self.assertFalse(row.runs("julia", "rosenbrock23_sciml"))
-        self.assertFalse(row.runs("julia", "kvaerno3"))
-        self.assertTrue(row.runs("cubie", "rosenbrock23_sciml"))
-        self.assertFalse(row.runs("nosuchframework", "tsit5"))
-        # A row without exclusions runs everything its frameworks run.
-        self.assertTrue(get_problem("lorenz96_20").runs("julia", "kvaerno3"))
+        self.assertTrue(row.supports("julia"))
+        self.assertTrue(row.supports("cubie"))
+        self.assertFalse(row.supports("nosuchframework"))
 
     def test_bench_args_accept_an_n_list(self):
         from wp_common import N_WP, STATES_N, parse_bench_args
@@ -94,7 +90,7 @@ class RegistryTests(unittest.TestCase):
         row = states_row(16)
         self.assertEqual("lorenz96", row.name)
         self.assertEqual(16, row["states"])
-        self.assertTrue(row.runs("julia", "rosenbrock23_sciml"))
+        self.assertTrue(row.supports("julia"))
 
 
 class GridTests(unittest.TestCase):

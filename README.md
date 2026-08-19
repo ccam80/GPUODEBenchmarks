@@ -286,13 +286,7 @@ returns is caught by a hard watchdog that records every row its process
 can no longer reach as NaN and exits, and the Julia runner launches one
 process per problem and algorithm so an exit abandons only that pair.
 
-The `exclusions` column lists `framework:algorithm` pairs a problem never
-attempts. `lorenz96` carries `julia:rosenbrock23_sciml|julia:kvaerno3`:
-DiffEqGPU's kernel-path implicit solvers inline a fully unrolled
-StaticArrays LU whose compile time roughly doubles with every four states
-and cannot be interrupted by the watchdog. `lorenz96_20` is the same model
-at the largest size whose compile fits the 120 s cap, the stiff-solver
-head-to-head between cubie and DiffEqGPU.
+Every problem attempts every algorithm its frameworks support; a failed solve is a NaN row. `lorenz96_20` is the 20-state lorenz96 row, the smaller stiff head-to-head.
 
 ### States sweep
 

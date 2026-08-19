@@ -63,7 +63,7 @@ def _julia_legs(request, problem_request):
     legs = []
     for problem in problems:
         for algorithm in algorithms:
-            if not problem.runs("julia", algorithm):
+            if not problem.supports("julia"):
                 continue
             if not any(algorithm in supported
                        for supported in modes.values()):
