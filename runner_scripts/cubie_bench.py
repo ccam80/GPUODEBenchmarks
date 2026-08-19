@@ -265,105 +265,114 @@ def _run_times(problem, opts, system, grid):
             _release(solver)
 
 
-def _run_warm(opts, problems, argv):
-    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 spawns one child per problem."""
-    import subprocess
-    from timeit import default_timer
+def _warm_legs(opts, problems):
+    """Every (system, mode, algorithm, setting) compile task, in a
+    deterministic order shared by the parent and its shard children."""
+    from problems import STATES_PROBLEM, states_row
+    from wp_common import STATES_GRID, TOLS
 
-    jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
-    if len(problems) > 1 and jobs > 1:
-        # Forward the CLI minus any --problem tokens, one child per problem.
-        passthrough = []
-        rest = list(argv[1:])
-        while rest:
-            tok = rest.pop(0)
-            if tok in ("--problem", "-s"):
-                rest and rest.pop(0)
-            elif not tok.startswith("--problem="):
-                passthrough.append(tok)
-        import time
-        running = []
-        for problem in problems:
-            running = [p for p in running if p.poll() is None]
-            while len(running) >= jobs:
-                time.sleep(1)
-                running = [p for p in running if p.poll() is None]
-            running.append(subprocess.Popen(
-                [sys.executable, sys.argv[0], argv[0]] + passthrough
-                + ["--problem", problem.name]))
-        for proc in running:
-            proc.wait()
-        return
-
+    legs = []
     for problem in problems:
-        system, initial_conditions = build_system(
-            problem, PRECISION, name_suffix=opts["name_suffix"])
-        def warm_one(make_solver, row, conditions, label):
-            solver = None
-            started = default_timer()
-            try:
-                solver = make_solver()
-                initials, params = solver.build_grid(
-                    initial_values=conditions,
-                    parameters=sweep_parameters(row, 64, PRECISION))
-                solver.solve(initial_values=initials, parameters=params,
-                             blocksize=64, duration=row["duration"])
-                print("warmed {0} in {1:.1f}s".format(
-                    label, default_timer() - started))
-            except Exception as exc:
-                _failed(exc, "warm {0}".format(label))
-            if solver is not None:
-                _release(solver)
-
         for algorithm in opts["algorithms"]:
             if not problem.runs(opts["framework"], algorithm):
                 continue
             if algorithm in opts["fixed"]:
-                warm_one(lambda: _make_fixed_solver(system, problem,
-                                                    algorithm),
-                         problem, initial_conditions,
-                         f"{problem.name} fixed {algorithm}")
+                legs.append((problem.name, None, "fixed", algorithm, None))
                 for dt in problem.dts(algorithm):
-                    warm_one(lambda: _make_fixed_solver(system, problem,
-                                                        algorithm, dt),
-                             problem, initial_conditions,
-                             f"{problem.name} fixed {algorithm} dt={dt:g}")
+                    legs.append((problem.name, None, "fixed", algorithm, dt))
             if algorithm in opts["adaptive"]:
-                warm_one(lambda: _make_adaptive_solver(system, problem,
-                                                       algorithm),
-                         problem, initial_conditions,
-                         f"{problem.name} adaptive {algorithm}")
-                from wp_common import TOLS
+                legs.append((problem.name, None, "adaptive", algorithm,
+                             None))
                 for tol in TOLS:
-                    warm_one(lambda: _make_adaptive_solver(system, problem,
-                                                           algorithm, tol),
-                             problem, initial_conditions,
-                             f"{problem.name} adaptive {algorithm} "
-                             f"tol={tol:g}")
-
+                    legs.append((problem.name, None, "adaptive", algorithm,
+                                 tol))
         # The states sweep runs lorenz96 at every grid size, exclusions off.
-        from problems import STATES_PROBLEM, states_row
-        from wp_common import STATES_GRID
         if problem.name == STATES_PROBLEM:
             for nstates in STATES_GRID:
-                row = states_row(nstates)
-                sized_system, sized_conditions = build_system(
-                    row, PRECISION,
-                    name_suffix="{0}_s{1}".format(opts["name_suffix"],
-                                                  nstates))
                 for algorithm in opts["algorithms"]:
                     if algorithm in opts["fixed"]:
-                        warm_one(lambda: _make_fixed_solver(
-                                     sized_system, row, algorithm),
-                                 row, sized_conditions,
-                                 f"lorenz96 states={nstates} fixed "
-                                 f"{algorithm}")
+                        legs.append((problem.name, nstates, "fixed",
+                                     algorithm, None))
                     if algorithm in opts["adaptive"]:
-                        warm_one(lambda: _make_adaptive_solver(
-                                     sized_system, row, algorithm),
-                                 row, sized_conditions,
-                                 f"lorenz96 states={nstates} adaptive "
-                                 f"{algorithm}")
+                        legs.append((problem.name, nstates, "adaptive",
+                                     algorithm, None))
+    return legs
+
+
+def _run_warm(opts, problems, argv):
+    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 stripes
+    the legs across that many shard children."""
+    import subprocess
+    from timeit import default_timer
+
+    from problems import states_row
+
+    jobs = int(os.environ.get("BENCH_WARM_JOBS", "8"))
+    shard = opts.get("warm_shard")
+    legs = _warm_legs(opts, problems)
+
+    if shard is None and jobs > 1 and len(legs) > 1:
+        count = min(jobs, len(legs))
+        children = [subprocess.Popen(
+            [sys.executable, sys.argv[0]] + argv
+            + ["--warm-shard", f"{index}/{count}"])
+            for index in range(count)]
+        for child in children:
+            child.wait()
+        return
+
+    if shard is not None:
+        index, count = shard
+        legs = legs[index::count]
+
+    rows = {p.name: p for p in problems}
+    systems = {}
+
+    def system_for(name, nstates):
+        key = (name, nstates)
+        if key not in systems:
+            if nstates is None:
+                systems[key] = build_system(
+                    rows[name], PRECISION, name_suffix=opts["name_suffix"])
+            else:
+                systems[key] = build_system(
+                    states_row(nstates), PRECISION,
+                    name_suffix="{0}_s{1}".format(opts["name_suffix"],
+                                                  nstates))
+        return systems[key]
+
+    for name, nstates, mode, algorithm, setting in legs:
+        row = rows[name] if nstates is None else states_row(nstates)
+        sized = "" if nstates is None else f" states={nstates}"
+        tag = ("" if setting is None else
+               (f" dt={setting:g}" if mode == "fixed" else
+                f" tol={setting:g}"))
+        label = f"{name}{sized} {mode} {algorithm}{tag}"
+        solver = None
+        started = default_timer()
+        try:
+            system, conditions = system_for(name, nstates)
+            if mode == "fixed":
+                solver = (_make_fixed_solver(system, row, algorithm)
+                          if setting is None else
+                          _make_fixed_solver(system, row, algorithm,
+                                             setting))
+            else:
+                solver = (_make_adaptive_solver(system, row, algorithm)
+                          if setting is None else
+                          _make_adaptive_solver(system, row, algorithm,
+                                                setting))
+            initials, params = solver.build_grid(
+                initial_values=conditions,
+                parameters=sweep_parameters(row, 64, PRECISION))
+            solver.solve(initial_values=initials, parameters=params,
+                         blocksize=64, duration=row["duration"])
+            print("warmed {0} in {1:.1f}s".format(
+                label, default_timer() - started))
+        except Exception as exc:
+            _failed(exc, "warm {0}".format(label))
+        if solver is not None:
+            _release(solver)
 
 
 def _run_states(opts):
@@ -470,6 +479,14 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
 
+    argv = list(argv)
+    warm_shard = None
+    if "--warm-shard" in argv:
+        position = argv.index("--warm-shard")
+        index, count = argv[position + 1].split("/")
+        warm_shard = (int(index), int(count))
+        del argv[position:position + 2]
+
     ns, analysis, algorithms, problems = parse_bench_args(argv, framework)
     if not problems:
         print("{0} runs none of the requested problems; skipping."
@@ -487,6 +504,7 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         "fixed": supported_for(framework, "fixed"),
         "adaptive": supported_for(framework, "adaptive"),
         "dataset_key": dataset_key(),
+        "warm_shard": warm_shard,
     }
     if analysis == "warm":
         _run_warm(opts, problems, argv)
