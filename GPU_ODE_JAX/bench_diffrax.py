@@ -337,8 +337,7 @@ def run_states():
 
 
 def run_warm():
-    """Compile each leg's timing, wp-setting and states kernels without
-    running them."""
+    """Compile every timing, wp-setting and states kernel without running them."""
     import timeit
 
     from problems import STATES_PROBLEM, states_row

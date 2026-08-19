@@ -176,8 +176,7 @@ def run_states(argv):
             nstates, algorithm = pending.pop(0)
             print(f"spawning lorenz96 states={nstates} {algorithm} "
                   f"(N={ensemble})")
-            # The marker appears once the first kernel compiles, so the
-            # optional budget only fells processes still compiling.
+            # The marker marks first-kernel compile; the budget kills only markerless processes.
             marker = os.path.join(marker_dir, f"{nstates}_{algorithm}.done")
             env = dict(os.environ, BENCH_GPU_LOCK=lock_path,
                        BENCH_STATES_MARKER=marker)
