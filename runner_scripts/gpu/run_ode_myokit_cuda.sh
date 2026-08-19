@@ -29,6 +29,7 @@ fi
 # The whole ascending N sweep runs in one process on kernels compiled once.
 NLIST_CSV=$(echo $NLIST | tr ' ' ',')
 echo "N sweep = $NLIST_CSV"
+python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
 python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
 
 deactivate

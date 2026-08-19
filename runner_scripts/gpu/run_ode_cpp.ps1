@@ -123,27 +123,14 @@ function Invoke-Point {
 
 Enter-VsEnvironment
 
-if ($Analysis -eq 'warm') {
+# Every missing target builds through parallel nvcc straight into the cache.
+function Invoke-WarmBuilds {
+    param([object[]]$Targets)
     $jobsMax = 8
     if ($env:BENCH_WARM_JOBS) { $jobsMax = [int]$env:BENCH_WARM_JOBS }
     New-Item -ItemType Directory -Force $CacheDir | Out-Null
-    $targets = @()
-    $nts = @($NValues + [long]131072 | Sort-Object -Unique)
-    foreach ($p in $Problems) {
-        foreach ($s in $Solvers) {
-            foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
-        }
-    }
-    if ($Problems -contains 'lorenz96') {
-        $grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-        foreach ($s in $Solvers) {
-            foreach ($sd in $grid) {
-                $targets += , @('lorenz96', $s, [long]131072, [long]$sd)
-            }
-        }
-    }
     $builds = @()
-    foreach ($t in $targets) {
+    foreach ($t in $Targets) {
         $p, $s, $nt, $sd = $t
         $sdTag = if ($sd -gt 0) { "_SD$sd" } else { "" }
         $exe = "$CacheDir\Bench_${p}_${s}_NT$nt${sdTag}_$SrcHash.exe"
@@ -174,9 +161,38 @@ if ($Analysis -eq 'warm') {
             Select-Object -Last 6 | ForEach-Object { Write-Host "  $_" }
     }
     Remove-Item "$CacheDir\*.out", "$CacheDir\*.err" -Force -ErrorAction SilentlyContinue
-    Write-Host "MPGOS warm build cache populated ($($builds.Count - $failed.Count) built, $($failed.Count) failed)."
+    Write-Host "MPGOS builds ready ($($builds.Count - $failed.Count) built, $($failed.Count) failed)."
+}
+
+function Get-NtTargets {
+    $targets = @()
+    $nts = @($NValues + [long]131072 | Sort-Object -Unique)
+    foreach ($p in $Problems) {
+        foreach ($s in $Solvers) {
+            foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
+        }
+    }
+    return $targets
+}
+
+if ($Analysis -eq 'warm') {
+    $targets = @(Get-NtTargets)
+    if ($Problems -contains 'lorenz96') {
+        $grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
+        foreach ($s in $Solvers) {
+            foreach ($sd in $grid) {
+                $targets += , @('lorenz96', $s, [long]131072, [long]$sd)
+            }
+        }
+    }
+    Invoke-WarmBuilds -Targets $targets
     Pop-Location
     exit 0
+}
+
+# All binaries compile in parallel before anything is timed.
+if ($Analysis -eq 'performance') {
+    Invoke-WarmBuilds -Targets @(Get-NtTargets)
 }
 
 if ($Analysis -eq 'states') {

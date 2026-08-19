@@ -316,13 +316,15 @@ serves code instances with a precompiled build id, which the
 ModelingToolkit-generated functions never have; the Julia states sweep
 parallelizes compiles across processes instead.
 
-`run_benchmark -a warm` populates the caches without timing anything:
-MPGOS builds every (problem, solver, NT) binary in parallel
-(`BENCH_WARM_JOBS`, default 8) plus the lorenz96 states variants, cubie
-compiles each leg once at a tiny ensemble (per-problem child processes
-under `BENCH_WARM_JOBS`), JAX lowers and compiles each leg at each `-n`
-size, Myokit compiles each model, and julia runs `Pkg.precompile`.
-`run_full_dataset -a warm,performance,...` runs it as a stage.
+Performance runs compile before they measure: each runner first fills
+its package's cache — MPGOS builds every (problem, solver, NT) binary
+with up to `BENCH_WARM_JOBS` (default 8) parallel nvcc processes, cubie
+compiles each leg once at a tiny ensemble in per-problem child
+processes, JAX lowers and compiles each leg at each N, Myokit compiles
+each model — then runs the timed sweep against warm caches.
+`run_benchmark -a warm` runs the cache fill alone, adding the lorenz96
+states binaries and julia's `Pkg.precompile`; `run_full_dataset -a warm`
+does that for every package.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
