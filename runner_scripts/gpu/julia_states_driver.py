@@ -1,14 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia states sweep: one process per (system size, algorithm), compiles in
-parallel, GPU-timed sections serialized through a pidfile lock. Every size
-runs unless a smaller size of the same algorithm produced no result, which
-cancels the larger ones.
-
-Usage: julia_states_driver.py [algorithm|all] [ensemble N]
-Environment: BENCH_STATES_JOBS concurrent processes (default 4);
-BENCH_STATES_BUDGET compile-budget seconds (unset or 0 disables it).
-"""
+"""Julia states sweep driver: julia_states_driver.py [algorithm|all] [ensemble N]. One process per (size, algorithm); BENCH_STATES_JOBS concurrent (default 4); BENCH_STATES_BUDGET seconds kills processes with no compiled kernel yet (unset disables)."""
 
 import math
 import os

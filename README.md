@@ -297,12 +297,10 @@ to the first completed solve (the compile). The Julia sweep runs one
 process per (size, algorithm) so compiles proceed in parallel while a
 pidfile lock serializes every timed GPU section
 (`runner_scripts/gpu/julia_states_driver.py`; `BENCH_STATES_JOBS`
-concurrent processes, default 4). Every size runs to completion under the
-ordinary solve caps; a size that produces no finite time in either mode
-cancels the pending and running larger sizes of that algorithm, and
-cancelled rows are recorded as NaN. Setting `BENCH_STATES_BUDGET` (seconds)
-adds an opt-in backstop for unattended runs that kills any process whose
-first kernel has not compiled within the budget.
+concurrent processes, default 4). A size with no finite time in either
+mode cancels the pending and running larger sizes of that algorithm;
+cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset disables)
+kills any process whose first kernel has not compiled within the budget.
 
 ### Compiled-kernel caches
 
