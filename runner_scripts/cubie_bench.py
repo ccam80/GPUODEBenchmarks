@@ -266,9 +266,7 @@ def _run_times(problem, opts, system, grid):
 
 
 def _run_warm(opts, problems, argv):
-    """Compile every requested leg once at a tiny ensemble so the disk
-    kernel cache is hot; BENCH_WARM_JOBS>1 warms problems in parallel
-    child processes."""
+    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 spawns one child per problem."""
     import subprocess
     from timeit import default_timer
 
