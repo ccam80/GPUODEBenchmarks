@@ -58,13 +58,26 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(get_problem("lorenz96_20").runs("julia", "kvaerno3"))
 
     def test_bench_args_accept_an_n_list(self):
-        from wp_common import N_WP, parse_bench_args
-        ns, wp, _, _ = parse_bench_args(["32,8,128"], "cubie")
+        from wp_common import N_WP, STATES_N, parse_bench_args
+        ns, analysis, _, _ = parse_bench_args(["32,8,128"], "cubie")
         self.assertEqual([8, 32, 128], ns)
-        self.assertFalse(wp)
-        ns, wp, _, _ = parse_bench_args(["wp"], "cubie")
-        self.assertTrue(wp)
+        self.assertEqual("times", analysis)
+        ns, analysis, _, _ = parse_bench_args(["wp"], "cubie")
+        self.assertEqual("wp", analysis)
         self.assertEqual([N_WP], ns)
+        ns, analysis, _, _ = parse_bench_args(["states"], "cubie")
+        self.assertEqual("states", analysis)
+        self.assertEqual([STATES_N], ns)
+        ns, analysis, _, _ = parse_bench_args(["states:4096"], "cubie")
+        self.assertEqual("states", analysis)
+        self.assertEqual([4096], ns)
+
+    def test_states_rows_resize_lorenz96(self):
+        from problems import states_row
+        row = states_row(16)
+        self.assertEqual("lorenz96", row.name)
+        self.assertEqual(16, row["states"])
+        self.assertTrue(row.runs("julia", "rosenbrock23_sciml"))
 
 
 class GridTests(unittest.TestCase):

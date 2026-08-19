@@ -77,7 +77,7 @@ def _run_problem(problem, opts):
         problem, PRECISION, name_suffix=opts["name_suffix"])
     grid = _grid_builder(problem, initial_conditions)
 
-    if opts["wp"]:
+    if opts["analysis"] == "wp":
         _run_wp(problem, opts, system, grid)
         return
 
@@ -265,20 +265,117 @@ def _run_times(problem, opts, system, grid):
             _release(solver)
 
 
+def _run_states(opts):
+    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, timed at
+    one fixed ensemble size."""
+    from timeit import default_timer
+
+    from problems import states_row
+    from wp_common import STATES_GRID, states_outfile, timed_min_ms
+
+    n = opts["ns"][0]
+    systems = {}
+
+    def system_for(nstates):
+        if nstates not in systems:
+            systems[nstates] = build_system(
+                states_row(nstates), PRECISION,
+                name_suffix="{0}_s{1}".format(opts["name_suffix"], nstates))
+        return systems[nstates]
+
+    for algorithm in opts["algorithms"]:
+        for mode in ("fixed", "adaptive"):
+            if algorithm not in opts[mode]:
+                continue
+            outfile = states_outfile(opts["framework_dir"], opts["prefix"],
+                                     mode, algorithm, opts["dataset_key"])
+            with open(outfile, "w") as file:
+                for index, nstates in enumerate(STATES_GRID):
+                    row = states_row(nstates)
+                    duration = row["duration"]
+                    print(f"Running lorenz96 states={nstates}, "
+                          f"{n} trajectories, {mode} dt, {algorithm}...")
+                    t_ms = t_dev = build_s = float("nan")
+                    breached = False
+                    solver = None
+                    try:
+                        started = default_timer()
+                        system, initial_conditions = system_for(nstates)
+                        solver = (_make_fixed_solver(system, row, algorithm)
+                                  if mode == "fixed"
+                                  else _make_adaptive_solver(system, row,
+                                                             algorithm))
+                        initials_array, parameter_array = solver.build_grid(
+                            initial_values=initial_conditions,
+                            parameters=sweep_parameters(row, n, PRECISION))
+
+                        def with_transfers(blocksize=64):
+                            return solver.solve(
+                                initial_values=initials_array,
+                                parameters=parameter_array,
+                                blocksize=blocksize,
+                                duration=duration,
+                            )
+
+                        with_transfers()
+                        build_s = default_timer() - started
+
+                        d_initials = cuda.to_device(initials_array)
+                        d_parameters = cuda.to_device(parameter_array)
+
+                        def device_only(blocksize=64):
+                            solution = solver.solve(
+                                initial_values=d_initials,
+                                parameters=d_parameters,
+                                blocksize=blocksize,
+                                duration=duration,
+                                on_device=True,
+                            )
+                            cuda.synchronize()
+                            return solution
+
+                        best, _ = timed_min_ms(with_transfers, REPEATS)
+                        best_dev = None
+                        if best is not None:
+                            best_dev, _ = timed_min_ms(device_only, REPEATS)
+                        breached = best is None or best_dev is None
+                        if not breached:
+                            t_ms, t_dev = best, best_dev
+                            print(f"{n} ODE solves (lorenz96 "
+                                  f"states={nstates}, {algorithm}, {mode}) "
+                                  f"completed in {t_ms:.1f} ms ({t_dev:.1f} "
+                                  "ms without transfers)")
+                    except Exception as exc:
+                        _failed(exc, f"lorenz96 states={nstates} {mode} "
+                                     f"{algorithm} N={n}")
+                    file.write(f'{nstates} {t_ms} {t_dev} {build_s}\n')
+                    file.flush()
+                    if solver is not None:
+                        _release(solver)
+                    if breached:
+                        # Larger systems are slower, so the leg is abandoned.
+                        print(f"WATCHDOG lorenz96 states={nstates} {mode} "
+                              f"{algorithm} N={n}: run exceeded the cap")
+                        for rest in STATES_GRID[index + 1:]:
+                            file.write(f'{rest} nan nan nan\n')
+                        file.flush()
+                        break
+
+
 def run(argv, framework, framework_dir, prefix, numerical_tag,
         name_suffix=""):
     """Entry point: parse the CLI and run every requested problem."""
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
 
-    ns, wp, algorithms, problems = parse_bench_args(argv, framework)
+    ns, analysis, algorithms, problems = parse_bench_args(argv, framework)
     if not problems:
         print("{0} runs none of the requested problems; skipping."
               .format(framework))
         return 0
     opts = {
         "ns": ns,
-        "wp": wp,
+        "analysis": analysis,
         "framework": framework,
         "algorithms": algorithms,
         "framework_dir": framework_dir,
@@ -289,6 +386,14 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         "adaptive": supported_for(framework, "adaptive"),
         "dataset_key": dataset_key(),
     }
+    if analysis == "states":
+        from problems import STATES_PROBLEM
+        if not any(p.name == STATES_PROBLEM for p in problems):
+            print("{0} does not run {1}; skipping the states sweep."
+                  .format(framework, STATES_PROBLEM))
+            return 0
+        _run_states(opts)
+        return 0
     for problem in problems:
         _run_problem(problem, opts)
     return 0

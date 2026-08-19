@@ -7,6 +7,17 @@ if errorlevel 1 exit /b 1
 call GPU_ODE_MYOKIT_CUDA\venv\Scripts\activate.bat
 
 REM Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if /i "%ANALYSIS%"=="states" (
+    REM -n ^(when set^) overrides the states-sweep ensemble size.
+    set "STATES_ARG=states"
+    if not "%NMAX%"=="16777216" set "STATES_ARG=states:%NMAX%"
+    python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py "!STATES_ARG!" "%ALGORITHM%"
+    if errorlevel 1 exit /b 1
+    call deactivate
+    endlocal
+    exit /b 0
+)
+
 if /i "%ANALYSIS%"=="work-precision" (
     python GPU_ODE_MYOKIT_CUDA\bench_myokit_cuda.py wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1

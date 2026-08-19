@@ -27,7 +27,7 @@ def _lorenz(problem):
 
 
 class _Lorenz96ODE(torch.nn.Module):
-    """Cyclic 40-state Lorenz 96; the swept forcing F drives every row."""
+    """Cyclic Lorenz 96 sized by u; the swept forcing F drives every row."""
 
     def __init__(self, F=torch.tensor(8.0)):
         super(_Lorenz96ODE, self).__init__()
@@ -41,7 +41,7 @@ class _Lorenz96ODE(torch.nn.Module):
 
 def _lorenz96(problem):
     # Uniform state 8 with x1 perturbed to 9.
-    u0 = torch.full((40,), 8.0)
+    u0 = torch.full((problem["states"],), 8.0)
     u0[0] = 9.0
     return _Lorenz96ODE, u0.cuda()
 

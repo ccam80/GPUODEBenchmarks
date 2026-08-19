@@ -15,7 +15,7 @@
 #   run_full_dataset.bat --clock-tolerance 30      # widen the drift threshold (MHz)
 #
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
+#   -a, --analysis  all (default) | comma list of performance | states | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
@@ -27,6 +27,7 @@ Set-Location $PSScriptRoot
 
 $NMax = '16777216'
 $DoPerf = $true
+$DoStates = $true
 $DoWp = $true
 $DoNe = $true
 $DoOverlap = $true
@@ -56,21 +57,22 @@ function Show-Usage {
 # Selecting plots alone redraws everything on disk; otherwise plots track perf/wp.
 function Set-Analyses {
     param([string]$List)
-    $script:DoPerf = $false; $script:DoWp = $false; $script:DoNe = $false
+    $script:DoPerf = $false; $script:DoStates = $false; $script:DoWp = $false; $script:DoNe = $false
     $script:DoOverlap = $false; $script:DoPlots = $false
     foreach ($item in $List.Split(',')) {
         switch ($item.Trim()) {
             'all' {
-                $script:DoPerf = $true; $script:DoWp = $true; $script:DoNe = $true
+                $script:DoPerf = $true; $script:DoStates = $true; $script:DoWp = $true; $script:DoNe = $true
                 $script:DoOverlap = $true; $script:DoPlots = $true
             }
             'performance' { $script:DoPerf = $true; $script:DoPlots = $true }
+            'states' { $script:DoStates = $true }
             'work-precision' { $script:DoWp = $true; $script:DoPlots = $true }
             'numerical' { $script:DoNe = $true }
             'overlap' { $script:DoOverlap = $true }
             'plots' { $script:DoPlots = $true; $script:PlotAll = $true }
             default {
-                Write-Host "Unknown analysis '$item' (all|performance|work-precision|numerical|overlap|plots)"
+                Write-Host "Unknown analysis '$item' (all|performance|states|work-precision|numerical|overlap|plots)"
                 exit 1
             }
         }
@@ -270,7 +272,7 @@ Write-Host "Algorithm   : $Algorithm"
 Write-Host "Problems    : $Problem"
 Write-Host "Packages    : $($Languages -join ', ')"
 Write-Host "Log dir     : $LogDir"
-Write-Host "Analyses    : performance=$DoPerf work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
+Write-Host "Analyses    : performance=$DoPerf states=$DoStates work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
 Write-Host "Clocks      : $ClockStatus"
 if ($ResumeFrom) { Write-Host "Resume from : $ResumeFrom" }
 Write-Host ''
@@ -328,6 +330,18 @@ try {
             } else {
                 Add-Record "perf:$lang" 'FAILED' 'no data' "$status"
             }
+            Start-Sleep -Seconds $Cooldown
+        }
+    }
+
+    # ----------------------------------------------------------------- states
+    if ($DoStates) {
+        foreach ($lang in $Languages) {
+            $ClockCritical = $true; $StepLabel = "states:$lang"
+            $status = Invoke-Step "States sweep: $lang" "states_$lang.log" `
+                ".un_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`""
+            if ($status -eq 0) { Add-Record "states:$lang" 'OK' '-' "$status" }
+            else { Add-Record "states:$lang" 'FAILED' '-' "$status" }
             Start-Sleep -Seconds $Cooldown
         }
     }

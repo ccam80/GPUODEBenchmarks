@@ -21,7 +21,7 @@ def _lorenz(problem):
 
 
 class _Lorenz96(eqx.Module):
-    """Cyclic 40-state Lorenz 96; the swept forcing F drives every row."""
+    """Cyclic Lorenz 96 sized by y0; the swept forcing F drives every row."""
 
     F: float
 
@@ -31,7 +31,7 @@ class _Lorenz96(eqx.Module):
 
 def _lorenz96(problem):
     # Uniform state 8 with x1 perturbed to 9.
-    y0 = jnp.full(40, 8.0).at[0].set(9.0)
+    y0 = jnp.full(problem["states"], 8.0).at[0].set(9.0)
     return _Lorenz96, y0
 
 

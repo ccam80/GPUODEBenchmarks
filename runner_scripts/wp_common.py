@@ -12,6 +12,11 @@ TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 131072
 
+# States sweep: lorenz96 resized in powers of 2, timed at a fixed ensemble
+# large enough to strain occupancy.
+STATES_GRID = (4, 8, 16, 32, 64, 128)
+STATES_N = 131072
+
 # Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
 TIMING_TOL = 1.0e-8
 
@@ -87,14 +92,28 @@ def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
                         "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
 
 
+def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
+    """Path of the states-sweep timing file under the lorenz96 problem dir."""
+    from problems import STATES_PROBLEM
+    return os.path.join(
+        data_dir(framework_dir, dataset_key, problem=STATES_PROBLEM),
+        "{0}_states_{1}_{2}.txt".format(prefix, mode, algorithm))
+
+
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp [algorithm|all] [--problem <name|all>] into (ns, wp, algorithms, problems); wp mode always runs at N_WP."""
+    """Parse <N|N,N,...>|wp|states[:N] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
     if not argv:
-        raise SystemExit(
-            "usage: <N|N,N,...>|wp [algorithm|all] [--problem <name|all>]")
-    wp = argv[0] == "wp"
-    # Ascending, so each leg walks its sweep on kernels compiled once.
-    ns = [N_WP] if wp else sorted(int(tok) for tok in argv[0].split(","))
+        raise SystemExit("usage: <N|N,N,...>|wp|states[:N] [algorithm|all] "
+                         "[--problem <name|all>]")
+    if argv[0] == "wp":
+        analysis, ns = "wp", [N_WP]
+    elif argv[0] == "states" or argv[0].startswith("states:"):
+        _, _, count = argv[0].partition(":")
+        analysis, ns = "states", [int(count) if count else STATES_N]
+    else:
+        # Ascending, so each leg walks its sweep on kernels compiled once.
+        analysis = "times"
+        ns = sorted(int(tok) for tok in argv[0].split(","))
     request = "all"
     problem_request = "all"
     rest = list(argv[1:])
@@ -110,4 +129,4 @@ def parse_bench_args(argv, framework):
             request = tok
     algorithms = resolve_algorithms(request, framework)
     problems = resolve_problems(problem_request, framework)
-    return ns, wp, algorithms, problems
+    return ns, analysis, algorithms, problems
