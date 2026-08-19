@@ -307,7 +307,8 @@ def _run_warm(opts, problems, argv):
 
     from problems import states_row
 
-    jobs = int(os.environ.get("BENCH_WARM_JOBS", "8"))
+    # Each shard holds ~3 GB host RAM; 4 fits comfortably in 32 GB.
+    jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
     shard = opts.get("warm_shard")
     legs = _warm_legs(opts, problems)
 
