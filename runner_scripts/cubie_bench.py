@@ -270,7 +270,7 @@ def _run_warm(opts, problems, argv):
     import subprocess
     from timeit import default_timer
 
-    jobs = int(os.environ.get("BENCH_WARM_JOBS", "1"))
+    jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
     if len(problems) > 1 and jobs > 1:
         # Forward the CLI minus any --problem tokens, one child per problem.
         passthrough = []
