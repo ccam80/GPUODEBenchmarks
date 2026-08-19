@@ -323,10 +323,9 @@ cache under `generated/jax_cache`. Myokit compiles through CuPy's NVRTC
 cached under `GPU_ODE_MPGOS/build_cache/<key>/` keyed by problem, solver,
 trajectory count, state count and a source hash, so an unchanged point
 skips nvcc entirely. torchdiffeq is eager and compiles nothing. DiffEqGPU
-kernels cannot be cached across processes: GPUCompiler's disk cache only
-serves code instances with a precompiled build id, and the
-ModelingToolkit-generated functions are runtime-generated, so every Julia
-process pays inference again — which is why the Julia states sweep
+kernels are not cached across processes: GPUCompiler's disk cache only
+serves code instances with a precompiled build id, which the
+ModelingToolkit-generated functions never have; the Julia states sweep
 parallelizes compiles across processes instead.
 
 `run_benchmark -a warm` populates the caches without timing anything:

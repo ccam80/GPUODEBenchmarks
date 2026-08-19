@@ -337,8 +337,7 @@ def run_states():
 
 
 def run_warm():
-    """Lower and compile every requested leg at each N without running it;
-    the persistent cache keeps the binaries."""
+    """Compile each leg at each N without running it."""
     import timeit
 
     counts = NS or [8]
