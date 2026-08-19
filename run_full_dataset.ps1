@@ -68,7 +68,7 @@ function Set-Analyses {
             }
             'performance' { $script:DoPerf = $true; $script:DoPlots = $true }
             'warm' { $script:DoWarm = $true }
-            'states' { $script:DoStates = $true }
+            'states' { $script:DoStates = $true; $script:DoPlots = $true }
             'work-precision' { $script:DoWp = $true; $script:DoPlots = $true }
             'numerical' { $script:DoNe = $true }
             'overlap' { $script:DoOverlap = $true }
@@ -434,6 +434,13 @@ try {
                 'julia --project=. runner_scripts\plot\plot_ode_wp.jl'
             if ($status -eq 0) { Add-Record 'plot:wp' 'OK' '-' "$status" }
             else { Add-Record 'plot:wp' 'FAILED' '-' "$status" }
+        }
+
+        if ($DoStates -or $PlotAll) {
+            $status = Invoke-Step 'States sweep plot' 'plot_states.log' `
+                'julia --project=. runner_scripts\plot\plot_states.jl'
+            if ($status -eq 0) { Add-Record 'plot:states' 'OK' '-' "$status" }
+            else { Add-Record 'plot:states' 'FAILED' '-' "$status" }
         }
 
         $py = 'GPU_ODE_CUBIE\venv\Scripts\python.exe'

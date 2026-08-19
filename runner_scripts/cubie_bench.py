@@ -372,9 +372,10 @@ def _run_states(opts):
     from timeit import default_timer
 
     from problems import states_row
-    from wp_common import STATES_GRID, states_outfile, timed_min_ms
+    from wp_common import STATES_N, states_outfile, timed_min_ms
 
-    n = opts["ns"][0]
+    n = STATES_N
+    grid = opts["ns"]
     systems = {}
 
     def system_for(nstates):
@@ -391,7 +392,7 @@ def _run_states(opts):
             outfile = states_outfile(opts["framework_dir"], opts["prefix"],
                                      mode, algorithm, opts["dataset_key"])
             with open(outfile, "w") as file:
-                for index, nstates in enumerate(STATES_GRID):
+                for index, nstates in enumerate(grid):
                     row = states_row(nstates)
                     duration = row["duration"]
                     print(f"Running lorenz96 states={nstates}, "
@@ -457,7 +458,7 @@ def _run_states(opts):
                         # Larger systems are slower, so the leg is abandoned.
                         print(f"WATCHDOG lorenz96 states={nstates} {mode} "
                               f"{algorithm} N={n}: run exceeded the cap")
-                        for rest in STATES_GRID[index + 1:]:
+                        for rest in grid[index + 1:]:
                             file.write(f'{rest} nan nan nan\n')
                         file.flush()
                         break

@@ -122,8 +122,9 @@ def resolve_problems(request, framework=None):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--states-grid":
-        from wp_common import STATES_GRID
-        print(" ".join(str(n) for n in STATES_GRID))
+        from wp_common import resolve_states_grid
+        token = sys.argv[2] if len(sys.argv) > 2 else ""
+        print(" ".join(str(n) for n in resolve_states_grid(token)))
     elif len(sys.argv) > 1:
         # <framework> [request]: the resolved problem names, one per line.
         request = sys.argv[2] if len(sys.argv) > 2 else "all"

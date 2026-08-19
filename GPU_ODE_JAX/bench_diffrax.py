@@ -291,9 +291,10 @@ def run_states():
     import timeit
 
     from problems import states_row
-    from wp_common import STATES_GRID, states_outfile
+    from wp_common import STATES_N, states_outfile
 
-    n = NS[0]
+    n = STATES_N
+    grid = NS
     for algorithm in ALGORITHMS:
         for mode in ("fixed", "adaptive"):
             supported = (FIXED_ALGORITHMS if mode == "fixed"
@@ -303,7 +304,7 @@ def run_states():
             outfile = states_outfile("JAX", "Jax", mode, algorithm,
                                      DATASET_KEY)
             with open(outfile, "w") as file:
-                for index, nstates in enumerate(STATES_GRID):
+                for index, nstates in enumerate(grid):
                     row = states_row(nstates)
                     main = (make_fixed(row, algorithm) if mode == "fixed"
                             else make_adaptive(row, algorithm))
@@ -330,7 +331,7 @@ def run_states():
                     file.flush()
                     if abandon:
                         # Larger systems are slower, so the leg ends.
-                        for rest in STATES_GRID[index + 1:]:
+                        for rest in grid[index + 1:]:
                             file.write('{0} nan nan nan\n'.format(rest))
                         file.flush()
                         break

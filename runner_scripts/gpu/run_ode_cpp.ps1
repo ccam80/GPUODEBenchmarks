@@ -196,9 +196,11 @@ if ($Analysis -eq 'performance') {
 }
 
 if ($Analysis -eq 'states') {
-    # -n (when set) overrides the states-sweep ensemble size.
-    $StatesN = if ($Nmax -ne '16777216') { [long]$Nmax } else { [long]131072 }
-    $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
+    # -n (when set) is the state-count list or ceiling.
+    $StatesN = [long]131072
+    $GridArgs = @('runner_scripts\problems.py', '--states-grid')
+    if ($Nmax -ne '16777216') { $GridArgs += $Nmax }
+    $Grid = (& python @GridArgs).Trim() -split ' '
     Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
     foreach ($solver in $Solvers) {
         foreach ($n in $Grid) {

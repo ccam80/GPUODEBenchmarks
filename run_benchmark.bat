@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 REM Generate benchmark data for one package and one analysis.
 REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 REM   -a, --analysis  performance (default) | work-precision | states | warm
-REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns; in states mode the state-count list or ceiling
 REM   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 REM   -d, --device    gpu (default) | cpu

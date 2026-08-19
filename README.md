@@ -284,9 +284,10 @@ head-to-head between cubie and DiffEqGPU.
 
 ### States sweep
 
-`run_benchmark -a states` times lorenz96 resized along powers of two
-(4-128 states, `STATES_GRID` in `wp_common.py`) at one fixed ensemble size
-(131072, or a single `-n` value), in every framework and algorithm the
+`run_benchmark -a states` times lorenz96 resized along a state-count
+grid (default 4-128 in powers of two; `-n` supplies a comma list of exact
+sizes or a ceiling on the default grid) at a fixed 131072-trajectory
+ensemble, in every framework and algorithm the
 problem's frameworks support — including the pairs the performance sweep
 excludes, so the size at which each implicit stack gives out is measured
 rather than assumed. Rows are

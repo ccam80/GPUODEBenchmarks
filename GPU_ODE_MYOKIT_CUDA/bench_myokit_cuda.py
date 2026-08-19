@@ -303,18 +303,19 @@ def _lorenz96_cellml(n):
     return path
 
 
-def run_states(cell_count):
-    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID at one
-    fixed ensemble size."""
+def run_states(grid):
+    """Runtime-by-states sweep: lorenz96 resized along the requested grid at
+    one fixed ensemble size."""
     import timeit
 
     from problems import states_row
-    from wp_common import STATES_GRID, states_outfile
+    from wp_common import STATES_N, states_outfile
 
+    cell_count = STATES_N
     outfile = Path(states_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY))
     with outfile.open("w", encoding="utf-8") as handle:
-        for index, nstates in enumerate(STATES_GRID):
+        for index, nstates in enumerate(grid):
             row = states_row(nstates)
             sweep = row.sweep(cell_count, dtype=np.float32)
             elapsed_ms = elapsed_dev_ms = build_s = float("nan")
@@ -355,7 +356,7 @@ def run_states(cell_count):
                 print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: run "
                       "exceeded the cap".format(nstates, ALGORITHM,
                                                 cell_count))
-                for rest in STATES_GRID[index + 1:]:
+                for rest in grid[index + 1:]:
                     handle.write("{0} nan nan nan\n".format(rest))
                 handle.flush()
                 break
@@ -389,7 +390,7 @@ def main(argv=None):
             print("Myokit CUDA does not run {0}; skipping the states sweep."
                   .format(STATES_PROBLEM))
             return 0
-        run_states(cell_counts[0])
+        run_states(cell_counts)
         return 0
     for problem in problems:
         if not problem.runs("myokit_cuda", ALGORITHM):
