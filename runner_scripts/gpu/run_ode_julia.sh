@@ -13,40 +13,25 @@ fi
 if [ "$ANALYSIS" == "warm" ]; then
     # Package precompilation runs in parallel; DiffEqGPU kernels do not persist.
     julia --project=. -e 'using Pkg; Pkg.precompile()'
-    echo "DiffEqGPU kernels recompile per process; the states driver overlaps those compiles."
+    echo "DiffEqGPU kernels recompile per process; the julia driver overlaps those compiles."
     exit 0
 fi
 
 if [ "$ANALYSIS" == "states" ]; then
     # Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
     if [ "$NMAX" != "16777216" ]; then
-        python3 ./runner_scripts/gpu/julia_states_driver.py "$ALGORITHM" "$NMAX"
+        python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM" "$NMAX"
     else
-        python3 ./runner_scripts/gpu/julia_states_driver.py "$ALGORITHM"
+        python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM"
     fi
     exit 0
 fi
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    for g in $ALGO_LIST
-    do
-        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl wp "$g" --problem "$PROBLEM"
-    done
-    exit 0
-fi
-
-PROBLEM_LIST=$(python3 ./runner_scripts/problems.py julia "$PROBLEM")
-if [ -z "$PROBLEM_LIST" ]; then
-    echo "Julia runs none of the requested problems; skipping."
+    python3 ./runner_scripts/gpu/julia_driver.py wp "$ALGORITHM" "$PROBLEM"
     exit 0
 fi
 
 NLIST_CSV=$(echo $NLIST | tr ' ' ',')
-for p in $PROBLEM_LIST
-do
-    for g in $ALGO_LIST
-    do
-        echo "Problem $p, algorithm $g, N sweep = $NLIST_CSV"
-        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl "$NLIST_CSV" "$g" --problem "$p"
-    done
-done
+echo "N sweep = $NLIST_CSV"
+python3 ./runner_scripts/gpu/julia_driver.py performance "$NLIST_CSV" "$ALGORITHM" "$PROBLEM"

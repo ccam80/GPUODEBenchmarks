@@ -169,25 +169,40 @@ def load_model(problem):
 
 
 def run_warm(problems):
-    """Compile each requested model once so CuPy's kernel cache is hot."""
+    """Compile each model, including the states-sweep sizes, so CuPy's
+    kernel cache is hot."""
     import timeit
+
+    from problems import STATES_PROBLEM, states_row
+    from wp_common import STATES_GRID
+
+    def warm_one(build_model, row, label):
+        started = timeit.default_timer()
+        try:
+            model = build_model()
+            model.solve(
+                dt=row.timing_dt,
+                step_count=1,
+                initial_states=model.initial_states(64),
+                diffusion_values=row.sweep(64, dtype=np.float32),
+            )
+            print("warmed {0} in {1:.1f}s".format(
+                label, timeit.default_timer() - started))
+        except Exception as exc:
+            print("FAILED warm {0}: {1}".format(label, exc))
 
     for problem in problems:
         if not problem.runs("myokit_cuda", ALGORITHM):
             continue
-        started = timeit.default_timer()
-        try:
-            model = load_model(problem)
-            model.solve(
-                dt=problem.timing_dt,
-                step_count=1,
-                initial_states=model.initial_states(64),
-                diffusion_values=problem.sweep(64, dtype=np.float32),
-            )
-            print("warmed {0} in {1:.1f}s".format(
-                problem.name, timeit.default_timer() - started))
-        except Exception as exc:
-            print("FAILED warm {0}: {1}".format(problem.name, exc))
+        warm_one(lambda: load_model(problem), problem, problem.name)
+        if problem.name == STATES_PROBLEM:
+            for nstates in STATES_GRID:
+                row = states_row(nstates)
+                warm_one(
+                    lambda: MyokitCudaModel(
+                        _lorenz96_cellml(nstates),
+                        diffusion_variable="lorenz96.F"),
+                    row, "lorenz96 states={0}".format(nstates))
 
 
 def run_problem(problem, cell_counts, wp_mode):

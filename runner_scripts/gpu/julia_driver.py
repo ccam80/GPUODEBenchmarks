@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia states sweep driver: julia_states_driver.py [algorithm|all] [ensemble N]. One process per (size, algorithm); BENCH_STATES_JOBS concurrent (default 4); BENCH_STATES_BUDGET seconds kills processes with no compiled kernel yet (unset disables)."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm] [ensemble N]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -15,10 +15,105 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 
 from algorithms import resolve_algorithms, supported_for  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
+from problems import resolve_problems  # noqa: E402
 from wp_common import STATES_GRID, STATES_N, states_outfile  # noqa: E402
 
+BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
 
-def _succeeded(outfiles, algorithm, nstates):
+
+def _lock_env():
+    lock_path = os.path.join(tempfile.gettempdir(), "gpuode_julia_gpu.pid")
+    # A lock left by a previous run's killed process would block every child.
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
+    return lock_path
+
+
+def _run_pool(jobs_args, jobs):
+    """Run each command with the GPU lock exported, at most `jobs` at once;
+    jobs_args maps a label to its julia argv tail."""
+    lock_path = _lock_env()
+    pending = list(jobs_args.items())
+    running = {}
+    while pending or running:
+        while pending and len(running) < jobs:
+            label, args = pending.pop(0)
+            print(f"spawning {label}")
+            env = dict(os.environ, BENCH_GPU_LOCK=lock_path)
+            proc = subprocess.Popen(["julia", "--project=."] + args,
+                                    cwd=REPO_ROOT, env=env)
+            running[proc] = label
+        time.sleep(2)
+        for proc in list(running):
+            code = proc.poll()
+            if code is not None:
+                label = running.pop(proc)
+                print(f"{label}: exit {code}")
+                yield label, code
+
+
+def _julia_legs(request, problem_request):
+    """(problem, algorithm) pairs julia actually runs."""
+    algorithms = resolve_algorithms(request, "julia")
+    problems = resolve_problems(problem_request, "julia")
+    modes = {"fixed": supported_for("julia", "fixed"),
+             "adaptive": supported_for("julia", "adaptive")}
+    legs = []
+    for problem in problems:
+        for algorithm in algorithms:
+            if not problem.runs("julia", algorithm):
+                continue
+            if not any(algorithm in supported
+                       for supported in modes.values()):
+                continue
+            legs.append((problem.name, algorithm))
+    return legs
+
+
+def run_performance(argv):
+    nlist = argv[0]
+    request = argv[1] if len(argv) > 1 else "all"
+    problem_request = argv[2] if len(argv) > 2 else "all"
+    legs = _julia_legs(request, problem_request)
+    if not legs:
+        print("Julia (DiffEqGPU kernel path) runs none of the requested "
+              "legs; skipping.")
+        return 0
+    jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
+    jobs_args = {
+        f"{problem} {algorithm}":
+            [BENCH, nlist, algorithm, "--problem", problem]
+        for problem, algorithm in legs}
+    status = 0
+    for label, code in _run_pool(jobs_args, jobs):
+        if code:
+            status = 1
+    return status
+
+
+def run_wp(argv):
+    request = argv[0] if argv else "all"
+    problem_request = argv[1] if len(argv) > 1 else "all"
+    legs = _julia_legs(request, problem_request)
+    if not legs:
+        print("Julia (DiffEqGPU kernel path) runs none of the requested "
+              "legs; skipping.")
+        return 0
+    jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
+    jobs_args = {
+        f"wp {problem} {algorithm}":
+            [BENCH, "wp", algorithm, "--problem", problem]
+        for problem, algorithm in legs}
+    status = 0
+    for label, code in _run_pool(jobs_args, jobs):
+        if code:
+            status = 1
+    return status
+
+
+def _states_succeeded(outfiles, algorithm, nstates):
     """True when any mode recorded a finite time for this size."""
     for (mode, alg), path in outfiles.items():
         if alg != algorithm:
@@ -35,8 +130,7 @@ def _succeeded(outfiles, algorithm, nstates):
     return False
 
 
-def main(argv):
-    os.chdir(REPO_ROOT)
+def run_states(argv):
     request = argv[0] if argv else "all"
     ensemble = int(argv[1]) if len(argv) > 1 else STATES_N
     algorithms = resolve_algorithms(request, "julia")
@@ -45,27 +139,20 @@ def main(argv):
               "algorithms; skipping.")
         return 0
 
-    jobs = int(os.environ.get("BENCH_STATES_JOBS", "4"))
+    jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
     budget = float(os.environ.get("BENCH_STATES_BUDGET", "0"))
     key = dataset_key()
     modes = {"fixed": supported_for("julia", "fixed"),
              "adaptive": supported_for("julia", "adaptive")}
     legs = [(mode, algorithm) for algorithm in algorithms
             for mode, supported in modes.items() if algorithm in supported]
-
     outfiles = {leg: states_outfile("Julia", "Julia", leg[0], leg[1], key)
                 for leg in legs}
     for path in outfiles.values():
         open(path, "w").close()
 
-    lock_path = os.path.join(tempfile.gettempdir(), "gpuode_states_gpu.pid")
-    # A lock left by a previous run's killed process would block every child.
-    try:
-        os.remove(lock_path)
-    except OSError:
-        pass
+    lock_path = _lock_env()
     marker_dir = tempfile.mkdtemp(prefix="gpuode_states_")
-
     pending = [(nstates, algorithm) for nstates in STATES_GRID
                for algorithm in algorithms]
     running = {}
@@ -95,7 +182,7 @@ def main(argv):
             env = dict(os.environ, BENCH_GPU_LOCK=lock_path,
                        BENCH_STATES_MARKER=marker)
             proc = subprocess.Popen(
-                ["julia", "--project=.", "GPU_ODE_Julia/bench_ode_gpu.jl",
+                ["julia", "--project=.", BENCH,
                  f"states:{nstates}:{ensemble}", algorithm],
                 cwd=REPO_ROOT, env=env)
             running[proc] = (nstates, algorithm, time.monotonic(), marker)
@@ -106,7 +193,7 @@ def main(argv):
             if code is not None:
                 del running[proc]
                 print(f"states={nstates} {algorithm}: exit {code}")
-                if not _succeeded(outfiles, algorithm, nstates):
+                if not _states_succeeded(outfiles, algorithm, nstates):
                     cancel_larger(algorithm, nstates,
                                   f"states={nstates} produced no result")
             elif (budget > 0 and time.monotonic() - started > budget
@@ -134,4 +221,11 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "performance":
+        sys.exit(run_performance(sys.argv[2:]))
+    if mode == "wp":
+        sys.exit(run_wp(sys.argv[2:]))
+    if mode == "states":
+        sys.exit(run_states(sys.argv[2:]))
+    raise SystemExit("usage: julia_driver.py performance|wp|states ...")
