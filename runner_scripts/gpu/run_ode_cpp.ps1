@@ -2,7 +2,7 @@
 param(
     # Exact aliases keep -a, -g and -s unambiguous under prefix matching.
     [Alias('a')]
-    [ValidateSet('performance', 'work-precision')]
+    [ValidateSet('performance', 'work-precision', 'states')]
     [string]$Analysis = 'performance',
     # A single value is a sweep ceiling (8, 32, ... <= n); a comma list runs exactly those Ns.
     [Alias('n')]
@@ -69,21 +69,42 @@ function Enter-VsEnvironment {
     Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64' | Out-Null
 }
 
-# Mirrors GPU_ODE_MPGOS/Makefile.
+# Built binaries are cached per source hash, machine and build constants.
+$DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
+$SourceFiles = @("GPU_ODE_MPGOS\Bench.cu", "GPU_ODE_MPGOS\makefile") +
+    @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
+      Sort-Object FullName | ForEach-Object { $_.FullName })
+$Hasher = [System.Security.Cryptography.SHA256]::Create()
+$SrcBytes = [byte[]]@()
+foreach ($f in $SourceFiles) { $SrcBytes += [System.IO.File]::ReadAllBytes($f) }
+$SrcHash = ([System.BitConverter]::ToString($Hasher.ComputeHash($SrcBytes)) -replace '-', '').Substring(0, 12)
+$CacheDir = "GPU_ODE_MPGOS\build_cache\$DatasetKey"
+
+# Mirrors GPU_ODE_MPGOS/Makefile; reuses the cached binary when one exists.
 function Build-Project {
-    param([string]$ProblemName, [string]$Solver, [long]$Nt)
+    param([string]$ProblemName, [string]$Solver, [long]$Nt, [long]$Sd = 0)
+    $SdTag = if ($Sd -gt 0) { "_SD$Sd" } else { "" }
+    $CachedExe = "$CacheDir\Bench_${ProblemName}_${Solver}_NT$Nt${SdTag}_$SrcHash.exe"
+    if (Test-Path $CachedExe) {
+        Copy-Item $CachedExe "GPU_ODE_MPGOS\Bench.exe" -Force
+        Write-Host "Cached build: $(Split-Path $CachedExe -Leaf)"
+        return
+    }
     if (Test-Path "GPU_ODE_MPGOS\Bench.exe") {
         Remove-Item "GPU_ODE_MPGOS\Bench.exe" -Force
     }
+    $SdDefine = if ($Sd -gt 0) { "-DPROBLEM_SD=$Sd" } else { $null }
     nvcc -o GPU_ODE_MPGOS\Bench.exe GPU_ODE_MPGOS\Bench.cu `
         -I"GPU_ODE_MPGOS\SourceCodes" -I"GPU_ODE_MPGOS" `
         "-DPROBLEM_HEADER=\`"problems/$ProblemName.cuh\`"" `
-        "-DSOLVER_CHOICE=$Solver" "-DNT_VALUE=$Nt" `
+        "-DSOLVER_CHOICE=$Solver" "-DNT_VALUE=$Nt" $SdDefine `
         -O3 -std=c++17 --ptxas-options=-v --gpu-architecture=native `
         -lineinfo -maxrregcount=128
     if ($LASTEXITCODE -ne 0) {
         Write-Error "nvcc build failed with exit code $LASTEXITCODE"
     }
+    New-Item -ItemType Directory -Force $CacheDir | Out-Null
+    Copy-Item "GPU_ODE_MPGOS\Bench.exe" $CachedExe -Force
 }
 
 function Invoke-Point {
@@ -100,6 +121,28 @@ function Invoke-Point {
 }
 
 Enter-VsEnvironment
+
+if ($Analysis -eq 'states') {
+    # -n (when set) overrides the states-sweep ensemble size.
+    $StatesN = if ($Nmax -ne '16777216') { [long]$Nmax } else { [long]131072 }
+    $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
+    Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
+    foreach ($solver in $Solvers) {
+        foreach ($n in $Grid) {
+            Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
+            $Watch = [System.Diagnostics.Stopwatch]::StartNew()
+            Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n)
+            $BuildS = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
+                "{0:F3}", $Watch.Elapsed.TotalSeconds)
+            & "GPU_ODE_MPGOS\Bench.exe" states $BuildS
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Bench.exe (lorenz96 states=$n, $solver) failed with exit code $LASTEXITCODE"
+            }
+        }
+    }
+    Pop-Location
+    exit 0
+}
 
 foreach ($problemName in $Problems) {
     if ($Analysis -eq 'work-precision') {

@@ -10,6 +10,16 @@ if [ -z "$ALGO_LIST" ]; then
     exit 0
 fi
 
+if [ "$ANALYSIS" == "states" ]; then
+    # Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
+    if [ "$NMAX" != "16777216" ]; then
+        python3 ./runner_scripts/gpu/julia_states_driver.py "$ALGORITHM" "$NMAX"
+    else
+        python3 ./runner_scripts/gpu/julia_states_driver.py "$ALGORITHM"
+    fi
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "work-precision" ]; then
     for g in $ALGO_LIST
     do

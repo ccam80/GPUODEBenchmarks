@@ -282,6 +282,41 @@ and cannot be interrupted by the watchdog. `lorenz96_20` is the same model
 at the largest size whose compile fits the 120 s cap, the stiff-solver
 head-to-head between cubie and DiffEqGPU.
 
+### States sweep
+
+`run_benchmark -a states` times lorenz96 resized along powers of two
+(4-128 states, `STATES_GRID` in `wp_common.py`) at one fixed ensemble size
+(131072, or a single `-n` value), in every framework and algorithm the
+problem's frameworks support — including the pairs the performance sweep
+excludes, so the size at which each implicit stack gives out is measured
+rather than assumed. Rows are
+`states t_ms t_dev_ms build_s` in
+`<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
+data directory, where `build_s` is the wall time from solver construction
+to the first completed solve (the compile). The Julia sweep runs one
+process per (size, algorithm) so compiles proceed in parallel while a
+pidfile lock serializes every timed GPU section
+(`runner_scripts/gpu/julia_states_driver.py`; `BENCH_STATES_JOBS`
+concurrent processes, `BENCH_STATES_BUDGET` compile-budget seconds,
+defaults 4 and 1800). A process that has not compiled its first kernel
+within the budget is killed and its unwritten rows recorded as NaN;
+compiled processes run to completion under the ordinary solve caps.
+
+### Compiled-kernel caches
+
+Cubie persists generated source and compiled kernels under `generated/`
+(both backends). JAX writes XLA binaries to a persistent compilation
+cache under `generated/jax_cache`. Myokit compiles through CuPy's NVRTC
+`RawModule`, which keeps its own on-disk kernel cache. MPGOS binaries are
+cached under `GPU_ODE_MPGOS/build_cache/<key>/` keyed by problem, solver,
+trajectory count, state count and a source hash, so an unchanged point
+skips nvcc entirely. torchdiffeq is eager and compiles nothing. DiffEqGPU
+kernels cannot be cached across processes: GPUCompiler's disk cache only
+serves code instances with a precompiled build id, and the
+ModelingToolkit-generated functions are runtime-generated, so every Julia
+process pays inference again — which is why the Julia states sweep
+parallelizes compiles across processes instead.
+
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
 become algebraic and the system is an index-2 DAE, which is a separate row

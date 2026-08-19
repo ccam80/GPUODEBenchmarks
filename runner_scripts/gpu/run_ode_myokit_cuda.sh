@@ -4,6 +4,15 @@ set -e
 source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
 # Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if [ "$ANALYSIS" == "states" ]; then
+    # -n (when set) overrides the states-sweep ensemble size.
+    STATES_ARG=states
+    [ "$NMAX" != "16777216" ] && STATES_ARG="states:$NMAX"
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$STATES_ARG" "$ALGORITHM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "work-precision" ]; then
     python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate

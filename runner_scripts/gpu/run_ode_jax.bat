@@ -8,6 +8,17 @@ call GPU_ODE_JAX\venv\Scripts\activate.bat
 
 set XLA_PYTHON_CLIENT_PREALLOCATE=false
 
+if /i "%ANALYSIS%"=="states" (
+    REM -n ^(when set^) overrides the states-sweep ensemble size.
+    set "STATES_ARG=states"
+    if not "%NMAX%"=="16777216" set "STATES_ARG=states:%NMAX%"
+    python GPU_ODE_JAX\bench_diffrax.py "!STATES_ARG!" "%ALGORITHM%"
+    if errorlevel 1 exit /b 1
+    call deactivate
+    endlocal
+    exit /b 0
+)
+
 if /i "%ANALYSIS%"=="work-precision" (
     python GPU_ODE_JAX\bench_diffrax.py wp "%ALGORITHM%" --problem "%PROBLEM%"
     if errorlevel 1 exit /b 1

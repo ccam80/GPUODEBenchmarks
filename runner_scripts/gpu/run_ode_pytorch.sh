@@ -4,6 +4,15 @@ set -e
 source ./GPU_ODE_PyTorch/venv/bin/activate
 
 # Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
+if [ "$ANALYSIS" == "states" ]; then
+    # -n (when set) overrides the states-sweep ensemble size.
+    STATES_ARG=states
+    [ "$NMAX" != "16777216" ] && STATES_ARG="states:$NMAX"
+    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py "$STATES_ARG" "$ALGORITHM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "work-precision" ]; then
     python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate

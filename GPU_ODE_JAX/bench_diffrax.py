@@ -31,10 +31,17 @@ DATASET_KEY = dataset_key()
 FIXED_ALGORITHMS = supported_for("jax", "fixed")
 ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
 
-NS, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "jax")
 # Timed repeats per point; min is reported.
 REPEATS = 20
+
+# Persistent XLA compilation cache under the shared generated/ cache root.
+jax.config.update("jax_compilation_cache_dir", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "generated", "jax_cache"))
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 # %%
 
@@ -278,13 +285,73 @@ def run_times(problem):
                         break
 
 
+def run_states():
+    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID at one
+    fixed ensemble size."""
+    import timeit
+
+    from problems import states_row
+    from wp_common import STATES_GRID, states_outfile
+
+    n = NS[0]
+    for algorithm in ALGORITHMS:
+        for mode in ("fixed", "adaptive"):
+            supported = (FIXED_ALGORITHMS if mode == "fixed"
+                         else ADAPTIVE_ALGORITHMS)
+            if algorithm not in supported:
+                continue
+            outfile = states_outfile("JAX", "Jax", mode, algorithm,
+                                     DATASET_KEY)
+            with open(outfile, "w") as file:
+                for index, nstates in enumerate(STATES_GRID):
+                    row = states_row(nstates)
+                    main = (make_fixed(row, algorithm) if mode == "fixed"
+                            else make_adaptive(row, algorithm))
+                    parameterList = jnp.asarray(row.sweep(n))
+                    label = "states={0} {1} {2}".format(nstates, mode,
+                                                        algorithm)
+                    try:
+                        started = timeit.default_timer()
+                        jax.block_until_ready(main(parameterList))
+                        build_s = timeit.default_timer() - started
+                    except Exception as err:
+                        print("FAILED {0} at N={1} ({2}: {3})".format(
+                            label, n, type(err).__name__, err))
+                        file.write('{0} nan nan nan\n'.format(nstates))
+                        file.flush()
+                        continue
+                    best_time, best_time_dev, abandon = best_times_ms(
+                        main, parameterList, label, n)
+                    print("{:} ODE solves ({}) completed in {:.1f} ms "
+                          "({:.1f} ms without transfers)".format(
+                              n, label, best_time, best_time_dev))
+                    file.write('{0} {1} {2} {3}\n'.format(
+                        nstates, best_time, best_time_dev, build_s))
+                    file.flush()
+                    if abandon:
+                        # Larger systems are slower, so the leg ends.
+                        for rest in STATES_GRID[index + 1:]:
+                            file.write('{0} nan nan nan\n'.format(rest))
+                        file.flush()
+                        break
+
+
 # %%
+if ANALYSIS == "states":
+    from problems import STATES_PROBLEM
+    if not any(p.name == STATES_PROBLEM for p in PROBLEMS):
+        print("diffrax does not run {0}; skipping the states sweep."
+              .format(STATES_PROBLEM))
+        sys.exit(0)
+    run_states()
+    sys.exit(0)
+
 if not PROBLEMS:
     print("diffrax runs none of the requested problems; skipping.")
     sys.exit(0)
 
 for _problem in PROBLEMS:
-    if WP_MODE:
+    if ANALYSIS == "wp":
         # Setting up parameters for parallel simulation
         run_wp(_problem, jnp.asarray(_problem.sweep(NS[0])))
     else:

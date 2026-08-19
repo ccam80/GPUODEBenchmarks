@@ -21,7 +21,7 @@ DATASET_KEY = dataset_key()
 
 FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
-NS, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "pytorch")
 # Timed repeats per point; min is reported.
 REPEATS = 20
@@ -205,13 +205,86 @@ def run_times(problem):
                     break
 
 
+def run_states():
+    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID at one
+    fixed ensemble size; torchdiffeq is fixed-step only."""
+    import timeit
+
+    from problems import states_row
+    from wp_common import STATES_GRID, states_outfile, timed_min_ms
+
+    n = NS[0]
+    for algorithm in ALGORITHMS:
+        outfile = states_outfile("PYTORCH", "Torch", "fixed", algorithm,
+                                 DATASET_KEY)
+        with open(outfile, "w") as file:
+            for index, nstates in enumerate(STATES_GRID):
+                row = states_row(nstates)
+                solve = make_solve(row, algorithm)
+                parameters_host = row.sweep(n, dtype=np.float32)
+                parameters = torch.from_numpy(parameters_host).cuda()
+
+                def with_transfers():
+                    p = torch.from_numpy(parameters_host).cuda()
+                    out = torch.vmap(solve)(p).cpu()
+                    torch.cuda.synchronize()
+                    return out
+
+                def device_only():
+                    out = torch.vmap(solve)(parameters)
+                    torch.cuda.synchronize()
+                    return out
+
+                t_ms = t_dev = build_s = float("nan")
+                breached = False
+                try:
+                    started = timeit.default_timer()
+                    device_only()
+                    build_s = timeit.default_timer() - started
+                    best, _ = timed_min_ms(with_transfers, REPEATS)
+                    best_dev = None
+                    if best is not None:
+                        best_dev, _ = timed_min_ms(device_only, REPEATS)
+                    breached = best is None or best_dev is None
+                    if not breached:
+                        t_ms, t_dev = best, best_dev
+                        print("{:} ODE solves (lorenz96 states={}, {}, "
+                              "fixed) completed in {:.1f} ms ({:.1f} ms "
+                              "without transfers)".format(
+                                  n, nstates, algorithm, t_ms, t_dev))
+                except Exception as exc:
+                    print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
+                          .format(nstates, algorithm, n, exc))
+                file.write('{0} {1} {2} {3}\n'.format(
+                    nstates, t_ms, t_dev, build_s))
+                file.flush()
+                if breached:
+                    # Larger systems are slower, so the leg is abandoned.
+                    print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
+                          "run exceeded the cap".format(nstates, algorithm,
+                                                        n))
+                    for rest in STATES_GRID[index + 1:]:
+                        file.write('{0} nan nan nan\n'.format(rest))
+                    file.flush()
+                    break
+
+
 # %%
+if ANALYSIS == "states":
+    from problems import STATES_PROBLEM
+    if not any(p.name == STATES_PROBLEM for p in PROBLEMS):
+        print("torchdiffeq does not run {0}; skipping the states sweep."
+              .format(STATES_PROBLEM))
+        sys.exit(0)
+    run_states()
+    sys.exit(0)
+
 if not PROBLEMS:
     print("torchdiffeq runs none of the requested problems; skipping.")
     sys.exit(0)
 
 for _problem in PROBLEMS:
-    if WP_MODE:
+    if ANALYSIS == "wp":
         # Generate parameter list
         run_wp(_problem, torch.from_numpy(
             _problem.sweep(NS[0], dtype=np.float32)).cuda())

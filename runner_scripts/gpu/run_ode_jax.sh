@@ -4,6 +4,15 @@ set -e
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 source ./GPU_ODE_JAX/venv/bin/activate
 
+if [ "$ANALYSIS" == "states" ]; then
+    # -n (when set) overrides the states-sweep ensemble size.
+    STATES_ARG=states
+    [ "$NMAX" != "16777216" ] && STATES_ARG="states:$NMAX"
+    python3 ./GPU_ODE_JAX/bench_diffrax.py "$STATES_ARG" "$ALGORITHM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "work-precision" ]; then
     python3 ./GPU_ODE_JAX/bench_diffrax.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate

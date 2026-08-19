@@ -15,6 +15,18 @@ if "!ALGO_LIST!"=="" (
     exit /b 0
 )
 
+if /i "%ANALYSIS%"=="states" (
+    REM Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
+    if not "%NMAX%"=="16777216" (
+        python runner_scripts\gpu\julia_states_driver.py "%ALGORITHM%" "%NMAX%"
+    ) else (
+        python runner_scripts\gpu\julia_states_driver.py "%ALGORITHM%"
+    )
+    if errorlevel 1 exit /b 1
+    endlocal
+    exit /b 0
+)
+
 if /i "%ANALYSIS%"=="work-precision" (
     for %%g in (!ALGO_LIST!) do (
         julia --project=. GPU_ODE_Julia\bench_ode_gpu.jl wp "%%g" --problem "%PROBLEM%"
