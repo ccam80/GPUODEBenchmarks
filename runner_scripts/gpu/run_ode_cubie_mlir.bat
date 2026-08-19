@@ -8,6 +8,8 @@ call GPU_ODE_CUBIE_MLIR\venv\Scripts\activate.bat
 
 REM Cubie picks its backend from this at import time.
 set CUBIE_CUDA_BACKEND=mlir
+REM The suite holds ~100 kernels per system; the default LRU cap of 10 evicts them.
+set CUBIE_MAX_CACHE_ENTRIES=0
 
 if /i "%ANALYSIS%"=="warm" (
     set "NLIST_CSV=!NLIST: =,!"
