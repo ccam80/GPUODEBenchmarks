@@ -188,7 +188,11 @@ def run_states(argv):
             running[proc] = (nstates, algorithm, time.monotonic(), marker)
         time.sleep(2)
         for proc in list(running):
-            nstates, algorithm, started, marker = running[proc]
+            state = running.get(proc)
+            if state is None:
+                # cancel_larger removed it while this snapshot was polled.
+                continue
+            nstates, algorithm, started, marker = state
             code = proc.poll()
             if code is not None:
                 del running[proc]
@@ -210,9 +214,14 @@ def run_states(argv):
         rows = {}
         with open(path) as handle:
             for line in handle:
+                # Keep only complete `states t_ms t_dev_ms build_s` rows.
                 fields = line.split()
-                if fields:
+                if len(fields) < 4:
+                    continue
+                try:
                     rows[int(fields[0])] = line.rstrip("\n")
+                except ValueError:
+                    continue
         with open(path, "w") as handle:
             for nstates in grid:
                 handle.write(rows.get(nstates,
