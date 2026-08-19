@@ -206,19 +206,20 @@ def run_times(problem):
 
 
 def run_states():
-    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID at one
-    fixed ensemble size; torchdiffeq is fixed-step only."""
+    """Runtime-by-states sweep: lorenz96 resized along the requested grid at
+    one fixed ensemble size; torchdiffeq is fixed-step only."""
     import timeit
 
     from problems import states_row
-    from wp_common import STATES_GRID, states_outfile, timed_min_ms
+    from wp_common import STATES_N, states_outfile, timed_min_ms
 
-    n = NS[0]
+    n = STATES_N
+    grid = NS
     for algorithm in ALGORITHMS:
         outfile = states_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                  DATASET_KEY)
         with open(outfile, "w") as file:
-            for index, nstates in enumerate(STATES_GRID):
+            for index, nstates in enumerate(grid):
                 row = states_row(nstates)
                 solve = make_solve(row, algorithm)
                 parameters_host = row.sweep(n, dtype=np.float32)
@@ -263,7 +264,7 @@ def run_states():
                     print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
                           "run exceeded the cap".format(nstates, algorithm,
                                                         n))
-                    for rest in STATES_GRID[index + 1:]:
+                    for rest in grid[index + 1:]:
                         file.write('{0} nan nan nan\n'.format(rest))
                     file.flush()
                     break

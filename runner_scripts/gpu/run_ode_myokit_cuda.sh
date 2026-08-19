@@ -12,9 +12,9 @@ if [ "$ANALYSIS" == "warm" ]; then
 fi
 
 if [ "$ANALYSIS" == "states" ]; then
-    # -n (when set) overrides the states-sweep ensemble size.
+    # -n (when set) is the state-count list or ceiling.
     STATES_ARG=states
-    [ "$NMAX" != "16777216" ] && STATES_ARG="states:$NMAX"
+    [ "$NMAX_RAW" != "16777216" ] && STATES_ARG="states:$NMAX_RAW"
     python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$STATES_ARG" "$ALGORITHM"
     deactivate
     exit 0

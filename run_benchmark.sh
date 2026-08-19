@@ -4,7 +4,7 @@
 # Usage: ./run_benchmark.sh -p <package> [-a <analysis>] [-n <nmax>] [-g <algorithm>] [-d <device>] [-m <model>]
 #   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | work-precision | states | warm
-#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
+#   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns; in states mode the state-count list or ceiling
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #   -d, --device    gpu (default) | cpu

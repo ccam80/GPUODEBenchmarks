@@ -18,9 +18,9 @@ if [ "$ANALYSIS" == "warm" ]; then
 fi
 
 if [ "$ANALYSIS" == "states" ]; then
-    # Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
-    if [ "$NMAX" != "16777216" ]; then
-        python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM" "$NMAX"
+    # Parallel compiles, serialized GPU sections; -n is the state-count list or ceiling.
+    if [ "$NMAX_RAW" != "16777216" ]; then
+        python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM" "$NMAX_RAW"
     else
         python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM"
     fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm] [ensemble N]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm] [sizes|ceiling]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 from algorithms import resolve_algorithms, supported_for  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from problems import resolve_problems  # noqa: E402
-from wp_common import STATES_GRID, STATES_N, states_outfile  # noqa: E402
+from wp_common import (STATES_N, resolve_states_grid,  # noqa: E402
+                       states_outfile)
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
 
@@ -132,7 +133,8 @@ def _states_succeeded(outfiles, algorithm, nstates):
 
 def run_states(argv):
     request = argv[0] if argv else "all"
-    ensemble = int(argv[1]) if len(argv) > 1 else STATES_N
+    grid = resolve_states_grid(argv[1] if len(argv) > 1 else "")
+    ensemble = STATES_N
     algorithms = resolve_algorithms(request, "julia")
     if not algorithms:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
@@ -153,7 +155,7 @@ def run_states(argv):
 
     lock_path = _lock_env()
     marker_dir = tempfile.mkdtemp(prefix="gpuode_states_")
-    pending = [(nstates, algorithm) for nstates in STATES_GRID
+    pending = [(nstates, algorithm) for nstates in grid
                for algorithm in algorithms]
     running = {}
 
@@ -213,7 +215,7 @@ def run_states(argv):
                 if fields:
                     rows[int(fields[0])] = line.rstrip("\n")
         with open(path, "w") as handle:
-            for nstates in STATES_GRID:
+            for nstates in grid:
                 handle.write(rows.get(nstates,
                                       f"{nstates} nan nan nan") + "\n")
     return 0

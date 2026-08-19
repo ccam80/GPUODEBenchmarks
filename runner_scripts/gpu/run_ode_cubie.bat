@@ -20,9 +20,9 @@ if /i "%ANALYSIS%"=="warm" (
 )
 
 if /i "%ANALYSIS%"=="states" (
-    REM -n ^(when set^) overrides the states-sweep ensemble size.
+    REM -n ^(when set^) is the state-count list or ceiling.
     set "STATES_ARG=states"
-    if not "%NMAX%"=="16777216" set "STATES_ARG=states:%NMAX%"
+    if not "!NMAX_RAW!"=="16777216" set "STATES_ARG=states:!NMAX_RAW!"
     python GPU_ODE_CUBIE\bench_cubie.py "!STATES_ARG!" "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     call deactivate

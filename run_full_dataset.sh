@@ -86,7 +86,7 @@ set_analyses() {
             all) DO_PERF=true; DO_STATES=true; DO_WP=true; DO_NE=true; DO_OVERLAP=true; DO_PLOTS=true;;
             performance) DO_PERF=true; DO_PLOTS=true;;
             warm) DO_WARM=true;;
-            states) DO_STATES=true;;
+            states) DO_STATES=true; DO_PLOTS=true;;
             work-precision) DO_WP=true; DO_PLOTS=true;;
             numerical) DO_NE=true;;
             overlap) DO_OVERLAP=true;;
@@ -450,6 +450,14 @@ if $DO_PLOTS; then
         status=$?
         [ "$status" -eq 0 ] && record "plot:wp" "OK" "-" "$status" \
                             || record "plot:wp" "FAILED" "-" "$status"
+    fi
+
+    if $DO_STATES || $PLOT_ALL; then
+        run_step "States sweep plot" "plot_states.log" \
+            julia --project=. ./runner_scripts/plot/plot_states.jl
+        status=$?
+        [ "$status" -eq 0 ] && record "plot:states" "OK" "-" "$status" \
+                            || record "plot:states" "FAILED" "-" "$status"
     fi
 
     PY=./GPU_ODE_CUBIE/venv/bin/python
