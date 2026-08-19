@@ -337,32 +337,69 @@ def run_states():
 
 
 def run_warm():
-    """Compile each leg at each N without running it."""
+    """Compile each leg's timing, wp-setting and states kernels without
+    running them."""
     import timeit
 
+    from problems import STATES_PROBLEM, states_row
+    from wp_common import (N_WP, STATES_GRID, STATES_N, TOLS, dts_for,
+                           wp_outfile)  # noqa: F401
+
     counts = NS or [8]
+
+    def warm_one(build, args, label):
+        started = timeit.default_timer()
+        try:
+            build().lower(args).compile()
+            print("warmed {0} in {1:.1f}s".format(
+                label, timeit.default_timer() - started))
+        except Exception as err:
+            print("FAILED warm {0} ({1}: {2})".format(
+                label, type(err).__name__, err))
+
     for problem in PROBLEMS:
         for algorithm in ALGORITHMS:
-            for mode in ("fixed", "adaptive"):
-                supported = (FIXED_ALGORITHMS if mode == "fixed"
-                             else ADAPTIVE_ALGORITHMS)
-                if algorithm not in supported:
-                    continue
-                if not problem.runs("jax", algorithm):
-                    continue
-                solve = (make_fixed(problem, algorithm) if mode == "fixed"
-                         else make_adaptive(problem, algorithm))
+            if not problem.runs("jax", algorithm):
+                continue
+            if algorithm in FIXED_ALGORITHMS:
                 for n in counts:
-                    started = timeit.default_timer()
-                    try:
-                        solve.lower(jnp.asarray(problem.sweep(n))).compile()
-                        print("warmed {0} {1} {2} N={3} in {4:.1f}s".format(
-                            problem.name, mode, algorithm, n,
-                            timeit.default_timer() - started))
-                    except Exception as err:
-                        print("FAILED warm {0} {1} {2} N={3} ({4}: {5})"
-                              .format(problem.name, mode, algorithm, n,
-                                      type(err).__name__, err))
+                    warm_one(lambda: make_fixed(problem, algorithm),
+                             jnp.asarray(problem.sweep(n)),
+                             f"{problem.name} fixed {algorithm} N={n}")
+                wp_args = jnp.asarray(problem.sweep(N_WP))
+                for dt in dts_for(algorithm, problem):
+                    warm_one(lambda: make_fixed(problem, algorithm, dt,
+                                                max_steps=262144),
+                             wp_args,
+                             f"{problem.name} fixed {algorithm} dt={dt:g}")
+            if algorithm in ADAPTIVE_ALGORITHMS:
+                for n in counts:
+                    warm_one(lambda: make_adaptive(problem, algorithm),
+                             jnp.asarray(problem.sweep(n)),
+                             f"{problem.name} adaptive {algorithm} N={n}")
+                wp_args = jnp.asarray(problem.sweep(N_WP))
+                for tol in TOLS:
+                    warm_one(lambda: make_adaptive(problem, algorithm, tol),
+                             wp_args,
+                             f"{problem.name} adaptive {algorithm} "
+                             f"tol={tol:g}")
+
+        # The states sweep runs lorenz96 at every grid size, exclusions off.
+        if problem.name == STATES_PROBLEM:
+            for nstates in STATES_GRID:
+                row = states_row(nstates)
+                states_args = jnp.asarray(row.sweep(STATES_N))
+                for algorithm in ALGORITHMS:
+                    if algorithm in FIXED_ALGORITHMS:
+                        warm_one(lambda: make_fixed(row, algorithm),
+                                 states_args,
+                                 f"lorenz96 states={nstates} fixed "
+                                 f"{algorithm}")
+                    if algorithm in ADAPTIVE_ALGORITHMS:
+                        warm_one(lambda: make_adaptive(row, algorithm),
+                                 states_args,
+                                 f"lorenz96 states={nstates} adaptive "
+                                 f"{algorithm}")
 
 
 # %%

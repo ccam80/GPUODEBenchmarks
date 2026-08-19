@@ -298,32 +298,72 @@ def _run_warm(opts, problems, argv):
     for problem in problems:
         system, initial_conditions = build_system(
             problem, PRECISION, name_suffix=opts["name_suffix"])
+        def warm_one(make_solver, row, conditions, label):
+            solver = None
+            started = default_timer()
+            try:
+                solver = make_solver()
+                initials, params = solver.build_grid(
+                    initial_values=conditions,
+                    parameters=sweep_parameters(row, 64, PRECISION))
+                solver.solve(initial_values=initials, parameters=params,
+                             blocksize=64, duration=row["duration"])
+                print("warmed {0} in {1:.1f}s".format(
+                    label, default_timer() - started))
+            except Exception as exc:
+                _failed(exc, "warm {0}".format(label))
+            if solver is not None:
+                _release(solver)
+
         for algorithm in opts["algorithms"]:
-            for mode in ("fixed", "adaptive"):
-                if algorithm not in opts[mode]:
-                    continue
-                if not problem.runs(opts["framework"], algorithm):
-                    continue
-                solver = None
-                started = default_timer()
-                try:
-                    solver = (_make_fixed_solver(system, problem, algorithm)
-                              if mode == "fixed"
-                              else _make_adaptive_solver(system, problem,
-                                                         algorithm))
-                    initials, params = solver.build_grid(
-                        initial_values=initial_conditions,
-                        parameters=sweep_parameters(problem, 64, PRECISION))
-                    solver.solve(initial_values=initials, parameters=params,
-                                 blocksize=64, duration=problem["duration"])
-                    print("warmed {0} {1} {2} in {3:.1f}s".format(
-                        problem.name, mode, algorithm,
-                        default_timer() - started))
-                except Exception as exc:
-                    _failed(exc, "warm {0} {1} {2}".format(
-                        problem.name, mode, algorithm))
-                if solver is not None:
-                    _release(solver)
+            if not problem.runs(opts["framework"], algorithm):
+                continue
+            if algorithm in opts["fixed"]:
+                warm_one(lambda: _make_fixed_solver(system, problem,
+                                                    algorithm),
+                         problem, initial_conditions,
+                         f"{problem.name} fixed {algorithm}")
+                for dt in problem.dts(algorithm):
+                    warm_one(lambda: _make_fixed_solver(system, problem,
+                                                        algorithm, dt),
+                             problem, initial_conditions,
+                             f"{problem.name} fixed {algorithm} dt={dt:g}")
+            if algorithm in opts["adaptive"]:
+                warm_one(lambda: _make_adaptive_solver(system, problem,
+                                                       algorithm),
+                         problem, initial_conditions,
+                         f"{problem.name} adaptive {algorithm}")
+                from wp_common import TOLS
+                for tol in TOLS:
+                    warm_one(lambda: _make_adaptive_solver(system, problem,
+                                                           algorithm, tol),
+                             problem, initial_conditions,
+                             f"{problem.name} adaptive {algorithm} "
+                             f"tol={tol:g}")
+
+        # The states sweep runs lorenz96 at every grid size, exclusions off.
+        from problems import STATES_PROBLEM, states_row
+        from wp_common import STATES_GRID
+        if problem.name == STATES_PROBLEM:
+            for nstates in STATES_GRID:
+                row = states_row(nstates)
+                sized_system, sized_conditions = build_system(
+                    row, PRECISION,
+                    name_suffix="{0}_s{1}".format(opts["name_suffix"],
+                                                  nstates))
+                for algorithm in opts["algorithms"]:
+                    if algorithm in opts["fixed"]:
+                        warm_one(lambda: _make_fixed_solver(
+                                     sized_system, row, algorithm),
+                                 row, sized_conditions,
+                                 f"lorenz96 states={nstates} fixed "
+                                 f"{algorithm}")
+                    if algorithm in opts["adaptive"]:
+                        warm_one(lambda: _make_adaptive_solver(
+                                     sized_system, row, algorithm),
+                                 row, sized_conditions,
+                                 f"lorenz96 states={nstates} adaptive "
+                                 f"{algorithm}")
 
 
 def _run_states(opts):

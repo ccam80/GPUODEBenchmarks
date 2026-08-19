@@ -139,6 +139,7 @@ end
 function wp_sweep(solve_once, system, path, settings, golden, label)
     open(path, "w") do io
         breached = false
+        compiled = false
         for (index, setting) in enumerate(settings)
             if breached
                 println(io, setting, " NaN NaN")
@@ -152,15 +153,22 @@ function wp_sweep(solve_once, system, path, settings, golden, label)
                 println("WATCHDOG $(label) setting=$(setting): run never returned")
             end
             t_ms, err = try
-                warm = @elapsed sol = run_watchdogged(
-                    () -> solve_once(setting), on_breach)
-                if warm > WATCHDOG_SECONDS
-                    (NaN, NaN)
-                else
-                    e = ensemble_error(system, sol[2], golden)
-                    t = watchdogged_min_ms(() -> solve_once(setting),
-                        on_breach, REPEATS)
-                    (t, isnan(t) ? NaN : e)
+                if !compiled
+                    # The first solve carries the kernel compile, off the GPU lock.
+                    run_watchdogged(() -> solve_once(setting), on_breach)
+                    compiled = true
+                end
+                with_gpu_lock() do
+                    warm = @elapsed sol = run_watchdogged(
+                        () -> solve_once(setting), on_breach)
+                    if warm > WATCHDOG_SECONDS
+                        (NaN, NaN)
+                    else
+                        e = ensemble_error(system, sol[2], golden)
+                        t = watchdogged_min_ms(() -> solve_once(setting),
+                            on_breach, REPEATS)
+                        (t, isnan(t) ? NaN : e)
+                    end
                 end
             catch err
                 (failed("wp $(label) setting=$(setting)", err), NaN)
@@ -227,6 +235,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     dt0 = Float32(problem_timing_dt(problem))
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
     outfile = joinpath(outdir, "Julia_times_$(mode)_$(algorithm).txt")
+    compiled = false
 
     for (index, n) in enumerate(NS)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
@@ -270,9 +279,17 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         end
 
         t_ms, t_dev_ms, breached = try
-            t_dev = watchdogged_min_ms(device_solve, on_breach, REPEATS)
-            t = isnan(t_dev) ? NaN :
-                watchdogged_min_ms(full_solve, on_breach, REPEATS)
+            if !compiled
+                # The first solve carries the kernel compile, off the GPU lock.
+                run_watchdogged(device_solve, on_breach)
+                compiled = true
+            end
+            t_dev, t = with_gpu_lock() do
+                td = watchdogged_min_ms(device_solve, on_breach, REPEATS)
+                tt = isnan(td) ? NaN :
+                     watchdogged_min_ms(full_solve, on_breach, REPEATS)
+                (td, tt)
+            end
             (t, t_dev, isnan(t))
         catch err
             (failed("$(problem["problem"]) $(mode) $(algorithm) N=$(n)", err),

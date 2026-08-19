@@ -293,14 +293,18 @@ rather than assumed. Rows are
 `states t_ms t_dev_ms build_s` in
 `<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
 data directory, where `build_s` is the wall time from solver construction
-to the first completed solve (the compile). The Julia sweep runs one
-process per (size, algorithm) so compiles proceed in parallel while a
-pidfile lock serializes every timed GPU section
-(`runner_scripts/gpu/julia_states_driver.py`; `BENCH_STATES_JOBS`
-concurrent processes, default 4). A size with no finite time in either
-mode cancels the pending and running larger sizes of that algorithm;
-cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset disables)
-kills any process whose first kernel has not compiled within the budget.
+to the first completed solve (the compile). A size with no finite time in
+either mode cancels the pending and running larger sizes of that
+algorithm; cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset
+disables) kills any process whose first kernel has not compiled within
+the budget.
+
+Every Julia analysis runs through `runner_scripts/gpu/julia_driver.py`:
+one process per leg — (problem, algorithm) for performance and
+work-precision, (size, algorithm) for states — with up to
+`BENCH_JULIA_JOBS` (default 4) compiling concurrently while a pidfile
+lock serializes every timed GPU section; each leg's first solve carries
+its kernel compile outside the lock.
 
 ### Compiled-kernel caches
 
@@ -322,9 +326,10 @@ with up to `BENCH_WARM_JOBS` (default 8) parallel nvcc processes, cubie
 compiles each leg once at a tiny ensemble in per-problem child
 processes, JAX lowers and compiles each leg at each N, Myokit compiles
 each model — then runs the timed sweep against warm caches.
-`run_benchmark -a warm` runs the cache fill alone, adding the lorenz96
-states binaries and julia's `Pkg.precompile`; `run_full_dataset -a warm`
-does that for every package.
+`run_benchmark -a warm` fills every cache the suite can use: timing
+solvers, every work-precision setting, the lorenz96 states sizes and
+binaries, and julia's `Pkg.precompile`; `run_full_dataset -a warm` does
+that for every package.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
