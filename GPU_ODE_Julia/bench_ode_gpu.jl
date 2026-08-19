@@ -312,8 +312,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     end
 end
 
-# Timed sections wait on this pidfile so parallel compiles stay off the GPU
-# clock; stale_age breaks locks whose owner was killed (held locks refresh).
+# Serialize timed GPU sections on a pidfile; stale_age breaks dead owners' locks.
 function with_gpu_lock(f)
     path = get(ENV, "BENCH_GPU_LOCK", "")
     isempty(path) && return f()
