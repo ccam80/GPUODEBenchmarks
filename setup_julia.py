@@ -108,6 +108,10 @@ def main():
         print("Please install Julia from https://julialang.org/downloads/")
         return 1
 
+    # The Manifest targets the juliaup "1.13" channel; pin this directory.
+    if shutil.which("juliaup"):
+        run_command(["juliaup", "override", "set", "1.13"])
+
     print("Julia version:")
     if not run_command(["julia", "--version"]):
         return 1
