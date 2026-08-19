@@ -5,6 +5,8 @@ source ./GPU_ODE_CUBIE/venv/bin/activate
 
 # The venv is shared with the MLIR suite; cubie picks its backend from this at import time.
 export CUBIE_CUDA_BACKEND=numba-cuda
+# The suite holds ~100 kernels per system; the default LRU cap of 10 evicts them.
+export CUBIE_MAX_CACHE_ENTRIES=0
 
 if [ "$ANALYSIS" == "warm" ]; then
     NLIST_CSV=$(echo $NLIST | tr ' ' ',')
