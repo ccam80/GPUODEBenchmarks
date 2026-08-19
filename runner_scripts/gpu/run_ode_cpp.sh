@@ -61,6 +61,44 @@ if [ -z "$PROBLEMS" ]; then
 	exit 0
 fi
 
+if [ "$ANALYSIS" == "warm" ]; then
+	JOBS=${BENCH_WARM_JOBS:-8}
+	mkdir -p "$CACHE_DIR"
+	# warm_build <problem> <solver> <NT> [SD]: nvcc straight into the cache.
+	warm_build() {
+		local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
+		[ -f "$exe" ] && return 0
+		echo "building $(basename "$exe")"
+		nvcc -o "$exe" GPU_ODE_MPGOS/Bench.cu \
+			-IGPU_ODE_MPGOS/SourceCodes -IGPU_ODE_MPGOS \
+			-DPROBLEM_HEADER="\"problems/$1.cuh\"" -DSOLVER_CHOICE="$2" \
+			-DNT_VALUE="$3" ${4:+-DPROBLEM_SD=$4} \
+			-O3 -std=c++11 --ptxas-options=-v --gpu-architecture=native \
+			-lineinfo -maxrregcount=128 > /dev/null 2>&1 \
+			|| { rm -f "$exe"; echo "FAILED $(basename "$exe")"; }
+	}
+	NTS=$(echo "$NLIST 131072" | tr ' ' '\n' | sort -un)
+	for problem in $PROBLEMS; do
+		for solver in $SOLVERS; do
+			for a in $NTS; do
+				while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+				warm_build "$problem" "$solver" "$a" &
+			done
+		done
+	done
+	case " $PROBLEMS " in *" lorenz96 "*)
+		for solver in $SOLVERS; do
+			for sd in $(python3 ./runner_scripts/problems.py --states-grid); do
+				while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+				warm_build lorenz96 "$solver" 131072 "$sd" &
+			done
+		done;;
+	esac
+	wait
+	echo "MPGOS warm build cache populated."
+	exit 0
+fi
+
 for problem in $PROBLEMS
 do
 	if [ "$ANALYSIS" == "work-precision" ]; then

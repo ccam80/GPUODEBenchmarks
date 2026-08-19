@@ -336,7 +336,41 @@ def run_states():
                         break
 
 
+def run_warm():
+    """Lower and compile every requested leg at each N without running it;
+    the persistent cache keeps the binaries."""
+    import timeit
+
+    counts = NS or [8]
+    for problem in PROBLEMS:
+        for algorithm in ALGORITHMS:
+            for mode in ("fixed", "adaptive"):
+                supported = (FIXED_ALGORITHMS if mode == "fixed"
+                             else ADAPTIVE_ALGORITHMS)
+                if algorithm not in supported:
+                    continue
+                if not problem.runs("jax", algorithm):
+                    continue
+                solve = (make_fixed(problem, algorithm) if mode == "fixed"
+                         else make_adaptive(problem, algorithm))
+                for n in counts:
+                    started = timeit.default_timer()
+                    try:
+                        solve.lower(jnp.asarray(problem.sweep(n))).compile()
+                        print("warmed {0} {1} {2} N={3} in {4:.1f}s".format(
+                            problem.name, mode, algorithm, n,
+                            timeit.default_timer() - started))
+                    except Exception as err:
+                        print("FAILED warm {0} {1} {2} N={3} ({4}: {5})"
+                              .format(problem.name, mode, algorithm, n,
+                                      type(err).__name__, err))
+
+
 # %%
+if ANALYSIS == "warm":
+    run_warm()
+    sys.exit(0)
+
 if ANALYSIS == "states":
     from problems import STATES_PROBLEM
     if not any(p.name == STATES_PROBLEM for p in PROBLEMS):

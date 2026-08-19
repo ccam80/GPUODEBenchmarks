@@ -10,6 +10,13 @@ if [ -z "$ALGO_LIST" ]; then
     exit 0
 fi
 
+if [ "$ANALYSIS" == "warm" ]; then
+    # Package precompilation runs in parallel; DiffEqGPU kernels do not persist.
+    julia --project=. -e 'using Pkg; Pkg.precompile()'
+    echo "DiffEqGPU kernels recompile per process; the states driver overlaps those compiles."
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "states" ]; then
     # Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
     if [ "$NMAX" != "16777216" ]; then

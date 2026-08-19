@@ -7,6 +7,16 @@ if errorlevel 1 exit /b 1
 call GPU_ODE_PyTorch\venv\Scripts\activate.bat
 
 REM Fixed-step only: torchdiffeq adaptive solvers are incompatible with torch.vmap.
+if /i "%ANALYSIS%"=="warm" (
+    set "NLIST_CSV=!NLIST: =,!"
+    if "!NLIST_CSV:~0,1!"=="," set "NLIST_CSV=!NLIST_CSV:~1!"
+    python GPU_ODE_PyTorch\bench_torchdiffeq.py "warm:!NLIST_CSV!" "%ALGORITHM%" --problem "%PROBLEM%"
+    if errorlevel 1 exit /b 1
+    call deactivate
+    endlocal
+    exit /b 0
+)
+
 if /i "%ANALYSIS%"=="states" (
     REM -n ^(when set^) overrides the states-sweep ensemble size.
     set "STATES_ARG=states"

@@ -168,6 +168,28 @@ def load_model(problem):
     return model
 
 
+def run_warm(problems):
+    """Compile each requested model once so CuPy's kernel cache is hot."""
+    import timeit
+
+    for problem in problems:
+        if not problem.runs("myokit_cuda", ALGORITHM):
+            continue
+        started = timeit.default_timer()
+        try:
+            model = load_model(problem)
+            model.solve(
+                dt=problem.timing_dt,
+                step_count=1,
+                initial_states=model.initial_states(64),
+                diffusion_values=problem.sweep(64, dtype=np.float32),
+            )
+            print("warmed {0} in {1:.1f}s".format(
+                problem.name, timeit.default_timer() - started))
+        except Exception as exc:
+            print("FAILED warm {0}: {1}".format(problem.name, exc))
+
+
 def run_problem(problem, cell_counts, wp_mode):
     """The ascending N sweep or the work-precision sweep, on one compiled model."""
     model = load_model(problem)
@@ -344,6 +366,9 @@ def main(argv=None):
         return 0
 
     os.chdir(REPO_ROOT)
+    if analysis == "warm":
+        run_warm(problems)
+        return 0
     if analysis == "states":
         from problems import STATES_PROBLEM
         if not any(p.name == STATES_PROBLEM for p in problems):

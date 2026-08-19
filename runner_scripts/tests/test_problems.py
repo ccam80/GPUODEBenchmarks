@@ -71,6 +71,12 @@ class RegistryTests(unittest.TestCase):
         ns, analysis, _, _ = parse_bench_args(["states:4096"], "cubie")
         self.assertEqual("states", analysis)
         self.assertEqual([4096], ns)
+        ns, analysis, _, _ = parse_bench_args(["warm:32,8"], "cubie")
+        self.assertEqual("warm", analysis)
+        self.assertEqual([8, 32], ns)
+        ns, analysis, _, _ = parse_bench_args(["warm"], "cubie")
+        self.assertEqual("warm", analysis)
+        self.assertEqual([], ns)
 
     def test_states_rows_resize_lorenz96(self):
         from problems import states_row

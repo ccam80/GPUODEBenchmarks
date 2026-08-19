@@ -6,6 +6,13 @@ source ./GPU_ODE_CUBIE_MLIR/venv/bin/activate
 # Cubie picks its backend from this at import time.
 export CUBIE_CUDA_BACKEND=mlir
 
+if [ "$ANALYSIS" == "warm" ]; then
+    NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+    python3 ./GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "states" ]; then
     # -n (when set) overrides the states-sweep ensemble size.
     STATES_ARG=states

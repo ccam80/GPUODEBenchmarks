@@ -15,6 +15,15 @@ if "!ALGO_LIST!"=="" (
     exit /b 0
 )
 
+if /i "%ANALYSIS%"=="warm" (
+    REM Package precompilation runs in parallel; DiffEqGPU kernels do not persist.
+    julia --project=. -e "using Pkg; Pkg.precompile()"
+    if errorlevel 1 exit /b 1
+    echo DiffEqGPU kernels recompile per process; the states driver overlaps those compiles.
+    endlocal
+    exit /b 0
+)
+
 if /i "%ANALYSIS%"=="states" (
     REM Parallel compiles, serialized GPU sections; -n overrides the ensemble size.
     if not "%NMAX%"=="16777216" (
