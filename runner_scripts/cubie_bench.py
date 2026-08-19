@@ -299,32 +299,46 @@ def _warm_legs(opts, problems):
     return legs
 
 
+# Legs per shard child before it exits and is respawned; numba dispatchers
+# stay resident, so long-lived children grow without bound.
+WARM_RECYCLE = 32
+
+
 def _run_warm(opts, problems, argv):
     """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 stripes
-    the legs across that many shard children."""
+    the legs across that many shard children, recycled every WARM_RECYCLE
+    legs to cap their memory."""
     import subprocess
     from timeit import default_timer
 
     from problems import states_row
 
-    # Each shard holds ~3 GB host RAM; 4 fits comfortably in 32 GB.
+    # Each shard holds several GB of host RAM; 4 fits in 32 GB.
     jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
     shard = opts.get("warm_shard")
     legs = _warm_legs(opts, problems)
 
     if shard is None and jobs > 1 and len(legs) > 1:
         count = min(jobs, len(legs))
-        children = [subprocess.Popen(
-            [sys.executable, sys.argv[0]] + argv
-            + ["--warm-shard", f"{index}/{count}"])
-            for index in range(count)]
-        for child in children:
-            child.wait()
+        cursors = [0] * count
+        stripe_sizes = [len(legs[index::count]) for index in range(count)]
+        while any(cursors[i] < stripe_sizes[i] for i in range(count)):
+            children = []
+            for index in range(count):
+                if cursors[index] >= stripe_sizes[index]:
+                    continue
+                children.append(subprocess.Popen(
+                    [sys.executable, sys.argv[0]] + argv
+                    + ["--warm-shard",
+                       f"{index}/{count}/{cursors[index]}/{WARM_RECYCLE}"]))
+                cursors[index] += WARM_RECYCLE
+            for child in children:
+                child.wait()
         return
 
     if shard is not None:
-        index, count = shard
-        legs = legs[index::count]
+        index, count, offset, limit = shard
+        legs = legs[index::count][offset:offset + limit]
 
     rows = {p.name: p for p in problems}
     systems = {}
@@ -369,7 +383,7 @@ def _run_warm(opts, problems, argv):
             solver.solve(initial_values=initials, parameters=params,
                          blocksize=64, duration=row["duration"])
             print("warmed {0} in {1:.1f}s".format(
-                label, default_timer() - started))
+                label, default_timer() - started), flush=True)
         except Exception as exc:
             _failed(exc, "warm {0}".format(label))
         if solver is not None:
@@ -484,8 +498,7 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
     warm_shard = None
     if "--warm-shard" in argv:
         position = argv.index("--warm-shard")
-        index, count = argv[position + 1].split("/")
-        warm_shard = (int(index), int(count))
+        warm_shard = tuple(int(t) for t in argv[position + 1].split("/"))
         del argv[position:position + 2]
 
     ns, analysis, algorithms, problems = parse_bench_args(argv, framework)
