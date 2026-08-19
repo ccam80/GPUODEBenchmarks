@@ -4,6 +4,13 @@ set -e
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 source ./GPU_ODE_JAX/venv/bin/activate
 
+if [ "$ANALYSIS" == "warm" ]; then
+    NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+    python3 ./GPU_ODE_JAX/bench_diffrax.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "states" ]; then
     # -n (when set) overrides the states-sweep ensemble size.
     STATES_ARG=states

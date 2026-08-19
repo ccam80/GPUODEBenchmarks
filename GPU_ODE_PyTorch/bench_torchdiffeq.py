@@ -270,6 +270,10 @@ def run_states():
 
 
 # %%
+if ANALYSIS == "warm":
+    print("torchdiffeq runs eagerly; there is nothing to warm.")
+    sys.exit(0)
+
 if ANALYSIS == "states":
     from problems import STATES_PROBLEM
     if not any(p.name == STATES_PROBLEM for p in PROBLEMS):

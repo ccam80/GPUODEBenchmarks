@@ -317,6 +317,14 @@ ModelingToolkit-generated functions are runtime-generated, so every Julia
 process pays inference again — which is why the Julia states sweep
 parallelizes compiles across processes instead.
 
+`run_benchmark -a warm` populates the caches without timing anything:
+MPGOS builds every (problem, solver, NT) binary in parallel
+(`BENCH_WARM_JOBS`, default 8) plus the lorenz96 states variants, cubie
+compiles each leg once at a tiny ensemble (per-problem child processes
+under `BENCH_WARM_JOBS`), JAX lowers and compiles each leg at each `-n`
+size, Myokit compiles each model, and julia runs `Pkg.precompile`.
+`run_full_dataset -a warm,performance,...` runs it as a stage.
+
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
 become algebraic and the system is an index-2 DAE, which is a separate row

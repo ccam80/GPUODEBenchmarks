@@ -101,15 +101,19 @@ def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states[:N] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
+    """Parse <N|N,N,...>|wp|states[:N]|warm[:N,N,...] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states[:N] [algorithm|all] "
-                         "[--problem <name|all>]")
+        raise SystemExit("usage: <N|N,N,...>|wp|states[:N]|warm[:N,N,...] "
+                         "[algorithm|all] [--problem <name|all>]")
     if argv[0] == "wp":
         analysis, ns = "wp", [N_WP]
     elif argv[0] == "states" or argv[0].startswith("states:"):
         _, _, count = argv[0].partition(":")
         analysis, ns = "states", [int(count) if count else STATES_N]
+    elif argv[0] == "warm" or argv[0].startswith("warm:"):
+        _, _, counts = argv[0].partition(":")
+        analysis = "warm"
+        ns = sorted(int(tok) for tok in counts.split(",")) if counts else []
     else:
         # Ascending, so each leg walks its sweep on kernels compiled once.
         analysis = "times"

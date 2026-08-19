@@ -265,6 +265,69 @@ def _run_times(problem, opts, system, grid):
             _release(solver)
 
 
+def _run_warm(opts, problems, argv):
+    """Compile every requested leg once at a tiny ensemble so the disk
+    kernel cache is hot; BENCH_WARM_JOBS>1 warms problems in parallel
+    child processes."""
+    import subprocess
+    from timeit import default_timer
+
+    jobs = int(os.environ.get("BENCH_WARM_JOBS", "1"))
+    if len(problems) > 1 and jobs > 1:
+        # Forward the CLI minus any --problem tokens, one child per problem.
+        passthrough = []
+        rest = list(argv[1:])
+        while rest:
+            tok = rest.pop(0)
+            if tok in ("--problem", "-s"):
+                rest and rest.pop(0)
+            elif not tok.startswith("--problem="):
+                passthrough.append(tok)
+        import time
+        running = []
+        for problem in problems:
+            running = [p for p in running if p.poll() is None]
+            while len(running) >= jobs:
+                time.sleep(1)
+                running = [p for p in running if p.poll() is None]
+            running.append(subprocess.Popen(
+                [sys.executable, sys.argv[0], argv[0]] + passthrough
+                + ["--problem", problem.name]))
+        for proc in running:
+            proc.wait()
+        return
+
+    for problem in problems:
+        system, initial_conditions = build_system(
+            problem, PRECISION, name_suffix=opts["name_suffix"])
+        for algorithm in opts["algorithms"]:
+            for mode in ("fixed", "adaptive"):
+                if algorithm not in opts[mode]:
+                    continue
+                if not problem.runs(opts["framework"], algorithm):
+                    continue
+                solver = None
+                started = default_timer()
+                try:
+                    solver = (_make_fixed_solver(system, problem, algorithm)
+                              if mode == "fixed"
+                              else _make_adaptive_solver(system, problem,
+                                                         algorithm))
+                    initials, params = solver.build_grid(
+                        initial_values=initial_conditions,
+                        parameters=sweep_parameters(problem, 64, PRECISION))
+                    solver.solve(initial_values=initials, parameters=params,
+                                 blocksize=64, duration=problem["duration"])
+                    print("warmed {0} {1} {2} in {3:.1f}s".format(
+                        problem.name, mode, algorithm,
+                        default_timer() - started))
+                except Exception as exc:
+                    _failed(exc, "warm {0} {1} {2}".format(
+                        problem.name, mode, algorithm))
+                if solver is not None:
+                    _release(solver)
+
+
 def _run_states(opts):
     """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, timed at
     one fixed ensemble size."""
@@ -386,6 +449,9 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         "adaptive": supported_for(framework, "adaptive"),
         "dataset_key": dataset_key(),
     }
+    if analysis == "warm":
+        _run_warm(opts, problems, argv)
+        return 0
     if analysis == "states":
         from problems import STATES_PROBLEM
         if not any(p.name == STATES_PROBLEM for p in problems):

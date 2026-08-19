@@ -2,7 +2,7 @@
 param(
     # Exact aliases keep -a, -g and -s unambiguous under prefix matching.
     [Alias('a')]
-    [ValidateSet('performance', 'work-precision', 'states')]
+    [ValidateSet('performance', 'work-precision', 'states', 'warm')]
     [string]$Analysis = 'performance',
     # A single value is a sweep ceiling (8, 32, ... <= n); a comma list runs exactly those Ns.
     [Alias('n')]
@@ -71,7 +71,8 @@ function Enter-VsEnvironment {
 
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
-$SourceFiles = @("GPU_ODE_MPGOS\Bench.cu", "GPU_ODE_MPGOS\makefile") +
+$SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
+    (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
     @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
       Sort-Object FullName | ForEach-Object { $_.FullName })
 $Hasher = [System.Security.Cryptography.SHA256]::Create()
@@ -121,6 +122,62 @@ function Invoke-Point {
 }
 
 Enter-VsEnvironment
+
+if ($Analysis -eq 'warm') {
+    $jobsMax = 8
+    if ($env:BENCH_WARM_JOBS) { $jobsMax = [int]$env:BENCH_WARM_JOBS }
+    New-Item -ItemType Directory -Force $CacheDir | Out-Null
+    $targets = @()
+    $nts = @($NValues + [long]131072 | Sort-Object -Unique)
+    foreach ($p in $Problems) {
+        foreach ($s in $Solvers) {
+            foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
+        }
+    }
+    if ($Problems -contains 'lorenz96') {
+        $grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
+        foreach ($s in $Solvers) {
+            foreach ($sd in $grid) {
+                $targets += , @('lorenz96', $s, [long]131072, [long]$sd)
+            }
+        }
+    }
+    $builds = @()
+    foreach ($t in $targets) {
+        $p, $s, $nt, $sd = $t
+        $sdTag = if ($sd -gt 0) { "_SD$sd" } else { "" }
+        $exe = "$CacheDir\Bench_${p}_${s}_NT$nt${sdTag}_$SrcHash.exe"
+        if (Test-Path $exe) { continue }
+        while (@($builds | Where-Object { -not $_.Proc.HasExited }).Count -ge $jobsMax) {
+            Start-Sleep -Seconds 2
+        }
+        Write-Host "building $(Split-Path $exe -Leaf)"
+        $nvccArgs = @('-o', $exe, 'GPU_ODE_MPGOS\Bench.cu',
+            '-IGPU_ODE_MPGOS\SourceCodes', '-IGPU_ODE_MPGOS',
+            "-DPROBLEM_HEADER=\`"problems/$p.cuh\`"", "-DSOLVER_CHOICE=$s",
+            "-DNT_VALUE=$nt")
+        if ($sd -gt 0) { $nvccArgs += "-DPROBLEM_SD=$sd" }
+        $nvccArgs += @('-O3', '-std=c++17', '--ptxas-options=-v',
+            '--gpu-architecture=native', '-lineinfo', '-maxrregcount=128')
+        $proc = Start-Process nvcc -ArgumentList $nvccArgs -NoNewWindow -PassThru `
+            -RedirectStandardOutput "$exe.out" -RedirectStandardError "$exe.err"
+        # Caching the handle keeps ExitCode readable after the process ends.
+        $null = $proc.Handle
+        $builds += @{ Proc = $proc; Exe = $exe }
+    }
+    foreach ($b in $builds) { $b.Proc.WaitForExit() }
+    $failed = @($builds | Where-Object { $_.Proc.ExitCode -ne 0 })
+    foreach ($b in $failed) {
+        Remove-Item $b.Exe -Force -ErrorAction SilentlyContinue
+        Write-Host "FAILED $(Split-Path $b.Exe -Leaf)"
+        Get-Content "$($b.Exe).out", "$($b.Exe).err" -ErrorAction SilentlyContinue |
+            Select-Object -Last 6 | ForEach-Object { Write-Host "  $_" }
+    }
+    Remove-Item "$CacheDir\*.out", "$CacheDir\*.err" -Force -ErrorAction SilentlyContinue
+    Write-Host "MPGOS warm build cache populated ($($builds.Count - $failed.Count) built, $($failed.Count) failed)."
+    Pop-Location
+    exit 0
+}
 
 if ($Analysis -eq 'states') {
     # -n (when set) overrides the states-sweep ensemble size.

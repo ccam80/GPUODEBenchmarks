@@ -4,6 +4,13 @@ set -e
 source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
 # Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if [ "$ANALYSIS" == "warm" ]; then
+    NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "states" ]; then
     # -n (when set) overrides the states-sweep ensemble size.
     STATES_ARG=states
