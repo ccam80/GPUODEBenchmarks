@@ -16,9 +16,9 @@ import subprocess
 import platform
 from pathlib import Path
 
-# Newest CPython minor with torch wheels on download.pytorch.org. Bump as
-# upstream publishes new ABI tags.
-MAX_TORCH_MINOR = 13
+# Newest CPython minor with cu121 torch wheels on download.pytorch.org for
+# this platform. Bump as upstream publishes new ABI tags.
+MAX_TORCH_MINOR = 12 if platform.system() == "Windows" else 13
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
