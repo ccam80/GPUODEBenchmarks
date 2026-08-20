@@ -349,7 +349,7 @@ def _nand_gate(problem, precision, name):
 # The problem's own variables, in the order the golden reference stores them.
 _ORDER = {
     "lorenz": ("x", "y", "z"),
-    "lorenz96": tuple("x{0}".format(i) for i in range(1, 41)),
+    "lorenz96": tuple("x{0}".format(i) for i in range(1, 33)),
     "lorenz96_20": tuple("x{0}".format(i) for i in range(1, 21)),
     "pleiades": tuple("{0}{1}".format(prefix, i)
                       for prefix in ("x", "y", "u", "v")

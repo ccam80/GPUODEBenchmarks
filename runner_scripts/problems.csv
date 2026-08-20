@@ -1,6 +1,6 @@
 problem,display,states,duration,sweep_parameter,sweep_min,sweep_max,sweep_scale,golden_algorithm,golden_tol,frameworks
 lorenz,Lorenz,3,1.0,rho,0.0,21.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda
-lorenz96,Lorenz 96,40,1.0,F,0.0,16.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda
+lorenz96,Lorenz 96,32,1.0,F,0.0,16.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda
 lorenz96_20,Lorenz 96 (20),20,1.0,F,0.0,16.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia
 pleiades,Pleiades,28,3.0,m1,0.5,2.0,linear,Vern9,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp|myokit_cuda
 pollu,Pollution,20,60.0,k1,3.5e-2,3.5,log,Rodas5P,1.0e-13,cubie|cubie_mlir|julia|jax|pytorch|cpp

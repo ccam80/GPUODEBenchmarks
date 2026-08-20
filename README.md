@@ -244,7 +244,7 @@ floating point.
 | Problem | States | Duration | Swept parameter | Class |
 |---|---|---|---|---|
 | `lorenz` | 3 | 1 | `rho` over [0, 21], linear | non-stiff |
-| `lorenz96` | 40 | 1 | `F` over [0, 16], linear | non-stiff |
+| `lorenz96` | 32 | 1 | `F` over [0, 16], linear | non-stiff |
 | `lorenz96_20` | 20 | 1 | `F` over [0, 16], linear | non-stiff |
 | `pleiades` | 28 | 3 | `m1` over [0.5, 2], linear | non-stiff |
 | `pollu` | 20 | 60 | `k1` over [3.5e-2, 3.5], log | stiff |
@@ -254,8 +254,7 @@ floating point.
 
 Except for the two Lorenz systems, the problems come from Mazzia and
 Magherini's Bari *Test Set for IVP Solvers*, transcribed from its Fortran
-sources with their canonical initial states and intervals. Lorenz 96 is the
-cyclic 40-state forcing model; the Pleiades is the seven-body celestial
+sources with their canonical initial states and intervals. Lorenz 96 is the cyclic 32-state forcing model; the Pleiades is the seven-body celestial
 mechanics problem with masses (m1, 2, ..., 7); the pollution problem is
 Verwer's 25-reaction atmospheric mechanism.
 

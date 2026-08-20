@@ -89,7 +89,7 @@ function _lorenz_entry()
 end
 
 # --- lorenz 96 -------------------------------------------------------------
-# n is the state count: 40 for lorenz96, 20 for lorenz96_20.
+# n is the state count, from the problem row or the states-sweep grid.
 function _lorenz96_entry(n)
     @parameters F = 8.0f0
     @variables (x(t))[1:n]
@@ -383,8 +383,8 @@ end
 
 const _ENTRY_BUILDERS = Dict{String, Function}(
     "lorenz" => _lorenz_entry,
-    "lorenz96" => () -> _lorenz96_entry(40),
-    "lorenz96_20" => () -> _lorenz96_entry(20),
+    "lorenz96" => () -> _lorenz96_entry(get_problem("lorenz96")["states"]),
+    "lorenz96_20" => () -> _lorenz96_entry(get_problem("lorenz96_20")["states"]),
     "pleiades" => _pleiades_entry,
     "pollu" => _pollu_entry,
     "ring_modulator" => _ring_modulator_entry,

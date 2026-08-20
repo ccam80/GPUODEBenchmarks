@@ -315,10 +315,8 @@ end
 # One system size per process; the driver enforces the compile budget and
 # backfills rows for processes that never wrote them.
 function run_states(nstates, n)
-    # 40 and 20 states are the registered lorenz96 rows.
-    entry = nstates == 40 ? julia_system("lorenz96") :
-            nstates == 20 ? julia_system("lorenz96_20") :
-            _lorenz96_entry(nstates)
+    # Runtime entry at every size, so build_s is a cold compile.
+    entry = _lorenz96_entry(nstates)
     row = copy(get_problem("lorenz96"))
     row["states"] = nstates
     system, prob, duration = build_prob_parts(entry, row)
