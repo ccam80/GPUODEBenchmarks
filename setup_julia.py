@@ -110,7 +110,10 @@ def main():
 
     # The Manifest targets the juliaup "1.13" channel; pin this directory.
     if shutil.which("juliaup"):
-        run_command(["juliaup", "override", "set", "1.13"])
+        if not run_command(["juliaup", "override", "set", "1.13"]):
+            print("Failed to pin the juliaup 1.13 channel override; the "
+                  "Manifest will not resolve on another julia version")
+            return 1
 
     print("Julia version:")
     if not run_command(["julia", "--version"]):
@@ -130,7 +133,8 @@ def main():
 
     print("Precompiling packages...")
     if not julia("using Pkg; Pkg.precompile()"):
-        print("Warning: Precompilation had issues, but continuing...")
+        print("Precompilation failed")
+        return 1
 
     print("\nJulia environment setup complete!")
     print("To test the installation, run:")

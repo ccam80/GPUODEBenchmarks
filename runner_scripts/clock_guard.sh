@@ -40,12 +40,12 @@ _clock_supported() {   # _clock_supported gr|mem <mhz>
         | tr -d ' ' | grep -qx "$2"
 }
 
-# Apply a setting; fail when the output shows it did not take despite exit 0.
+# Apply a setting; fail on refusal text despite exit 0, output kept in CLOCK_APPLY_OUT.
 _clock_apply() {
-    local out rc
-    out="$(_clock_smi_priv "$@" 2>&1)"; rc=$?
+    local rc
+    CLOCK_APPLY_OUT="$(_clock_smi_priv "$@" 2>&1)"; rc=$?
     [ "$rc" -eq 0 ] || return 1
-    case "$out" in
+    case "$CLOCK_APPLY_OUT" in
         *"not supported"*|*"Insufficient Permissions"*|*"Unable to"*) return 1;;
     esac
     return 0
@@ -116,8 +116,15 @@ clocks_lock() {
     # Drop an unlockable memory clock from the drift check instead of failing.
     if [ -n "$CLOCK_MEM" ]; then
         if ! _clock_apply -lmc "$CLOCK_MEM,$CLOCK_MEM"; then
-            echo "⚠ Could not lock the memory clock to $CLOCK_MEM MHz; left on the" >&2
-            echo "  driver default and excluded from drift checks." >&2
+            case "$CLOCK_APPLY_OUT" in
+                *"not supported"*)
+                    echo "⚠ Locked memory clocks are not supported on this GPU; the memory" >&2
+                    echo "  clock stays on the driver default and is excluded from drift checks." >&2;;
+                *)
+                    echo "⚠ Could not lock the memory clock to $CLOCK_MEM MHz; left on the" >&2
+                    echo "  driver default and excluded from drift checks." >&2
+                    echo "  nvidia-smi said: $CLOCK_APPLY_OUT" >&2;;
+            esac
             CLOCK_MEM=""
         fi
     fi
