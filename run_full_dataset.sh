@@ -165,6 +165,16 @@ if $HAS_ALL_PACKAGES; then
 fi
 [ "${#LANGUAGES[@]}" -gt 0 ] || { echo "-p/--package requires a value"; exit 1; }
 
+# cubie always runs first.
+ORDERED=()
+for pkg in "${LANGUAGES[@]}"; do
+    if [ "$pkg" == "cubie" ]; then ORDERED+=("$pkg"); fi
+done
+for pkg in "${LANGUAGES[@]}"; do
+    if [ "$pkg" != "cubie" ]; then ORDERED+=("$pkg"); fi
+done
+LANGUAGES=("${ORDERED[@]}")
+
 # ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
 NE_PACKAGE=""
 if $HAS_JULIA && $HAS_CUBIE; then NE_PACKAGE=all
@@ -283,6 +293,14 @@ run_step() {
     return "$status"
 }
 
+# Redraw one stage's plots after each package lands; failures never stop the run.
+plots_refresh() {
+    $DO_PLOTS || return 0
+    echo "  ↻ replotting ($1)"
+    julia --project=. "./runner_scripts/plot/$1" >> "$LOG_DIR/plot_refresh.log" 2>&1 \
+        || echo "  ⚠ replot failed; see $LOG_DIR/plot_refresh.log"
+}
+
 echo "Dataset key : $DATASET_KEY"
 echo "nmax        : $NMAX"
 echo "Algorithm   : $ALGORITHM"
@@ -354,6 +372,7 @@ if $DO_PERF; then
         else
             record "perf:$lang" "FAILED" "no data" "${status}"
         fi
+        plots_refresh plot_ode_comp.jl
         sleep "$COOLDOWN"
     done
 fi
@@ -369,6 +388,7 @@ if $DO_STATES; then
         else
             record "states:$lang" "FAILED" "-" "${status}"
         fi
+        plots_refresh plot_states.jl
         sleep "$COOLDOWN"
     done
 fi
@@ -395,6 +415,7 @@ if $DO_WP; then
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"
+        plots_refresh plot_ode_wp.jl
         sleep "$COOLDOWN"
     done
 fi

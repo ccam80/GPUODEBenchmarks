@@ -125,6 +125,10 @@ if ($Languages.Count -eq 0) {
     exit 1
 }
 
+# cubie always runs first.
+$Languages = @($Languages | Where-Object { $_ -eq 'cubie' }) +
+             @($Languages | Where-Object { $_ -ne 'cubie' })
+
 # ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
 $NePackage = ''
 $HasJulia = $Languages -contains 'julia'
@@ -268,6 +272,18 @@ function Invoke-Step {
     return $status
 }
 
+# Redraw one stage's plots after each package lands; failures never stop the run.
+function Update-StagePlots {
+    param([string]$PlotScript)
+    if (-not $script:DoPlots) { return }
+    Write-Host "  replotting ($PlotScript)"
+    cmd /c "julia --project=. runner_scripts\plot\$PlotScript 2>&1" |
+        Add-Content (Join-Path $script:LogDir 'plot_refresh.log')
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ! replot failed; see $script:LogDir\plot_refresh.log"
+    }
+}
+
 Write-Host "Dataset key : $DatasetKey"
 Write-Host "nmax        : $NMax"
 Write-Host "Algorithm   : $Algorithm"
@@ -343,6 +359,7 @@ try {
             } else {
                 Add-Record "perf:$lang" 'FAILED' 'no data' "$status"
             }
+            Update-StagePlots 'plot_ode_comp.jl'
             Start-Sleep -Seconds $Cooldown
         }
     }
@@ -355,6 +372,7 @@ try {
                 ".\run_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`""
             if ($status -eq 0) { Add-Record "states:$lang" 'OK' '-' "$status" }
             else { Add-Record "states:$lang" 'FAILED' '-' "$status" }
+            Update-StagePlots 'plot_states.jl'
             Start-Sleep -Seconds $Cooldown
         }
     }
@@ -378,6 +396,7 @@ try {
                 ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`" -s `"$Problem`""
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
+            Update-StagePlots 'plot_ode_wp.jl'
             Start-Sleep -Seconds $Cooldown
         }
     }
