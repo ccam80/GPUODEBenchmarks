@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Cross-platform setup script for JAX (Diffrax) ODE benchmarking environment.
-Works on Linux, Windows, and macOS.
+Setup script for the JAX (Diffrax) ODE benchmarking environment.
+Linux only; see CUDA_PLATFORM.
 """
 import os
 import sys
@@ -10,13 +10,13 @@ import platform
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
-from cuda_toolkit import detect_cuda_major
+from cuda_toolkit import require_cuda13
 
 JAX_VERSION = "0.11.1"
 DIFFRAX_VERSION = "0.7.2"
 EQUINOX_VERSION = "0.13.8"
 
-# jax's CUDA plugins are manylinux-only, so the cuda extras work here alone.
+# jax's CUDA plugins are manylinux-only; a CPU jax cannot run this suite.
 CUDA_PLATFORM = "Linux"
 
 
@@ -39,23 +39,16 @@ def run_command(cmd, shell=False, check=True, cwd=None):
         return False
 
 
-def jax_requirement():
-    """Return the jax requirement, with a CUDA extra where one exists."""
-    if platform.system() != CUDA_PLATFORM:
-        print(f"{platform.system()} has no CUDA jaxlib wheels; installing the "
-              f"CPU build. Run the JAX benchmark on Linux or WSL2 - it aborts "
-              f"on a CPU backend.")
-        return f"jax=={JAX_VERSION}"
-    cuda_major = detect_cuda_major()
-    print(f"Detected CUDA {cuda_major}; using the jax[cuda{cuda_major}] extra.")
-    return f"jax[cuda{cuda_major}]=={JAX_VERSION}"
-
-
 def main():
     script_dir = Path(__file__).parent.resolve()
     os.chdir(script_dir)
 
     print("Setting up JAX/Diffrax environment...")
+
+    if platform.system() != CUDA_PLATFORM:
+        print(f"Skipping: jax publishes no CUDA wheels for "
+              f"{platform.system()}. Set this suite up on Linux or WSL2.")
+        return 0
 
     # Check if Python is available
     try:
@@ -66,10 +59,11 @@ def main():
         return 1
 
     try:
-        jax_spec = jax_requirement()
+        require_cuda13()
     except RuntimeError as error:
         print(f"Error: {error}")
         return 1
+    jax_spec = f"jax[cuda13]=={JAX_VERSION}"
 
     # Create or use existing venv
     venv_path = script_dir / "venv"
@@ -81,14 +75,8 @@ def main():
             print("Failed to create virtual environment")
             return 1
 
-    # Determine the correct paths for the virtual environment
-    is_windows = platform.system() == "Windows"
-    if is_windows:
-        venv_python = venv_path / "Scripts" / "python.exe"
-        venv_pip = venv_path / "Scripts" / "pip.exe"
-    else:
-        venv_python = venv_path / "bin" / "python"
-        venv_pip = venv_path / "bin" / "pip"
+    venv_python = venv_path / "bin" / "python"
+    venv_pip = venv_path / "bin" / "pip"
 
     # Upgrade pip using python -m pip (required for proper upgrade)
     print("Upgrading pip...")
@@ -102,11 +90,7 @@ def main():
         print("Failed to install uv")
         return 1
 
-    # Determine uv executable path
-    if is_windows:
-        venv_uv = venv_path / "Scripts" / "uv.exe"
-    else:
-        venv_uv = venv_path / "bin" / "uv"
+    venv_uv = venv_path / "bin" / "uv"
 
     # One resolve for the whole stack, so diffrax cannot pull a different jax.
     print(f"Installing {jax_spec}, diffrax {DIFFRAX_VERSION}, "
@@ -131,11 +115,7 @@ def main():
         print("Warning: Equinox verification failed")
 
     print("\nJAX/Diffrax environment setup complete!")
-    if is_windows:
-        print(f"To activate: {venv_path / 'Scripts' / 'activate.bat'}")
-        print(f"Or in PowerShell: {venv_path / 'Scripts' / 'Activate.ps1'}")
-    else:
-        print(f"To activate: source {venv_path / 'bin' / 'activate'}")
+    print(f"To activate: source {venv_path / 'bin' / 'activate'}")
 
     return 0
 

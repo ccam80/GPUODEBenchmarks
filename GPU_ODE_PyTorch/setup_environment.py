@@ -12,14 +12,12 @@ import platform
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
-from cuda_toolkit import detect_cuda_major
+from cuda_toolkit import require_cuda13
 
 TORCH_VERSION = "2.13.0"
+TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu132"
 
-# CUDA major -> download.pytorch.org index carrying TORCH_VERSION.
-TORCH_CUDA_INDEX = {12: "cu126", 13: "cu130"}
-
-# Newest CPython minor with TORCH_VERSION wheels on every index above.
+# Newest CPython minor with TORCH_VERSION wheels for Windows and Linux.
 MAX_TORCH_MINOR = 14
 
 # The vmap-capable fork, at the head of its u/vmap branch.
@@ -119,13 +117,10 @@ def main():
     print("Setting up PyTorch/torchdiffeq environment...")
 
     try:
-        cuda_major = detect_cuda_major()
+        require_cuda13()
     except RuntimeError as error:
         print(f"Error: {error}")
         return 1
-    index_url = "https://download.pytorch.org/whl/{0}".format(
-        TORCH_CUDA_INDEX[cuda_major])
-    print(f"Detected CUDA {cuda_major}; using {index_url}")
 
     # Check if a torch-compatible Python is available
     python = find_torch_python()
@@ -189,9 +184,10 @@ def main():
     else:
         venv_uv = venv_path / "bin" / "uv"
 
-    print(f"Installing torch {TORCH_VERSION} with CUDA support...")
+    print(f"Installing torch {TORCH_VERSION} from {TORCH_INDEX_URL}...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
-                        f"torch=={TORCH_VERSION}", "--index-url", index_url]):
+                        f"torch=={TORCH_VERSION}",
+                        "--index-url", TORCH_INDEX_URL]):
         print("Failed to install PyTorch")
         return 1
 

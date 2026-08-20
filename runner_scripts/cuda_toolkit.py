@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-"""Detect the installed CUDA major version for the setup scripts."""
+"""Check that the CUDA toolchain on PATH is the one the wheels target."""
 
 import re
 import subprocess
 
-SUPPORTED_MAJORS = (12, 13)
+REQUIRED_MAJOR = 13
 
 _PROBES = (
     (["nvcc", "--version"], r"release\s+(\d+)(?:\.\d+)?"),
@@ -14,7 +14,7 @@ _PROBES = (
 
 
 def detect_cuda_major():
-    """Return 12 or 13 from the toolchain on PATH, or raise RuntimeError."""
+    """Return the CUDA major from nvcc or nvidia-smi, or raise RuntimeError."""
     for command, pattern in _PROBES:
         try:
             result = subprocess.run(
@@ -31,13 +31,17 @@ def detect_cuda_major():
             flags=re.IGNORECASE,
         )
         if match is not None:
-            major = int(match.group(1))
-            if major in SUPPORTED_MAJORS:
-                return major
-            raise RuntimeError(
-                "CUDA {0} is unsupported; expected CUDA {1}."
-                .format(major, " or ".join(str(m) for m in SUPPORTED_MAJORS))
-            )
+            return int(match.group(1))
     raise RuntimeError(
         "Could not detect CUDA from nvcc or nvidia-smi on PATH."
     )
+
+
+def require_cuda13():
+    """Raise RuntimeError unless CUDA 13 is the toolchain on PATH."""
+    major = detect_cuda_major()
+    if major != REQUIRED_MAJOR:
+        raise RuntimeError(
+            "CUDA {0} found on PATH; this suite needs CUDA {1}."
+            .format(major, REQUIRED_MAJOR)
+        )

@@ -8,10 +8,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
-from cuda_toolkit import detect_cuda_major
+from cuda_toolkit import require_cuda13
 
-# CuPy's wheel name carries the CUDA major, so it is pinned here rather than
-# in requirements.txt.
+CUPY_PACKAGE = "cupy-cuda13x"
 CUPY_VERSION = "14.2.0"
 
 
@@ -37,6 +36,7 @@ def myokit_version(requirements):
 
 def main():
     """Create a venv and install pinned Myokit plus matched CuPy."""
+    require_cuda13()
     script_dir = Path(__file__).resolve().parent
     environment = script_dir / "venv"
     if not environment.exists():
@@ -48,8 +48,6 @@ def main():
         python = environment / "bin" / "python"
 
     requirements = script_dir / "requirements.txt"
-    major = detect_cuda_major()
-    cupy_package = "cupy-cuda{0}x=={1}".format(major, CUPY_VERSION)
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
     run(
         [
@@ -59,7 +57,7 @@ def main():
             "install",
             "-r",
             str(requirements),
-            cupy_package,
+            "{0}=={1}".format(CUPY_PACKAGE, CUPY_VERSION),
         ]
     )
     run(
