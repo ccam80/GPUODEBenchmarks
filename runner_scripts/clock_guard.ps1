@@ -33,8 +33,7 @@ function Test-ClockAdmin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Apply a setting; fail when the output shows it did not take despite exit 0.
-# The output stays in $script:ClockApplyOut so a caller can report why it failed.
+# Apply a setting; fail on refusal text despite exit 0, output kept in $script:ClockApplyOut.
 function Invoke-ClockApply {
     param([string[]]$SmiArgs)
     $script:ClockApplyOut = (& nvidia-smi @SmiArgs 2>&1 | Out-String)

@@ -103,9 +103,7 @@ def main():
         print("Failed to install scipy")
         return 1
     
-    # A reused venv strands the previous CUDA generation's jax plugin wheels
-    # beside the new ones; the stale PJRT plugin then throws an ALREADY_EXISTS
-    # traceback on every run. Fail here with the fix instead.
+    # Fail when jax-cuda plugin wheels from two CUDA generations coexist.
     print("Checking for stale jax-cuda plugin generations...")
     result = subprocess.run(
         [str(venv_python), "-c",

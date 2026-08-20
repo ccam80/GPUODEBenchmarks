@@ -40,8 +40,7 @@ _clock_supported() {   # _clock_supported gr|mem <mhz>
         | tr -d ' ' | grep -qx "$2"
 }
 
-# Apply a setting; fail when the output shows it did not take despite exit 0.
-# The output stays in CLOCK_APPLY_OUT so a caller can report why it failed.
+# Apply a setting; fail on refusal text despite exit 0, output kept in CLOCK_APPLY_OUT.
 _clock_apply() {
     local rc
     CLOCK_APPLY_OUT="$(_clock_smi_priv "$@" 2>&1)"; rc=$?
