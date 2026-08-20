@@ -7,6 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
+from cuda_toolkit import require_cuda13
+
+CUPY_PACKAGE = "cupy-cuda13x"
+CUPY_VERSION = "14.2.0"
+
 
 def run(command):
     """Run a setup command and fail on a non-zero exit."""
@@ -14,42 +20,23 @@ def run(command):
     subprocess.run(command, check=True)
 
 
-def cuda_major():
-    """Detect CUDA 12 or 13 from the toolchain already on PATH."""
-    probes = (
-        (["nvcc", "--version"], r"release\s+(\d+)(?:\.\d+)?"),
-        (["nvidia-smi"], r"CUDA Version:\s*(\d+)(?:\.\d+)?"),
+def myokit_version(requirements):
+    """Return the pinned myokit version from a requirements file."""
+    match = re.search(
+        r"^myokit==(\S+)$",
+        requirements.read_text(),
+        flags=re.MULTILINE,
     )
-    for command, pattern in probes:
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-        match = re.search(
-            pattern,
-            result.stdout + "\n" + result.stderr,
-            flags=re.IGNORECASE,
+    if match is None:
+        raise RuntimeError(
+            "No pinned myokit== line in {0}".format(requirements)
         )
-        if match is not None:
-            major = int(match.group(1))
-            if major in (12, 13):
-                return major
-            raise RuntimeError(
-                "CUDA {0} is unsupported; expected CUDA 12 or 13."
-                .format(major)
-            )
-    raise RuntimeError(
-        "Could not detect CUDA from nvcc or nvidia-smi on PATH."
-    )
+    return match.group(1)
 
 
 def main():
     """Create a venv and install pinned Myokit plus matched CuPy."""
+    require_cuda13()
     script_dir = Path(__file__).resolve().parent
     environment = script_dir / "venv"
     if not environment.exists():
@@ -60,8 +47,7 @@ def main():
     else:
         python = environment / "bin" / "python"
 
-    major = cuda_major()
-    cupy_package = "cupy-cuda{0}x".format(major)
+    requirements = script_dir / "requirements.txt"
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
     run(
         [
@@ -70,8 +56,8 @@ def main():
             "pip",
             "install",
             "-r",
-            str(script_dir / "requirements.txt"),
-            cupy_package,
+            str(requirements),
+            "{0}=={1}".format(CUPY_PACKAGE, CUPY_VERSION),
         ]
     )
     run(
@@ -80,11 +66,12 @@ def main():
             "-c",
             (
                 "import cupy, myokit; "
-                "assert myokit.__version__ == '1.39.2'; "
+                "assert myokit.__version__ == '{0}'; "
+                "assert cupy.__version__ == '{1}'; "
                 "print('Myokit', myokit.__version__); "
                 "print('CuPy', cupy.__version__); "
                 "print('CUDA devices', cupy.cuda.runtime.getDeviceCount())"
-            ),
+            ).format(myokit_version(requirements), CUPY_VERSION),
         ]
     )
     print("Myokit-CUDA environment is ready at {0}".format(environment))

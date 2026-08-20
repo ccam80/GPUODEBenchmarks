@@ -84,8 +84,9 @@ python3 GPU_ODE_JAX/setup_environment.py
 This will:
 - Create a Python virtual environment in `GPU_ODE_JAX/venv`
 - Install `uv` package manager
-- Install JAX with CUDA support
-- Install Diffrax, Equinox, and other dependencies
+- Install a pinned `jax[cuda13]`, Diffrax, Equinox, and other dependencies
+
+Linux only; elsewhere the script prints a skip and exits 0.
 
 To activate:
 - Linux/macOS: `source GPU_ODE_JAX/venv/bin/activate`
@@ -101,8 +102,9 @@ python3 GPU_ODE_PyTorch/setup_environment.py
 This will:
 - Create a Python virtual environment in `GPU_ODE_PyTorch/venv`
 - Install `uv` package manager
-- Install PyTorch with CUDA support
-- Install the custom torchdiffeq fork with vmap support
+- Install a pinned PyTorch from the `cu132` wheel index
+- Install the custom torchdiffeq fork at a pinned commit, and fail if a
+  `torch.vmap` solve through it does not work
 
 To activate:
 - Linux/macOS: `source GPU_ODE_PyTorch/venv/bin/activate`
@@ -162,14 +164,32 @@ driver packages inside WSL — the WSL driver is provided by Windows via
 `/usr/lib/wsl/lib`, and a native `libcuda` in `/lib/x86_64-linux-gnu` will
 shadow it and break CUDA context creation for native extensions.
 
-JAX and PyTorch bundle their own CUDA runtime via pip wheels
-(`jax[cuda12]`, torch cu121), so they need only the driver. JAX has no CUDA
-wheels for native Windows; the JAX benchmark aborts on a CPU backend and
-should be run on Linux or WSL2.
+Every suite targets CUDA 13. The JAX, PyTorch, and Myokit setups read the
+CUDA major from `nvcc`/`nvidia-smi` and refuse to build against anything
+else. JAX and PyTorch bundle their own CUDA runtime via pip wheels, so they
+need only the driver.
+
+JAX's CUDA plugins are published for Linux only, and `bench_diffrax.py`
+aborts on a CPU backend, so the JAX suite runs on Linux or WSL2.
 
 Myokit-CUDA requires an NVIDIA GPU and CUDA toolchain. Its setup and
 benchmark scripts expect the required NVIDIA tools and libraries to be
 available on `PATH`.
+
+### Pinned versions
+
+Change these in `GPU_ODE_*/setup_environment.py`. Datasets are only
+comparable across machines that share them.
+
+| Package | Pin |
+| --- | --- |
+| torch | 2.13.0 (`cu132` index) |
+| torchdiffeq | `utkarsh530/torchdiffeq` @ `4f4524f` (`u/vmap`) |
+| jax / jaxlib | 0.11.1 (`cuda13` extra) |
+| diffrax | 0.7.2 |
+| equinox | 0.13.8 |
+| myokit | 1.39.2 (`GPU_ODE_MYOKIT_CUDA/requirements.txt`) |
+| cupy | 14.2.0 (`cupy-cuda13x`) |
 
 ### Python Packages
 - Python 3.10 or higher (3.12 recommended; the numba stack may lag the newest CPython)
