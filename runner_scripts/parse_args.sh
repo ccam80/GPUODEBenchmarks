@@ -31,7 +31,6 @@ case ",$NMAX," in
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'" >&2
         exit 1;;
 esac
-NMAX_RAW=$NMAX
 case "$NMAX" in
     *,*)
         NLIST=${NMAX//,/ }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm] [sizes|ceiling]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -16,8 +16,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 from algorithms import resolve_algorithms, supported_for  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from problems import resolve_problems  # noqa: E402
-from wp_common import (STATES_N, resolve_states_grid,  # noqa: E402
-                       states_outfile)
+from wp_common import STATES_GRID, STATES_N, states_outfile  # noqa: E402
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
 
@@ -133,7 +132,7 @@ def _states_succeeded(outfiles, algorithm, nstates):
 
 def run_states(argv):
     request = argv[0] if argv else "all"
-    grid = resolve_states_grid(argv[1] if len(argv) > 1 else "")
+    grid = list(STATES_GRID)
     ensemble = STATES_N
     algorithms = resolve_algorithms(request, "julia")
     if not algorithms:
