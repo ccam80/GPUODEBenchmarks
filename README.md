@@ -284,8 +284,8 @@ head-to-head between cubie and DiffEqGPU.
 
 ### States sweep
 
-`run_benchmark -a states` times lorenz96 at 4-128 states (powers of two;
-`BENCH_STATES_GRID` supplies a comma list of sizes instead) and a fixed
+`run_benchmark -a states` times lorenz96 at 4-128 states
+(`BENCH_STATES_GRID=<comma list>` overrides) and a fixed
 131072-trajectory ensemble, in every framework and algorithm
 the problem's frameworks support, exclusions included. Rows are
 `states t_ms t_dev_ms build_s` in
