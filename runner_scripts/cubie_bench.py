@@ -92,13 +92,14 @@ def _failed(exc, what):
 
 def _run_wp(problem, opts, system, grid):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
-                           timed_min_ms, wp_outfile)
+    from wp_common import (dts_for, TOLS, N_WP, SampleLog, load_golden,
+                           ensemble_error, samples_outfile, timed_min_ms,
+                           wp_outfile)
 
     duration = problem["duration"]
     golden = load_golden(problem)
 
-    def bench_solver(solver, repeats=REPEATS):
+    def bench_solver(solver, sink=None, repeats=REPEATS):
         """(best_ms, err); best_ms is None when a run breaches the watchdog."""
         initials_array, parameter_array = grid(solver, N_WP)
 
@@ -109,7 +110,7 @@ def _run_wp(problem, opts, system, grid):
                 blocksize=64,
                 duration=duration,
             )
-        best_ms, solution = timed_min_ms(run, repeats)
+        best_ms, solution = timed_min_ms(run, repeats, sink)
         if best_ms is None:
             return None, float("nan")
         err = ensemble_error(final_states(system, solution, problem),
@@ -119,7 +120,11 @@ def _run_wp(problem, opts, system, grid):
     def sweep(mode, make_solver, settings):
         outfile = wp_outfile(opts["framework_dir"], opts["prefix"], mode,
                              algorithm, opts["dataset_key"], problem)
-        with open(outfile, "w") as f:
+        samples_file = samples_outfile(opts["framework_dir"], opts["prefix"],
+                                       "wp", mode, algorithm,
+                                       opts["dataset_key"], problem)
+        setting_kind = "dt" if mode == "fixed" else "tol"
+        with open(outfile, "w") as f, SampleLog(samples_file, True) as samples:
             breached = False
             for setting in settings:
                 t_ms, err = float("nan"), float("nan")
@@ -127,7 +132,9 @@ def _run_wp(problem, opts, system, grid):
                 if not breached:
                     try:
                         solver = make_solver(setting)
-                        t_ms, err = bench_solver(solver)
+                        t_ms, err = bench_solver(solver, samples.sink(
+                            "wp", problem.name, algorithm, mode, "both",
+                            N_WP, problem["states"], setting_kind, setting))
                     except Exception as exc:
                         t_ms, err = _failed(
                             exc, f"{problem.name} {mode} {algorithm} "
@@ -162,13 +169,13 @@ def _run_wp(problem, opts, system, grid):
 
 def _run_times(problem, opts, system, grid):
     """N-sweep timing: each (algorithm, mode) leg walks the sizes ascending on one solver."""
-    from wp_common import timed_min_ms
+    from wp_common import SampleLog, samples_outfile, timed_min_ms
 
     duration = problem["duration"]
     dataset = opts["dataset_key"]
     ns = opts["ns"]
 
-    def bench_times(solver, n):
+    def bench_times(solver, n, samples, mode, algorithm):
         """(with_transfers_ms, device_only_ms, solution); times None on a breach."""
         initials_array, parameter_array = grid(solver, n)
         # Uploaded once per size so the device-only timing excludes the h2d.
@@ -194,10 +201,14 @@ def _run_times(problem, opts, system, grid):
             cuda.synchronize()
             return solution
 
-        best, solution = timed_min_ms(with_transfers, REPEATS)
+        def sink(transfers):
+            return samples.sink("times", problem.name, algorithm, mode,
+                                transfers, n, problem["states"])
+
+        best, solution = timed_min_ms(with_transfers, REPEATS, sink("both"))
         if best is None:
             return None, None, None
-        best_dev, _ = timed_min_ms(device_only, REPEATS)
+        best_dev, _ = timed_min_ms(device_only, REPEATS, sink("none"))
         return best, best_dev, solution
 
     def save_numerical(solution, name):
@@ -219,6 +230,9 @@ def _run_times(problem, opts, system, grid):
                 continue
             outfile = times_outfile(opts["framework_dir"], opts["prefix"],
                                     mode, algorithm, dataset, problem)
+            samples_file = samples_outfile(
+                opts["framework_dir"], opts["prefix"], "times", mode,
+                algorithm, dataset, problem)
             solver = None
             try:
                 solver = (_make_fixed_solver(system, problem, algorithm)
@@ -230,13 +244,14 @@ def _run_times(problem, opts, system, grid):
                 with open(outfile, "a+") as file:
                     nan_rows(file, ns)
                 continue
-            with open(outfile, "a+") as file:
+            with open(outfile, "a+") as file, SampleLog(samples_file) as samples:
                 for index, n in enumerate(ns):
                     print(f"Running {problem.name}, {n} trajectories, "
                           f"{mode} dt, {algorithm}...")
                     solution = None
                     try:
-                        best, best_dev, solution = bench_times(solver, n)
+                        best, best_dev, solution = bench_times(
+                            solver, n, samples, mode, algorithm)
                         if best is None or best_dev is None:
                             # Larger sizes are slower, so the leg is abandoned.
                             print(f"WATCHDOG {problem.name} {mode} "
@@ -374,8 +389,9 @@ def _run_states(opts):
     from timeit import default_timer
 
     from cubie.cache_root import set_cache_root
-    from problems import states_row
-    from wp_common import STATES_N, states_outfile, timed_min_ms
+    from problems import STATES_PROBLEM, states_row
+    from wp_common import (STATES_N, SampleLog, samples_outfile,
+                           states_outfile, timed_min_ms)
 
     # Throwaway cache root: every states compile runs cold.
     set_cache_root(tempfile.mkdtemp(prefix="cubie_states_"))
@@ -397,7 +413,11 @@ def _run_states(opts):
                 continue
             outfile = states_outfile(opts["framework_dir"], opts["prefix"],
                                      mode, algorithm, opts["dataset_key"])
-            with open(outfile, "w") as file:
+            samples_file = samples_outfile(
+                opts["framework_dir"], opts["prefix"], "states", mode,
+                algorithm, opts["dataset_key"], STATES_PROBLEM)
+            with open(outfile, "w") as file, \
+                    SampleLog(samples_file, True) as samples:
                 for index, nstates in enumerate(grid):
                     row = states_row(nstates)
                     duration = row["duration"]
@@ -442,10 +462,17 @@ def _run_states(opts):
                             cuda.synchronize()
                             return solution
 
-                        best, _ = timed_min_ms(with_transfers, REPEATS)
+                        def sink(transfers):
+                            return samples.sink("states", STATES_PROBLEM,
+                                                algorithm, mode, transfers,
+                                                n, nstates)
+
+                        best, _ = timed_min_ms(with_transfers, REPEATS,
+                                               sink("both"))
                         best_dev = None
                         if best is not None:
-                            best_dev, _ = timed_min_ms(device_only, REPEATS)
+                            best_dev, _ = timed_min_ms(device_only, REPEATS,
+                                                       sink("none"))
                         breached = best is None or best_dev is None
                         if not breached:
                             t_ms, t_dev = best, best_dev

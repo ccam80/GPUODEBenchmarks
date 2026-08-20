@@ -25,14 +25,21 @@ TIMING_TOL = 1.0e-5
 WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))
 
 
-def timed_min_ms(run, repeats):
-    """Best-of-repeats wall time in ms after one warm-up; None on a breach."""
+# Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
+SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
+                 "setting_kind", "setting", "n", "states", "repeat", "ms")
+
+
+def timed_min_ms(run, repeats, sink=None):
+    """Best-of-repeats wall time in ms after one warm-up; None on a breach. ``sink(attempt, ms)`` sees every attempt, warm-up (0) and breaching run included."""
     import timeit
     best = None
     for attempt in range(repeats + 1):
         elapsed = timeit.default_timer()
         result = run()
         elapsed = timeit.default_timer() - elapsed
+        if sink is not None:
+            sink(attempt, elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
             return None, result
         if attempt and (best is None or elapsed < best):
@@ -99,6 +106,56 @@ def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
     return os.path.join(
         data_dir(framework_dir, dataset_key, problem=STATES_PROBLEM),
         "{0}_states_{1}_{2}.txt".format(prefix, mode, algorithm))
+
+
+def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
+                    dataset_key, problem=DEFAULT_PROBLEM):
+    """Path of the per-repeat timing log beside its reduced output file."""
+    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
+                        "{0}_samples_{1}_{2}_{3}.csv".format(
+                            prefix, analysis, mode, algorithm))
+
+
+class SampleLog(object):
+    """Per-repeat timing rows for one (analysis, mode, algorithm) leg; ``truncate`` matches the sibling output file's open mode."""
+
+    def __init__(self, path, truncate=False):
+        header = ",".join(SAMPLE_FIELDS) + "\n"
+        if truncate:
+            self._handle = open(path, "w")
+            self._handle.write(header)
+            self._handle.flush()
+            return
+        # Exclusive create: one header even when sibling processes open the log.
+        try:
+            with open(path, "x") as fresh:
+                fresh.write(header)
+        except FileExistsError:
+            pass
+        self._handle = open(path, "a")
+
+    def sink(self, analysis, problem, algorithm, mode, transfers, n, states,
+             setting_kind="none", setting=float("nan")):
+        """A ``sink(repeat, ms)`` callable for one timed point."""
+        head = "{0},{1},{2},{3},{4},{5},{6:.10g},{7},{8}".format(
+            analysis, problem, algorithm, mode, transfers, setting_kind,
+            setting, n, states)
+
+        def record(repeat, ms):
+            self._handle.write("{0},{1},{2:.6f}\n".format(head, repeat, ms))
+            self._handle.flush()
+
+        return record
+
+    def close(self):
+        self._handle.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
 
 def parse_bench_args(argv, framework):

@@ -21,6 +21,7 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
@@ -107,51 +108,64 @@ function nan_rows(outfile, ns)
 end
 
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
-function wp_sweep(solve_once, system, path, settings, golden, label)
-    open(path, "w") do io
-        breached = false
-        compiled = false
-        for (index, setting) in enumerate(settings)
-            if breached
-                println(io, setting, " NaN NaN")
-                continue
-            end
-            on_breach = () -> begin
-                for s in settings[index:end]
-                    println(io, s, " NaN NaN")
+function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
+        golden, label)
+    samples = SampleLog(
+        samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia", "wp", mode,
+            algorithm, problem); truncate = true)
+    setting_kind = mode == "fixed" ? "dt" : "tol"
+    try
+        open(path, "w") do io
+            breached = false
+            compiled = false
+            for (index, setting) in enumerate(settings)
+                if breached
+                    println(io, setting, " NaN NaN")
+                    continue
                 end
-                flush(io)
-                println("WATCHDOG $(label) setting=$(setting): run never returned")
-            end
-            t_ms, err = try
-                if !compiled
-                    # The first solve carries the kernel compile, off the GPU lock.
-                    run_watchdogged(() -> solve_once(setting), on_breach)
-                    compiled = true
-                end
-                with_gpu_lock() do
-                    warm = @elapsed sol = run_watchdogged(
-                        () -> solve_once(setting), on_breach)
-                    if warm > WATCHDOG_SECONDS
-                        (NaN, NaN)
-                    else
-                        e = ensemble_error(system, sol[2], golden)
-                        t = watchdogged_min_ms(() -> solve_once(setting),
-                            on_breach, REPEATS)
-                        (t, isnan(t) ? NaN : e)
+                # The ensemble is already resident, so only the d2h is timed.
+                sink = sample_sink(samples, "wp", problem["problem"],
+                    algorithm, mode, "d2h", N_WP, problem["states"];
+                    setting_kind = setting_kind, setting = setting)
+                on_breach = () -> begin
+                    for s in settings[index:end]
+                        println(io, s, " NaN NaN")
                     end
+                    flush(io)
+                    println("WATCHDOG $(label) setting=$(setting): run never returned")
                 end
-            catch err
-                (failed("wp $(label) setting=$(setting)", err), NaN)
+                t_ms, err = try
+                    if !compiled
+                        # The first solve carries the kernel compile, off the GPU lock.
+                        run_watchdogged(() -> solve_once(setting), on_breach)
+                        compiled = true
+                    end
+                    with_gpu_lock() do
+                        warm = @elapsed sol = run_watchdogged(
+                            () -> solve_once(setting), on_breach)
+                        if warm > WATCHDOG_SECONDS
+                            (NaN, NaN)
+                        else
+                            e = ensemble_error(system, sol[2], golden)
+                            t = watchdogged_min_ms(() -> solve_once(setting),
+                                on_breach, REPEATS, sink)
+                            (t, isnan(t) ? NaN : e)
+                        end
+                    end
+                catch err
+                    (failed("wp $(label) setting=$(setting)", err), NaN)
+                end
+                if isnan(t_ms)
+                    println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
+                    breached = true
+                end
+                println(io, setting, " ", t_ms, " ", err)
+                flush(io)
+                println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err)")
             end
-            if isnan(t_ms)
-                println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
-                breached = true
-            end
-            println(io, setting, " ", t_ms, " ", err)
-            flush(io)
-            println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err)")
         end
+    finally
+        close(samples)
     end
 end
 
@@ -171,7 +185,7 @@ function run_wp(problem)
         label = "$(problem["problem"]) $(algorithm)"
 
         if algorithm in FIXED_ALGORITHMS
-            wp_sweep(system,
+            wp_sweep(system, problem, algorithm, "fixed",
                 joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
                 collect(problem_dts(problem)), golden,
                 "$(label) fixed") do dt
@@ -185,7 +199,7 @@ function run_wp(problem)
         end
 
         if algorithm in ADAPTIVE_ALGORITHMS
-            wp_sweep(system,
+            wp_sweep(system, problem, algorithm, "adaptive",
                 joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
                 [10.0^-k for k in 2:8], golden,
                 "$(label) adaptive") do tol
@@ -202,6 +216,18 @@ end
 
 # One (algorithm, mode) leg: every sweep size ascending on one compiled kernel.
 function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
+    samples = SampleLog(samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
+        "Julia", "times", mode, algorithm, problem))
+    try
+        run_leg(samples, problem, system, prob, duration, algorithm, mode,
+            later_legs)
+    finally
+        close(samples)
+    end
+end
+
+function run_leg(samples::SampleLog, problem, system, prob, duration,
+        algorithm, mode, later_legs)
     solver = gpu_solver(algorithm)
     dt0 = Float32(problem_timing_dt(problem))
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
@@ -255,10 +281,15 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
                 run_watchdogged(device_solve, on_breach)
                 compiled = true
             end
+            sink = transfers -> sample_sink(samples, "times",
+                problem["problem"], algorithm, mode, transfers, n,
+                problem["states"])
             t_dev, t = with_gpu_lock() do
-                td = watchdogged_min_ms(device_solve, on_breach, REPEATS)
+                td = watchdogged_min_ms(device_solve, on_breach, REPEATS,
+                    sink("none"))
                 tt = isnan(td) ? NaN :
-                     watchdogged_min_ms(full_solve, on_breach, REPEATS)
+                     watchdogged_min_ms(full_solve, on_breach, REPEATS,
+                         sink("both"))
                 (td, tt)
             end
             (t, t_dev, isnan(t))
@@ -327,6 +358,8 @@ function run_states(nstates, n)
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
             outfile = joinpath(outdir, "Julia_states_$(mode)_$(algorithm).txt")
+            samples = SampleLog(samples_outfile(REPO_ROOT, "Julia",
+                DATASET_KEY, "Julia", "states", mode, algorithm, row))
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
             t_ms, t_dev_ms, build_s = try
                 probs_host, probs = build_ensemble(system, prob, row, n)
@@ -367,10 +400,14 @@ function run_states(nstates, n)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
+                sink = transfers -> sample_sink(samples, "states",
+                    row["problem"], algorithm, mode, transfers, n, nstates)
                 t_dev, t = with_gpu_lock() do
-                    td = watchdogged_min_ms(device_solve, on_breach, REPEATS)
+                    td = watchdogged_min_ms(device_solve, on_breach, REPEATS,
+                        sink("none"))
                     tt = isnan(td) ? NaN :
-                         watchdogged_min_ms(full_solve, on_breach, REPEATS)
+                         watchdogged_min_ms(full_solve, on_breach, REPEATS,
+                             sink("both"))
                     (td, tt)
                 end
                 isnan(t) &&
@@ -387,6 +424,7 @@ function run_states(nstates, n)
                         build_s)
                 end
             end
+            close(samples)
             GC.gc()
             CUDA.reclaim()
             println("states=$(nstates) $(mode) $(algorithm): $(t_ms) ms")

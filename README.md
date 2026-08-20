@@ -231,6 +231,30 @@ Timing files are named
 (work-precision files use `_wp_` in place of `_times_`). Data without the
 algorithm field is regenerated fresh rather than migrated.
 
+### Per-repeat timing log
+
+Every timed point is a minimum over `REPEATS` runs, and each of those runs is
+also written to
+`<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv` beside
+the reduced file, one row per attempt:
+
+`analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms`
+
+* `repeat` is 0 for the warm-up, which carries the first-call compile, and
+  1..`REPEATS` for the runs the minimum is taken over.
+* `transfers` is what the timed region copies: `both` (h2d and d2h), `none`
+  (neither) or `d2h` (inputs already resident). Each timed leg of a point
+  writes its own rows.
+* `setting_kind`/`setting` carry the wp sweep's `dt` or `tol`, and are
+  `none`/`nan` elsewhere.
+* A run that breaches the watchdog is logged before its leg is abandoned.
+
+The samples file follows its reduced sibling's write mode: the wp and states
+sweeps rewrite theirs each run, the N sweep appends. Filtering to `repeat > 0`
+and taking the minimum per (leg, point) reproduces the reduced file. The
+writers are `SampleLog` in `runner_scripts/wp_common.py`,
+`runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
+
 ### Problems
 
 `runner_scripts/problems.csv` is the problem registry: one row per benchmark

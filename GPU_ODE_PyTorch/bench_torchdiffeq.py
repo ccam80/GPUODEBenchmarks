@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
-from wp_common import parse_bench_args, times_outfile
+from wp_common import (SampleLog, parse_bench_args, samples_outfile,
+                       times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -100,8 +101,8 @@ def make_solve(problem, algorithm, dt=None):
 
 def run_wp(problem, parameters):
     """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, load_golden, ensemble_error, timed_min_ms,
-                           wp_outfile)
+    from wp_common import (dts_for, N_WP, load_golden, ensemble_error,
+                           timed_min_ms, wp_outfile)
 
     golden = load_golden(problem)
 
@@ -110,7 +111,9 @@ def run_wp(problem, parameters):
             continue
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
                              DATASET_KEY, problem)
-        with open(outfile, "w") as f:
+        samples_file = samples_outfile("PYTORCH", "Torch", "wp", "fixed",
+                                       algorithm, DATASET_KEY, problem)
+        with open(outfile, "w") as f, SampleLog(samples_file, True) as samples:
             # Later settings are slower, so a breach abandons the leg.
             breached = False
             for dt in dts_for(algorithm, problem):
@@ -124,7 +127,10 @@ def run_wp(problem, parameters):
                     torch.cuda.synchronize()
                     return traj
 
-                t_ms, traj = timed_min_ms(run, 5)
+                # Parameters are already resident and results stay on device.
+                t_ms, traj = timed_min_ms(run, 5, samples.sink(
+                    "wp", problem.name, algorithm, "fixed", "none", N_WP,
+                    problem["states"], "dt", dt))
                 if t_ms is None:
                     print("WATCHDOG wp {0} fixed {1} dt={2:g}: run exceeded "
                           "the cap".format(problem.name, algorithm, dt))
@@ -148,7 +154,9 @@ def run_times(problem):
         solve = make_solve(problem, algorithm)
         outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                 DATASET_KEY, problem)
-        with open(outfile, "a+") as file:
+        samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
+                                       algorithm, DATASET_KEY, problem)
+        with open(outfile, "a+") as file, SampleLog(samples_file) as samples:
             for index, n in enumerate(NS):
                 parameters_host = problem.sweep(n, dtype=np.float32)
                 parameters = torch.from_numpy(parameters_host).cuda()
@@ -166,10 +174,17 @@ def run_times(problem):
                     torch.cuda.synchronize()
                     return out
 
-                best_time, _ = timed_min_ms(with_transfers, REPEATS)
+                def sink(transfers):
+                    return samples.sink("times", problem.name, algorithm,
+                                        "fixed", transfers, n,
+                                        problem["states"])
+
+                best_time, _ = timed_min_ms(with_transfers, REPEATS,
+                                            sink("both"))
                 best_time_dev = None
                 if best_time is not None:
-                    best_time_dev, _ = timed_min_ms(device_only, REPEATS)
+                    best_time_dev, _ = timed_min_ms(device_only, REPEATS,
+                                                    sink("none"))
                 breached = best_time is None or best_time_dev is None
                 if breached:
                     print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
@@ -210,7 +225,7 @@ def run_states():
     one fixed ensemble size; torchdiffeq is fixed-step only."""
     import timeit
 
-    from problems import states_row
+    from problems import STATES_PROBLEM, states_row
     from wp_common import STATES_N, states_outfile, timed_min_ms
 
     n = STATES_N
@@ -218,7 +233,10 @@ def run_states():
     for algorithm in ALGORITHMS:
         outfile = states_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                  DATASET_KEY)
-        with open(outfile, "w") as file:
+        samples_file = samples_outfile("PYTORCH", "Torch", "states", "fixed",
+                                       algorithm, DATASET_KEY, STATES_PROBLEM)
+        with open(outfile, "w") as file, \
+                SampleLog(samples_file, True) as samples:
             for index, nstates in enumerate(grid):
                 row = states_row(nstates)
                 solve = make_solve(row, algorithm)
@@ -242,10 +260,18 @@ def run_states():
                     started = timeit.default_timer()
                     device_only()
                     build_s = timeit.default_timer() - started
-                    best, _ = timed_min_ms(with_transfers, REPEATS)
+
+                    def sink(transfers):
+                        return samples.sink("states", STATES_PROBLEM,
+                                            algorithm, "fixed", transfers, n,
+                                            nstates)
+
+                    best, _ = timed_min_ms(with_transfers, REPEATS,
+                                           sink("both"))
                     best_dev = None
                     if best is not None:
-                        best_dev, _ = timed_min_ms(device_only, REPEATS)
+                        best_dev, _ = timed_min_ms(device_only, REPEATS,
+                                                   sink("none"))
                     breached = best is None or best_dev is None
                     if not breached:
                         t_ms, t_dev = best, best_dev

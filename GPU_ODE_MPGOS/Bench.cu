@@ -132,6 +132,53 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
+// Per-repeat timing log, as in runner_scripts/wp_common.py.
+static const char* SampleHeader =
+	"analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms";
+
+class SampleLog
+{
+public:
+	// `Truncate` matches the sibling output file's open mode.
+	SampleLog(const std::string& Path, bool Truncate)
+	{
+		if (Truncate)
+		{
+			Out.open(Path.c_str(), std::ios::trunc);
+			Out << SampleHeader << "\n";
+			return;
+		}
+		// Exclusive create: one header even when sibling processes open the log.
+		FILE* Fresh = fopen(Path.c_str(), "wx");
+		if (Fresh)
+		{
+			fputs(SampleHeader, Fresh);
+			fputc('\n', Fresh);
+			fclose(Fresh);
+		}
+		Out.open(Path.c_str(), std::ios::app);
+	}
+
+	void Row(const std::string& Analysis, const std::string& Algorithm,
+	         const std::string& Mode, const std::string& Transfers,
+	         const std::string& SettingKind, double Setting, int N, int States,
+	         int Repeat, double Ms)
+	{
+		char SettingText[32];
+		char MsText[32];
+		snprintf(SettingText, sizeof(SettingText), "%.10g", Setting);
+		snprintf(MsText, sizeof(MsText), "%.6f", Ms);
+		Out << Analysis << "," << PROBLEM_NAME << "," << Algorithm << ","
+		    << Mode << "," << Transfers << "," << SettingKind << ","
+		    << SettingText << "," << N << "," << States << "," << Repeat << ","
+		    << MsText << "\n";
+		Out.flush();
+	}
+
+private:
+	std::ofstream Out;
+};
+
 // Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
 static double WatchdogSeconds()
 {
@@ -265,9 +312,13 @@ int main(int argc, char *argv[])
 		// Filenames carry the cubie-vocabulary algorithm name.
 		string Mode = FixedMode ? "fixed" : "adaptive";
 		string Algorithm = FixedMode ? "classical-rk4" : "cash-karp-54";
-		const std::string WpPath = DataDir("CPP") + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
+		const std::string WpDir = DataDir("CPP");
+		const std::string WpPath = WpDir + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
 		ofstream wpfile(WpPath.c_str());
 		wpfile.precision(12);
+		SampleLog WpSamples(WpDir + "MPGOS_samples_wp_" + Mode + "_"
+			+ Algorithm + ".csv", true);
+		const std::string SettingKind = FixedMode ? "dt" : "tol";
 
 		const int Repeats = 10;
 		for (size_t si = 0; si < Settings.size(); si++)
@@ -321,6 +372,9 @@ int main(int argc, char *argv[])
 				}
 
 				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+				// The h2d is outside the timed region; the ActualState d2h is inside.
+				WpSamples.Row("wp", Algorithm, Mode, "d2h", SettingKind,
+					Setting, NT, SD, r, Ms);
 				if (Ms > WatchdogSeconds() * 1000.0) { Breached = true; break; }
 				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up
 			}
@@ -358,10 +412,15 @@ int main(int argc, char *argv[])
 	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
 	const int TimingRepeats = 20;
 
-	const std::string TimesPath = DataDir("CPP") + "MPGOS_" +
-		(StatesMode ? string("states") : string("times")) +
-		(SOLVER == RK4 ? "_fixed_classical-rk4.txt"
-		               : "_adaptive_cash-karp-54.txt");
+	const std::string TimesAnalysis = StatesMode ? "states" : "times";
+	const std::string TimesMode = (SOLVER == RK4) ? "fixed" : "adaptive";
+	const std::string TimesAlgorithm = (SOLVER == RK4) ? "classical-rk4"
+	                                                   : "cash-karp-54";
+	const std::string TimesDir = DataDir("CPP");
+	const std::string TimesPath = TimesDir + "MPGOS_" + TimesAnalysis +
+		"_" + TimesMode + "_" + TimesAlgorithm + ".txt";
+	SampleLog TimesSamples(TimesDir + "MPGOS_samples_" + TimesAnalysis +
+		"_" + TimesMode + "_" + TimesAlgorithm + ".csv", false);
 	std::vector<std::string> TimesNanRow;
 	{
 		std::ostringstream row;
@@ -390,6 +449,8 @@ int main(int argc, char *argv[])
 		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		TimesSamples.Row(TimesAnalysis, TimesAlgorithm, TimesMode, "none",
+			"none", std::nan(""), NT, SD, r, Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
 	}
@@ -412,6 +473,8 @@ int main(int argc, char *argv[])
 		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		TimesSamples.Row(TimesAnalysis, TimesAlgorithm, TimesMode, "both",
+			"none", std::nan(""), NT, SD, r, Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
 	}
