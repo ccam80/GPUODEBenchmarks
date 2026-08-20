@@ -169,11 +169,9 @@ def load_model(problem):
 
 
 def run_warm(problems):
-    """Compile each model, including the states-sweep sizes."""
+    """Compile each problem's model. States-sweep models are never warmed:
+    the sweep measures the compile."""
     import timeit
-
-    from problems import STATES_PROBLEM, states_row
-    from wp_common import STATES_GRID
 
     def warm_one(build_model, row, label):
         started = timeit.default_timer()
@@ -194,14 +192,6 @@ def run_warm(problems):
         if not problem.runs("myokit_cuda", ALGORITHM):
             continue
         warm_one(lambda: load_model(problem), problem, problem.name)
-        if problem.name == STATES_PROBLEM:
-            for nstates in STATES_GRID:
-                row = states_row(nstates)
-                warm_one(
-                    lambda: MyokitCudaModel(
-                        _lorenz96_cellml(nstates),
-                        diffusion_variable="lorenz96.F"),
-                    row, "lorenz96 states={0}".format(nstates))
 
 
 def run_problem(problem, cell_counts, wp_mode):
@@ -306,10 +296,15 @@ def _lorenz96_cellml(n):
 def run_states(grid):
     """Runtime-by-states sweep: lorenz96 resized along the requested grid at
     one fixed ensemble size."""
+    import tempfile
     import timeit
 
     from problems import states_row
     from wp_common import STATES_N, states_outfile
+
+    # build_s is the compile; CuPy's disk kernel cache would hide it. CuPy
+    # reads this when it is first imported, inside the first model build.
+    os.environ["CUPY_CACHE_DIR"] = tempfile.mkdtemp(prefix="myokit_states_")
 
     cell_count = STATES_N
     outfile = Path(states_outfile(

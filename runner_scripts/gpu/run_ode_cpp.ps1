@@ -82,11 +82,13 @@ $SrcHash = ([System.BitConverter]::ToString($Hasher.ComputeHash($SrcBytes)) -rep
 $CacheDir = "GPU_ODE_MPGOS\build_cache\$DatasetKey"
 
 # Mirrors GPU_ODE_MPGOS/Makefile; reuses the cached binary when one exists.
+# -Fresh always runs nvcc and skips the cache: the states sweep measures the build.
 function Build-Project {
-    param([string]$ProblemName, [string]$Solver, [long]$Nt, [long]$Sd = 0)
+    param([string]$ProblemName, [string]$Solver, [long]$Nt, [long]$Sd = 0,
+          [switch]$Fresh)
     $SdTag = if ($Sd -gt 0) { "_SD$Sd" } else { "" }
     $CachedExe = "$CacheDir\Bench_${ProblemName}_${Solver}_NT$Nt${SdTag}_$SrcHash.exe"
-    if (Test-Path $CachedExe) {
+    if (-not $Fresh -and (Test-Path $CachedExe)) {
         Copy-Item $CachedExe "GPU_ODE_MPGOS\Bench.exe" -Force
         Write-Host "Cached build: $(Split-Path $CachedExe -Leaf)"
         return
@@ -104,8 +106,10 @@ function Build-Project {
     if ($LASTEXITCODE -ne 0) {
         Write-Error "nvcc build failed with exit code $LASTEXITCODE"
     }
-    New-Item -ItemType Directory -Force $CacheDir | Out-Null
-    Copy-Item "GPU_ODE_MPGOS\Bench.exe" $CachedExe -Force
+    if (-not $Fresh) {
+        New-Item -ItemType Directory -Force $CacheDir | Out-Null
+        Copy-Item "GPU_ODE_MPGOS\Bench.exe" $CachedExe -Force
+    }
 }
 
 function Invoke-Point {
@@ -175,17 +179,9 @@ function Get-NtTargets {
     return $targets
 }
 
+# States-sweep binaries are never warmed: the sweep measures the build.
 if ($Analysis -eq 'warm') {
-    $targets = @(Get-NtTargets)
-    if ($Problems -contains 'lorenz96') {
-        $grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-        foreach ($s in $Solvers) {
-            foreach ($sd in $grid) {
-                $targets += , @('lorenz96', $s, [long]131072, [long]$sd)
-            }
-        }
-    }
-    Invoke-WarmBuilds -Targets $targets
+    Invoke-WarmBuilds -Targets @(Get-NtTargets)
     Pop-Location
     exit 0
 }
@@ -206,7 +202,7 @@ if ($Analysis -eq 'states') {
         foreach ($n in $Grid) {
             Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
             $Watch = [System.Diagnostics.Stopwatch]::StartNew()
-            Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n)
+            Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
             $BuildS = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
             & "GPU_ODE_MPGOS\Bench.exe" states $BuildS

@@ -21,6 +21,13 @@ SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
             | sha256sum | cut -c1-12)
 CACHE_DIR="GPU_ODE_MPGOS/build_cache/${DATASET_KEY}"
 
+# build_fresh <problem> <solver> <NT> [SD]: always run nvcc, no cache; the
+# states sweep measures the build.
+build_fresh() {
+	make clean --directory=./GPU_ODE_MPGOS/
+	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3" ${4:+SD="$4"}
+}
+
 # build <problem> <solver> <NT> [SD]: reuse the cached binary or run nvcc.
 build() {
 	local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
@@ -29,8 +36,7 @@ build() {
 		echo "Cached build: $(basename "$exe")"
 		return
 	fi
-	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3" ${4:+SD="$4"}
+	build_fresh "$@"
 	mkdir -p "$CACHE_DIR"
 	cp GPU_ODE_MPGOS/Bench.exe "$exe"
 }
@@ -79,7 +85,7 @@ if [ "$ANALYSIS" == "states" ]; then
 		do
 			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
 			T0=$(date +%s.%N)
-			build lorenz96 "$solver" "$STATES_N" "$n"
+			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
 			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S"
 		done
@@ -93,18 +99,9 @@ if [ -z "$PROBLEMS" ]; then
 	exit 0
 fi
 
+# States-sweep binaries are never warmed: the sweep measures the build.
 if [ "$ANALYSIS" == "warm" ]; then
-	JOBS=${BENCH_WARM_JOBS:-8}
 	warm_nt_builds
-	case " $PROBLEMS " in *" lorenz96 "*)
-		for solver in $SOLVERS; do
-			for sd in $(python3 ./runner_scripts/problems.py --states-grid); do
-				while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
-				warm_build lorenz96 "$solver" 131072 "$sd" &
-			done
-		done
-		wait;;
-	esac
 	echo "MPGOS warm build cache populated."
 	exit 0
 fi
