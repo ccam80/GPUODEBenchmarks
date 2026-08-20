@@ -42,3 +42,7 @@ GPU_ODE_MYOKIT_CUDA/generated/
 /logs/
 
 golden_ring_modulator.log*
+
+# MPGOS cached builds and generated Myokit models
+GPU_ODE_MPGOS/build_cache/
+GPU_ODE_MYOKIT_CUDA/models/generated/

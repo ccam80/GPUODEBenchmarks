@@ -8,7 +8,12 @@ SOURCE   = Bench.cu
 PROBLEM ?= lorenz
 SOLVER  ?= RKCK45
 NT      ?= 8388608
+# SD overrides the problem's state count (states sweep only).
+SD      ?=
 DEFINES  = -DPROBLEM_HEADER='"problems/$(PROBLEM).cuh"' -DSOLVER_CHOICE=$(SOLVER) -DNT_VALUE=$(NT)
+ifneq ($(SD),)
+DEFINES += -DPROBLEM_SD=$(SD)
+endif
 
 all: Bench.exe
 

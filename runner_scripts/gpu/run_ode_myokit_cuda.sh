@@ -4,16 +4,29 @@ set -e
 source ./GPU_ODE_MYOKIT_CUDA/venv/bin/activate
 
 # Myokit CUDA exposes float32 forward Euler only, so work-precision is fixed-step.
+if [ "$ANALYSIS" == "warm" ]; then
+    NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
+    deactivate
+    exit 0
+fi
+
+if [ "$ANALYSIS" == "states" ]; then
+    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py states "$ALGORITHM"
+    deactivate
+    exit 0
+fi
+
 if [ "$ANALYSIS" == "work-precision" ]; then
     python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py wp "$ALGORITHM" --problem "$PROBLEM"
     deactivate
     exit 0
 fi
 
-for a in $NLIST
-do
-    echo "No. of trajectories = $a"
-    python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$a" "$ALGORITHM" --problem "$PROBLEM"
-done
+# The whole ascending N sweep runs in one process on kernels compiled once.
+NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+echo "N sweep = $NLIST_CSV"
+python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "warm:$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
+python3 ./GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py "$NLIST_CSV" "$ALGORITHM" --problem "$PROBLEM"
 
 deactivate

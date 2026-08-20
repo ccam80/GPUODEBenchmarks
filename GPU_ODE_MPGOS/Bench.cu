@@ -187,6 +187,11 @@ int main(int argc, char *argv[])
 	int NumberOfProblems = NT;
 	int BlockSize        = 32;
 
+	// `<exe> states <build_s>` writes an SD-keyed row with the build time.
+	bool StatesMode = (argc > 1 && string(argv[1]) == string("states"));
+	string StatesBuild = (StatesMode && argc > 2) ? string(argv[2])
+	                                              : string("nan");
+
 	std::thread(WatchdogMain).detach();
 
 	ListCUDADevices();
@@ -346,13 +351,17 @@ int main(int argc, char *argv[])
 	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
 	const int TimingRepeats = 20;
 
-	const std::string TimesPath = DataDir("CPP") +
-		(SOLVER == RK4 ? "MPGOS_times_fixed_classical-rk4.txt"
-		               : "MPGOS_times_adaptive_cash-karp-54.txt");
+	const std::string TimesPath = DataDir("CPP") + "MPGOS_" +
+		(StatesMode ? string("states") : string("times")) +
+		(SOLVER == RK4 ? "_fixed_classical-rk4.txt"
+		               : "_adaptive_cash-karp-54.txt");
 	std::vector<std::string> TimesNanRow;
 	{
 		std::ostringstream row;
-		row << NT << "\tnan\tnan";
+		if (StatesMode)
+			row << SD << "\tnan\tnan\t" << StatesBuild;
+		else
+			row << NT << "\tnan\tnan";
 		TimesNanRow.push_back(row.str());
 	}
 	bool TimesBreached = false;
@@ -425,22 +434,18 @@ int main(int argc, char *argv[])
 	cout << "Ensemble size:                   " << NT << endl << endl;
 
 
-	ofstream datafile;
-	if (SOLVER == RK4){
-		datafile.open ((DataDir("CPP") + "MPGOS_times_fixed_classical-rk4.txt").c_str(),ios::app);
+	ofstream datafile(TimesPath.c_str(), ios::app);
+	if (StatesMode)
+		datafile << SD << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
+		         << "\t" << StatesBuild << "\n";
+	else
 		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
-		datafile.close();
-	}else{
-
-		datafile.open ((DataDir("CPP") + "MPGOS_times_adaptive_cash-karp-54.txt").c_str(),ios::app);
-		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
-		datafile.close();
-	}
+	datafile.close();
 
 	//SaveData(Scan, NT);
 
 	// Save numerical data for 32768-trajectory run
-	if (NT == 32768) {
+	if (NT == 32768 && !StatesMode) {
 		SaveNumericalData(Scan, NT);
 		SaveData(Scan, NT);
 		// save per-trajectory step counts (total steps, rejected steps)

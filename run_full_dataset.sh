@@ -30,7 +30,7 @@
 #   ./run_full_dataset.sh --clock-tolerance 30      # widen the drift threshold (MHz)
 #
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  all (default) | comma list of performance | work-precision | numerical | overlap | plots
+#   -a, --analysis  all (default) | comma list of warm | performance | states | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
@@ -45,6 +45,8 @@ cd "$(dirname "$0")" || exit 1
 
 NMAX=16777216
 DO_PERF=true
+DO_WARM=false
+DO_STATES=true
 DO_WP=true
 DO_NE=true
 DO_OVERLAP=true
@@ -74,20 +76,22 @@ set_analyses() {
     # Charset check keeps the unquoted token split free of glob metacharacters.
     case "$1" in
         ''|*[!a-z,-]*)
-            echo "Unknown analysis '$1' (all|performance|work-precision|numerical|overlap|plots)"
+            echo "Unknown analysis '$1' (all|warm|performance|states|work-precision|numerical|overlap|plots)"
             exit 1;;
     esac
-    DO_PERF=false; DO_WP=false; DO_NE=false; DO_OVERLAP=false; DO_PLOTS=false
+    DO_PERF=false; DO_WARM=false; DO_STATES=false; DO_WP=false; DO_NE=false; DO_OVERLAP=false; DO_PLOTS=false
     local item
     for item in ${1//,/ }; do
         case "$item" in
-            all) DO_PERF=true; DO_WP=true; DO_NE=true; DO_OVERLAP=true; DO_PLOTS=true;;
+            all) DO_PERF=true; DO_STATES=true; DO_WP=true; DO_NE=true; DO_OVERLAP=true; DO_PLOTS=true;;
             performance) DO_PERF=true; DO_PLOTS=true;;
+            warm) DO_WARM=true;;
+            states) DO_STATES=true; DO_PLOTS=true;;
             work-precision) DO_WP=true; DO_PLOTS=true;;
             numerical) DO_NE=true;;
             overlap) DO_OVERLAP=true;;
             plots) DO_PLOTS=true; PLOT_ALL=true;;
-            *) echo "Unknown analysis '$item' (all|performance|work-precision|numerical|overlap|plots)"
+            *) echo "Unknown analysis '$item' (all|warm|performance|states|work-precision|numerical|overlap|plots)"
                exit 1;;
         esac
     done
@@ -285,7 +289,7 @@ echo "Algorithm   : $ALGORITHM"
 echo "Problems    : $PROBLEM"
 echo "Packages    : ${LANGUAGES[*]}"
 echo "Log dir     : $LOG_DIR"
-echo "Analyses    : performance=$DO_PERF work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
+echo "Analyses    : warm=$DO_WARM performance=$DO_PERF states=$DO_STATES work-precision=$DO_WP numerical=$DO_NE overlap=$DO_OVERLAP plots=$DO_PLOTS"
 echo "Clocks      : $CLOCK_STATUS"
 [ -n "$RESUME_FROM" ] && echo "Resume from : $RESUME_FROM"
 echo
@@ -312,6 +316,20 @@ echo
 skipping=false
 [ -n "$RESUME_FROM" ] && skipping=true
 
+# ----------------------------------------------------------------------- warm
+if $DO_WARM; then
+    for lang in "${LANGUAGES[@]}"; do
+        CLOCK_CRITICAL=false; STEP_LABEL="warm:$lang"
+        run_step "Warm caches: $lang" "warm_${lang}.log"             bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a warm -n "$NMAX" -g "$ALGORITHM" -s "$PROBLEM"
+        status=$?
+        if [ "$status" -eq 0 ]; then
+            record "warm:$lang" "OK" "-" "${status}"
+        else
+            record "warm:$lang" "FAILED" "-" "${status}"
+        fi
+    done
+fi
+
 # ---------------------------------------------------------------- performance
 if $DO_PERF; then
     for lang in "${LANGUAGES[@]}"; do
@@ -335,6 +353,21 @@ if $DO_PERF; then
             echo "  → kept results up to N=$reached; higher N left empty"
         else
             record "perf:$lang" "FAILED" "no data" "${status}"
+        fi
+        sleep "$COOLDOWN"
+    done
+fi
+
+# ----------------------------------------------------------------------- states
+if $DO_STATES; then
+    for lang in "${LANGUAGES[@]}"; do
+        CLOCK_CRITICAL=true; STEP_LABEL="states:$lang"
+        run_step "States sweep: $lang" "states_${lang}.log"             bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a states -g "$ALGORITHM"
+        status=$?
+        if [ "$status" -eq 0 ]; then
+            record "states:$lang" "OK" "-" "${status}"
+        else
+            record "states:$lang" "FAILED" "-" "${status}"
         fi
         sleep "$COOLDOWN"
     done
@@ -417,6 +450,14 @@ if $DO_PLOTS; then
         status=$?
         [ "$status" -eq 0 ] && record "plot:wp" "OK" "-" "$status" \
                             || record "plot:wp" "FAILED" "-" "$status"
+    fi
+
+    if $DO_STATES || $PLOT_ALL; then
+        run_step "States sweep plot" "plot_states.log" \
+            julia --project=. ./runner_scripts/plot/plot_states.jl
+        status=$?
+        [ "$status" -eq 0 ] && record "plot:states" "OK" "-" "$status" \
+                            || record "plot:states" "FAILED" "-" "$status"
     fi
 
     PY=./GPU_ODE_CUBIE/venv/bin/python

@@ -245,6 +245,7 @@ floating point.
 |---|---|---|---|---|
 | `lorenz` | 3 | 1 | `rho` over [0, 21], linear | non-stiff |
 | `lorenz96` | 40 | 1 | `F` over [0, 16], linear | non-stiff |
+| `lorenz96_20` | 20 | 1 | `F` over [0, 16], linear | non-stiff |
 | `pleiades` | 28 | 3 | `m1` over [0.5, 2], linear | non-stiff |
 | `pollu` | 20 | 60 | `k1` over [3.5e-2, 3.5], log | stiff |
 | `ring_modulator` | 15 | 1e-3 | `Cs` over [2e-13, 2e-9], log | stiff |
@@ -270,14 +271,76 @@ solve is, rather than excluded in advance by shrinking the parameter space. An
 earlier commit message (`db2f6ca`) describes narrowing this range to
 [0.9, 1.1]; that narrowing was intentionally reverted and the message is stale.
 
+The performance sweep runs each package's whole ascending N list inside
+one process, one `(problem, algorithm, mode)` leg at a time: kernels
+compile once per leg and only the per-size ensembles are rebuilt. MPGOS's
+trajectory count is a compile-time constant, so it rebuilds per point, one
+solver at a time.
+
 Every benchmark solve runs under `BENCH_WATCHDOG_SECONDS` (default 120): a
 run over the cap is recorded as a NaN row and the leg's remaining solves
-are abandoned, including a work-precision sweep's remaining settings.
-MPGOS kernels end themselves through a device-side cycle budget in
-`problems/stubs.cuh`; a solve that never returns is caught by a hard
-watchdog that writes the NaN rows and exits the process, and the Julia
-runner launches one process per algorithm so an exit abandons only that
-leg.
+are abandoned — the remaining work-precision settings, or the remaining
+trajectory counts of an N sweep. MPGOS kernels end themselves through a
+device-side cycle budget in `problems/stubs.cuh`; a solve that never
+returns is caught by a hard watchdog that records every row its process
+can no longer reach as NaN and exits, and the Julia runner launches one
+process per problem and algorithm so an exit abandons only that pair.
+
+The `exclusions` column lists `framework:algorithm` pairs a problem never
+attempts. `lorenz96` carries `julia:rosenbrock23_sciml|julia:kvaerno3`:
+DiffEqGPU's kernel-path implicit solvers inline a fully unrolled
+StaticArrays LU whose compile time roughly doubles with every four states
+and cannot be interrupted by the watchdog. `lorenz96_20` is the same model
+at the largest size whose compile fits the 120 s cap, the stiff-solver
+head-to-head between cubie and DiffEqGPU.
+
+### States sweep
+
+`run_benchmark -a states` times lorenz96 at 4-128 states
+(`BENCH_STATES_GRID=<comma list>` overrides) and a fixed
+131072-trajectory ensemble, in every framework and algorithm
+the problem's frameworks support, exclusions included. Rows are
+`states t_ms t_dev_ms build_s` in
+`<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
+data directory. `build_s` is the wall time from solver construction to
+the first completed solve; the sweep bypasses every compiled-kernel
+cache, making it a cold compile on every run. A size with no finite time in
+either mode cancels the pending and running larger sizes of that
+algorithm; cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset
+disables) kills any process whose first kernel has not compiled within
+the budget.
+
+Every Julia analysis runs through `runner_scripts/gpu/julia_driver.py`:
+one process per leg — (problem, algorithm) for performance and
+work-precision, (size, algorithm) for states — with up to
+`BENCH_JULIA_JOBS` (default 4) compiling concurrently while a pidfile
+lock serializes every timed GPU section; each leg's first solve carries
+its kernel compile outside the lock.
+
+### Compiled-kernel caches
+
+Cubie persists generated source and compiled kernels under `generated/`
+(both backends). JAX writes XLA binaries to a persistent compilation
+cache under `generated/jax_cache`. Myokit compiles through CuPy's NVRTC
+`RawModule`, which keeps its own on-disk kernel cache. MPGOS binaries are
+cached under `GPU_ODE_MPGOS/build_cache/<key>/` keyed by problem, solver,
+trajectory count, state count and a source hash, so an unchanged point
+skips nvcc entirely. torchdiffeq is eager and compiles nothing. DiffEqGPU
+kernels are not cached across processes: GPUCompiler's disk cache only
+serves code instances with a precompiled build id, which the
+ModelingToolkit-generated functions never have; the Julia states sweep
+parallelizes compiles across processes instead.
+
+Performance runs compile before they measure: each runner first fills
+its package's cache — MPGOS builds every (problem, solver, NT) binary
+with up to `BENCH_WARM_JOBS` (default 8) parallel nvcc processes, cubie
+compiles each leg once at a tiny ensemble in per-problem child
+processes, JAX lowers and compiles each leg at each N, Myokit compiles
+each model — then runs the timed sweep against warm caches.
+`run_benchmark -a warm` fills every cache the suite can use: timing
+solvers, every work-precision setting, and julia's `Pkg.precompile`;
+`run_full_dataset -a warm` does that for every package. States-sweep
+kernels are never warmed.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows

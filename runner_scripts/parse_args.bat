@@ -24,7 +24,9 @@ if defined PA_TARGET if not defined PA_HAVE (
 
 if /i "%ANALYSIS%"=="performance" goto check_nmax
 if /i "%ANALYSIS%"=="work-precision" goto check_nmax
-echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^)
+if /i "%ANALYSIS%"=="states" goto check_nmax
+if /i "%ANALYSIS%"=="warm" goto check_nmax
+echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^)
 exit /b 1
 
 :check_nmax

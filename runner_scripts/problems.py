@@ -8,6 +8,15 @@ PROBLEMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 DEFAULT_PROBLEM = "lorenz"
 
+# The states sweep resizes this problem; see STATES_GRID in wp_common.py.
+STATES_PROBLEM = "lorenz96"
+
+
+def states_row(n):
+    """The lorenz96 row resized to n states, with exclusions cleared."""
+    row = get_problem(STATES_PROBLEM)
+    return Problem({**row, "states": n, "exclusions": frozenset()})
+
 _INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
@@ -61,6 +70,11 @@ class Problem(dict):
     def supports(self, framework):
         return framework in self["frameworks"]
 
+    def runs(self, framework, algorithm):
+        """True unless the (framework, algorithm) pair is excluded here."""
+        return (self.supports(framework)
+                and (framework, algorithm) not in self["exclusions"])
+
 
 def load_problems():
     """Every problem in declaration order."""
@@ -73,6 +87,10 @@ def load_problems():
         for field in _FLOAT_FIELDS:
             row[field] = float(row[field])
         row["frameworks"] = tuple(row["frameworks"].split("|"))
+        # framework:algorithm pairs this problem never attempts.
+        row["exclusions"] = frozenset(
+            tuple(token.split(":", 1))
+            for token in (row.get("exclusions") or "").split("|") if token)
         problems.append(Problem(row))
     return problems
 
@@ -102,5 +120,15 @@ def resolve_problems(request, framework=None):
 
 
 if __name__ == "__main__":
-    for row in load_problems():
-        print(row["problem"])
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--states-grid":
+        from wp_common import STATES_GRID
+        print(" ".join(str(n) for n in STATES_GRID))
+    elif len(sys.argv) > 1:
+        # <framework> [request]: the resolved problem names, one per line.
+        request = sys.argv[2] if len(sys.argv) > 2 else "all"
+        for row in resolve_problems(request, sys.argv[1]):
+            print(row["problem"])
+    else:
+        for row in load_problems():
+            print(row["problem"])

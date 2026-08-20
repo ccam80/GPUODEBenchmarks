@@ -14,18 +14,95 @@ case "$ALGORITHM" in
     *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
 esac
 
-# Problem, solver and trajectory count are compile-time constants, so each
-# point is a rebuild.
-build() {
+DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
+# Built binaries are cached per source hash, machine and build constants.
+SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
+             find GPU_ODE_MPGOS/problems GPU_ODE_MPGOS/SourceCodes -type f | sort | xargs cat) \
+            | sha256sum | cut -c1-12)
+CACHE_DIR="GPU_ODE_MPGOS/build_cache/${DATASET_KEY}"
+
+# build_fresh <problem> <solver> <NT> [SD]: always run nvcc, no cache.
+build_fresh() {
 	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3"
+	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3" ${4:+SD="$4"}
 }
+
+# build <problem> <solver> <NT> [SD]: reuse the cached binary or run nvcc.
+build() {
+	local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
+	if [ -f "$exe" ]; then
+		cp "$exe" GPU_ODE_MPGOS/Bench.exe
+		echo "Cached build: $(basename "$exe")"
+		return
+	fi
+	build_fresh "$@"
+	mkdir -p "$CACHE_DIR"
+	cp GPU_ODE_MPGOS/Bench.exe "$exe"
+}
+
+# warm_build <problem> <solver> <NT> [SD]: nvcc straight into the cache.
+warm_build() {
+	local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
+	[ -f "$exe" ] && return 0
+	echo "building $(basename "$exe")"
+	nvcc -o "$exe" GPU_ODE_MPGOS/Bench.cu \
+		-IGPU_ODE_MPGOS/SourceCodes -IGPU_ODE_MPGOS \
+		-DPROBLEM_HEADER="\"problems/$1.cuh\"" -DSOLVER_CHOICE="$2" \
+		-DNT_VALUE="$3" ${4:+-DPROBLEM_SD=$4} \
+		-O3 -std=c++11 --ptxas-options=-v --gpu-architecture=native \
+		-lineinfo -maxrregcount=128 > /dev/null 2>&1 \
+		|| { rm -f "$exe"; echo "FAILED $(basename "$exe")"; }
+}
+
+# warm_nt_builds: every (problem, solver, NT) binary, in parallel.
+warm_nt_builds() {
+	local jobs=${BENCH_WARM_JOBS:-8}
+	mkdir -p "$CACHE_DIR"
+	local nts
+	nts=$(echo "$NLIST 131072" | tr ' ' '\n' | sort -un)
+	for problem in $PROBLEMS; do
+		for solver in $SOLVERS; do
+			for a in $nts; do
+				while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do wait -n; done
+				warm_build "$problem" "$solver" "$a" &
+			done
+		done
+	done
+	wait
+}
+
+if [ "$ANALYSIS" == "states" ]; then
+	STATES_N=131072
+	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
+	rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
+	for solver in $SOLVERS
+	do
+		for n in $GRID
+		do
+			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
+			T0=$(date +%s.%N)
+			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
+			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
+			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S"
+		done
+	done
+	exit 0
+fi
 
 PROBLEMS=$(python3 ./runner_scripts/mpgos_problems.py "$PROBLEM")
 if [ -z "$PROBLEMS" ]; then
 	echo "MPGOS runs none of the requested problems; skipping."
 	exit 0
 fi
+
+if [ "$ANALYSIS" == "warm" ]; then
+	warm_nt_builds
+	echo "MPGOS warm build cache populated."
+	exit 0
+fi
+
+# All binaries compile in parallel before anything is timed.
+[ "$ANALYSIS" == "performance" ] && warm_nt_builds
 
 for problem in $PROBLEMS
 do
@@ -37,11 +114,11 @@ do
 		done
 		continue
 	fi
-	for a in $NLIST
+	for solver in $SOLVERS
 	do
-		echo "No. of trajectories = $a ($problem)"
-		for solver in $SOLVERS
+		for a in $NLIST
 		do
+			echo "No. of trajectories = $a ($problem, $solver)"
 			build "$problem" "$solver" "$a"
 			./GPU_ODE_MPGOS/Bench.exe
 		done

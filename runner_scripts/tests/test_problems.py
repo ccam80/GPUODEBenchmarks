@@ -47,6 +47,55 @@ class RegistryTests(unittest.TestCase):
         names = [r.name for r in resolve_problems(DEFAULT_PROBLEM)]
         self.assertEqual([DEFAULT_PROBLEM], names)
 
+    def test_exclusions_gate_framework_algorithm_pairs(self):
+        row = get_problem("lorenz96")
+        self.assertTrue(row.runs("julia", "tsit5"))
+        self.assertFalse(row.runs("julia", "rosenbrock23_sciml"))
+        self.assertFalse(row.runs("julia", "kvaerno3"))
+        self.assertTrue(row.runs("cubie", "rosenbrock23_sciml"))
+        self.assertFalse(row.runs("nosuchframework", "tsit5"))
+        # A row without exclusions runs everything its frameworks run.
+        self.assertTrue(get_problem("lorenz96_20").runs("julia", "kvaerno3"))
+
+    def test_bench_args_accept_an_n_list(self):
+        from wp_common import N_WP, STATES_N, parse_bench_args
+        ns, analysis, _, _ = parse_bench_args(["32,8,128"], "cubie")
+        self.assertEqual([8, 32, 128], ns)
+        self.assertEqual("times", analysis)
+        ns, analysis, _, _ = parse_bench_args(["wp"], "cubie")
+        self.assertEqual("wp", analysis)
+        self.assertEqual([N_WP], ns)
+        from wp_common import STATES_GRID
+        ns, analysis, _, _ = parse_bench_args(["states"], "cubie")
+        self.assertEqual("states", analysis)
+        self.assertEqual(list(STATES_GRID), ns)
+        ns, analysis, _, _ = parse_bench_args(["warm:32,8"], "cubie")
+        self.assertEqual("warm", analysis)
+        self.assertEqual([8, 32], ns)
+        ns, analysis, _, _ = parse_bench_args(["warm"], "cubie")
+        self.assertEqual("warm", analysis)
+        self.assertEqual([], ns)
+
+    def test_states_grid_env_override(self):
+        import importlib
+        import os
+
+        import wp_common
+        os.environ["BENCH_STATES_GRID"] = "16,4,256"
+        try:
+            importlib.reload(wp_common)
+            self.assertEqual((4, 16, 256), wp_common.STATES_GRID)
+        finally:
+            del os.environ["BENCH_STATES_GRID"]
+            importlib.reload(wp_common)
+
+    def test_states_rows_resize_lorenz96(self):
+        from problems import states_row
+        row = states_row(16)
+        self.assertEqual("lorenz96", row.name)
+        self.assertEqual(16, row["states"])
+        self.assertTrue(row.runs("julia", "rosenbrock23_sciml"))
+
 
 class GridTests(unittest.TestCase):
     def setUp(self):

@@ -23,8 +23,8 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$PROBLEM" ] || { echo "-s/--problem requires a value" >&2; exit 1; }
 case "$ANALYSIS" in
-    performance|work-precision) ;;
-    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision)" >&2; exit 1;;
+    performance|work-precision|states|warm) ;;
+    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|states|warm)" >&2; exit 1;;
 esac
 case ",$NMAX," in
     *[!0-9,]*|*,,*)

@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 REM Generate benchmark data for one package and one analysis.
 REM   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-REM   -a, --analysis  performance (default) | work-precision
+REM   -a, --analysis  performance (default) | work-precision | states | warm
 REM   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 REM   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
@@ -79,8 +79,8 @@ if /i not "%MODEL%"=="ode" if /i not "%MODEL%"=="sde" (
     popd
     exit /b 1
 )
-if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" (
-    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^)
+if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" if /i not "%ANALYSIS%"=="states" if /i not "%ANALYSIS%"=="warm" (
+    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^)
     popd
     exit /b 1
 )
@@ -186,6 +186,10 @@ REM Delete one problem directory's files for the analysis being run.
 :clear_dir
 if /i "%ANALYSIS%"=="work-precision" (
     del /q "%~1\*_wp_%~2.txt" 2>nul
+) else if /i "%ANALYSIS%"=="states" (
+    del /q "%~1\*_states_%~2.txt" 2>nul
+) else if /i "%ANALYSIS%"=="warm" (
+    rem warm deletes nothing
 ) else (
     del /q "%~1\*_times_%~2.txt" 2>nul
 )

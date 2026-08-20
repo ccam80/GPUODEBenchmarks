@@ -3,7 +3,7 @@
 #
 # Usage: ./run_benchmark.sh -p <package> [-a <analysis>] [-n <nmax>] [-g <algorithm>] [-d <device>] [-m <model>]
 #   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  performance (default) | work-precision
+#   -a, --analysis  performance (default) | work-precision | states | warm
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
@@ -45,8 +45,8 @@ PACKAGE=${PACKAGE//-/_}
 
 [ -n "$PACKAGE" ] || { echo "-p/--package is required" >&2; usage 1; }
 case "$ANALYSIS" in
-    performance|work-precision) ;;
-    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision)" >&2; exit 1;;
+    performance|work-precision|states|warm) ;;
+    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|states|warm)" >&2; exit 1;;
 esac
 # -g: "all" or a comma list; charset-check before the unquoted split.
 case "$ALGORITHM" in
@@ -123,6 +123,10 @@ for ALG in $ALG_LIST; do
         for PDIR in "${PROBLEM_DIRS[@]}"; do
             if [ "$ANALYSIS" == "work-precision" ]; then
                 rm -f "${PDIR%/}"/*_wp_${ALG_GLOB}.txt
+            elif [ "$ANALYSIS" == "states" ]; then
+                rm -f "${PDIR%/}"/*_states_${ALG_GLOB}.txt
+            elif [ "$ANALYSIS" == "warm" ]; then
+                :
             else
                 rm -f "${PDIR%/}"/*_times_${ALG_GLOB}.txt
             fi

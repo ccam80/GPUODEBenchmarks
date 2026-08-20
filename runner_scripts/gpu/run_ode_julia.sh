@@ -3,26 +3,31 @@ set -e
 . "$(dirname "$0")/../parse_args.sh" "$@"
 unset LD_LIBRARY_PATH
 
-# One julia process per algorithm, so a watchdog exit only abandons that leg.
+# One julia process per (problem, algorithm) runs that pair's whole N sweep.
 ALGO_LIST=$(python3 ./runner_scripts/algorithms.py julia "$ALGORITHM")
 if [ -z "$ALGO_LIST" ]; then
     echo "Julia (DiffEqGPU kernel path) runs none of the requested algorithms; skipping."
     exit 0
 fi
 
-if [ "$ANALYSIS" == "work-precision" ]; then
-    for g in $ALGO_LIST
-    do
-        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl wp "$g" --problem "$PROBLEM"
-    done
+if [ "$ANALYSIS" == "warm" ]; then
+    # Package precompilation runs in parallel; DiffEqGPU kernels do not persist.
+    julia --project=. -e 'using Pkg; Pkg.precompile()'
+    echo "DiffEqGPU kernels recompile per process; the julia driver overlaps those compiles."
     exit 0
 fi
 
-for a in $NLIST
-do
-    echo "No. of trajectories = $a"
-    for g in $ALGO_LIST
-    do
-        julia --project=. ./GPU_ODE_Julia/bench_ode_gpu.jl $a "$g" --problem "$PROBLEM"
-    done
-done
+if [ "$ANALYSIS" == "states" ]; then
+    # Parallel compiles, serialized GPU sections.
+    python3 ./runner_scripts/gpu/julia_driver.py states "$ALGORITHM"
+    exit 0
+fi
+
+if [ "$ANALYSIS" == "work-precision" ]; then
+    python3 ./runner_scripts/gpu/julia_driver.py wp "$ALGORITHM" "$PROBLEM"
+    exit 0
+fi
+
+NLIST_CSV=$(echo $NLIST | tr ' ' ',')
+echo "N sweep = $NLIST_CSV"
+python3 ./runner_scripts/gpu/julia_driver.py performance "$NLIST_CSV" "$ALGORITHM" "$PROBLEM"

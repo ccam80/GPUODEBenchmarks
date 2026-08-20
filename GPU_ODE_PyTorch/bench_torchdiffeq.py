@@ -21,7 +21,7 @@ DATASET_KEY = dataset_key()
 
 FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
-numberOfParameters, WP_MODE, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "pytorch")
 # Timed repeats per point; min is reported.
 REPEATS = 20
@@ -106,6 +106,8 @@ def run_wp(problem, parameters):
     golden = load_golden(problem)
 
     for algorithm in ALGORITHMS:
+        if not problem.runs("pytorch", algorithm):
+            continue
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
                              DATASET_KEY, problem)
         with open(outfile, "w") as f:
@@ -136,71 +138,162 @@ def run_wp(problem, parameters):
                 f.flush()
 
 
-def run_times(problem, parameters):
-    """N-sweep timing benchmark."""
-    parameters_host = parameters.cpu().numpy()
+def run_times(problem):
+    """N-sweep timing: one leg per algorithm, sizes ascending on one solve."""
+    from wp_common import timed_min_ms
 
     for algorithm in ALGORITHMS:
+        if not problem.runs("pytorch", algorithm):
+            continue
         solve = make_solve(problem, algorithm)
-
-        def with_transfers():
-            # .cuda() is the h2d, .cpu() the d2h.
-            p = torch.from_numpy(parameters_host).cuda()
-            out = torch.vmap(solve)(p).cpu()
-            torch.cuda.synchronize()
-            return out
-
-        def device_only():
-            # Params already resident, results left on device.
-            out = torch.vmap(solve)(parameters)
-            torch.cuda.synchronize()
-            return out
-
-        from wp_common import timed_min_ms
-        best_time, _ = timed_min_ms(with_transfers, REPEATS)
-        best_time_dev = None
-        if best_time is not None:
-            best_time_dev, _ = timed_min_ms(device_only, REPEATS)
-        if best_time is None or best_time_dev is None:
-            print("WATCHDOG {0} fixed {1} N={2}: run exceeded the cap".format(
-                problem.name, algorithm, numberOfParameters))
-            best_time = float("nan") if best_time is None else best_time
-            best_time_dev = float("nan")
-        else:
-            print("{:} ODE solves ({}, {}, fixed) completed in {:.1f} ms "
-                  "({:.1f} ms without transfers)".format(
-                      numberOfParameters, problem.name, algorithm, best_time,
-                      best_time_dev))
-
         outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                 DATASET_KEY, problem)
         with open(outfile, "a+") as file:
-            file.write('{0} {1} {2}\n'.format(
-                numberOfParameters, best_time, best_time_dev))
+            for index, n in enumerate(NS):
+                parameters_host = problem.sweep(n, dtype=np.float32)
+                parameters = torch.from_numpy(parameters_host).cuda()
 
-        # The pairwise numerical cross-check reads this fixed CSV name.
-        if (numberOfParameters == 32768 and algorithm == "classical-rk4"
-                and np.isfinite(best_time)):
-            traj = torch.vmap(solve)(parameters)
-            # Extract final state values (last time point for each trajectory)
-            final_states = traj[:, -1, :].cpu().numpy()  # (trajectories, states)
-            np.savetxt(os.path.join(
-                data_dir("numerical", DATASET_KEY, problem=problem),
-                "pytorch.csv"), final_states, delimiter=',')
+                def with_transfers():
+                    # .cuda() is the h2d, .cpu() the d2h.
+                    p = torch.from_numpy(parameters_host).cuda()
+                    out = torch.vmap(solve)(p).cpu()
+                    torch.cuda.synchronize()
+                    return out
+
+                def device_only():
+                    # Params already resident, results left on device.
+                    out = torch.vmap(solve)(parameters)
+                    torch.cuda.synchronize()
+                    return out
+
+                best_time, _ = timed_min_ms(with_transfers, REPEATS)
+                best_time_dev = None
+                if best_time is not None:
+                    best_time_dev, _ = timed_min_ms(device_only, REPEATS)
+                breached = best_time is None or best_time_dev is None
+                if breached:
+                    print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
+                          "cap".format(problem.name, algorithm, n))
+                    best_time = (float("nan") if best_time is None
+                                 else best_time)
+                    best_time_dev = float("nan")
+                else:
+                    print("{:} ODE solves ({}, {}, fixed) completed in "
+                          "{:.1f} ms ({:.1f} ms without transfers)".format(
+                              n, problem.name, algorithm, best_time,
+                              best_time_dev))
+
+                file.write('{0} {1} {2}\n'.format(
+                    n, best_time, best_time_dev))
+                file.flush()
+
+                # The pairwise numerical cross-check reads this fixed CSV name.
+                if (n == 32768 and algorithm == "classical-rk4"
+                        and np.isfinite(best_time)):
+                    traj = torch.vmap(solve)(parameters)
+                    # Extract final state values (last time point for each trajectory)
+                    final_states = traj[:, -1, :].cpu().numpy()  # (trajectories, states)
+                    np.savetxt(os.path.join(
+                        data_dir("numerical", DATASET_KEY, problem=problem),
+                        "pytorch.csv"), final_states, delimiter=',')
+
+                if breached:
+                    # Larger sizes are slower, so the leg is abandoned.
+                    for rest in NS[index + 1:]:
+                        file.write('{0} nan nan\n'.format(rest))
+                    file.flush()
+                    break
+
+
+def run_states():
+    """Runtime-by-states sweep: lorenz96 resized along the requested grid at
+    one fixed ensemble size; torchdiffeq is fixed-step only."""
+    import timeit
+
+    from problems import states_row
+    from wp_common import STATES_N, states_outfile, timed_min_ms
+
+    n = STATES_N
+    grid = NS
+    for algorithm in ALGORITHMS:
+        outfile = states_outfile("PYTORCH", "Torch", "fixed", algorithm,
+                                 DATASET_KEY)
+        with open(outfile, "w") as file:
+            for index, nstates in enumerate(grid):
+                row = states_row(nstates)
+                solve = make_solve(row, algorithm)
+                parameters_host = row.sweep(n, dtype=np.float32)
+                parameters = torch.from_numpy(parameters_host).cuda()
+
+                def with_transfers():
+                    p = torch.from_numpy(parameters_host).cuda()
+                    out = torch.vmap(solve)(p).cpu()
+                    torch.cuda.synchronize()
+                    return out
+
+                def device_only():
+                    out = torch.vmap(solve)(parameters)
+                    torch.cuda.synchronize()
+                    return out
+
+                t_ms = t_dev = build_s = float("nan")
+                breached = False
+                try:
+                    started = timeit.default_timer()
+                    device_only()
+                    build_s = timeit.default_timer() - started
+                    best, _ = timed_min_ms(with_transfers, REPEATS)
+                    best_dev = None
+                    if best is not None:
+                        best_dev, _ = timed_min_ms(device_only, REPEATS)
+                    breached = best is None or best_dev is None
+                    if not breached:
+                        t_ms, t_dev = best, best_dev
+                        print("{:} ODE solves (lorenz96 states={}, {}, "
+                              "fixed) completed in {:.1f} ms ({:.1f} ms "
+                              "without transfers)".format(
+                                  n, nstates, algorithm, t_ms, t_dev))
+                except Exception as exc:
+                    print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
+                          .format(nstates, algorithm, n, exc))
+                file.write('{0} {1} {2} {3}\n'.format(
+                    nstates, t_ms, t_dev, build_s))
+                file.flush()
+                if breached:
+                    # Larger systems are slower, so the leg is abandoned.
+                    print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
+                          "run exceeded the cap".format(nstates, algorithm,
+                                                        n))
+                    for rest in grid[index + 1:]:
+                        file.write('{0} nan nan nan\n'.format(rest))
+                    file.flush()
+                    break
 
 
 # %%
+if ANALYSIS == "warm":
+    print("torchdiffeq runs eagerly; there is nothing to warm.")
+    sys.exit(0)
+
+if ANALYSIS == "states":
+    from problems import STATES_PROBLEM
+    if not any(p.name == STATES_PROBLEM for p in PROBLEMS):
+        print("torchdiffeq does not run {0}; skipping the states sweep."
+              .format(STATES_PROBLEM))
+        sys.exit(0)
+    run_states()
+    sys.exit(0)
+
 if not PROBLEMS:
     print("torchdiffeq runs none of the requested problems; skipping.")
     sys.exit(0)
 
 for _problem in PROBLEMS:
-    # Generate parameter list
-    _parameters = torch.from_numpy(
-        _problem.sweep(numberOfParameters, dtype=np.float32)).cuda()
-    if WP_MODE:
-        run_wp(_problem, _parameters)
+    if ANALYSIS == "wp":
+        # Generate parameter list
+        run_wp(_problem, torch.from_numpy(
+            _problem.sweep(NS[0], dtype=np.float32)).cuda())
     else:
-        run_times(_problem, _parameters)
+        run_times(_problem)
 
 # %%
