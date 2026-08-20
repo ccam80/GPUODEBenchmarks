@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Setup script for the JAX (Diffrax) ODE benchmarking environment.
-Linux only; see CUDA_PLATFORM.
-"""
+"""Linux-only setup script for the JAX (Diffrax) ODE benchmarking environment."""
 import os
 import sys
 import subprocess

@@ -86,8 +86,7 @@ This will:
 - Install `uv` package manager
 - Install a pinned `jax[cuda13]`, Diffrax, Equinox, and other dependencies
 
-Linux only. On Windows and macOS the script prints a skip and exits 0, since
-jax publishes no CUDA wheels for them.
+Linux only; elsewhere the script prints a skip and exits 0.
 
 To activate:
 - Linux/macOS: `source GPU_ODE_JAX/venv/bin/activate`
