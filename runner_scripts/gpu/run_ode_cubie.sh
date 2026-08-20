@@ -16,10 +16,7 @@ if [ "$ANALYSIS" == "warm" ]; then
 fi
 
 if [ "$ANALYSIS" == "states" ]; then
-    # -n (when set) is the state-count list or ceiling.
-    STATES_ARG=states
-    [ "$NMAX_RAW" != "16777216" ] && STATES_ARG="states:$NMAX_RAW"
-    python3 ./GPU_ODE_CUBIE/bench_cubie.py "$STATES_ARG" "$ALGORITHM"
+    python3 ./GPU_ODE_CUBIE/bench_cubie.py states "$ALGORITHM"
     deactivate
     exit 0
 fi

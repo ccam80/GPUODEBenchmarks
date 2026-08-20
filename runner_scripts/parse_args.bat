@@ -45,7 +45,6 @@ if not "!NMAX_CHECK!"=="x" (
     echo -n/--nmax must be a positive integer or a comma list of them, got "!NMAX!"
     exit /b 1
 )
-set "NMAX_RAW=!NMAX!"
 if "!NMAX:,=!"=="!NMAX!" goto nmax_sweep
 
 REM Comma list: run exactly these Ns; NMAX becomes the largest of them.

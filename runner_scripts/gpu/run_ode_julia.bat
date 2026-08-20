@@ -25,12 +25,8 @@ if /i "%ANALYSIS%"=="warm" (
 )
 
 if /i "%ANALYSIS%"=="states" (
-    REM Parallel compiles, serialized GPU sections; -n is the state-count list or ceiling.
-    if not "!NMAX_RAW!"=="16777216" (
-        python runner_scripts\gpu\julia_driver.py states "%ALGORITHM%" "!NMAX_RAW!"
-    ) else (
-        python runner_scripts\gpu\julia_driver.py states "%ALGORITHM%"
-    )
+    REM Parallel compiles, serialized GPU sections.
+    python runner_scripts\gpu\julia_driver.py states "%ALGORITHM%"
     if errorlevel 1 exit /b 1
     endlocal
     exit /b 0

@@ -72,11 +72,8 @@ warm_nt_builds() {
 }
 
 if [ "$ANALYSIS" == "states" ]; then
-	# -n (when set) is the state-count list or ceiling.
 	STATES_N=131072
-	GRID_TOKEN=""
-	[ "$NMAX_RAW" != "16777216" ] && GRID_TOKEN="$NMAX_RAW"
-	GRID=$(python3 ./runner_scripts/problems.py --states-grid $GRID_TOKEN)
+	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
 	rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
 	for solver in $SOLVERS
 	do

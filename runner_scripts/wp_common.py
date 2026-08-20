@@ -17,17 +17,6 @@ N_WP = 131072
 STATES_GRID = (4, 8, 16, 32, 64, 128)
 STATES_N = 131072
 
-
-def resolve_states_grid(token):
-    """State counts for the states sweep: a comma list is exact sizes, a
-    single value caps the default grid, empty is the default grid."""
-    if not token:
-        return list(STATES_GRID)
-    if "," in token:
-        return sorted(int(t) for t in token.split(","))
-    ceiling = int(token)
-    return [n for n in STATES_GRID if n <= ceiling]
-
 # Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
 TIMING_TOL = 1.0e-8
 
@@ -112,16 +101,15 @@ def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states[:N]|warm[:N,N,...] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
+    """Parse <N|N,N,...>|wp|states|warm[:N,N,...] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states[:N]|warm[:N,N,...] "
+        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...] "
                          "[algorithm|all] [--problem <name|all>]")
     if argv[0] == "wp":
         analysis, ns = "wp", [N_WP]
-    elif argv[0] == "states" or argv[0].startswith("states:"):
+    elif argv[0] == "states":
         # In states mode ns is the state-count grid; the ensemble is STATES_N.
-        _, _, token = argv[0].partition(":")
-        analysis, ns = "states", resolve_states_grid(token)
+        analysis, ns = "states", list(STATES_GRID)
     elif argv[0] == "warm" or argv[0].startswith("warm:"):
         _, _, counts = argv[0].partition(":")
         analysis = "warm"
