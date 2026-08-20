@@ -165,13 +165,15 @@ if $HAS_ALL_PACKAGES; then
 fi
 [ "${#LANGUAGES[@]}" -gt 0 ] || { echo "-p/--package requires a value"; exit 1; }
 
-# cubie always runs first.
+# cubie then cubie_mlir always run first.
 ORDERED=()
-for pkg in "${LANGUAGES[@]}"; do
-    if [ "$pkg" == "cubie" ]; then ORDERED+=("$pkg"); fi
+for lead in cubie cubie_mlir; do
+    for pkg in "${LANGUAGES[@]}"; do
+        if [ "$pkg" == "$lead" ]; then ORDERED+=("$pkg"); fi
+    done
 done
 for pkg in "${LANGUAGES[@]}"; do
-    if [ "$pkg" != "cubie" ]; then ORDERED+=("$pkg"); fi
+    if [ "$pkg" != "cubie" ] && [ "$pkg" != "cubie_mlir" ]; then ORDERED+=("$pkg"); fi
 done
 LANGUAGES=("${ORDERED[@]}")
 

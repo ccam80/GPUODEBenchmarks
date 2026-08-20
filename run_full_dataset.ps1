@@ -125,9 +125,10 @@ if ($Languages.Count -eq 0) {
     exit 1
 }
 
-# cubie always runs first.
+# cubie then cubie_mlir always run first.
 $Languages = @($Languages | Where-Object { $_ -eq 'cubie' }) +
-             @($Languages | Where-Object { $_ -ne 'cubie' })
+             @($Languages | Where-Object { $_ -eq 'cubie_mlir' }) +
+             @($Languages | Where-Object { $_ -notin @('cubie', 'cubie_mlir') })
 
 # ne/overlap take a single -p token: julia+cubie -> all, one -> that one.
 $NePackage = ''
