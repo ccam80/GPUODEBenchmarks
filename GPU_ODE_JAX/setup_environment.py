@@ -103,6 +103,29 @@ def main():
         print("Failed to install scipy")
         return 1
     
+    # A reused venv strands the previous CUDA generation's jax plugin wheels
+    # beside the new ones; the stale PJRT plugin then throws an ALREADY_EXISTS
+    # traceback on every run. Fail here with the fix instead.
+    print("Checking for stale jax-cuda plugin generations...")
+    result = subprocess.run(
+        [str(venv_python), "-c",
+         "import importlib.metadata as m;"
+         "names = sorted(d.metadata['Name'] for d in m.distributions()"
+         " if (d.metadata['Name'] or '').startswith('jax-cuda'));"
+         "print('\\n'.join(names))"],
+        capture_output=True, text=True)
+    plugins = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    generations = sorted({name.split("-")[1] for name in plugins})
+    if len(generations) > 1:
+        print("Error: jax CUDA plugin packages from multiple CUDA generations "
+              f"are installed side by side: {', '.join(plugins)}")
+        print("The stale generation's PJRT plugin raises ALREADY_EXISTS on "
+              "every run. Delete the venv and re-run this script, or remove "
+              "the stale packages with:")
+        stale = [name for name in plugins if name.split("-")[1] != generations[-1]]
+        print(f"  {venv_uv} pip uninstall -p {venv_python} {' '.join(stale)}")
+        return 1
+
     # Verify installation
     print("Verifying installation...")
     if not run_command([str(venv_python), "-c", "import jax; print('JAX version:', jax.__version__); print('JAX backend:', jax.default_backend())"]):

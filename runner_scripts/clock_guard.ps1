@@ -34,11 +34,12 @@ function Test-ClockAdmin {
 }
 
 # Apply a setting; fail when the output shows it did not take despite exit 0.
+# The output stays in $script:ClockApplyOut so a caller can report why it failed.
 function Invoke-ClockApply {
     param([string[]]$SmiArgs)
-    $out = (& nvidia-smi @SmiArgs 2>&1 | Out-String)
+    $script:ClockApplyOut = (& nvidia-smi @SmiArgs 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { return $false }
-    if ($out -match 'not supported|Insufficient Permissions|Unable to') { return $false }
+    if ($script:ClockApplyOut -match 'not supported|Insufficient Permissions|Unable to') { return $false }
     return $true
 }
 
@@ -127,7 +128,13 @@ function Lock-GpuClocks {
     # Drop an unlockable memory clock from the drift check instead of failing.
     if ($script:ClockMem) {
         if (-not (Invoke-ClockApply @('-lmc', "$($script:ClockMem),$($script:ClockMem)"))) {
-            Write-Warning "Could not lock the memory clock to $($script:ClockMem) MHz; excluded from drift checks."
+            if ($script:ClockApplyOut -match 'not supported') {
+                Write-Warning "Locked memory clocks are not supported on this GPU; the memory clock stays on the driver default and is excluded from drift checks."
+            }
+            else {
+                Write-Warning "Could not lock the memory clock to $($script:ClockMem) MHz; excluded from drift checks."
+                Write-Warning "nvidia-smi said: $($script:ClockApplyOut.Trim())"
+            }
             $script:ClockMem = ''
         }
     }
