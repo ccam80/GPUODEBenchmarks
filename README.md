@@ -284,17 +284,14 @@ head-to-head between cubie and DiffEqGPU.
 
 ### States sweep
 
-`run_benchmark -a states` times lorenz96 resized along a state-count
-grid (4-128 in powers of two) at a fixed 131072-trajectory
-ensemble, in every framework and algorithm the
-problem's frameworks support — including the pairs the performance sweep
-excludes, so the size at which each implicit stack gives out is measured
-rather than assumed. Rows are
+`run_benchmark -a states` times lorenz96 at 4-128 states (powers of two)
+and a fixed 131072-trajectory ensemble, in every framework and algorithm
+the problem's frameworks support, exclusions included. Rows are
 `states t_ms t_dev_ms build_s` in
 `<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
-data directory, where `build_s` is the wall time from solver construction
-to the first completed solve. The sweep bypasses every compiled-kernel
-cache, so `build_s` is a cold compile on every run. A size with no finite time in
+data directory. `build_s` is the wall time from solver construction to
+the first completed solve; the sweep bypasses every compiled-kernel
+cache, making it a cold compile on every run. A size with no finite time in
 either mode cancels the pending and running larger sizes of that
 algorithm; cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset
 disables) kills any process whose first kernel has not compiled within
