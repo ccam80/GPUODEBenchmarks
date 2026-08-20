@@ -103,8 +103,7 @@ class DriverHarness(object):
             mock.patch.object(julia_driver.time, "sleep", lambda _s: None),
             mock.patch.object(julia_driver, "_available_ram_gb",
                               lambda: self.free_ram_gb),
-            mock.patch.object(julia_driver, "resolve_states_grid",
-                              lambda token: list(grid)),
+            mock.patch.object(julia_driver, "STATES_GRID", tuple(grid)),
             mock.patch.object(julia_driver, "resolve_algorithms",
                               lambda request, fw: list(algorithms)),
             mock.patch.object(

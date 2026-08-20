@@ -30,7 +30,7 @@ end
 const ENTRIES = _ENTRIES
 
 # Mirrors TIMING_TOL in runner_scripts/wp_common.py and bench_ode_gpu.jl.
-const TIMING_TOL = 1.0f-8
+const TIMING_TOL = 1.0f-5
 # Trajectory count is runtime data, not a kernel specialization axis.
 const WORKLOAD_N = 4
 

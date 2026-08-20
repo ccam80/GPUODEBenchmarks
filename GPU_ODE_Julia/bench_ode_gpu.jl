@@ -64,7 +64,7 @@ const STATES_MODE = !isempty(ARGS) && startswith(ARGS[1], "states:")
 # states:<nstates>:<ensemble>, one system size per process.
 const STATES_ARGS = STATES_MODE ? parse.(Int, split(ARGS[1], ':')[2:3]) : Int[]
 # Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
-const TIMING_TOL = 1.0f-8
+const TIMING_TOL = 1.0f-5
 const N_WP = 131072
 # The N sweep runs ascending inside one process so each kernel compiles once.
 const NS = isinteractive() ? [8192] :
