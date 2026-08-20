@@ -12,9 +12,10 @@ TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
 
 N_WP = 131072
 
-# States sweep: lorenz96 resized in powers of 2, timed at a fixed ensemble
-# large enough to strain occupancy.
-STATES_GRID = (4, 8, 16, 32, 64, 128)
+# States sweep sizes; BENCH_STATES_GRID (comma list) overrides the default.
+_STATES_ENV = os.environ.get("BENCH_STATES_GRID", "")
+STATES_GRID = (tuple(sorted(int(tok) for tok in _STATES_ENV.split(",")))
+               if _STATES_ENV else (4, 8, 16, 32, 64, 128))
 STATES_N = 131072
 
 # Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.

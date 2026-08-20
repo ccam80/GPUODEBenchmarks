@@ -76,6 +76,19 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual("warm", analysis)
         self.assertEqual([], ns)
 
+    def test_states_grid_env_override(self):
+        import importlib
+        import os
+
+        import wp_common
+        os.environ["BENCH_STATES_GRID"] = "16,4,256"
+        try:
+            importlib.reload(wp_common)
+            self.assertEqual((4, 16, 256), wp_common.STATES_GRID)
+        finally:
+            del os.environ["BENCH_STATES_GRID"]
+            importlib.reload(wp_common)
+
     def test_states_rows_resize_lorenz96(self):
         from problems import states_row
         row = states_row(16)
