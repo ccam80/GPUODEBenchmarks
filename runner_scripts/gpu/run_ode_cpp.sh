@@ -21,8 +21,7 @@ SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
             | sha256sum | cut -c1-12)
 CACHE_DIR="GPU_ODE_MPGOS/build_cache/${DATASET_KEY}"
 
-# build_fresh <problem> <solver> <NT> [SD]: always run nvcc, no cache; the
-# states sweep measures the build.
+# build_fresh <problem> <solver> <NT> [SD]: always run nvcc, no cache.
 build_fresh() {
 	make clean --directory=./GPU_ODE_MPGOS/
 	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3" ${4:+SD="$4"}
@@ -99,7 +98,6 @@ if [ -z "$PROBLEMS" ]; then
 	exit 0
 fi
 
-# States-sweep binaries are never warmed: the sweep measures the build.
 if [ "$ANALYSIS" == "warm" ]; then
 	warm_nt_builds
 	echo "MPGOS warm build cache populated."

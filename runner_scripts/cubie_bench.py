@@ -267,8 +267,7 @@ def _run_times(problem, opts, system, grid):
 
 def _warm_legs(opts, problems):
     """Every (problem, mode, algorithm, setting) compile task, in a
-    deterministic order shared by the parent and its shard children.
-    States-sweep kernels are never warmed: the sweep measures the compile."""
+    deterministic order shared by the parent and its shard children."""
     from wp_common import TOLS
 
     legs = []
@@ -378,8 +377,7 @@ def _run_states(opts):
     from problems import states_row
     from wp_common import STATES_N, states_outfile, timed_min_ms
 
-    # build_s is the compile; the persistent generated/ cache would hide it,
-    # so this run's codegen and kernels go to a throwaway root.
+    # Throwaway cache root: every states compile runs cold.
     set_cache_root(tempfile.mkdtemp(prefix="cubie_states_"))
 
     n = STATES_N
