@@ -47,19 +47,11 @@
     <variable name="x30" units="dimensionless" initial_value="8"/>
     <variable name="x31" units="dimensionless" initial_value="8"/>
     <variable name="x32" units="dimensionless" initial_value="8"/>
-    <variable name="x33" units="dimensionless" initial_value="8"/>
-    <variable name="x34" units="dimensionless" initial_value="8"/>
-    <variable name="x35" units="dimensionless" initial_value="8"/>
-    <variable name="x36" units="dimensionless" initial_value="8"/>
-    <variable name="x37" units="dimensionless" initial_value="8"/>
-    <variable name="x38" units="dimensionless" initial_value="8"/>
-    <variable name="x39" units="dimensionless" initial_value="8"/>
-    <variable name="x40" units="dimensionless" initial_value="8"/>
     <variable name="F" units="dimensionless" initial_value="8"/>
 
     <math xmlns="http://www.w3.org/1998/Math/MathML">
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x1</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x2</ci><ci>x39</ci></apply><ci>x40</ci></apply><ci>x1</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x2</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x3</ci><ci>x40</ci></apply><ci>x1</ci></apply><ci>x2</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x1</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x2</ci><ci>x31</ci></apply><ci>x32</ci></apply><ci>x1</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x2</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x3</ci><ci>x32</ci></apply><ci>x1</ci></apply><ci>x2</ci></apply><ci>F</ci></apply></apply>
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x3</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x4</ci><ci>x1</ci></apply><ci>x2</ci></apply><ci>x3</ci></apply><ci>F</ci></apply></apply>
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x4</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x5</ci><ci>x2</ci></apply><ci>x3</ci></apply><ci>x4</ci></apply><ci>F</ci></apply></apply>
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x5</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x6</ci><ci>x3</ci></apply><ci>x4</ci></apply><ci>x5</ci></apply><ci>F</ci></apply></apply>
@@ -89,15 +81,7 @@
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x29</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x30</ci><ci>x27</ci></apply><ci>x28</ci></apply><ci>x29</ci></apply><ci>F</ci></apply></apply>
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x30</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x31</ci><ci>x28</ci></apply><ci>x29</ci></apply><ci>x30</ci></apply><ci>F</ci></apply></apply>
       <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x31</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x32</ci><ci>x29</ci></apply><ci>x30</ci></apply><ci>x31</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x32</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x33</ci><ci>x30</ci></apply><ci>x31</ci></apply><ci>x32</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x33</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x34</ci><ci>x31</ci></apply><ci>x32</ci></apply><ci>x33</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x34</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x35</ci><ci>x32</ci></apply><ci>x33</ci></apply><ci>x34</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x35</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x36</ci><ci>x33</ci></apply><ci>x34</ci></apply><ci>x35</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x36</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x37</ci><ci>x34</ci></apply><ci>x35</ci></apply><ci>x36</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x37</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x38</ci><ci>x35</ci></apply><ci>x36</ci></apply><ci>x37</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x38</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x39</ci><ci>x36</ci></apply><ci>x37</ci></apply><ci>x38</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x39</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x40</ci><ci>x37</ci></apply><ci>x38</ci></apply><ci>x39</ci></apply><ci>F</ci></apply></apply>
-      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x40</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x1</ci><ci>x38</ci></apply><ci>x39</ci></apply><ci>x40</ci></apply><ci>F</ci></apply></apply>
+      <apply><eq/><apply><diff/><bvar><ci>time</ci></bvar><ci>x32</ci></apply><apply><plus/><apply><minus/><apply><times/><apply><minus/><ci>x1</ci><ci>x30</ci></apply><ci>x31</ci></apply><ci>x32</ci></apply><ci>F</ci></apply></apply>
     </math>
   </component>
 

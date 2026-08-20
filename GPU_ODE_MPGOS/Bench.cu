@@ -218,6 +218,13 @@ int main(int argc, char *argv[])
 
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
+	// Adaptive N-sweep tolerance; mirrors TIMING_TOL in runner_scripts/wp_common.py.
+	if (SOLVER != RK4)
+		for (int c = 0; c < SD; c++)
+		{
+			Scan.SolverOption(RelativeTolerance, c, 1.0e-5);
+			Scan.SolverOption(AbsoluteTolerance, c, 1.0e-5);
+		}
 
 	// Device-side run budget, 1.25 over the host cap; see problems/stubs.cuh.
 	int ClockKHz = 0;

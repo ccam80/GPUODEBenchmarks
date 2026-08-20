@@ -11,9 +11,9 @@ if [ -z "$ALGO_LIST" ]; then
 fi
 
 if [ "$ANALYSIS" == "warm" ]; then
-    # Package precompilation runs in parallel; DiffEqGPU kernels do not persist.
+    # Builds GPU_ODE_JuliaKernels; GPU kernels still recompile per process.
     julia --project=. -e 'using Pkg; Pkg.precompile()'
-    echo "DiffEqGPU kernels recompile per process; the julia driver overlaps those compiles."
+    echo "GPU_ODE_JuliaKernels precompiled; the julia driver overlaps the per-process kernel compiles."
     exit 0
 fi
 

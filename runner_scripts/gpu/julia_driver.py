@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -31,6 +31,43 @@ def _lock_env():
     return lock_path
 
 
+def _available_ram_gb():
+    """Free physical memory in GB, 0.0 when unknown."""
+    if os.name == "nt":
+        import ctypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_uint32),
+                        ("dwMemoryLoad", ctypes.c_uint32),
+                        ("ullTotalPhys", ctypes.c_uint64),
+                        ("ullAvailPhys", ctypes.c_uint64),
+                        ("ullTotalPageFile", ctypes.c_uint64),
+                        ("ullAvailPageFile", ctypes.c_uint64),
+                        ("ullTotalVirtual", ctypes.c_uint64),
+                        ("ullAvailVirtual", ctypes.c_uint64),
+                        ("ullAvailExtendedVirtual", ctypes.c_uint64)]
+
+        stat = MemoryStatusEx()
+        stat.dwLength = ctypes.sizeof(stat)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            return stat.ullAvailPhys / 2 ** 30
+        return 0.0
+    try:
+        return (os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+                / 2 ** 30)
+    except (ValueError, OSError, AttributeError):
+        return 0.0
+
+
+def _ram_allows_spawn(running_count):
+    """One kernel compile can take tens of GB; hold spawns while RAM is low."""
+    if running_count == 0:
+        return True
+    floor = float(os.environ.get("BENCH_JULIA_MIN_FREE_GB", "10"))
+    free = _available_ram_gb()
+    return free == 0.0 or free >= floor
+
+
 def _run_pool(jobs_args, jobs):
     """Run each command with the GPU lock exported, at most `jobs` at once;
     jobs_args maps a label to its julia argv tail."""
@@ -38,7 +75,8 @@ def _run_pool(jobs_args, jobs):
     pending = list(jobs_args.items())
     running = {}
     while pending or running:
-        while pending and len(running) < jobs:
+        while (pending and len(running) < jobs
+               and _ram_allows_spawn(len(running))):
             label, args = pending.pop(0)
             print(f"spawning {label}")
             env = dict(os.environ, BENCH_GPU_LOCK=lock_path)
@@ -63,7 +101,7 @@ def _julia_legs(request, problem_request):
     legs = []
     for problem in problems:
         for algorithm in algorithms:
-            if not problem.runs("julia", algorithm):
+            if not problem.supports("julia"):
                 continue
             if not any(algorithm in supported
                        for supported in modes.values()):
@@ -173,7 +211,8 @@ def run_states(argv):
                 print(f"CANCELLED states={size} {algorithm}: {reason}")
 
     while pending or running:
-        while pending and len(running) < jobs:
+        while (pending and len(running) < jobs
+               and _ram_allows_spawn(len(running))):
             nstates, algorithm = pending.pop(0)
             print(f"spawning lorenz96 states={nstates} {algorithm} "
                   f"(N={ensemble})")
@@ -188,7 +227,11 @@ def run_states(argv):
             running[proc] = (nstates, algorithm, time.monotonic(), marker)
         time.sleep(2)
         for proc in list(running):
-            nstates, algorithm, started, marker = running[proc]
+            state = running.get(proc)
+            if state is None:
+                # cancel_larger removed it while this snapshot was polled.
+                continue
+            nstates, algorithm, started, marker = state
             code = proc.poll()
             if code is not None:
                 del running[proc]
@@ -210,9 +253,14 @@ def run_states(argv):
         rows = {}
         with open(path) as handle:
             for line in handle:
+                # Keep only complete `states t_ms t_dev_ms build_s` rows.
                 fields = line.split()
-                if fields:
+                if len(fields) < 4:
+                    continue
+                try:
                     rows[int(fields[0])] = line.rstrip("\n")
+                except ValueError:
+                    continue
         with open(path, "w") as handle:
             for nstates in grid:
                 handle.write(rows.get(nstates,

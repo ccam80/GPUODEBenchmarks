@@ -13,9 +13,9 @@ STATES_PROBLEM = "lorenz96"
 
 
 def states_row(n):
-    """The lorenz96 row resized to n states, with exclusions cleared."""
+    """The lorenz96 row resized to n states."""
     row = get_problem(STATES_PROBLEM)
-    return Problem({**row, "states": n, "exclusions": frozenset()})
+    return Problem({**row, "states": n})
 
 _INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
@@ -70,11 +70,6 @@ class Problem(dict):
     def supports(self, framework):
         return framework in self["frameworks"]
 
-    def runs(self, framework, algorithm):
-        """True unless the (framework, algorithm) pair is excluded here."""
-        return (self.supports(framework)
-                and (framework, algorithm) not in self["exclusions"])
-
 
 def load_problems():
     """Every problem in declaration order."""
@@ -87,10 +82,6 @@ def load_problems():
         for field in _FLOAT_FIELDS:
             row[field] = float(row[field])
         row["frameworks"] = tuple(row["frameworks"].split("|"))
-        # framework:algorithm pairs this problem never attempts.
-        row["exclusions"] = frozenset(
-            tuple(token.split(":", 1))
-            for token in (row.get("exclusions") or "").split("|") if token)
         problems.append(Problem(row))
     return problems
 

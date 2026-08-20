@@ -19,7 +19,7 @@ STATES_GRID = (tuple(sorted(int(tok) for tok in _STATES_ENV.split(",")))
 STATES_N = 131072
 
 # Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
-TIMING_TOL = 1.0e-8
+TIMING_TOL = 1.0e-5
 
 # Per-run wall-clock ceiling in seconds; mirrored by the Julia and MPGOS writers.
 WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))

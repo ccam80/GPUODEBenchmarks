@@ -71,7 +71,7 @@ end
 # states, mapped through each compiled system's golden index.
 using Random
 rng = MersenneTwister(7)
-for (name, nstates, p) in (("lorenz96", 40, 8.0), ("pleiades", 28, 1.0),
+for (name, nstates, p) in (("lorenz96", 32, 8.0), ("pleiades", 28, 1.0),
     ("pollu", 20, 0.35))
     system64 = reference_system(name)
     system32 = julia_system(name)

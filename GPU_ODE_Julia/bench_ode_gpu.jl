@@ -7,6 +7,7 @@ using CUDA
 using DiffEqGPU, OrdinaryDiffEq, StaticArrays
 using CSV, DataFrames, DelimitedFiles
 using FileWatching.Pidfile: mkpidlock
+using GPU_ODE_JuliaKernels
 
 # CLI: <N|N,N,...>|wp|states:<nstates>:<N> [algorithm|all] [--problem <name|all>].
 @show ARGS
@@ -18,7 +19,10 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "problems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
+# Precompiled entries take precedence over runtime-built ones.
+merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
 const REPO_ROOT = dirname(@__DIR__)
 
@@ -60,21 +64,13 @@ const STATES_MODE = !isempty(ARGS) && startswith(ARGS[1], "states:")
 # states:<nstates>:<ensemble>, one system size per process.
 const STATES_ARGS = STATES_MODE ? parse.(Int, split(ARGS[1], ':')[2:3]) : Int[]
 # Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
-const TIMING_TOL = 1.0f-8
+const TIMING_TOL = 1.0f-5
 const N_WP = 131072
 # The N sweep runs ascending inside one process so each kernel compiles once.
 const NS = isinteractive() ? [8192] :
            (WP_MODE ? [N_WP] :
             (STATES_MODE ? [STATES_ARGS[2]] :
              sort(parse.(Int64, split(ARGS[1], ',')))))
-
-"DiffEqGPU kernel solver for an algorithm name; autodiff off matches the overlap suite."
-function gpu_solver(algorithm)
-    algorithm == "tsit5" && return GPUTsit5()
-    algorithm == "rosenbrock23_sciml" && return GPURosenbrock23(autodiff = Val(false))
-    algorithm == "kvaerno3" && return GPUKvaerno3(autodiff = Val(false))
-    error("no DiffEqGPU kernel solver for '$(algorithm)'")
-end
 
 "Modes the algorithm runs under this framework, fixed first."
 algorithm_modes(algorithm) = [mode
@@ -91,31 +87,6 @@ function ensemble_error(system, us, golden)
         m[i, :] .= Float64.(final[i][system.golden_index])
     end
     return sqrt(sum(abs2, m .- golden) / length(m))
-end
-
-"The per-problem pieces every sweep size shares."
-build_prob(problem) = build_prob_parts(julia_system(problem), problem)
-
-function build_prob_parts(system, problem)
-    duration = Float32(problem["duration"])
-    f = system.mass_matrix === nothing ?
-        ODEFunction{false}(system.rhs; jac = system.jac,
-            tgrad = system.tgrad) :
-        ODEFunction{false}(system.rhs; jac = system.jac,
-            tgrad = system.tgrad, mass_matrix = system.mass_matrix)
-    prob = ODEProblem{false}(f, system.u0, (0.0f0, duration),
-        @SArray [Float32(problem["sweep_max"])])
-    return system, prob, duration
-end
-
-"Host and device ensembles for one sweep size; data only, no new kernels."
-function build_ensemble(system, prob, problem, n)
-    grid = Float32.(collect(problem_sweep(problem, n)))
-    probs_host = map(1:n) do i
-        DiffEqGPU.make_prob_compatible(remake(prob,
-            u0 = system.u0_for(grid[i]), p = @SVector [grid[i]]))
-    end
-    return probs_host, cu(probs_host)
 end
 
 "An algorithm that cannot run this system is a NaN row, not an aborted run."
@@ -195,7 +166,7 @@ function run_wp(problem)
     dt0 = Float32(problem_timing_dt(problem))
 
     for algorithm in ALGORITHMS
-        problem_runs(problem, "julia", algorithm) || continue
+        problem_supports(problem, "julia") || continue
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
 
@@ -344,6 +315,7 @@ end
 # One system size per process; the driver enforces the compile budget and
 # backfills rows for processes that never wrote them.
 function run_states(nstates, n)
+    # Runtime entry at every size, so build_s is a cold compile.
     entry = _lorenz96_entry(nstates)
     row = copy(get_problem("lorenz96"))
     row["states"] = nstates
@@ -424,7 +396,7 @@ end
 
 function run_times(problem)
     legs = [(algorithm, mode) for algorithm in ALGORITHMS
-            if problem_runs(problem, "julia", algorithm)
+            if problem_supports(problem, "julia")
             for mode in algorithm_modes(algorithm)]
     if isempty(legs)
         println("Julia runs none of the requested algorithms on ",

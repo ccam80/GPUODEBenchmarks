@@ -1,11 +1,11 @@
 #ifndef PROBLEM_LORENZ96_CUH
 #define PROBLEM_LORENZ96_CUH
 
-// Lorenz 96: cyclic 40-state coupling, the forcing F swept across the ensemble.
+// Lorenz 96: cyclic coupling over PROBLEM_SD states, the forcing F swept across the ensemble.
 #define PROBLEM_NAME "lorenz96"
 // Overridable so the states sweep can rebuild at other sizes.
 #ifndef PROBLEM_SD
-#define PROBLEM_SD 40
+#define PROBLEM_SD 32
 #endif
 #define PROBLEM_NCP 1
 #define PROBLEM_DURATION 1.0

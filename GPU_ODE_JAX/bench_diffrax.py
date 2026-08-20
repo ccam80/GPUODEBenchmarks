@@ -225,7 +225,7 @@ def run_wp(problem, parameterList):
                     breached = True
 
     for algorithm in ALGORITHMS:
-        if not problem.runs("jax", algorithm):
+        if not problem.supports("jax"):
             continue
         if algorithm in FIXED_ALGORITHMS:
             # max_steps covers the finest euler dt (2^17 steps).
@@ -244,7 +244,7 @@ def run_wp(problem, parameterList):
 def run_times(problem):
     """N-sweep: each (algorithm, mode) leg walks the sizes ascending on one jitted ensemble."""
     for algorithm in ALGORITHMS:
-        if not problem.runs("jax", algorithm):
+        if not problem.supports("jax"):
             continue
         for mode in ("fixed", "adaptive"):
             supported = (FIXED_ALGORITHMS if mode == "fixed"
@@ -358,7 +358,7 @@ def run_warm():
 
     for problem in PROBLEMS:
         for algorithm in ALGORITHMS:
-            if not problem.runs("jax", algorithm):
+            if not problem.supports("jax"):
                 continue
             if algorithm in FIXED_ALGORITHMS:
                 for n in counts:

@@ -335,7 +335,7 @@ const NAND_U0 = [5.0, 5.0, NAND_VBB, NAND_VBB, 5.0, 3.62385, 5.0, NAND_VBB,
 const REFERENCE_SYSTEMS = Dict{String, Any}(
     "lorenz" => (rhs = lorenz_reference, u0 = [1.0, 0.0, 0.0],
         mass_matrix = nothing),
-    "lorenz96" => (rhs = lorenz96_reference, u0 = lorenz96_u0(40),
+    "lorenz96" => (rhs = lorenz96_reference, u0 = lorenz96_u0(32),
         mass_matrix = nothing),
     "lorenz96_20" => (rhs = lorenz96_reference, u0 = lorenz96_u0(20),
         mass_matrix = nothing),
