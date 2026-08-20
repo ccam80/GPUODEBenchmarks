@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 
-"""Detect the installed CUDA major version for the setup scripts.
-
-Every suite pins its wheels against a CUDA major (cubie's ``cuda13`` extra,
-torch's ``cu130`` index, CuPy's ``cupy-cuda13x``), so they all need the same
-answer from the same probes.
-"""
+"""Detect the installed CUDA major version for the setup scripts."""
 
 import re
 import subprocess

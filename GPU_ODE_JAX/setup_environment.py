@@ -2,9 +2,6 @@
 """
 Cross-platform setup script for JAX (Diffrax) ODE benchmarking environment.
 Works on Linux, Windows, and macOS.
-
-The whole jax/diffrax stack is pinned so environments built on different dates
-resolve to the same solver code and the datasets stay comparable.
 """
 import os
 import sys
@@ -15,14 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
 from cuda_toolkit import detect_cuda_major
 
-# Pinned versions; revisit deliberately, not incidentally.
 JAX_VERSION = "0.11.1"
 DIFFRAX_VERSION = "0.7.2"
 EQUINOX_VERSION = "0.13.8"
 
-# jax's CUDA plugins ship manylinux wheels only, so the cuda extras exist on
-# Linux alone. bench_diffrax.py aborts on the CPU backend rather than record
-# CPU timings as GPU results.
+# jax's CUDA plugins are manylinux-only, so the cuda extras work here alone.
 CUDA_PLATFORM = "Linux"
 
 
@@ -46,7 +40,7 @@ def run_command(cmd, shell=False, check=True, cwd=None):
 
 
 def jax_requirement():
-    """Return the pinned jax requirement, with a CUDA extra where one exists."""
+    """Return the jax requirement, with a CUDA extra where one exists."""
     if platform.system() != CUDA_PLATFORM:
         print(f"{platform.system()} has no CUDA jaxlib wheels; installing the "
               f"CPU build. Run the JAX benchmark on Linux or WSL2 - it aborts "
@@ -114,8 +108,7 @@ def main():
     else:
         venv_uv = venv_path / "bin" / "uv"
 
-    # One resolve for the whole pinned stack, so diffrax cannot quietly pull a
-    # different jax in after the fact.
+    # One resolve for the whole stack, so diffrax cannot pull a different jax.
     print(f"Installing {jax_spec}, diffrax {DIFFRAX_VERSION}, "
           f"equinox {EQUINOX_VERSION}...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),

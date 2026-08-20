@@ -10,8 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
 from cuda_toolkit import detect_cuda_major
 
-# CuPy's wheel name carries the CUDA major, so the pin cannot live in
-# requirements.txt alongside the myokit one.
+# CuPy's wheel name carries the CUDA major, so it is pinned here rather than
+# in requirements.txt.
 CUPY_VERSION = "14.2.0"
 
 
@@ -22,7 +22,7 @@ def run(command):
 
 
 def myokit_version(requirements):
-    """Read the myokit pin so the post-install check cannot drift from it."""
+    """Return the pinned myokit version from a requirements file."""
     match = re.search(
         r"^myokit==(\S+)$",
         requirements.read_text(),

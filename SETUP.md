@@ -85,7 +85,7 @@ This will:
 - Create a Python virtual environment in `GPU_ODE_JAX/venv`
 - Install `uv` package manager
 - Install a pinned JAX with the CUDA extra matching the toolchain on `PATH`
-  (`jax[cuda12]` or `jax[cuda13]`; Linux only, see below)
+  (`jax[cuda12]` or `jax[cuda13]`, Linux only)
 - Install pinned Diffrax, Equinox, and other dependencies
 
 To activate:
@@ -104,8 +104,8 @@ This will:
 - Install `uv` package manager
 - Install a pinned PyTorch from the CUDA wheel index matching the toolchain on
   `PATH` (`cu126` or `cu130`)
-- Install the custom torchdiffeq fork, pinned to a commit, and check its vmap
-  path against that PyTorch before declaring the environment ready
+- Install the custom torchdiffeq fork at a pinned commit, and fail if a
+  `torch.vmap` solve through it does not work
 
 To activate:
 - Linux/macOS: `source GPU_ODE_PyTorch/venv/bin/activate`
@@ -178,8 +178,8 @@ available on `PATH`.
 
 ### Pinned versions
 
-These are fixed so datasets built on different machines and dates are
-comparable. Bump them deliberately, in `GPU_ODE_*/setup_environment.py`:
+Change these in `GPU_ODE_*/setup_environment.py`. Datasets are only
+comparable across machines that share them.
 
 | Package | Pin |
 | --- | --- |
@@ -188,7 +188,7 @@ comparable. Bump them deliberately, in `GPU_ODE_*/setup_environment.py`:
 | jax / jaxlib | 0.11.1 |
 | diffrax | 0.7.2 |
 | equinox | 0.13.8 |
-| myokit | 1.39.2 |
+| myokit | 1.39.2 (`GPU_ODE_MYOKIT_CUDA/requirements.txt`) |
 | cupy | 14.2.0 (`cupy-cuda12x`/`cupy-cuda13x`) |
 
 ### Python Packages

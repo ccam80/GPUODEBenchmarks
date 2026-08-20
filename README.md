@@ -600,14 +600,13 @@ JAX ones.
 ```
 `torchdiffeq` does not fully support vectorized maps with ODE solvers.
 To circumvent this, we extended the functionality by rewriting some
-library parts, so the setup script installs the fork rather than the
-release, pinned to a commit:
+library parts, so the setup script installs the fork at a pinned commit:
 ```bash
     pip install git+https://github.com/\
     utkarsh530/torchdiffeq.git@4f4524f719a619c9bd65b722e5f7bf699ff75f62
 ```
-That fork was last updated against torch 2.0, so the setup script runs a
-`torch.vmap` solve through it and refuses the environment if it fails.
+The setup script runs a `torch.vmap` solve through the fork and fails if
+it does not work.
 
 Then run the benchmarks by:
 

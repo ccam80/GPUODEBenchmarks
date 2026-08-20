@@ -2,9 +2,6 @@
 """
 Cross-platform setup script for PyTorch (torchdiffeq) ODE benchmarking environment.
 Works on Linux, Windows, and macOS.
-
-torch is pinned to one version so datasets built on different machines are
-comparable; only the CUDA wheel index varies with the toolchain on PATH.
 """
 import os
 import re
@@ -17,25 +14,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
 from cuda_toolkit import detect_cuda_major
 
-# Pinned torch. 2.13.0 publishes cp310-cp314 wheels on the cu126 and cu130
-# indexes for both Windows and Linux; revisit deliberately, not incidentally.
 TORCH_VERSION = "2.13.0"
 
-# CUDA major -> download.pytorch.org index. The minor is the oldest that
-# carries TORCH_VERSION, so any driver in that major series runs it.
+# CUDA major -> download.pytorch.org index carrying TORCH_VERSION.
 TORCH_CUDA_INDEX = {12: "cu126", 13: "cu130"}
 
-# Newest CPython minor with TORCH_VERSION wheels for every supported index.
+# Newest CPython minor with TORCH_VERSION wheels on every index above.
 MAX_TORCH_MINOR = 14
 
-# The vmap-capable fork, pinned to the head of its u/vmap branch.
+# The vmap-capable fork, at the head of its u/vmap branch.
 TORCHDIFFEQ_URL = (
     "git+https://github.com/utkarsh530/torchdiffeq.git"
     "@4f4524f719a619c9bd65b722e5f7bf699ff75f62"
 )
 
-# Exercises exactly what bench_torchdiffeq.py depends on: the private solver
-# internals it subclasses, and a fixed-step odeint under torch.vmap on CUDA.
+# The solver internals bench_torchdiffeq.py subclasses, and a fixed-step
+# odeint under torch.vmap on CUDA.
 VMAP_CHECK = """
 import torch
 from torchdiffeq import odeint
@@ -195,9 +189,6 @@ def main():
     else:
         venv_uv = venv_path / "bin" / "uv"
 
-    # torchvision and torchaudio are not imported by the benchmark, and
-    # torchaudio stopped publishing wheels before this torch, so neither is
-    # installed: pulling them in would drag torch back to an older release.
     print(f"Installing torch {TORCH_VERSION} with CUDA support...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         f"torch=={TORCH_VERSION}", "--index-url", index_url]):
@@ -224,12 +215,10 @@ def main():
     if not run_command([str(venv_python), "-c", "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"]):
         print("Warning: PyTorch verification failed")
 
-    # The fork was last updated against torch 1.13/2.0, so the vmap path it
-    # patches is checked against the pinned torch rather than assumed.
     print("Checking the torchdiffeq fork against this torch...")
     if not run_command([str(venv_python), "-c", VMAP_CHECK]):
         print(f"Error: the torchdiffeq fork does not work under torch "
-              f"{TORCH_VERSION}; the pytorch benchmark would produce nothing.")
+              f"{TORCH_VERSION}.")
         return 1
 
     print("\nPyTorch/torchdiffeq environment setup complete!")
