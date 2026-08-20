@@ -596,18 +596,19 @@ The JIT ordering JAX matters and sometimes can enhance performance if done corre
 Benchmarking PyTorch-based ODE solvers is a similar process compared to
 JAX ones.
 ```bash
-    $ conda env create -f environment.yml
-    $ conda activate venv_torch
+    $ python3 GPU_ODE_PyTorch/setup_environment.py
 ```
 `torchdiffeq` does not fully support vectorized maps with ODE solvers.
 To circumvent this, we extended the functionality by rewriting some
-library parts. To download it:
+library parts, so the setup script installs the fork rather than the
+release, pinned to a commit:
 ```bash
-    (venv_torch)$ pip uninstall torchdiffeq
-    (venv_torch)$ pip uninstall torchdiffeq
-    (venv_torch)$ pip install git+https://github.com/\
-    utkarsh530/torchdiffeq.git@u/vmap
+    pip install git+https://github.com/\
+    utkarsh530/torchdiffeq.git@4f4524f719a619c9bd65b722e5f7bf699ff75f62
 ```
+That fork was last updated against torch 2.0, so the setup script runs a
+`torch.vmap` solve through it and refuses the environment if it fails.
+
 Then run the benchmarks by:
 
 **On Linux/macOS:**

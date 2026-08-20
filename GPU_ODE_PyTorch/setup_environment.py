@@ -3,10 +3,8 @@
 Cross-platform setup script for PyTorch (torchdiffeq) ODE benchmarking environment.
 Works on Linux, Windows, and macOS.
 
-PyTorch publishes no wheels for the newest CPython releases, so this venv is
-built with the newest *supported* interpreter found on the system rather than
-whichever one happens to be running this script (the other suites here are
-routinely set up with a newer Python than torch supports).
+torch is pinned to one version so datasets built on different machines are
+comparable; only the CUDA wheel index varies with the toolchain on PATH.
 """
 import os
 import re
@@ -16,9 +14,55 @@ import subprocess
 import platform
 from pathlib import Path
 
-# Newest CPython minor with cu121 torch wheels on download.pytorch.org for
-# this platform. Bump as upstream publishes new ABI tags.
-MAX_TORCH_MINOR = 12 if platform.system() == "Windows" else 13
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner_scripts"))
+from cuda_toolkit import detect_cuda_major
+
+# Pinned torch. 2.13.0 publishes cp310-cp314 wheels on the cu126 and cu130
+# indexes for both Windows and Linux; revisit deliberately, not incidentally.
+TORCH_VERSION = "2.13.0"
+
+# CUDA major -> download.pytorch.org index. The minor is the oldest that
+# carries TORCH_VERSION, so any driver in that major series runs it.
+TORCH_CUDA_INDEX = {12: "cu126", 13: "cu130"}
+
+# Newest CPython minor with TORCH_VERSION wheels for every supported index.
+MAX_TORCH_MINOR = 14
+
+# The vmap-capable fork, pinned to the head of its u/vmap branch.
+TORCHDIFFEQ_URL = (
+    "git+https://github.com/utkarsh530/torchdiffeq.git"
+    "@4f4524f719a619c9bd65b722e5f7bf699ff75f62"
+)
+
+# Exercises exactly what bench_torchdiffeq.py depends on: the private solver
+# internals it subclasses, and a fixed-step odeint under torch.vmap on CUDA.
+VMAP_CHECK = """
+import torch
+from torchdiffeq import odeint
+from torchdiffeq._impl.odeint import SOLVERS
+from torchdiffeq._impl.solvers import FixedGridODESolver
+from torchdiffeq._impl.misc import Perturb
+
+assert torch.cuda.is_available(), 'no CUDA device visible to torch'
+assert 'rk4' in SOLVERS and issubclass(SOLVERS['rk4'], FixedGridODESolver)
+assert Perturb.NONE is not None
+
+t = torch.linspace(0.0, 1.0, 2).cuda()
+u0 = torch.tensor([1.0, 0.0], device='cuda')
+
+
+def solve(p):
+    with torch.no_grad():
+        return odeint(lambda _t, u: torch.stack((-p * u[0], p * u[0])),
+                      u0, t, method='rk4', options=dict(step_size=0.01))
+
+
+out = torch.vmap(solve)(torch.linspace(0.5, 1.5, 8).cuda())
+torch.cuda.synchronize()
+assert out.shape == (8, 2, 2), out.shape
+assert torch.isfinite(out).all()
+print('torchdiffeq vmap check passed on torch', torch.__version__)
+"""
 
 
 def run_command(cmd, shell=False, check=True, cwd=None):
@@ -64,7 +108,7 @@ def find_torch_python():
     if sys.version_info[1] <= MAX_TORCH_MINOR:
         return sys.executable
 
-    print(f"Python 3.{sys.version_info[1]} has no torch wheels "
+    print(f"Python 3.{sys.version_info[1]} has no torch {TORCH_VERSION} wheels "
           f"(torch supports up to 3.{MAX_TORCH_MINOR}); looking for another interpreter...")
     for minor in range(MAX_TORCH_MINOR, 8, -1):
         for name in (f"python3.{minor}", f"python3.{minor}.exe"):
@@ -80,11 +124,20 @@ def main():
 
     print("Setting up PyTorch/torchdiffeq environment...")
 
+    try:
+        cuda_major = detect_cuda_major()
+    except RuntimeError as error:
+        print(f"Error: {error}")
+        return 1
+    index_url = "https://download.pytorch.org/whl/{0}".format(
+        TORCH_CUDA_INDEX[cuda_major])
+    print(f"Detected CUDA {cuda_major}; using {index_url}")
+
     # Check if a torch-compatible Python is available
     python = find_torch_python()
     if python is None:
         print(f"Error: no CPython <= 3.{MAX_TORCH_MINOR} found on PATH, and torch "
-              f"publishes no wheels for 3.{sys.version_info[1]}.")
+              f"{TORCH_VERSION} publishes no wheels for 3.{sys.version_info[1]}.")
         print(f"Install one (e.g. `apt install python3.{MAX_TORCH_MINOR}` or "
               f"`uv python install 3.{MAX_TORCH_MINOR}`) and re-run this script.")
         return 1
@@ -114,7 +167,7 @@ def main():
         if not run_command([python, "-m", "venv", str(venv_path)]):
             print("Failed to create virtual environment")
             return 1
-    
+
     # Determine the correct paths for the virtual environment
     is_windows = platform.system() == "Windows"
     if is_windows:
@@ -123,61 +176,69 @@ def main():
     else:
         venv_python = venv_path / "bin" / "python"
         venv_pip = venv_path / "bin" / "pip"
-    
+
     # Upgrade pip using python -m pip (required for proper upgrade)
     print("Upgrading pip...")
     if not run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"]):
         print("Failed to upgrade pip")
         return 1
-    
+
     # Install uv package manager
     print("Installing uv package manager...")
     if not run_command([str(venv_pip), "install", "uv"]):
         print("Failed to install uv")
         return 1
-    
+
     # Determine uv executable path
     if is_windows:
         venv_uv = venv_path / "Scripts" / "uv.exe"
     else:
         venv_uv = venv_path / "bin" / "uv"
-    
-    # Install PyTorch with CUDA support and other dependencies
-    print("Installing PyTorch with CUDA support and dependencies...")
-    # Install PyTorch with CUDA 12.1 support (latest stable version)
-    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cu121"]):
+
+    # torchvision and torchaudio are not imported by the benchmark, and
+    # torchaudio stopped publishing wheels before this torch, so neither is
+    # installed: pulling them in would drag torch back to an older release.
+    print(f"Installing torch {TORCH_VERSION} with CUDA support...")
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
+                        f"torch=={TORCH_VERSION}", "--index-url", index_url]):
         print("Failed to install PyTorch")
         return 1
-    
+
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "numpy"]):
         print("Failed to install numpy")
         return 1
-    
+
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "scipy"]):
         print("Failed to install scipy")
         return 1
-    
+
     # Install custom torchdiffeq fork with vmap support
     print("Installing torchdiffeq with vmap support...")
-    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "git+https://github.com/utkarsh530/torchdiffeq.git@u/vmap"]):
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
+                        TORCHDIFFEQ_URL]):
         print("Failed to install torchdiffeq")
         return 1
-    
+
     # Verify installation
     print("Verifying installation...")
     if not run_command([str(venv_python), "-c", "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"]):
         print("Warning: PyTorch verification failed")
-    
-    if not run_command([str(venv_python), "-c", "import torchdiffeq; print('torchdiffeq installed successfully')"]):
-        print("Warning: torchdiffeq verification failed")
-    
+
+    # The fork was last updated against torch 1.13/2.0, so the vmap path it
+    # patches is checked against the pinned torch rather than assumed.
+    print("Checking the torchdiffeq fork against this torch...")
+    if not run_command([str(venv_python), "-c", VMAP_CHECK]):
+        print(f"Error: the torchdiffeq fork does not work under torch "
+              f"{TORCH_VERSION}; the pytorch benchmark would produce nothing.")
+        return 1
+
     print("\nPyTorch/torchdiffeq environment setup complete!")
     if is_windows:
         print(f"To activate: {venv_path / 'Scripts' / 'activate.bat'}")
         print(f"Or in PowerShell: {venv_path / 'Scripts' / 'Activate.ps1'}")
     else:
         print(f"To activate: source {venv_path / 'bin' / 'activate'}")
-    
+
     return 0
 
 
