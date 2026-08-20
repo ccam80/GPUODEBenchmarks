@@ -169,8 +169,7 @@ def load_model(problem):
 
 
 def run_warm(problems):
-    """Compile each problem's model. States-sweep models are never warmed:
-    the sweep measures the compile."""
+    """Compile each problem's model."""
     import timeit
 
     def warm_one(build_model, row, label):
@@ -302,8 +301,7 @@ def run_states(grid):
     from problems import states_row
     from wp_common import STATES_N, states_outfile
 
-    # build_s is the compile; CuPy's disk kernel cache would hide it. CuPy
-    # reads this when it is first imported, inside the first model build.
+    # Throwaway CuPy cache dir, set before cupy's first import: compiles run cold.
     os.environ["CUPY_CACHE_DIR"] = tempfile.mkdtemp(prefix="myokit_states_")
 
     cell_count = STATES_N

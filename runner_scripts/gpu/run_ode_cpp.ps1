@@ -81,8 +81,7 @@ foreach ($f in $SourceFiles) { $SrcBytes += [System.IO.File]::ReadAllBytes($f) }
 $SrcHash = ([System.BitConverter]::ToString($Hasher.ComputeHash($SrcBytes)) -replace '-', '').Substring(0, 12)
 $CacheDir = "GPU_ODE_MPGOS\build_cache\$DatasetKey"
 
-# Mirrors GPU_ODE_MPGOS/Makefile; reuses the cached binary when one exists.
-# -Fresh always runs nvcc and skips the cache: the states sweep measures the build.
+# Mirrors GPU_ODE_MPGOS/Makefile; reuses the cached binary unless -Fresh.
 function Build-Project {
     param([string]$ProblemName, [string]$Solver, [long]$Nt, [long]$Sd = 0,
           [switch]$Fresh)
@@ -179,7 +178,6 @@ function Get-NtTargets {
     return $targets
 }
 
-# States-sweep binaries are never warmed: the sweep measures the build.
 if ($Analysis -eq 'warm') {
     Invoke-WarmBuilds -Targets @(Get-NtTargets)
     Pop-Location

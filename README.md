@@ -306,10 +306,8 @@ rather than assumed. Rows are
 `states t_ms t_dev_ms build_s` in
 `<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
 data directory, where `build_s` is the wall time from solver construction
-to the first completed solve (the compile). The sweep bypasses every
-compiled-kernel cache — cubie and Myokit build into throwaway cache
-directories, JAX leaves its persistent cache off, MPGOS always runs nvcc —
-so `build_s` is a cold compile on every run. A size with no finite time in
+to the first completed solve. The sweep bypasses every compiled-kernel
+cache, so `build_s` is a cold compile on every run. A size with no finite time in
 either mode cancels the pending and running larger sizes of that
 algorithm; cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset
 disables) kills any process whose first kernel has not compiled within
@@ -345,7 +343,7 @@ each model — then runs the timed sweep against warm caches.
 `run_benchmark -a warm` fills every cache the suite can use: timing
 solvers, every work-precision setting, and julia's `Pkg.precompile`;
 `run_full_dataset -a warm` does that for every package. States-sweep
-kernels are never warmed — the sweep measures the compile.
+kernels are never warmed.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows

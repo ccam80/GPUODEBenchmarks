@@ -36,8 +36,7 @@ NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
 # Timed repeats per point; min is reported.
 REPEATS = 20
 
-# Persistent XLA compilation cache under the shared generated/ cache root.
-# The states sweep stays off it: its build_s is the compile.
+# Persistent XLA compilation cache; off in states mode so compiles run cold.
 if ANALYSIS != "states":
     jax.config.update("jax_compilation_cache_dir", os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -340,8 +339,7 @@ def run_states():
 
 
 def run_warm():
-    """Compile every timing and wp-setting kernel without running them.
-    States-sweep kernels are never warmed: the sweep measures the compile."""
+    """Compile every timing and wp-setting kernel without running them."""
     import timeit
 
     from wp_common import N_WP, TOLS, dts_for
