@@ -266,10 +266,10 @@ def _run_times(problem, opts, system, grid):
 
 
 def _warm_legs(opts, problems):
-    """Every (system, mode, algorithm, setting) compile task, in a
-    deterministic order shared by the parent and its shard children."""
-    from problems import STATES_PROBLEM, states_row
-    from wp_common import STATES_GRID, TOLS
+    """Every (problem, mode, algorithm, setting) compile task, in a
+    deterministic order shared by the parent and its shard children.
+    States-sweep kernels are never warmed: the sweep measures the compile."""
+    from wp_common import TOLS
 
     legs = []
     for problem in problems:
@@ -277,25 +277,13 @@ def _warm_legs(opts, problems):
             if not problem.runs(opts["framework"], algorithm):
                 continue
             if algorithm in opts["fixed"]:
-                legs.append((problem.name, None, "fixed", algorithm, None))
+                legs.append((problem.name, "fixed", algorithm, None))
                 for dt in problem.dts(algorithm):
-                    legs.append((problem.name, None, "fixed", algorithm, dt))
+                    legs.append((problem.name, "fixed", algorithm, dt))
             if algorithm in opts["adaptive"]:
-                legs.append((problem.name, None, "adaptive", algorithm,
-                             None))
+                legs.append((problem.name, "adaptive", algorithm, None))
                 for tol in TOLS:
-                    legs.append((problem.name, None, "adaptive", algorithm,
-                                 tol))
-        # The states sweep runs lorenz96 at every grid size, exclusions off.
-        if problem.name == STATES_PROBLEM:
-            for nstates in STATES_GRID:
-                for algorithm in opts["algorithms"]:
-                    if algorithm in opts["fixed"]:
-                        legs.append((problem.name, nstates, "fixed",
-                                     algorithm, None))
-                    if algorithm in opts["adaptive"]:
-                        legs.append((problem.name, nstates, "adaptive",
-                                     algorithm, None))
+                    legs.append((problem.name, "adaptive", algorithm, tol))
     return legs
 
 
@@ -310,8 +298,6 @@ def _run_warm(opts, problems, argv):
     legs to cap their memory."""
     import subprocess
     from timeit import default_timer
-
-    from problems import states_row
 
     # Each shard holds several GB of host RAM; 4 fits in 32 GB.
     jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
@@ -343,30 +329,22 @@ def _run_warm(opts, problems, argv):
     rows = {p.name: p for p in problems}
     systems = {}
 
-    def system_for(name, nstates):
-        key = (name, nstates)
-        if key not in systems:
-            if nstates is None:
-                systems[key] = build_system(
-                    rows[name], PRECISION, name_suffix=opts["name_suffix"])
-            else:
-                systems[key] = build_system(
-                    states_row(nstates), PRECISION,
-                    name_suffix="{0}_s{1}".format(opts["name_suffix"],
-                                                  nstates))
-        return systems[key]
+    def system_for(name):
+        if name not in systems:
+            systems[name] = build_system(
+                rows[name], PRECISION, name_suffix=opts["name_suffix"])
+        return systems[name]
 
-    for name, nstates, mode, algorithm, setting in legs:
-        row = rows[name] if nstates is None else states_row(nstates)
-        sized = "" if nstates is None else f" states={nstates}"
+    for name, mode, algorithm, setting in legs:
+        row = rows[name]
         tag = ("" if setting is None else
                (f" dt={setting:g}" if mode == "fixed" else
                 f" tol={setting:g}"))
-        label = f"{name}{sized} {mode} {algorithm}{tag}"
+        label = f"{name} {mode} {algorithm}{tag}"
         solver = None
         started = default_timer()
         try:
-            system, conditions = system_for(name, nstates)
+            system, conditions = system_for(name)
             if mode == "fixed":
                 solver = (_make_fixed_solver(system, row, algorithm)
                           if setting is None else
@@ -393,10 +371,16 @@ def _run_warm(opts, problems, argv):
 def _run_states(opts):
     """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, timed at
     one fixed ensemble size."""
+    import tempfile
     from timeit import default_timer
 
+    from cubie.cache_root import set_cache_root
     from problems import states_row
     from wp_common import STATES_N, states_outfile, timed_min_ms
+
+    # build_s is the compile; the persistent generated/ cache would hide it,
+    # so this run's codegen and kernels go to a throwaway root.
+    set_cache_root(tempfile.mkdtemp(prefix="cubie_states_"))
 
     n = STATES_N
     grid = opts["ns"]

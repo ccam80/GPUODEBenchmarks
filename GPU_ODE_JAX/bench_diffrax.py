@@ -37,11 +37,13 @@ NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
 REPEATS = 20
 
 # Persistent XLA compilation cache under the shared generated/ cache root.
-jax.config.update("jax_compilation_cache_dir", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "generated", "jax_cache"))
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+# The states sweep stays off it: its build_s is the compile.
+if ANALYSIS != "states":
+    jax.config.update("jax_compilation_cache_dir", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "generated", "jax_cache"))
+    jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 # %%
 
@@ -338,12 +340,11 @@ def run_states():
 
 
 def run_warm():
-    """Compile every timing, wp-setting and states kernel without running them."""
+    """Compile every timing and wp-setting kernel without running them.
+    States-sweep kernels are never warmed: the sweep measures the compile."""
     import timeit
 
-    from problems import STATES_PROBLEM, states_row
-    from wp_common import (N_WP, STATES_GRID, STATES_N, TOLS, dts_for,
-                           wp_outfile)  # noqa: F401
+    from wp_common import N_WP, TOLS, dts_for
 
     counts = NS or [8]
 
@@ -383,23 +384,6 @@ def run_warm():
                              wp_args,
                              f"{problem.name} adaptive {algorithm} "
                              f"tol={tol:g}")
-
-        # The states sweep runs lorenz96 at every grid size, exclusions off.
-        if problem.name == STATES_PROBLEM:
-            for nstates in STATES_GRID:
-                row = states_row(nstates)
-                states_args = jnp.asarray(row.sweep(STATES_N))
-                for algorithm in ALGORITHMS:
-                    if algorithm in FIXED_ALGORITHMS:
-                        warm_one(lambda: make_fixed(row, algorithm),
-                                 states_args,
-                                 f"lorenz96 states={nstates} fixed "
-                                 f"{algorithm}")
-                    if algorithm in ADAPTIVE_ALGORITHMS:
-                        warm_one(lambda: make_adaptive(row, algorithm),
-                                 states_args,
-                                 f"lorenz96 states={nstates} adaptive "
-                                 f"{algorithm}")
 
 
 # %%
