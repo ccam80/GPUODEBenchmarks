@@ -408,6 +408,7 @@ framework runs as its own process tree, so an OOM ends only that framework's
 sweep: the smaller-N points already written to disk are kept, the remaining N
 values are left absent, and the run moves on to the next framework. Stages are
 independent in the same way — a failed stage never aborts the others.
+Cubie always runs first, and the stage's plots are redrawn as each package lands.
 
 Every run writes a timestamped `logs/<dataset-key>_<stamp>/` directory holding
 a per-step log, a `run_manifest.txt` recording the git revision, GPU and
