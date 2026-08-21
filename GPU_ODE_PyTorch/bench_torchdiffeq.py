@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
-from wp_common import (SampleLog, parse_bench_args, samples_outfile,
-                       times_outfile)
+from wp_common import (append_samples, parse_bench_args, reset_samples,
+                       sample_point, samples_outfile, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -113,7 +113,8 @@ def run_wp(problem, parameters):
                              DATASET_KEY, problem)
         samples_file = samples_outfile("PYTORCH", "Torch", "wp", "fixed",
                                        algorithm, DATASET_KEY, problem)
-        with open(outfile, "w") as f, SampleLog(samples_file, True) as samples:
+        reset_samples(samples_file)
+        with open(outfile, "w") as f:
             # Later settings are slower, so a breach abandons the leg.
             breached = False
             for dt in dts_for(algorithm, problem):
@@ -128,9 +129,10 @@ def run_wp(problem, parameters):
                     return traj
 
                 # Parameters are already resident and results stay on device.
-                t_ms, traj = timed_min_ms(run, 5, samples.sink(
-                    "wp", problem.name, algorithm, "fixed", "none", N_WP,
-                    problem["states"], "dt", dt))
+                t_ms, traj, samples = timed_min_ms(run, 5)
+                append_samples(samples_file, sample_point(
+                    "wp", problem.name, algorithm, "fixed", N_WP,
+                    problem["states"], "dt", dt), "none", samples)
                 if t_ms is None:
                     print("WATCHDOG wp {0} fixed {1} dt={2:g}: run exceeded "
                           "the cap".format(problem.name, algorithm, dt))
@@ -156,7 +158,7 @@ def run_times(problem):
                                 DATASET_KEY, problem)
         samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
                                        algorithm, DATASET_KEY, problem)
-        with open(outfile, "a+") as file, SampleLog(samples_file) as samples:
+        with open(outfile, "a+") as file:
             for index, n in enumerate(NS):
                 parameters_host = problem.sweep(n, dtype=np.float32)
                 parameters = torch.from_numpy(parameters_host).cuda()
@@ -174,17 +176,15 @@ def run_times(problem):
                     torch.cuda.synchronize()
                     return out
 
-                def sink_for(transfers):
-                    return samples.sink("times", problem.name, algorithm,
-                                        "fixed", transfers, n,
-                                        problem["states"])
-
-                best_time, _ = timed_min_ms(with_transfers, REPEATS,
-                                            sink_for("both"))
+                point = sample_point("times", problem.name, algorithm,
+                                     "fixed", n, problem["states"])
+                best_time, _, samples = timed_min_ms(with_transfers, REPEATS)
+                append_samples(samples_file, point, "both", samples)
                 best_time_dev = None
                 if best_time is not None:
-                    best_time_dev, _ = timed_min_ms(device_only, REPEATS,
-                                                    sink_for("none"))
+                    best_time_dev, _, samples = timed_min_ms(device_only,
+                                                             REPEATS)
+                    append_samples(samples_file, point, "none", samples)
                 breached = best_time is None or best_time_dev is None
                 if breached:
                     print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
@@ -235,8 +235,8 @@ def run_states():
                                  DATASET_KEY)
         samples_file = samples_outfile("PYTORCH", "Torch", "states", "fixed",
                                        algorithm, DATASET_KEY, STATES_PROBLEM)
-        with open(outfile, "w") as file, \
-                SampleLog(samples_file, True) as samples:
+        reset_samples(samples_file)
+        with open(outfile, "w") as file:
             for index, nstates in enumerate(grid):
                 row = states_row(nstates)
                 solve = make_solve(row, algorithm)
@@ -261,17 +261,15 @@ def run_states():
                     device_only()
                     build_s = timeit.default_timer() - started
 
-                    def sink_for(transfers):
-                        return samples.sink("states", STATES_PROBLEM,
-                                            algorithm, "fixed", transfers, n,
-                                            nstates)
-
-                    best, _ = timed_min_ms(with_transfers, REPEATS,
-                                           sink_for("both"))
+                    point = sample_point("states", STATES_PROBLEM, algorithm,
+                                         "fixed", n, nstates)
+                    best, _, samples = timed_min_ms(with_transfers, REPEATS)
+                    append_samples(samples_file, point, "both", samples)
                     best_dev = None
                     if best is not None:
-                        best_dev, _ = timed_min_ms(device_only, REPEATS,
-                                                   sink_for("none"))
+                        best_dev, _, samples = timed_min_ms(device_only,
+                                                            REPEATS)
+                        append_samples(samples_file, point, "none", samples)
                     breached = best is None or best_dev is None
                     if not breached:
                         t_ms, t_dev = best, best_dev

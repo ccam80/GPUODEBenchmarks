@@ -136,48 +136,48 @@ static std::string DataDir(const std::string& package)
 static const char* SampleHeader =
 	"analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms";
 
-class SampleLog
+// The identity of one timed point, shared by its timed legs.
+struct SamplePoint
 {
-public:
-	// `Truncate` matches the sibling output file's open mode.
-	SampleLog(const std::string& Path, bool Truncate)
-	{
-		if (Truncate)
-		{
-			Out.open(Path.c_str(), std::ios::trunc);
-			Out << SampleHeader << "\n";
-			return;
-		}
-		// Exclusive create: one header even when sibling processes open the log.
-		FILE* Fresh = fopen(Path.c_str(), "wx");
-		if (Fresh)
-		{
-			fputs(SampleHeader, Fresh);
-			fputc('\n', Fresh);
-			fclose(Fresh);
-		}
-		Out.open(Path.c_str(), std::ios::app);
-	}
-
-	void Row(const std::string& Analysis, const std::string& Algorithm,
-	         const std::string& Mode, const std::string& Transfers,
-	         const std::string& SettingKind, double Setting, int N, int States,
-	         int Repeat, double Ms)
-	{
-		char SettingText[32];
-		char MsText[32];
-		snprintf(SettingText, sizeof(SettingText), "%.10g", Setting);
-		snprintf(MsText, sizeof(MsText), "%.6f", Ms);
-		Out << Analysis << "," << PROBLEM_NAME << "," << Algorithm << ","
-		    << Mode << "," << Transfers << "," << SettingKind << ","
-		    << SettingText << "," << N << "," << States << "," << Repeat << ","
-		    << MsText << "\n";
-		Out.flush();
-	}
-
-private:
-	std::ofstream Out;
+	std::string Analysis;
+	std::string Algorithm;
+	std::string Mode;
+	std::string SettingKind;
+	double Setting;
+	int N;
+	int States;
 };
+
+// Drop a leg's log, for the sweeps whose reduced file is rewritten.
+static void ResetSamples(const std::string& Path)
+{
+	remove(Path.c_str());
+}
+
+// Append one row per attempt of one timed leg, warm-up as repeat 0.
+static void AppendSamples(const std::string& Path, const SamplePoint& Point,
+                          const std::string& Transfers,
+                          const std::vector<double>& Samples)
+{
+	std::ifstream Probe(Path.c_str());
+	bool Header = !Probe.good();
+	Probe.close();
+
+	char SettingText[32];
+	snprintf(SettingText, sizeof(SettingText), "%.10g", Point.Setting);
+
+	std::ofstream Out(Path.c_str(), std::ios::app);
+	if (Header) Out << SampleHeader << "\n";
+	for (size_t r = 0; r < Samples.size(); ++r)
+	{
+		char MsText[32];
+		snprintf(MsText, sizeof(MsText), "%.6f", Samples[r]);
+		Out << Point.Analysis << "," << PROBLEM_NAME << "," << Point.Algorithm
+		    << "," << Point.Mode << "," << Transfers << "," << Point.SettingKind
+		    << "," << SettingText << "," << Point.N << "," << Point.States
+		    << "," << r << "," << MsText << "\n";
+	}
+}
 
 // Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
 static double WatchdogSeconds()
@@ -316,8 +316,9 @@ int main(int argc, char *argv[])
 		const std::string WpPath = WpDir + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
 		ofstream wpfile(WpPath.c_str());
 		wpfile.precision(12);
-		SampleLog WpSamples(WpDir + "MPGOS_samples_wp_" + Mode + "_"
-			+ Algorithm + ".csv", true);
+		const std::string WpSamplesPath = WpDir + "MPGOS_samples_wp_" + Mode
+			+ "_" + Algorithm + ".csv";
+		ResetSamples(WpSamplesPath);
 		const std::string SettingKind = FixedMode ? "dt" : "tol";
 
 		const int Repeats = 10;
@@ -346,6 +347,7 @@ int main(int argc, char *argv[])
 
 			bool Breached = false;
 			double BestMs = 1.0e300;
+			std::vector<double> WpSamples;
 			for (int r = 0; r <= Repeats; r++)
 			{
 				// Reset states/time domain: Solve() advances in place.
@@ -372,12 +374,14 @@ int main(int argc, char *argv[])
 				}
 
 				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-				// The h2d is outside the timed region; the ActualState d2h is inside.
-				WpSamples.Row("wp", Algorithm, Mode, "d2h", SettingKind,
-					Setting, NT, SD, r, Ms);
+				WpSamples.push_back(Ms);
 				if (Ms > WatchdogSeconds() * 1000.0) { Breached = true; break; }
 				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up
 			}
+			// The h2d is outside the timed region; the ActualState d2h is inside.
+			SamplePoint WpPoint = {"wp", Algorithm, Mode, SettingKind, Setting,
+				NT, SD};
+			AppendSamples(WpSamplesPath, WpPoint, "d2h", WpSamples);
 
 			if (Breached)
 			{
@@ -419,8 +423,10 @@ int main(int argc, char *argv[])
 	const std::string TimesDir = DataDir("CPP");
 	const std::string TimesPath = TimesDir + "MPGOS_" + TimesAnalysis +
 		"_" + TimesMode + "_" + TimesAlgorithm + ".txt";
-	SampleLog TimesSamples(TimesDir + "MPGOS_samples_" + TimesAnalysis +
-		"_" + TimesMode + "_" + TimesAlgorithm + ".csv", false);
+	const std::string TimesSamplesPath = TimesDir + "MPGOS_samples_" +
+		TimesAnalysis + "_" + TimesMode + "_" + TimesAlgorithm + ".csv";
+	SamplePoint TimesPoint = {TimesAnalysis, TimesAlgorithm, TimesMode,
+		"none", std::nan(""), NT, SD};
 	std::vector<std::string> TimesNanRow;
 	{
 		std::ostringstream row;
@@ -434,6 +440,7 @@ int main(int argc, char *argv[])
 
 	// Device-only timing: the untimed h2d resets the in-place solver state.
 	double ElapsedDeviceMs = 1.0e300;
+	std::vector<double> DeviceSamples;
 	for (int r = 0; r <= TimingRepeats; r++)
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
@@ -449,14 +456,15 @@ int main(int argc, char *argv[])
 		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-		TimesSamples.Row(TimesAnalysis, TimesAlgorithm, TimesMode, "none",
-			"none", std::nan(""), NT, SD, r, Ms);
+		DeviceSamples.push_back(Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
 	}
+	AppendSamples(TimesSamplesPath, TimesPoint, "none", DeviceSamples);
 
 	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
+	std::vector<double> EndToEndSamples;
 	for (int r = 0; !TimesBreached && r <= TimingRepeats; r++)
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
@@ -473,11 +481,11 @@ int main(int argc, char *argv[])
 		DisarmWatchdog();
 
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-		TimesSamples.Row(TimesAnalysis, TimesAlgorithm, TimesMode, "both",
-			"none", std::nan(""), NT, SD, r, Ms);
+		EndToEndSamples.push_back(Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
 		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
 	}
+	AppendSamples(TimesSamplesPath, TimesPoint, "both", EndToEndSamples);
 
 	if (TimesBreached)
 	{

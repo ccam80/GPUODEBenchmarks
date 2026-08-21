@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from wp_common import (TIMING_TOL, SampleLog, parse_bench_args,
-                       samples_outfile, timed_min_ms, times_outfile)
+from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
+                       reset_samples, sample_point, samples_outfile,
+                       timed_min_ms, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -100,8 +101,8 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
-def best_times_ms(solve, args, label, n, sink_for=lambda transfers: None):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. sink_for(transfers) gives each timed leg its sample sink."""
+def best_times_ms(solve, args, label, n, samples_file, point):
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
@@ -131,10 +132,12 @@ def best_times_ms(solve, args, label, n, sink_for=lambda transfers: None):
         return jax.block_until_ready(solve(args))
 
     try:
-        both, _ = timed_min_ms(with_transfers, REPEATS, sink_for("both"))
+        both, _, samples = timed_min_ms(with_transfers, REPEATS)
+        append_samples(samples_file, point, "both", samples)
         none = None
         if both is not None:
-            none, _ = timed_min_ms(device_only, REPEATS, sink_for("none"))
+            none, _, samples = timed_min_ms(device_only, REPEATS)
+            append_samples(samples_file, point, "none", samples)
         if both is None or none is None:
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
                 label, n))
@@ -190,12 +193,13 @@ def run_wp(problem, parameterList):
 
     golden = load_golden(problem)
 
-    def bench(m, setting, outfh, sink):
+    def bench(m, setting, outfh, samples_file, point):
         """Write one row; False when a run breached the watchdog."""
         breached = False
         try:
-            t_ms, sol = timed_min_ms(
-                lambda: jax.block_until_ready(m(parameterList)), 20, sink)
+            t_ms, sol, samples = timed_min_ms(
+                lambda: jax.block_until_ready(m(parameterList)), 20)
+            append_samples(samples_file, point, "none", samples)
             if t_ms is None:
                 breached = True
                 t_ms, err = float("nan"), float("nan")
@@ -218,17 +222,18 @@ def run_wp(problem, parameterList):
         samples_file = samples_outfile("JAX", "Jax", "wp", mode, algorithm,
                                        DATASET_KEY, problem)
         setting_kind = "dt" if mode == "fixed" else "tol"
-        with open(outfile, "w") as f, SampleLog(samples_file, True) as samples:
+        reset_samples(samples_file)
+        with open(outfile, "w") as f:
             breached = False
             for setting in settings:
                 if breached:
                     f.write("{0:.10g} nan nan\n".format(setting))
                     continue
                 # Parameters are already resident and results stay on device.
-                sink = samples.sink("wp", problem.name, algorithm, mode,
-                                    "none", N_WP, problem["states"],
-                                    setting_kind, setting)
-                if not bench(make(setting), setting, f, sink):
+                point = sample_point("wp", problem.name, algorithm, mode,
+                                     N_WP, problem["states"], setting_kind,
+                                     setting)
+                if not bench(make(setting), setting, f, samples_file, point):
                     print("WATCHDOG wp {0} setting={1:g}: run exceeded "
                           "the cap".format(problem.name, setting))
                     breached = True
@@ -262,15 +267,14 @@ def run_times(problem):
                                     DATASET_KEY, problem)
             samples_file = samples_outfile("JAX", "Jax", "times", mode,
                                            algorithm, DATASET_KEY, problem)
-            with open(outfile, "a+") as file, SampleLog(samples_file) as samples:
+            with open(outfile, "a+") as file:
                 for index, n in enumerate(NS):
                     parameterList = jnp.asarray(problem.sweep(n))
                     best_time, best_time_dev, abandon = best_times_ms(
                         main, parameterList,
-                        "{0} {1}".format(mode, algorithm), n,
-                        lambda transfers, n=n: samples.sink(
-                            "times", problem.name, algorithm, mode, transfers,
-                            n, problem["states"]))
+                        "{0} {1}".format(mode, algorithm), n, samples_file,
+                        sample_point("times", problem.name, algorithm, mode,
+                                     n, problem["states"]))
                     print("{:} ODE solves ({}, {}, {}) completed in {:.1f} "
                           "ms ({:.1f} ms without transfers)".format(
                               n, problem.name, algorithm, mode, best_time,
@@ -317,8 +321,8 @@ def run_states():
             samples_file = samples_outfile("JAX", "Jax", "states", mode,
                                            algorithm, DATASET_KEY,
                                            STATES_PROBLEM)
-            with open(outfile, "w") as file, \
-                    SampleLog(samples_file, True) as samples:
+            reset_samples(samples_file)
+            with open(outfile, "w") as file:
                 for index, nstates in enumerate(grid):
                     row = states_row(nstates)
                     main = (make_fixed(row, algorithm) if mode == "fixed"
@@ -337,10 +341,9 @@ def run_states():
                         file.flush()
                         continue
                     best_time, best_time_dev, abandon = best_times_ms(
-                        main, parameterList, label, n,
-                        lambda transfers, nstates=nstates: samples.sink(
-                            "states", STATES_PROBLEM, algorithm, mode,
-                            transfers, n, nstates))
+                        main, parameterList, label, n, samples_file,
+                        sample_point("states", STATES_PROBLEM, algorithm,
+                                     mode, n, nstates))
                     print("{:} ODE solves ({}) completed in {:.1f} ms "
                           "({:.1f} ms without transfers)".format(
                               n, label, best_time, best_time_dev))
