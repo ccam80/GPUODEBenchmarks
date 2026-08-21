@@ -21,6 +21,7 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
@@ -107,7 +108,12 @@ function nan_rows(outfile, ns)
 end
 
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
-function wp_sweep(solve_once, system, path, settings, golden, label)
+function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
+        golden, label)
+    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
+        "wp", mode, algorithm, problem)
+    setting_kind = mode == "fixed" ? "dt" : "tol"
+    reset_samples(samples_file)
     open(path, "w") do io
         breached = false
         compiled = false
@@ -116,6 +122,9 @@ function wp_sweep(solve_once, system, path, settings, golden, label)
                 println(io, setting, " NaN NaN")
                 continue
             end
+            point = sample_point("wp", problem["problem"], algorithm, mode,
+                N_WP, problem["states"]; setting_kind = setting_kind,
+                setting = setting)
             on_breach = () -> begin
                 for s in settings[index:end]
                     println(io, s, " NaN NaN")
@@ -136,8 +145,10 @@ function wp_sweep(solve_once, system, path, settings, golden, label)
                         (NaN, NaN)
                     else
                         e = ensemble_error(system, sol[2], golden)
-                        t = watchdogged_min_ms(() -> solve_once(setting),
-                            on_breach, REPEATS)
+                        t, samples = watchdogged_min_ms(
+                            () -> solve_once(setting), on_breach, REPEATS)
+                        # The ensemble is resident, so only the d2h is timed.
+                        append_samples(samples_file, point, "d2h", samples)
                         (t, isnan(t) ? NaN : e)
                     end
                 end
@@ -171,7 +182,7 @@ function run_wp(problem)
         label = "$(problem["problem"]) $(algorithm)"
 
         if algorithm in FIXED_ALGORITHMS
-            wp_sweep(system,
+            wp_sweep(system, problem, algorithm, "fixed",
                 joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
                 collect(problem_dts(problem)), golden,
                 "$(label) fixed") do dt
@@ -185,7 +196,7 @@ function run_wp(problem)
         end
 
         if algorithm in ADAPTIVE_ALGORITHMS
-            wp_sweep(system,
+            wp_sweep(system, problem, algorithm, "adaptive",
                 joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
                 [10.0^-k for k in 2:8], golden,
                 "$(label) adaptive") do tol
@@ -206,6 +217,8 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     dt0 = Float32(problem_timing_dt(problem))
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
     outfile = joinpath(outdir, "Julia_times_$(mode)_$(algorithm).txt")
+    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
+        "times", mode, algorithm, problem)
     compiled = false
 
     for (index, n) in enumerate(NS)
@@ -255,10 +268,16 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
                 run_watchdogged(device_solve, on_breach)
                 compiled = true
             end
+            point = sample_point("times", problem["problem"], algorithm, mode,
+                n, problem["states"])
             t_dev, t = with_gpu_lock() do
-                td = watchdogged_min_ms(device_solve, on_breach, REPEATS)
-                tt = isnan(td) ? NaN :
-                     watchdogged_min_ms(full_solve, on_breach, REPEATS)
+                td, samples = watchdogged_min_ms(device_solve, on_breach,
+                    REPEATS)
+                append_samples(samples_file, point, "none", samples)
+                isnan(td) && return (td, NaN)
+                tt, samples = watchdogged_min_ms(full_solve, on_breach,
+                    REPEATS)
+                append_samples(samples_file, point, "both", samples)
                 (td, tt)
             end
             (t, t_dev, isnan(t))
@@ -327,6 +346,8 @@ function run_states(nstates, n)
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
             outfile = joinpath(outdir, "Julia_states_$(mode)_$(algorithm).txt")
+            samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
+                "Julia", "states", mode, algorithm, row)
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
             t_ms, t_dev_ms, build_s = try
                 probs_host, probs = build_ensemble(system, prob, row, n)
@@ -367,10 +388,16 @@ function run_states(nstates, n)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
+                point = sample_point("states", row["problem"], algorithm,
+                    mode, n, nstates)
                 t_dev, t = with_gpu_lock() do
-                    td = watchdogged_min_ms(device_solve, on_breach, REPEATS)
-                    tt = isnan(td) ? NaN :
-                         watchdogged_min_ms(full_solve, on_breach, REPEATS)
+                    td, samples = watchdogged_min_ms(device_solve, on_breach,
+                        REPEATS)
+                    append_samples(samples_file, point, "none", samples)
+                    isnan(td) && return (td, NaN)
+                    tt, samples = watchdogged_min_ms(full_solve, on_breach,
+                        REPEATS)
+                    append_samples(samples_file, point, "both", samples)
                     (td, tt)
                 end
                 isnan(t) &&

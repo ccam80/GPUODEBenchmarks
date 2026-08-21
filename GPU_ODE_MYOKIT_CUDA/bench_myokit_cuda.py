@@ -18,10 +18,14 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 from bench_key import data_dir, dataset_key  # noqa: E402
 from wp_common import (  # noqa: E402
     WATCHDOG_SECONDS,
+    append_samples,
     dts_for,
     ensemble_error,
     load_golden,
     parse_bench_args,
+    reset_samples,
+    sample_point,
+    samples_outfile,
     times_outfile,
     wp_outfile,
 )
@@ -48,9 +52,10 @@ MODELS = {
 
 
 def _capped_min_ms(run, repeats, setup=None):
-    """Best-of-repeats after one warm-up; (ms, first_result), ms None on breach."""
+    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first."""
     best = None
     first = None
+    samples = []
     for attempt in range(repeats + 1):
         if setup is not None and attempt:
             setup()
@@ -59,15 +64,17 @@ def _capped_min_ms(run, repeats, setup=None):
         elapsed = timeit.default_timer() - started
         if attempt == 0:
             first = result
+        samples.append(elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
-            return None, first
+            return None, first, samples
         if attempt and (best is None or elapsed < best):
             best = elapsed
-    return best * 1000.0, first
+    return best * 1000.0, first, samples
 
 
-def timed_solve(model, cell_count, rho, dt, step_count, repeats):
-    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach."""
+def timed_solve(model, cell_count, rho, dt, step_count, repeats,
+                samples_file, point):
+    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. Each timed leg's attempts go to samples_file."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -78,7 +85,8 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
             diffusion_values=rho,
         )
 
-    elapsed_ms, finals = _capped_min_ms(run, repeats)
+    elapsed_ms, finals, samples = _capped_min_ms(run, repeats)
+    append_samples(samples_file, point, "both", samples)
     if elapsed_ms is None:
         return float("nan"), float("nan"), finals
 
@@ -94,7 +102,9 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats):
         # Untimed: reset the integrated-in-place state between timed runs.
         device_states[...] = pristine
 
-    elapsed_dev_ms, _ = _capped_min_ms(run_on_device, repeats, setup=restore)
+    elapsed_dev_ms, _, samples = _capped_min_ms(run_on_device, repeats,
+                                                setup=restore)
+    append_samples(samples_file, point, "none", samples)
     if elapsed_dev_ms is None:
         return elapsed_ms, float("nan"), finals
     return elapsed_ms, elapsed_dev_ms, finals
@@ -112,6 +122,10 @@ def run_work_precision(model, problem, cell_count):
         DATASET_KEY,
         problem,
     )
+    samples_file = samples_outfile(
+        "MYOKIT_CUDA", "Myokit_cuda", "wp", "fixed", ALGORITHM, DATASET_KEY,
+        problem)
+    reset_samples(samples_file)
     with open(output, "w", encoding="utf-8") as handle:
         # Later settings are slower, so a breach abandons the leg.
         breached = False
@@ -127,6 +141,9 @@ def run_work_precision(model, problem, cell_count):
                 dt,
                 step_count,
                 repeats=20,
+                samples_file=samples_file,
+                point=sample_point("wp", problem.name, ALGORITHM, "fixed",
+                                   cell_count, problem["states"], "dt", dt),
             )
             if np.isnan(elapsed_ms):
                 print("WATCHDOG wp fixed dt={0:g}: run exceeded the cap"
@@ -203,6 +220,9 @@ def run_problem(problem, cell_counts, wp_mode):
     timing_file = Path(times_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY, problem
     ))
+    samples_file = samples_outfile(
+        "MYOKIT_CUDA", "Myokit_cuda", "times", "fixed", ALGORITHM,
+        DATASET_KEY, problem)
     with timing_file.open("a", encoding="utf-8") as handle:
         for index, cell_count in enumerate(cell_counts):
             sweep = problem.sweep(cell_count, dtype=np.float32)
@@ -213,6 +233,9 @@ def run_problem(problem, cell_counts, wp_mode):
                 problem.timing_dt,
                 STANDARD_STEPS,
                 repeats=REPEATS,
+                samples_file=samples_file,
+                point=sample_point("times", problem.name, ALGORITHM, "fixed",
+                                   cell_count, problem["states"]),
             )
             print(
                 "{0} {1} solves with Myokit-CUDA Euler completed in "
@@ -298,7 +321,7 @@ def run_states(grid):
     import tempfile
     import timeit
 
-    from problems import states_row
+    from problems import STATES_PROBLEM, states_row
     from wp_common import STATES_N, states_outfile
 
     # Throwaway CuPy cache dir, set before cupy's first import: compiles run cold.
@@ -307,6 +330,10 @@ def run_states(grid):
     cell_count = STATES_N
     outfile = Path(states_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY))
+    samples_file = samples_outfile(
+        "MYOKIT_CUDA", "Myokit_cuda", "states", "fixed", ALGORITHM,
+        DATASET_KEY, STATES_PROBLEM)
+    reset_samples(samples_file)
     with outfile.open("w", encoding="utf-8") as handle:
         for index, nstates in enumerate(grid):
             row = states_row(nstates)
@@ -332,6 +359,9 @@ def run_states(grid):
                     row.timing_dt,
                     STANDARD_STEPS,
                     repeats=REPEATS,
+                    samples_file=samples_file,
+                    point=sample_point("states", STATES_PROBLEM, ALGORITHM,
+                                       "fixed", cell_count, nstates),
                 )
                 print(
                     "{0} lorenz96 states={1} solves with Myokit-CUDA Euler "

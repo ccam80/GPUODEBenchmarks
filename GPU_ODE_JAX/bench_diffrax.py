@@ -23,8 +23,9 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from wp_common import (TIMING_TOL, parse_bench_args, timed_min_ms,
-                       times_outfile)
+from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
+                       reset_samples, sample_point, samples_outfile,
+                       timed_min_ms, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -100,8 +101,8 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
-def best_times_ms(solve, args, label, n):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too."""
+def best_times_ms(solve, args, label, n, samples_file, point):
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
@@ -131,10 +132,12 @@ def best_times_ms(solve, args, label, n):
         return jax.block_until_ready(solve(args))
 
     try:
-        both, _ = timed_min_ms(with_transfers, REPEATS)
+        both, _, samples = timed_min_ms(with_transfers, REPEATS)
+        append_samples(samples_file, point, "both", samples)
         none = None
         if both is not None:
-            none, _ = timed_min_ms(device_only, REPEATS)
+            none, _, samples = timed_min_ms(device_only, REPEATS)
+            append_samples(samples_file, point, "none", samples)
         if both is None or none is None:
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
                 label, n))
@@ -185,17 +188,18 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
 
 def run_wp(problem, parameterList):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, load_golden, ensemble_error,
+    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
                            timed_min_ms, wp_outfile)
 
     golden = load_golden(problem)
 
-    def bench(m, setting, outfh):
+    def bench(m, setting, outfh, samples_file, point):
         """Write one row; False when a run breached the watchdog."""
         breached = False
         try:
-            t_ms, sol = timed_min_ms(
+            t_ms, sol, samples = timed_min_ms(
                 lambda: jax.block_until_ready(m(parameterList)), 20)
+            append_samples(samples_file, point, "none", samples)
             if t_ms is None:
                 breached = True
                 t_ms, err = float("nan"), float("nan")
@@ -211,15 +215,25 @@ def run_wp(problem, parameterList):
         outfh.flush()
         return not breached
 
-    def sweep(outfile, settings, make):
+    def sweep(mode, algorithm, settings, make):
         # Later settings are slower, so a breach abandons the leg as NaN rows.
+        outfile = wp_outfile("JAX", "Jax", mode, algorithm, DATASET_KEY,
+                             problem)
+        samples_file = samples_outfile("JAX", "Jax", "wp", mode, algorithm,
+                                       DATASET_KEY, problem)
+        setting_kind = "dt" if mode == "fixed" else "tol"
+        reset_samples(samples_file)
         with open(outfile, "w") as f:
             breached = False
             for setting in settings:
                 if breached:
                     f.write("{0:.10g} nan nan\n".format(setting))
                     continue
-                if not bench(make(setting), setting, f):
+                # Parameters are already resident and results stay on device.
+                point = sample_point("wp", problem.name, algorithm, mode,
+                                     N_WP, problem["states"], setting_kind,
+                                     setting)
+                if not bench(make(setting), setting, f, samples_file, point):
                     print("WATCHDOG wp {0} setting={1:g}: run exceeded "
                           "the cap".format(problem.name, setting))
                     breached = True
@@ -229,15 +243,11 @@ def run_wp(problem, parameterList):
             continue
         if algorithm in FIXED_ALGORITHMS:
             # max_steps covers the finest euler dt (2^17 steps).
-            sweep(wp_outfile("JAX", "Jax", "fixed", algorithm, DATASET_KEY,
-                             problem),
-                  dts_for(algorithm, problem),
+            sweep("fixed", algorithm, dts_for(algorithm, problem),
                   lambda dt: make_fixed(problem, algorithm, dt,
                                         max_steps=262144))
         if algorithm in ADAPTIVE_ALGORITHMS:
-            sweep(wp_outfile("JAX", "Jax", "adaptive", algorithm, DATASET_KEY,
-                             problem),
-                  TOLS,
+            sweep("adaptive", algorithm, TOLS,
                   lambda tol: make_adaptive(problem, algorithm, tol))
 
 
@@ -255,12 +265,16 @@ def run_times(problem):
                     else make_adaptive(problem, algorithm))
             outfile = times_outfile("JAX", "Jax", mode, algorithm,
                                     DATASET_KEY, problem)
+            samples_file = samples_outfile("JAX", "Jax", "times", mode,
+                                           algorithm, DATASET_KEY, problem)
             with open(outfile, "a+") as file:
                 for index, n in enumerate(NS):
                     parameterList = jnp.asarray(problem.sweep(n))
                     best_time, best_time_dev, abandon = best_times_ms(
                         main, parameterList,
-                        "{0} {1}".format(mode, algorithm), n)
+                        "{0} {1}".format(mode, algorithm), n, samples_file,
+                        sample_point("times", problem.name, algorithm, mode,
+                                     n, problem["states"]))
                     print("{:} ODE solves ({}, {}, {}) completed in {:.1f} "
                           "ms ({:.1f} ms without transfers)".format(
                               n, problem.name, algorithm, mode, best_time,
@@ -291,7 +305,7 @@ def run_states():
     fixed ensemble size."""
     import timeit
 
-    from problems import states_row
+    from problems import STATES_PROBLEM, states_row
     from wp_common import STATES_N, states_outfile
 
     n = STATES_N
@@ -304,6 +318,10 @@ def run_states():
                 continue
             outfile = states_outfile("JAX", "Jax", mode, algorithm,
                                      DATASET_KEY)
+            samples_file = samples_outfile("JAX", "Jax", "states", mode,
+                                           algorithm, DATASET_KEY,
+                                           STATES_PROBLEM)
+            reset_samples(samples_file)
             with open(outfile, "w") as file:
                 for index, nstates in enumerate(grid):
                     row = states_row(nstates)
@@ -323,7 +341,9 @@ def run_states():
                         file.flush()
                         continue
                     best_time, best_time_dev, abandon = best_times_ms(
-                        main, parameterList, label, n)
+                        main, parameterList, label, n, samples_file,
+                        sample_point("states", STATES_PROBLEM, algorithm,
+                                     mode, n, nstates))
                     print("{:} ODE solves ({}) completed in {:.1f} ms "
                           "({:.1f} ms without transfers)".format(
                               n, label, best_time, best_time_dev))

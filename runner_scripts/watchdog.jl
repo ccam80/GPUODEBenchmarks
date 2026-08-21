@@ -26,13 +26,15 @@ function run_watchdogged(f, on_breach)
     end
 end
 
-"Best-of-repeats wall time in ms after one warm-up; NaN when a run breaches."
+"(ms, samples) after one warm-up; ms is NaN when a run breaches. samples holds every attempt in ms, warm-up first."
 function watchdogged_min_ms(f, on_breach, repeats)
     best = Inf
+    samples = Float64[]
     for attempt in 0:repeats
         elapsed = @elapsed run_watchdogged(f, on_breach)
-        elapsed > WATCHDOG_SECONDS && return NaN
+        push!(samples, elapsed * 1000.0)
+        elapsed > WATCHDOG_SECONDS && return (NaN, samples)
         attempt > 0 && (best = min(best, elapsed))
     end
-    return best * 1000.0
+    return (best * 1000.0, samples)
 end

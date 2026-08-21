@@ -25,19 +25,26 @@ TIMING_TOL = 1.0e-5
 WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))
 
 
+# Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
+SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
+                 "setting_kind", "setting", "n", "states", "repeat", "ms")
+
+
 def timed_min_ms(run, repeats):
-    """Best-of-repeats wall time in ms after one warm-up; None on a breach."""
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first."""
     import timeit
     best = None
+    samples = []
     for attempt in range(repeats + 1):
         elapsed = timeit.default_timer()
         result = run()
         elapsed = timeit.default_timer() - elapsed
+        samples.append(elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
-            return None, result
+            return None, result, samples
         if attempt and (best is None or elapsed < best):
             best = elapsed
-    return best * 1000.0, result
+    return best * 1000.0, result, samples
 
 
 def _row(problem):
@@ -99,6 +106,41 @@ def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
     return os.path.join(
         data_dir(framework_dir, dataset_key, problem=STATES_PROBLEM),
         "{0}_states_{1}_{2}.txt".format(prefix, mode, algorithm))
+
+
+def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
+                    dataset_key, problem=DEFAULT_PROBLEM):
+    """Path of the per-repeat timing log beside its reduced output file."""
+    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
+                        "{0}_samples_{1}_{2}_{3}.csv".format(
+                            prefix, analysis, mode, algorithm))
+
+
+def sample_point(analysis, problem, algorithm, mode, n, states,
+                 setting_kind="none", setting=float("nan")):
+    """The identity of one timed point, shared by its timed legs."""
+    return {"analysis": analysis, "problem": problem, "algorithm": algorithm,
+            "mode": mode, "setting_kind": setting_kind, "setting": setting,
+            "n": n, "states": states}
+
+
+def reset_samples(path):
+    """Drop a leg's log, for the sweeps whose reduced file is rewritten."""
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def append_samples(path, point, transfers, samples):
+    """Append one row per attempt of one timed leg, warm-up as repeat 0."""
+    header = not os.path.exists(path)
+    with open(path, "a") as handle:
+        if header:
+            handle.write(",".join(SAMPLE_FIELDS) + "\n")
+        head = "{analysis},{problem},{algorithm},{mode}".format(**point)
+        tail = "{setting_kind},{setting:.10g},{n},{states}".format(**point)
+        for repeat, ms in enumerate(samples):
+            handle.write("{0},{1},{2},{3},{4:.6f}\n".format(
+                head, transfers, tail, repeat, ms))
 
 
 def parse_bench_args(argv, framework):
