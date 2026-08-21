@@ -201,14 +201,15 @@ def _run_times(problem, opts, system, grid):
             cuda.synchronize()
             return solution
 
-        def sink(transfers):
+        def sink_for(transfers):
             return samples.sink("times", problem.name, algorithm, mode,
                                 transfers, n, problem["states"])
 
-        best, solution = timed_min_ms(with_transfers, REPEATS, sink("both"))
+        best, solution = timed_min_ms(with_transfers, REPEATS,
+                                      sink_for("both"))
         if best is None:
             return None, None, None
-        best_dev, _ = timed_min_ms(device_only, REPEATS, sink("none"))
+        best_dev, _ = timed_min_ms(device_only, REPEATS, sink_for("none"))
         return best, best_dev, solution
 
     def save_numerical(solution, name):
@@ -462,17 +463,17 @@ def _run_states(opts):
                             cuda.synchronize()
                             return solution
 
-                        def sink(transfers):
+                        def sink_for(transfers):
                             return samples.sink("states", STATES_PROBLEM,
                                                 algorithm, mode, transfers,
                                                 n, nstates)
 
                         best, _ = timed_min_ms(with_transfers, REPEATS,
-                                               sink("both"))
+                                               sink_for("both"))
                         best_dev = None
                         if best is not None:
                             best_dev, _ = timed_min_ms(device_only, REPEATS,
-                                                       sink("none"))
+                                                       sink_for("none"))
                         breached = best is None or best_dev is None
                         if not breached:
                             t_ms, t_dev = best, best_dev

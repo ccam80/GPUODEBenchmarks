@@ -281,15 +281,15 @@ function run_leg(samples::SampleLog, problem, system, prob, duration,
                 run_watchdogged(device_solve, on_breach)
                 compiled = true
             end
-            sink = transfers -> sample_sink(samples, "times",
+            sink_for = transfers -> sample_sink(samples, "times",
                 problem["problem"], algorithm, mode, transfers, n,
                 problem["states"])
             t_dev, t = with_gpu_lock() do
                 td = watchdogged_min_ms(device_solve, on_breach, REPEATS,
-                    sink("none"))
+                    sink_for("none"))
                 tt = isnan(td) ? NaN :
                      watchdogged_min_ms(full_solve, on_breach, REPEATS,
-                         sink("both"))
+                         sink_for("both"))
                 (td, tt)
             end
             (t, t_dev, isnan(t))
@@ -400,14 +400,14 @@ function run_states(nstates, n)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
-                sink = transfers -> sample_sink(samples, "states",
+                sink_for = transfers -> sample_sink(samples, "states",
                     row["problem"], algorithm, mode, transfers, n, nstates)
                 t_dev, t = with_gpu_lock() do
                     td = watchdogged_min_ms(device_solve, on_breach, REPEATS,
-                        sink("none"))
+                        sink_for("none"))
                     tt = isnan(td) ? NaN :
                          watchdogged_min_ms(full_solve, on_breach, REPEATS,
-                             sink("both"))
+                             sink_for("both"))
                     (td, tt)
                 end
                 isnan(t) &&

@@ -71,11 +71,8 @@ def _capped_min_ms(run, repeats, setup=None, sink=None):
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats,
-                sink_for=None):
-    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. sink_for(transfers) gives each leg its sample sink."""
-    def sink(transfers):
-        return None if sink_for is None else sink_for(transfers)
-
+                sink_for=lambda transfers: None):
+    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. sink_for(transfers) gives each timed leg its sample sink."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -86,7 +83,7 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
             diffusion_values=rho,
         )
 
-    elapsed_ms, finals = _capped_min_ms(run, repeats, sink=sink("both"))
+    elapsed_ms, finals = _capped_min_ms(run, repeats, sink=sink_for("both"))
     if elapsed_ms is None:
         return float("nan"), float("nan"), finals
 
@@ -103,7 +100,7 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
         device_states[...] = pristine
 
     elapsed_dev_ms, _ = _capped_min_ms(run_on_device, repeats, setup=restore,
-                                       sink=sink("none"))
+                                       sink=sink_for("none"))
     if elapsed_dev_ms is None:
         return elapsed_ms, float("nan"), finals
     return elapsed_ms, elapsed_dev_ms, finals

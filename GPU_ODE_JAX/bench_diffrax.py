@@ -100,8 +100,8 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
-def best_times_ms(solve, args, label, n, sink_for=None):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. sink_for(transfers) gives each leg its sample sink."""
+def best_times_ms(solve, args, label, n, sink_for=lambda transfers: None):
+    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. sink_for(transfers) gives each timed leg its sample sink."""
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
@@ -130,14 +130,11 @@ def best_times_ms(solve, args, label, n, sink_for=None):
         # Args already resident, results left on device; block_until_ready only.
         return jax.block_until_ready(solve(args))
 
-    def sink(transfers):
-        return None if sink_for is None else sink_for(transfers)
-
     try:
-        both, _ = timed_min_ms(with_transfers, REPEATS, sink("both"))
+        both, _ = timed_min_ms(with_transfers, REPEATS, sink_for("both"))
         none = None
         if both is not None:
-            none, _ = timed_min_ms(device_only, REPEATS, sink("none"))
+            none, _ = timed_min_ms(device_only, REPEATS, sink_for("none"))
         if both is None or none is None:
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
                 label, n))

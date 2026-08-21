@@ -174,17 +174,17 @@ def run_times(problem):
                     torch.cuda.synchronize()
                     return out
 
-                def sink(transfers):
+                def sink_for(transfers):
                     return samples.sink("times", problem.name, algorithm,
                                         "fixed", transfers, n,
                                         problem["states"])
 
                 best_time, _ = timed_min_ms(with_transfers, REPEATS,
-                                            sink("both"))
+                                            sink_for("both"))
                 best_time_dev = None
                 if best_time is not None:
                     best_time_dev, _ = timed_min_ms(device_only, REPEATS,
-                                                    sink("none"))
+                                                    sink_for("none"))
                 breached = best_time is None or best_time_dev is None
                 if breached:
                     print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
@@ -261,17 +261,17 @@ def run_states():
                     device_only()
                     build_s = timeit.default_timer() - started
 
-                    def sink(transfers):
+                    def sink_for(transfers):
                         return samples.sink("states", STATES_PROBLEM,
                                             algorithm, "fixed", transfers, n,
                                             nstates)
 
                     best, _ = timed_min_ms(with_transfers, REPEATS,
-                                           sink("both"))
+                                           sink_for("both"))
                     best_dev = None
                     if best is not None:
                         best_dev, _ = timed_min_ms(device_only, REPEATS,
-                                                   sink("none"))
+                                                   sink_for("none"))
                     breached = best is None or best_dev is None
                     if not breached:
                         t_ms, t_dev = best, best_dev
