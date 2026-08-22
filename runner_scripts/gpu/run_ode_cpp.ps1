@@ -72,8 +72,7 @@ function Enter-VsEnvironment {
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
 
-# Continuation (issue #54): BENCH_RESUME / BENCH_RESUME_FROM are read by
-# runner_scripts/resume.py; each point or wp leg is asked for before it runs.
+# BENCH_RESUME / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
 $ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_RESUME_FROM)
 
 function Get-SolverMode { param([string]$Solver)

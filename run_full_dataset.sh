@@ -9,8 +9,8 @@
 #
 # A package that runs out of GPU memory stops only its own sweep; completed
 # points stay on disk and the run continues. A failed analysis never aborts
-# the others. Use --resume to continue a part-finished run from what is on
-# disk, and --resume-from to restart at an exact point.
+# the others. --resume continues from what is on disk; --resume-from
+# restarts at an exact point.
 #
 # GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh);
 # without passwordless root the run proceeds unlocked and reports any drift.
@@ -41,11 +41,7 @@
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #   --resume        skip every recorded point; nothing is deleted (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
-#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the
-#                   performance sweep there. A bare package re-runs it in full;
-#                   with a cursor tail the package keeps its files and skips
-#                   every point before the cursor (combine with --resume to
-#                   also skip the recorded points after it)
+#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -79,7 +75,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,50p' "$0" | sed 's/^# \?//'
+    sed -n '2,46p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -157,9 +153,7 @@ case "$PROBLEM" in
         exit 1;;
 esac
 
-# --resume-from package[:problem[:algorithm[:mode[:N]]]]: the package names
-# the perf-sweep restart; the tail is handed to that package's run_benchmark
-# as its run-order cursor. Hyphen aliases apply to the package token only.
+# Split --resume-from into the package and the cursor tail for that package.
 RESUME_PKG=""
 RESUME_TAIL=""
 if [ -n "$RESUME_FROM" ]; then
@@ -400,9 +394,7 @@ if $DO_PERF; then
         if $skipping; then
             if [ "$lang" == "$RESUME_PKG" ]; then
                 skipping=false
-                # With a cursor the resumed package keeps its files and skips
-                # everything before the cursor; bare package form re-runs it
-                # in full, exactly as before.
+                # A cursor tail resumes the package from that point; a bare package re-runs in full.
                 [ -n "$RESUME_TAIL" ] && PERF_FLAGS+=(--resume-from "$RESUME_TAIL")
             else
                 echo "-- skipping $lang (before --resume-from $RESUME_FROM)"

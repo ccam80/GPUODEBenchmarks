@@ -424,17 +424,14 @@ and comparison reports:
                                                     # ...or at an exact (problem, algorithm, mode, N)
 ```
 
-A run that dies partway is continued rather than redone. `--resume` skips
-every (problem, algorithm, mode, N) point whose row is already in its output
-file and deletes nothing (`--keep` gives the no-deletion behaviour on its
-own); a row of NaNs counts as recorded, so failed points are not retried.
-`--resume-from` places a cursor in the deterministic run order — problems in
-`runner_scripts/problems.csv` order, then algorithms in
-`runner_scripts/algorithms.csv` order, fixed before adaptive, N ascending —
-and skips everything strictly before it, which steps over a point that hangs
-the run (no row is written for a wedged point, so `--resume` alone would
-retry it). Both flags are also accepted by `run_benchmark.sh` /
-`run_benchmark.bat` directly, where `--resume-from` starts at the problem:
+`--resume` skips every (problem, algorithm, mode, N) point whose row is
+already in its output file and deletes nothing; NaN rows count as recorded.
+`--keep` gives the no-deletion behaviour on its own. `--resume-from` places
+a cursor in the run order (problems.csv order, then algorithms.csv order,
+fixed before adaptive, N ascending) and skips everything before it — use it
+to step over a point that hangs, since a hung point leaves no row for
+`--resume` to skip. Both flags are also accepted by `run_benchmark.sh` /
+`run_benchmark.bat`, where `--resume-from` starts at the problem:
 
 ```bash
     $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps

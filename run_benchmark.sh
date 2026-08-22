@@ -11,9 +11,7 @@
 #   -m, --model     ode (default) | sde
 #   --keep          keep existing output files (no pre-run deletion)
 #   --resume        skip every point already recorded on disk; implies --keep
-#   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor:
-#                   skip everything before it (see runner_scripts/resume.py);
-#                   implies --keep
+#   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor; skip everything before it; implies --keep
 
 # Run from the repo root regardless of the caller's working directory
 cd "$(dirname "$0")" || exit 1
@@ -30,7 +28,7 @@ RESUME=false
 RESUME_FROM=
 
 usage() {
-    sed -n '2,16p' "$0" | sed 's/^# \?//'
+    sed -n '2,14p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 

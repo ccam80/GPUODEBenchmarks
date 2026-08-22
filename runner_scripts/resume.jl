@@ -1,14 +1,10 @@
-# Continuation of partial runs, mirroring resume.py: BENCH_RESUME skips
-# points whose rows are already on disk, BENCH_RESUME_FROM is a run-order
-# cursor `problem[:algorithm][:fixed|adaptive][:N]`. Requires problems.jl
-# and algorithms.jl to be included first.
+# Continuation of partial runs, mirroring resume.py; include problems.jl and algorithms.jl first.
 
 const RESUME_MODES = ("fixed", "adaptive")
 
 resume_enabled() = !(get(ENV, "BENCH_RESUME", "") in ("", "0"))
 
-"Parse BENCH_RESUME_FROM into (problem, algorithm, mode, n) indices; the
-algorithm/mode/n entries are `nothing` when the spec omits them."
+"BENCH_RESUME_FROM spec -> cursor tuple; omitted parts are `nothing`."
 function parse_resume_cursor(spec)
     parts = String.(split(spec, ':'))
     (isempty(parts) || isempty(parts[1])) &&
@@ -88,8 +84,7 @@ function skip_point(problem, algorithm, mode, n, outfile)
     return resume_enabled() && n in recorded_values(outfile)
 end
 
-"True when a whole work-precision leg is covered; `expected` is the
-number of settings a complete file holds."
+"True when a wp leg's file already holds `expected` rows or the cursor skips it."
 function skip_wp_leg(problem, algorithm, mode, outfile, expected)
     cursor_skips(problem, algorithm, mode) && return true
     resume_enabled() || return false

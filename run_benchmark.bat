@@ -11,8 +11,7 @@ REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
 REM   --keep          keep existing output files (no pre-run deletion)
 REM   --resume        skip every point already recorded on disk; implies --keep
-REM   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor;
-REM                   skips everything before it and implies --keep
+REM   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor; skips everything before it; implies --keep
 
 pushd "%~dp0"
 

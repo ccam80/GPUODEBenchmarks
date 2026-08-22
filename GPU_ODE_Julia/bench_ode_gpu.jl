@@ -268,8 +268,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             us = Array(sol[2])
             sol
         end
-        # Record NaN rows for everything this process will no longer reach,
-        # leaving out the points a resumed run already holds on disk.
+        # NaN rows for every uncovered point this process will no longer reach.
         on_breach = () -> begin
             nan_rows(outfile, run_ns[index:end])
             for (later_algorithm, later_mode) in later_legs()

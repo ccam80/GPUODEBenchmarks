@@ -25,9 +25,7 @@
 #   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 #   --resume        skip every recorded point; nothing is deleted (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
-#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] - restart the
-#                   performance sweep there; a bare package re-runs in full, a cursor
-#                   tail keeps the package's files and skips points before the cursor
+#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] - restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
@@ -61,7 +59,7 @@ $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myoki
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 33 |
+    Get-Content $PSCommandPath -TotalCount 31 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -119,9 +117,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
-# --resume-from package[:problem[:algorithm[:mode[:N]]]]: the package names
-# the perf-sweep restart; the tail is handed to that package's run_benchmark
-# as its run-order cursor. Hyphen aliases apply to the package token only.
+# Split --resume-from into the package and the cursor tail for that package.
 $ResumePkg = ''
 $ResumeTail = ''
 if ($ResumeFrom) {
@@ -377,9 +373,7 @@ try {
             if ($skipping) {
                 if ($lang -eq $ResumePkg) {
                     $skipping = $false
-                    # With a cursor the resumed package keeps its files and
-                    # skips everything before the cursor; bare package form
-                    # re-runs it in full, exactly as before.
+                    # A cursor tail resumes the package from that point; a bare package re-runs in full.
                     if ($ResumeTail) { $PerfFlags += " --resume-from $ResumeTail" }
                 } else {
                     Write-Host "-- skipping $lang (before --resume-from $ResumeFrom)"

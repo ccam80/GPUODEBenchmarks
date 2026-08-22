@@ -1,27 +1,12 @@
-"""Continuation of partial runs: skip benchmark points already on disk and
-points before a run-order cursor; mirrored by resume.jl for the Julia bench.
+"""Continuation of partial runs; mirrored by resume.jl.
 
-Environment contract (set by run_benchmark.sh / run_benchmark.bat):
-
-- BENCH_RESUME=1
-    Skip every point whose row is already in its output file. A row counts
-    even when its timings are NaN: a recorded failure is a result.
-
-- BENCH_RESUME_FROM=problem[:algorithm][:fixed|adaptive][:N]
-    A cursor into the deterministic run order (problems.csv order, then
-    algorithms.csv order, then fixed before adaptive, then ascending N).
-    Points strictly before the cursor are skipped:
-      lorenz                          - start at lorenz; earlier problems skip
-      lorenz:tsit5                    - ... and lorenz legs before tsit5 skip
-      lorenz:tsit5:adaptive:131072    - ... that leg starts at N=131072
-      lorenz:131072                   - every lorenz leg starts at N=131072
-    The N component of the problem[:N] form floors every leg of that problem;
-    with an algorithm named it floors only the named leg, and later legs run
-    in full. In the states sweep N is the state count.
-
-Work-precision legs have no N axis: the cursor applies down to (problem,
-algorithm, mode), and BENCH_RESUME skips a wp leg only when its file already
-holds a row per setting (a partial wp file is rewritten whole).
+BENCH_RESUME=1 skips every point whose row is already in its output file
+(NaN rows count as recorded). BENCH_RESUME_FROM is a cursor
+problem[:algorithm][:fixed|adaptive][:N] into the run order (problems.csv,
+then algorithms.csv, fixed before adaptive, N ascending); points strictly
+before it are skipped. The problem[:N] form floors every leg of that
+problem at N; in the states sweep N is the state count. A wp leg is skipped
+only when its file holds a row per setting.
 """
 
 import os
@@ -40,10 +25,7 @@ def resume_enabled():
 
 
 def parse_cursor(spec):
-    """BENCH_RESUME_FROM spec -> {problem, algorithm, mode, n} indices/value.
-
-    algorithm/mode/n are None when the spec omits them; a bad spec exits.
-    """
+    """BENCH_RESUME_FROM spec -> cursor dict; omitted parts are None."""
     parts = [tok for tok in spec.split(":")]
     if not parts or not parts[0]:
         raise SystemExit("BENCH_RESUME_FROM requires a problem name, got "
@@ -161,8 +143,7 @@ def skip_wp_leg(problem, algorithm, mode, outfile):
 
 
 def _cli(argv):
-    """point <problem> <alg> <mode> <N> <outfile> | leg <problem> <alg>
-    <mode> <outfile>: prints "skip" or "run" for the shell runners."""
+    """Shell entry: prints "skip" or "run" for a point or a wp leg."""
     usage = ("usage: resume.py point <problem> <algorithm> <mode> <N> "
              "<outfile> | leg <problem> <algorithm> <mode> <outfile>")
     if len(argv) >= 1 and argv[0] == "point" and len(argv) == 6:

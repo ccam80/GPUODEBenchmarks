@@ -16,8 +16,7 @@ esac
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 
-# Continuation (issue #54): BENCH_RESUME / BENCH_RESUME_FROM are read by
-# runner_scripts/resume.py; each point or wp leg is asked for before it runs.
+# BENCH_RESUME / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
 RESUME_ACTIVE=""
 [ -n "${BENCH_RESUME:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
 
