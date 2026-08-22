@@ -71,6 +71,31 @@ function Enter-VsEnvironment {
 
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
+
+# BENCH_RESUME / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
+$ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_RESUME_FROM)
+
+function Get-SolverMode { param([string]$Solver)
+    if ($Solver -eq 'RK4') { return 'fixed' } else { return 'adaptive' }
+}
+function Get-SolverAlgorithm { param([string]$Solver)
+    if ($Solver -eq 'RK4') { return 'classical-rk4' } else { return 'cash-karp-54' }
+}
+
+# Test-ResumeSkip <times|states|wp> <problem> <solver> [N]: true when covered.
+function Test-ResumeSkip {
+    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N = '')
+    if (-not $ResumeActive) { return $false }
+    $mode = Get-SolverMode $Solver
+    $alg = Get-SolverAlgorithm $Solver
+    $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
+    if ($Kind -eq 'wp') {
+        $verdict = (& python runner_scripts\resume.py leg $ProblemName $alg $mode $outfile)
+    } else {
+        $verdict = (& python runner_scripts\resume.py point $ProblemName $alg $mode $N $outfile)
+    }
+    return ("$verdict".Trim() -eq 'skip')
+}
 $SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
     (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
     @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
@@ -192,9 +217,16 @@ if ($Analysis -eq 'performance') {
 if ($Analysis -eq 'states') {
     $StatesN = [long]131072
     $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-    Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
+    # A resumed run appends to what earlier runs recorded.
+    if (-not $ResumeActive) {
+        Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
+    }
     foreach ($solver in $Solvers) {
         foreach ($n in $Grid) {
+            if (Test-ResumeSkip 'states' 'lorenz96' $solver "$n") {
+                Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
+                continue
+            }
             Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
             $Watch = [System.Diagnostics.Stopwatch]::StartNew()
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
@@ -213,6 +245,10 @@ if ($Analysis -eq 'states') {
 foreach ($problemName in $Problems) {
     if ($Analysis -eq 'work-precision') {
         foreach ($solver in $Solvers) {
+            if (Test-ResumeSkip 'wp' $problemName $solver) {
+                Write-Host "-- resume: skipping wp $problemName ($solver) (already covered)"
+                continue
+            }
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt 131072 -Wp
         }
         continue
@@ -220,6 +256,10 @@ foreach ($problemName in $Problems) {
     # NT is a compile-time constant, so every point is a rebuild.
     foreach ($solver in $Solvers) {
         foreach ($a in $NValues) {
+            if (Test-ResumeSkip 'times' $problemName $solver "$a") {
+                Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
+                continue
+            }
             Write-Host "No. of trajectories = $a ($problemName, $solver)"
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
         }

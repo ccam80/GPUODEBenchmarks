@@ -417,7 +417,26 @@ and comparison reports:
     $ ./run_full_dataset.sh -a performance      # one analysis
     $ ./run_full_dataset.sh -p cpp              # one package
     $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
-    $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
+    $ ./run_full_dataset.sh --resume                # skip every point already on disk
+    $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
+    $ ./run_full_dataset.sh --resume \
+        --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
+                                                    # ...or at an exact (problem, algorithm, mode, N)
+```
+
+`--resume` skips every (problem, algorithm, mode, N) point whose row is
+already in its output file and deletes nothing; NaN rows count as recorded.
+`--keep` gives the no-deletion behaviour on its own. `--resume-from` places
+a cursor in the run order (problems.csv order, then algorithms.csv order,
+fixed before adaptive, N ascending) and skips everything before it — use it
+to step over a point that hangs, since a hung point leaves no row for
+`--resume` to skip. Both flags are also accepted by `run_benchmark.sh` /
+`run_benchmark.bat`, where `--resume-from` starts at the problem:
+
+```bash
+    $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps
+    $ bash ./run_benchmark.sh -p cubie --resume \
+        --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 ```
 
 **On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
+from resume import active as resume_active, skip_point, skip_wp_leg
 from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
                        reset_samples, sample_point, samples_outfile,
                        timed_min_ms, times_outfile)
@@ -219,6 +220,10 @@ def run_wp(problem, parameterList):
         # Later settings are slower, so a breach abandons the leg as NaN rows.
         outfile = wp_outfile("JAX", "Jax", mode, algorithm, DATASET_KEY,
                              problem)
+        if skip_wp_leg(problem.name, algorithm, mode, outfile):
+            print("-- resume: skipping wp {0} {1} {2} (already covered)"
+                  .format(problem.name, mode, algorithm))
+            return
         samples_file = samples_outfile("JAX", "Jax", "wp", mode, algorithm,
                                        DATASET_KEY, problem)
         setting_kind = "dt" if mode == "fixed" else "tol"
@@ -267,8 +272,19 @@ def run_times(problem):
                                     DATASET_KEY, problem)
             samples_file = samples_outfile("JAX", "Jax", "times", mode,
                                            algorithm, DATASET_KEY, problem)
+            run_ns = [n for n in NS
+                      if not skip_point(problem.name, algorithm, mode, n,
+                                        outfile)]
+            if not run_ns:
+                print("-- resume: skipping {0} {1} {2} (already covered)"
+                      .format(problem.name, mode, algorithm))
+                continue
+            if len(run_ns) < len(NS):
+                print("-- resume: {0} {1} {2} runs N={3}".format(
+                    problem.name, mode, algorithm,
+                    ",".join(str(n) for n in run_ns)))
             with open(outfile, "a+") as file:
-                for index, n in enumerate(NS):
+                for index, n in enumerate(run_ns):
                     parameterList = jnp.asarray(problem.sweep(n))
                     best_time, best_time_dev, abandon = best_times_ms(
                         main, parameterList,
@@ -294,7 +310,7 @@ def run_times(problem):
                             "jax.csv"), final_states, delimiter=',')
                     if abandon:
                         # Larger sizes are slower or bigger, so the leg ends.
-                        for rest in NS[index + 1:]:
+                        for rest in run_ns[index + 1:]:
                             file.write('{0} nan nan\n'.format(rest))
                         file.flush()
                         break
@@ -318,12 +334,21 @@ def run_states():
                 continue
             outfile = states_outfile("JAX", "Jax", mode, algorithm,
                                      DATASET_KEY)
+            run_grid = [s for s in grid
+                        if not skip_point(STATES_PROBLEM, algorithm, mode, s,
+                                          outfile)]
+            if not run_grid:
+                print("-- resume: skipping states {0} {1} (already covered)"
+                      .format(mode, algorithm))
+                continue
             samples_file = samples_outfile("JAX", "Jax", "states", mode,
                                            algorithm, DATASET_KEY,
                                            STATES_PROBLEM)
-            reset_samples(samples_file)
-            with open(outfile, "w") as file:
-                for index, nstates in enumerate(grid):
+            # A resumed leg appends to what earlier runs recorded.
+            if not resume_active():
+                reset_samples(samples_file)
+            with open(outfile, "a" if resume_active() else "w") as file:
+                for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
                     main = (make_fixed(row, algorithm) if mode == "fixed"
                             else make_adaptive(row, algorithm))
@@ -352,7 +377,7 @@ def run_states():
                     file.flush()
                     if abandon:
                         # Larger systems are slower, so the leg ends.
-                        for rest in grid[index + 1:]:
+                        for rest in run_grid[index + 1:]:
                             file.write('{0} nan nan nan\n'.format(rest))
                         file.flush()
                         break

@@ -22,6 +22,7 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
@@ -110,6 +111,10 @@ end
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
 function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
         golden, label)
+    if skip_wp_leg(problem["problem"], algorithm, mode, path, length(settings))
+        println("-- resume: skipping wp $(label) (already covered)")
+        return
+    end
     samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
         "wp", mode, algorithm, problem)
     setting_kind = mode == "fixed" ? "dt" : "tol"
@@ -221,7 +226,19 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         "times", mode, algorithm, problem)
     compiled = false
 
-    for (index, n) in enumerate(NS)
+    run_ns = [n for n in NS
+              if !skip_point(problem["problem"], algorithm, mode, n, outfile)]
+    if isempty(run_ns)
+        println("-- resume: skipping $(problem["problem"]) $(mode) " *
+                "$(algorithm) (already covered)")
+        return
+    end
+    if length(run_ns) < length(NS)
+        println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
+                "runs N=" * join(run_ns, ","))
+    end
+
+    for (index, n) in enumerate(run_ns)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
         probs_host, probs = build_ensemble(system, prob, problem, n)
 
@@ -251,12 +268,16 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             us = Array(sol[2])
             sol
         end
-        # Record NaN rows for everything this process will no longer reach.
+        # NaN rows for every uncovered point this process will no longer reach.
         on_breach = () -> begin
-            nan_rows(outfile, NS[index:end])
+            nan_rows(outfile, run_ns[index:end])
             for (later_algorithm, later_mode) in later_legs()
-                nan_rows(joinpath(outdir,
-                        "Julia_times_$(later_mode)_$(later_algorithm).txt"), NS)
+                later_out = joinpath(outdir,
+                    "Julia_times_$(later_mode)_$(later_algorithm).txt")
+                nan_rows(later_out,
+                    [m for m in NS
+                     if !skip_point(problem["problem"], later_algorithm,
+                         later_mode, m, later_out)])
             end
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run never returned")
@@ -313,7 +334,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             # Larger sweep sizes are slower, so the leg ends here.
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run exceeded the cap")
-            nan_rows(outfile, NS[(index + 1):end])
+            nan_rows(outfile, run_ns[(index + 1):end])
             return
         end
     end
@@ -346,6 +367,11 @@ function run_states(nstates, n)
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
             outfile = joinpath(outdir, "Julia_states_$(mode)_$(algorithm).txt")
+            if skip_point(row["problem"], algorithm, mode, nstates, outfile)
+                println("-- resume: skipping states=$(nstates) $(mode) " *
+                        "$(algorithm) (already covered)")
+                continue
+            end
             samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
                 "Julia", "states", mode, algorithm, row)
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"

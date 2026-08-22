@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate benchmark data for one package and one analysis.
 #
-# Usage: ./run_benchmark.sh -p <package> [-a <analysis>] [-n <nmax>] [-g <algorithm>] [-d <device>] [-m <model>]
+# Usage: ./run_benchmark.sh -p <package> [-a <analysis>] [-n <nmax>] [-g <algorithm>] [-d <device>] [-m <model>] [--keep] [--resume] [--resume-from <point>]
 #   -p, --package   julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
 #   -a, --analysis  performance (default) | work-precision | states | warm
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
@@ -9,6 +9,9 @@
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #   -d, --device    gpu (default) | cpu
 #   -m, --model     ode (default) | sde
+#   --keep          keep existing output files (no pre-run deletion)
+#   --resume        skip every point already recorded on disk; implies --keep
+#   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor; skip everything before it; implies --keep
 
 # Run from the repo root regardless of the caller's working directory
 cd "$(dirname "$0")" || exit 1
@@ -20,9 +23,12 @@ ALGORITHM=all
 PROBLEM=all
 DEVICE=gpu
 MODEL=ode
+KEEP=false
+RESUME=false
+RESUME_FROM=
 
 usage() {
-    sed -n '2,10p' "$0" | sed 's/^# \?//'
+    sed -n '2,14p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -35,6 +41,10 @@ while [ $# -gt 0 ]; do
         -s|--problem)   PROBLEM=$2; shift 2;;
         -d|--device)    DEVICE=$2; shift 2;;
         -m|--model)     MODEL=$2; shift 2;;
+        --keep)         KEEP=true; shift;;
+        --resume)       RESUME=true; KEEP=true; shift;;
+        --resume-from)  [ $# -ge 2 ] || { echo "$1 requires a value" >&2; exit 1; }
+                        RESUME_FROM=$2; KEEP=true; shift 2;;
         -h|--help)      usage 0;;
         *) echo "Unknown option $1" >&2; usage 1;;
     esac
@@ -76,6 +86,16 @@ case ",$NMAX," in
         echo "-n/--nmax must be a positive integer or a comma list of them, got '$NMAX'" >&2
         exit 1;;
 esac
+# --resume-from: charset check here; names are validated in resume.py.
+case "$RESUME_FROM" in
+    *[!a-z0-9_:-]*)
+        echo "--resume-from takes problem[:algorithm][:fixed|adaptive][:N], got '$RESUME_FROM'" >&2
+        exit 1;;
+esac
+
+# The continuation contract read by the bench scripts (runner_scripts/resume.py).
+$RESUME && export BENCH_RESUME=1
+[ -n "$RESUME_FROM" ] && export BENCH_RESUME_FROM="$RESUME_FROM"
 
 case "$PACKAGE" in
     julia)       DATA_DIR=Julia;;
@@ -106,7 +126,7 @@ for ALG in $ALG_LIST; do
     echo "Benchmarking ${PACKAGE} ${DEVICE} ensemble ${MODEL} solvers (${ANALYSIS}, ${ALG}, ${PROBLEM})..."
 
     # Clear this machine's appended files for the analysis, algorithm and problems being run.
-    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ]; then
+    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP; then
         if [ "$ALG" == "all" ]; then
             ALG_GLOB="*"
         else
