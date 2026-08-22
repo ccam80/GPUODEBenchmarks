@@ -9,7 +9,11 @@
 #   run_full_dataset.bat -a overlap                # one analysis
 #   run_full_dataset.bat -a performance,numerical  # several analyses
 #   run_full_dataset.bat -g euler,tsit5            # several algorithms
-#   run_full_dataset.bat --resume-from jax         # restart at a package
+#   run_full_dataset.bat --resume                  # skip points already on disk
+#   run_full_dataset.bat --keep                    # never delete existing outputs
+#   run_full_dataset.bat --resume-from jax         # restart the perf sweep at a package
+#   run_full_dataset.bat --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
+#                                                  # ... or at an exact (problem, algorithm, mode, N)
 #   run_full_dataset.bat --lock-clocks 1470,6801   # override the clock target
 #   run_full_dataset.bat --no-lock-clocks          # sample clocks but do not pin
 #   run_full_dataset.bat --clock-tolerance 30      # widen the drift threshold (MHz)
@@ -19,6 +23,11 @@
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
+#   --resume        skip every recorded point; nothing is deleted (implies --keep)
+#   --keep          keep existing output files (no pre-run deletion)
+#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] - restart the
+#                   performance sweep there; a bare package re-runs in full, a cursor
+#                   tail keeps the package's files and skips points before the cursor
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
@@ -35,6 +44,8 @@ $DoOverlap = $true
 $DoPlots = $true
 $Cooldown = 15
 $ResumeFrom = ''
+$Resume = $false
+$Keep = $false
 $AllowUnknownGpu = $false
 $LockClocks = $true
 $ClockTarget = ''        # "SM[,MEM]"; empty means use the per-GPU table
@@ -50,7 +61,7 @@ $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myoki
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 24 |
+    Get-Content $PSCommandPath -TotalCount 33 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -95,7 +106,9 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '^(-g|--algorithm)$' { $Algorithm = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^(-s|--problem)$' { $Problem = Get-RequiredValue $args $i $args[$i]; $i++ }
         '^(-a|--analysis)$' { Set-Analyses (Get-RequiredValue $args $i $args[$i]); $i++ }
-        '^--resume-from$' { $ResumeFrom = (Get-RequiredValue $args $i $args[$i]) -replace '-', '_'; $i++ }
+        '^--resume-from$' { $ResumeFrom = Get-RequiredValue $args $i $args[$i]; $i++ }
+        '^--resume$' { $Resume = $true; $Keep = $true }
+        '^--keep$' { $Keep = $true }
         '^--cooldown$' { $Cooldown = [int](Get-RequiredValue $args $i $args[$i]); $i++ }
         '^--allow-unknown-gpu$' { $AllowUnknownGpu = $true }
         '^--lock-clocks$' { $ClockTarget = Get-RequiredValue $args $i $args[$i]; $LockClocks = $true; $i++ }
@@ -105,6 +118,26 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         default { Write-Host "Unknown option $($args[$i])"; Show-Usage 1 }
     }
 }
+
+# --resume-from package[:problem[:algorithm[:mode[:N]]]]: the package names
+# the perf-sweep restart; the tail is handed to that package's run_benchmark
+# as its run-order cursor. Hyphen aliases apply to the package token only.
+$ResumePkg = ''
+$ResumeTail = ''
+if ($ResumeFrom) {
+    $parts = $ResumeFrom.Split(':', 2)
+    $ResumePkg = $parts[0] -replace '-', '_'
+    if ($parts.Count -gt 1) { $ResumeTail = $parts[1] }
+    if ($AllPackages -notcontains $ResumePkg) {
+        Write-Host "--resume-from names an unknown package '$ResumePkg' ($($AllPackages -join '|'))"
+        exit 1
+    }
+}
+
+# Continuation flags forwarded to every run_benchmark invocation.
+$BenchFlags = ''
+if ($Keep) { $BenchFlags += ' --keep' }
+if ($Resume) { $BenchFlags += ' --resume' }
 
 # -p accepts "all" or a comma list; each token is validated.
 $Languages = @()
@@ -324,7 +357,7 @@ $ExitCode = 0
 try {
     Start-ClockMonitor (Join-Path $LogDir 'clocks.csv') | Out-Null
 
-    $skipping = [bool]$ResumeFrom
+    $skipping = [bool]$ResumePkg
 
     # ----------------------------------------------------------------- warm
     if ($DoWarm) {
@@ -340,8 +373,15 @@ try {
     # ------------------------------------------------------------ performance
     if ($DoPerf) {
         foreach ($lang in $Languages) {
+            $PerfFlags = $BenchFlags
             if ($skipping) {
-                if ($lang -eq $ResumeFrom) { $skipping = $false } else {
+                if ($lang -eq $ResumePkg) {
+                    $skipping = $false
+                    # With a cursor the resumed package keeps its files and
+                    # skips everything before the cursor; bare package form
+                    # re-runs it in full, exactly as before.
+                    if ($ResumeTail) { $PerfFlags += " --resume-from $ResumeTail" }
+                } else {
                     Write-Host "-- skipping $lang (before --resume-from $ResumeFrom)"
                     Add-Record "perf:$lang" 'SKIPPED' '-' '-'
                     continue
@@ -349,7 +389,7 @@ try {
             }
             $ClockCritical = $true; $StepLabel = "perf:$lang"
             $status = Invoke-Step "Performance sweep: $lang (nmax=$NMax)" "perf_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n `"$NMax`" -g `"$Algorithm`" -s `"$Problem`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a performance -n `"$NMax`" -g `"$Algorithm`" -s `"$Problem`"$PerfFlags"
             $reached = Get-MaxNReached $lang
             if ($status -eq 0) {
                 Add-Record "perf:$lang" 'OK' "maxN=$reached" "$status"
@@ -370,7 +410,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "states:$lang"
             $status = Invoke-Step "States sweep: $lang" "states_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a states -g `"$Algorithm`"$BenchFlags"
             if ($status -eq 0) { Add-Record "states:$lang" 'OK' '-' "$status" }
             else { Add-Record "states:$lang" 'FAILED' '-' "$status" }
             Update-StagePlots 'plot_states.jl'
@@ -394,7 +434,7 @@ try {
         foreach ($lang in $Languages) {
             $ClockCritical = $true; $StepLabel = "wp:$lang"
             $status = Invoke-Step "Work-precision sweep: $lang" "wp_$lang.log" `
-                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`" -s `"$Problem`""
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a work-precision -g `"$Algorithm`" -s `"$Problem`"$BenchFlags"
             if ($status -eq 0) { Add-Record "wp:$lang" 'OK' '-' "$status" }
             else { Add-Record "wp:$lang" 'FAILED' '-' "$status" }
             Update-StagePlots 'plot_ode_wp.jl'

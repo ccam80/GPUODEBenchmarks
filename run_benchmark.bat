@@ -9,6 +9,10 @@ REM   -g, --algorithm all (default) | comma list of the names in runner_scripts/
 REM   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
 REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
+REM   --keep          keep existing output files (no pre-run deletion)
+REM   --resume        skip every point already recorded on disk; implies --keep
+REM   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor;
+REM                   skips everything before it and implies --keep
 
 pushd "%~dp0"
 
@@ -19,11 +23,26 @@ set ALGORITHM=all
 set PROBLEM=all
 set DEVICE=gpu
 set MODEL=ode
+set KEEP=
+set RESUME=
+set RESUME_FROM=
 
 REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_loop
 if "%~1"=="" goto parse_done
+if /i "%~1"=="--keep" (
+    set "KEEP=1"
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--resume" (
+    set "RESUME=1"
+    set "KEEP=1"
+    shift
+    goto parse_loop
+)
 set "PA_TARGET="
+if /i "%~1"=="--resume-from" set "PA_TARGET=RESUME_FROM"
 if /i "%~1"=="-p" set "PA_TARGET=PACKAGE"
 if /i "%~1"=="--package" set "PA_TARGET=PACKAGE"
 if /i "%~1"=="-a" set "PA_TARGET=ANALYSIS"
@@ -63,6 +82,11 @@ goto parse_collect
 REM Accept hyphenated aliases for underscore-separated package names
 if /i "%PACKAGE%"=="cubie-mlir" set PACKAGE=cubie_mlir
 if /i "%PACKAGE%"=="myokit-cuda" set PACKAGE=myokit_cuda
+
+REM The continuation contract read by the bench scripts (runner_scripts/resume.py).
+if defined RESUME_FROM set "KEEP=1"
+if defined RESUME set "BENCH_RESUME=1"
+if defined RESUME_FROM set "BENCH_RESUME_FROM=%RESUME_FROM%"
 
 if "%PACKAGE%"=="" (
     echo -p/--package is required
@@ -168,7 +192,7 @@ for %%g in (!ALG_LIST!) do (
         set "PROBLEM_DIRS=!PROBLEM:,= !"
     )
     REM A bare * would expand to file names, so all-problems walks the key directory.
-    if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
+    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
         if /i "%PROBLEM%"=="all" (
             for /d %%d in ("data\%DATA_DIR%\!DATASET_KEY!\*") do call :clear_dir "%%d" "!ALG_GLOB!"
         ) else (

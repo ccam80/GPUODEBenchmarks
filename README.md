@@ -417,7 +417,29 @@ and comparison reports:
     $ ./run_full_dataset.sh -a performance      # one analysis
     $ ./run_full_dataset.sh -p cpp              # one package
     $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
-    $ ./run_full_dataset.sh --resume-from jax   # restart a part-finished sweep
+    $ ./run_full_dataset.sh --resume                # skip every point already on disk
+    $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
+    $ ./run_full_dataset.sh --resume \
+        --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
+                                                    # ...or at an exact (problem, algorithm, mode, N)
+```
+
+A run that dies partway is continued rather than redone. `--resume` skips
+every (problem, algorithm, mode, N) point whose row is already in its output
+file and deletes nothing (`--keep` gives the no-deletion behaviour on its
+own); a row of NaNs counts as recorded, so failed points are not retried.
+`--resume-from` places a cursor in the deterministic run order — problems in
+`runner_scripts/problems.csv` order, then algorithms in
+`runner_scripts/algorithms.csv` order, fixed before adaptive, N ascending —
+and skips everything strictly before it, which steps over a point that hangs
+the run (no row is written for a wedged point, so `--resume` alone would
+retry it). Both flags are also accepted by `run_benchmark.sh` /
+`run_benchmark.bat` directly, where `--resume-from` starts at the problem:
+
+```bash
+    $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps
+    $ bash ./run_benchmark.sh -p cubie --resume \
+        --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 ```
 
 **On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper

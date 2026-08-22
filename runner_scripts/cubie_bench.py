@@ -13,6 +13,7 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
+from resume import active as resume_active, skip_point, skip_wp_leg
 from wp_common import TIMING_TOL, parse_bench_args, times_outfile
 
 # Timed repeats per point; min is reported.
@@ -120,6 +121,10 @@ def _run_wp(problem, opts, system, grid):
     def sweep(mode, make_solver, settings):
         outfile = wp_outfile(opts["framework_dir"], opts["prefix"], mode,
                              algorithm, opts["dataset_key"], problem)
+        if skip_wp_leg(problem.name, algorithm, mode, outfile):
+            print(f"-- resume: skipping wp {problem.name} {mode} "
+                  f"{algorithm} (already covered)")
+            return
         samples_file = samples_outfile(opts["framework_dir"], opts["prefix"],
                                        "wp", mode, algorithm,
                                        opts["dataset_key"], problem)
@@ -237,6 +242,16 @@ def _run_times(problem, opts, system, grid):
             samples_file = samples_outfile(
                 opts["framework_dir"], opts["prefix"], "times", mode,
                 algorithm, dataset, problem)
+            run_ns = [n for n in ns
+                      if not skip_point(problem.name, algorithm, mode, n,
+                                        outfile)]
+            if not run_ns:
+                print(f"-- resume: skipping {problem.name} {mode} "
+                      f"{algorithm} (already covered)")
+                continue
+            if len(run_ns) < len(ns):
+                print(f"-- resume: {problem.name} {mode} {algorithm} "
+                      f"runs N={','.join(str(n) for n in run_ns)}")
             solver = None
             try:
                 solver = (_make_fixed_solver(system, problem, algorithm)
@@ -246,10 +261,10 @@ def _run_times(problem, opts, system, grid):
             except Exception as exc:
                 _failed(exc, f"{problem.name} {mode} {algorithm}")
                 with open(outfile, "a+") as file:
-                    nan_rows(file, ns)
+                    nan_rows(file, run_ns)
                 continue
             with open(outfile, "a+") as file:
-                for index, n in enumerate(ns):
+                for index, n in enumerate(run_ns):
                     print(f"Running {problem.name}, {n} trajectories, "
                           f"{mode} dt, {algorithm}...")
                     solution = None
@@ -260,7 +275,7 @@ def _run_times(problem, opts, system, grid):
                             # Larger sizes are slower, so the leg is abandoned.
                             print(f"WATCHDOG {problem.name} {mode} "
                                   f"{algorithm} N={n}: run exceeded the cap")
-                            nan_rows(file, ns[index:])
+                            nan_rows(file, run_ns[index:])
                             break
                         print(f"{n} ODE solves ({algorithm}, {mode}) "
                               f"completed in {best:.1f} ms ({best_dev:.1f} ms "
@@ -418,12 +433,21 @@ def _run_states(opts):
                 continue
             outfile = states_outfile(opts["framework_dir"], opts["prefix"],
                                      mode, algorithm, opts["dataset_key"])
+            run_grid = [s for s in grid
+                        if not skip_point(STATES_PROBLEM, algorithm, mode, s,
+                                          outfile)]
+            if not run_grid:
+                print(f"-- resume: skipping states {mode} {algorithm} "
+                      "(already covered)")
+                continue
             samples_file = samples_outfile(
                 opts["framework_dir"], opts["prefix"], "states", mode,
                 algorithm, opts["dataset_key"], STATES_PROBLEM)
-            reset_samples(samples_file)
-            with open(outfile, "w") as file:
-                for index, nstates in enumerate(grid):
+            # A resumed leg appends to what earlier runs recorded.
+            if not resume_active():
+                reset_samples(samples_file)
+            with open(outfile, "a" if resume_active() else "w") as file:
+                for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
                     duration = row["duration"]
                     print(f"Running lorenz96 states={nstates}, "
@@ -496,7 +520,7 @@ def _run_states(opts):
                         # Larger systems are slower, so the leg is abandoned.
                         print(f"WATCHDOG lorenz96 states={nstates} {mode} "
                               f"{algorithm} N={n}: run exceeded the cap")
-                        for rest in grid[index + 1:]:
+                        for rest in run_grid[index + 1:]:
                             file.write(f'{rest} nan nan nan\n')
                         file.flush()
                         break

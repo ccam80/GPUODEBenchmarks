@@ -16,6 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
 from bench_key import data_dir, dataset_key  # noqa: E402
+from resume import (  # noqa: E402
+    active as resume_active,
+    skip_point,
+    skip_wp_leg,
+)
 from wp_common import (  # noqa: E402
     WATCHDOG_SECONDS,
     append_samples,
@@ -212,19 +217,37 @@ def run_warm(problems):
 
 def run_problem(problem, cell_counts, wp_mode):
     """The ascending N sweep or the work-precision sweep, on one compiled model."""
-    model = load_model(problem)
     if wp_mode:
+        output = wp_outfile("MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM,
+                            DATASET_KEY, problem)
+        if skip_wp_leg(problem.name, ALGORITHM, "fixed", output):
+            print("-- resume: skipping wp {0} fixed {1} (already covered)"
+                  .format(problem.name, ALGORITHM))
+            return
+        model = load_model(problem)
         run_work_precision(model, problem, cell_counts[0])
         return
 
     timing_file = Path(times_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY, problem
     ))
+    run_counts = [n for n in cell_counts
+                  if not skip_point(problem.name, ALGORITHM, "fixed", n,
+                                    str(timing_file))]
+    if not run_counts:
+        print("-- resume: skipping {0} fixed {1} (already covered)"
+              .format(problem.name, ALGORITHM))
+        return
+    if len(run_counts) < len(cell_counts):
+        print("-- resume: {0} fixed {1} runs N={2}".format(
+            problem.name, ALGORITHM,
+            ",".join(str(n) for n in run_counts)))
+    model = load_model(problem)
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "times", "fixed", ALGORITHM,
         DATASET_KEY, problem)
     with timing_file.open("a", encoding="utf-8") as handle:
-        for index, cell_count in enumerate(cell_counts):
+        for index, cell_count in enumerate(run_counts):
             sweep = problem.sweep(cell_count, dtype=np.float32)
             elapsed_ms, elapsed_dev_ms, finals = timed_solve(
                 model,
@@ -259,7 +282,7 @@ def run_problem(problem, cell_counts, wp_mode):
                 # Larger sizes are slower, so the sweep is abandoned.
                 print("WATCHDOG {0} fixed {1} N={2}: run exceeded the cap"
                       .format(problem.name, ALGORITHM, cell_count))
-                for rest in cell_counts[index + 1:]:
+                for rest in run_counts[index + 1:]:
                     handle.write("{0} nan nan\n".format(rest))
                 handle.flush()
                 break
@@ -330,12 +353,22 @@ def run_states(grid):
     cell_count = STATES_N
     outfile = Path(states_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "fixed", ALGORITHM, DATASET_KEY))
+    run_grid = [s for s in grid
+                if not skip_point(STATES_PROBLEM, ALGORITHM, "fixed", s,
+                                  str(outfile))]
+    if not run_grid:
+        print("-- resume: skipping states fixed {0} (already covered)"
+              .format(ALGORITHM))
+        return
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "states", "fixed", ALGORITHM,
         DATASET_KEY, STATES_PROBLEM)
-    reset_samples(samples_file)
-    with outfile.open("w", encoding="utf-8") as handle:
-        for index, nstates in enumerate(grid):
+    # A resumed leg appends to what earlier runs recorded.
+    if not resume_active():
+        reset_samples(samples_file)
+    with outfile.open("a" if resume_active() else "w",
+                      encoding="utf-8") as handle:
+        for index, nstates in enumerate(run_grid):
             row = states_row(nstates)
             sweep = row.sweep(cell_count, dtype=np.float32)
             elapsed_ms = elapsed_dev_ms = build_s = float("nan")
@@ -379,7 +412,7 @@ def run_states(grid):
                 print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: run "
                       "exceeded the cap".format(nstates, ALGORITHM,
                                                 cell_count))
-                for rest in grid[index + 1:]:
+                for rest in run_grid[index + 1:]:
                     handle.write("{0} nan nan nan\n".format(rest))
                 handle.flush()
                 break

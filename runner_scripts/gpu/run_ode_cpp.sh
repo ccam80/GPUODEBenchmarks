@@ -15,6 +15,30 @@ case "$ALGORITHM" in
 esac
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
+
+# Continuation (issue #54): BENCH_RESUME / BENCH_RESUME_FROM are read by
+# runner_scripts/resume.py; each point or wp leg is asked for before it runs.
+RESUME_ACTIVE=""
+[ -n "${BENCH_RESUME:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
+
+mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
+alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
+
+# resume_skip <times|states|wp> <problem> <solver> [N]: true when covered.
+resume_skip() {
+	[ -n "$RESUME_ACTIVE" ] || return 1
+	local kind=$1 problem=$2 solver=$3 n=${4:-}
+	local mode alg outfile
+	mode=$(mode_for "$solver")
+	alg=$(alg_for "$solver")
+	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
+	if [ "$kind" == "wp" ]; then
+		[ "$(python3 ./runner_scripts/resume.py leg "$problem" "$alg" "$mode" "$outfile")" == "skip" ]
+	else
+		[ "$(python3 ./runner_scripts/resume.py point "$problem" "$alg" "$mode" "$n" "$outfile")" == "skip" ]
+	fi
+}
+
 # Built binaries are cached per source hash, machine and build constants.
 SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
              find GPU_ODE_MPGOS/problems GPU_ODE_MPGOS/SourceCodes -type f | sort | xargs cat) \
@@ -74,11 +98,18 @@ warm_nt_builds() {
 if [ "$ANALYSIS" == "states" ]; then
 	STATES_N=131072
 	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
-	rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
+	# A resumed run appends to what earlier runs recorded.
+	if [ -z "$RESUME_ACTIVE" ]; then
+		rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
+	fi
 	for solver in $SOLVERS
 	do
 		for n in $GRID
 		do
+			if resume_skip states lorenz96 "$solver" "$n"; then
+				echo "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
+				continue
+			fi
 			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
@@ -109,6 +140,10 @@ do
 	if [ "$ANALYSIS" == "work-precision" ]; then
 		for solver in $SOLVERS
 		do
+			if resume_skip wp "$problem" "$solver"; then
+				echo "-- resume: skipping wp $problem ($solver) (already covered)"
+				continue
+			fi
 			build "$problem" "$solver" 131072
 			./GPU_ODE_MPGOS/Bench.exe wp
 		done
@@ -118,6 +153,10 @@ do
 	do
 		for a in $NLIST
 		do
+			if resume_skip times "$problem" "$solver" "$a"; then
+				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
+				continue
+			fi
 			echo "No. of trajectories = $a ($problem, $solver)"
 			build "$problem" "$solver" "$a"
 			./GPU_ODE_MPGOS/Bench.exe

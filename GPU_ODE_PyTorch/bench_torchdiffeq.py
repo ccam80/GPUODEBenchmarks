@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
+from resume import active as resume_active, skip_point, skip_wp_leg
 from wp_common import (append_samples, parse_bench_args, reset_samples,
                        sample_point, samples_outfile, times_outfile)
 
@@ -111,6 +112,10 @@ def run_wp(problem, parameters):
             continue
         outfile = wp_outfile("PYTORCH", "Torch", "fixed", algorithm,
                              DATASET_KEY, problem)
+        if skip_wp_leg(problem.name, algorithm, "fixed", outfile):
+            print("-- resume: skipping wp {0} fixed {1} (already covered)"
+                  .format(problem.name, algorithm))
+            continue
         samples_file = samples_outfile("PYTORCH", "Torch", "wp", "fixed",
                                        algorithm, DATASET_KEY, problem)
         reset_samples(samples_file)
@@ -153,13 +158,24 @@ def run_times(problem):
     for algorithm in ALGORITHMS:
         if not problem.supports("pytorch"):
             continue
-        solve = make_solve(problem, algorithm)
         outfile = times_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                 DATASET_KEY, problem)
+        run_ns = [n for n in NS
+                  if not skip_point(problem.name, algorithm, "fixed", n,
+                                    outfile)]
+        if not run_ns:
+            print("-- resume: skipping {0} fixed {1} (already covered)"
+                  .format(problem.name, algorithm))
+            continue
+        if len(run_ns) < len(NS):
+            print("-- resume: {0} fixed {1} runs N={2}".format(
+                problem.name, algorithm,
+                ",".join(str(n) for n in run_ns)))
+        solve = make_solve(problem, algorithm)
         samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
                                        algorithm, DATASET_KEY, problem)
         with open(outfile, "a+") as file:
-            for index, n in enumerate(NS):
+            for index, n in enumerate(run_ns):
                 parameters_host = problem.sweep(n, dtype=np.float32)
                 parameters = torch.from_numpy(parameters_host).cuda()
 
@@ -214,7 +230,7 @@ def run_times(problem):
 
                 if breached:
                     # Larger sizes are slower, so the leg is abandoned.
-                    for rest in NS[index + 1:]:
+                    for rest in run_ns[index + 1:]:
                         file.write('{0} nan nan\n'.format(rest))
                     file.flush()
                     break
@@ -233,11 +249,20 @@ def run_states():
     for algorithm in ALGORITHMS:
         outfile = states_outfile("PYTORCH", "Torch", "fixed", algorithm,
                                  DATASET_KEY)
+        run_grid = [s for s in grid
+                    if not skip_point(STATES_PROBLEM, algorithm, "fixed", s,
+                                      outfile)]
+        if not run_grid:
+            print("-- resume: skipping states fixed {0} (already covered)"
+                  .format(algorithm))
+            continue
         samples_file = samples_outfile("PYTORCH", "Torch", "states", "fixed",
                                        algorithm, DATASET_KEY, STATES_PROBLEM)
-        reset_samples(samples_file)
-        with open(outfile, "w") as file:
-            for index, nstates in enumerate(grid):
+        # A resumed leg appends to what earlier runs recorded.
+        if not resume_active():
+            reset_samples(samples_file)
+        with open(outfile, "a" if resume_active() else "w") as file:
+            for index, nstates in enumerate(run_grid):
                 row = states_row(nstates)
                 solve = make_solve(row, algorithm)
                 parameters_host = row.sweep(n, dtype=np.float32)
@@ -288,7 +313,7 @@ def run_states():
                     print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
                           "run exceeded the cap".format(nstates, algorithm,
                                                         n))
-                    for rest in grid[index + 1:]:
+                    for rest in run_grid[index + 1:]:
                         file.write('{0} nan nan nan\n'.format(rest))
                     file.flush()
                     break

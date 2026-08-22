@@ -9,7 +9,8 @@
 #
 # A package that runs out of GPU memory stops only its own sweep; completed
 # points stay on disk and the run continues. A failed analysis never aborts
-# the others. Use --resume-from to continue a part-finished sweep.
+# the others. Use --resume to continue a part-finished run from what is on
+# disk, and --resume-from to restart at an exact point.
 #
 # GPU clocks are pinned for the whole run (see runner_scripts/clock_guard.sh);
 # without passwordless root the run proceeds unlocked and reports any drift.
@@ -24,7 +25,11 @@
 #   ./run_full_dataset.sh -a performance,numerical  # several analyses
 #   ./run_full_dataset.sh -g euler,tsit5            # several algorithms
 #   ./run_full_dataset.sh -s lorenz                 # one problem
-#   ./run_full_dataset.sh --resume-from jax         # restart at a package
+#   ./run_full_dataset.sh --resume                  # skip points already on disk
+#   ./run_full_dataset.sh --keep                    # never delete existing outputs
+#   ./run_full_dataset.sh --resume-from jax         # restart the perf sweep at a package
+#   ./run_full_dataset.sh --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
+#                                                   # ... or at an exact (problem, algorithm, mode, N)
 #   ./run_full_dataset.sh --lock-clocks 1470,6801   # override the clock target
 #   ./run_full_dataset.sh --no-lock-clocks          # sample clocks but do not pin
 #   ./run_full_dataset.sh --clock-tolerance 30      # widen the drift threshold (MHz)
@@ -34,6 +39,13 @@
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
+#   --resume        skip every recorded point; nothing is deleted (implies --keep)
+#   --keep          keep existing output files (no pre-run deletion)
+#   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the
+#                   performance sweep there. A bare package re-runs it in full;
+#                   with a cursor tail the package keeps its files and skips
+#                   every point before the cursor (combine with --resume to
+#                   also skip the recorded points after it)
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -56,6 +68,8 @@ ALGORITHM="all"
 PROBLEM="all"
 COOLDOWN=15
 RESUME_FROM=""
+RESUME=false
+KEEP=false
 ALLOW_UNKNOWN_GPU=false
 LOCK_CLOCKS=true
 CLOCK_TARGET=""          # "SM[,MEM]"; empty means use the per-GPU table
@@ -65,7 +79,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,39p' "$0" | sed 's/^# \?//'
+    sed -n '2,50p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -110,7 +124,9 @@ while [ $# -gt 0 ]; do
         -a|--analysis) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    set_analyses "$2"; shift 2;;
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
-                   RESUME_FROM="${2//-/_}"; shift 2;;
+                   RESUME_FROM="$2"; shift 2;;
+        --resume) RESUME=true; KEEP=true; shift;;
+        --keep) KEEP=true; shift;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    COOLDOWN="$2"; shift 2;;
         --allow-unknown-gpu) ALLOW_UNKNOWN_GPU=true; shift;;
@@ -140,6 +156,33 @@ case "$PROBLEM" in
         echo "-s/--problem takes names from runner_scripts/problems.csv, got '$PROBLEM'"
         exit 1;;
 esac
+
+# --resume-from package[:problem[:algorithm[:mode[:N]]]]: the package names
+# the perf-sweep restart; the tail is handed to that package's run_benchmark
+# as its run-order cursor. Hyphen aliases apply to the package token only.
+RESUME_PKG=""
+RESUME_TAIL=""
+if [ -n "$RESUME_FROM" ]; then
+    case "$RESUME_FROM" in
+        *[!a-z0-9_:-]*)
+            echo "--resume-from takes package[:problem[:algorithm[:fixed|adaptive[:N]]]], got '$RESUME_FROM'"
+            exit 1;;
+    esac
+    RESUME_PKG="${RESUME_FROM%%:*}"
+    RESUME_PKG="${RESUME_PKG//-/_}"
+    case "$RESUME_FROM" in
+        *:*) RESUME_TAIL="${RESUME_FROM#*:}";;
+    esac
+    if [[ " ${ALL_PACKAGES[*]} " != *" $RESUME_PKG "* ]]; then
+        echo "--resume-from names an unknown package '$RESUME_PKG' ($(IFS='|'; echo "${ALL_PACKAGES[*]}"))"
+        exit 1
+    fi
+fi
+
+# Continuation flags forwarded to every run_benchmark invocation.
+BENCH_FLAGS=()
+$KEEP && BENCH_FLAGS+=(--keep)
+$RESUME && BENCH_FLAGS+=(--resume)
 
 # -p accepts "all" or a comma list; each token is validated.
 LANGUAGES=()
@@ -334,7 +377,7 @@ echo
 } > "$LOG_DIR/run_manifest.txt"
 
 skipping=false
-[ -n "$RESUME_FROM" ] && skipping=true
+[ -n "$RESUME_PKG" ] && skipping=true
 
 # ----------------------------------------------------------------------- warm
 if $DO_WARM; then
@@ -353,8 +396,15 @@ fi
 # ---------------------------------------------------------------- performance
 if $DO_PERF; then
     for lang in "${LANGUAGES[@]}"; do
+        PERF_FLAGS=(${BENCH_FLAGS[@]+"${BENCH_FLAGS[@]}"})
         if $skipping; then
-            if [ "$lang" == "$RESUME_FROM" ]; then skipping=false; else
+            if [ "$lang" == "$RESUME_PKG" ]; then
+                skipping=false
+                # With a cursor the resumed package keeps its files and skips
+                # everything before the cursor; bare package form re-runs it
+                # in full, exactly as before.
+                [ -n "$RESUME_TAIL" ] && PERF_FLAGS+=(--resume-from "$RESUME_TAIL")
+            else
                 echo "-- skipping $lang (before --resume-from $RESUME_FROM)"
                 record "perf:$lang" "SKIPPED" "-" "-"
                 continue
@@ -362,7 +412,8 @@ if $DO_PERF; then
         fi
         CLOCK_CRITICAL=true; STEP_LABEL="perf:$lang"
         run_step "Performance sweep: $lang (nmax=$NMAX)" "perf_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM" -s "$PROBLEM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a performance -n "$NMAX" -g "$ALGORITHM" -s "$PROBLEM" \
+                ${PERF_FLAGS[@]+"${PERF_FLAGS[@]}"}
         status=$?
         reached=$(max_n_reached "$lang")
         if [ "$status" -eq 0 ]; then
@@ -383,7 +434,7 @@ fi
 if $DO_STATES; then
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="states:$lang"
-        run_step "States sweep: $lang" "states_${lang}.log"             bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a states -g "$ALGORITHM"
+        run_step "States sweep: $lang" "states_${lang}.log"             bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a states -g "$ALGORITHM" ${BENCH_FLAGS[@]+"${BENCH_FLAGS[@]}"}
         status=$?
         if [ "$status" -eq 0 ]; then
             record "states:$lang" "OK" "-" "${status}"
@@ -413,7 +464,8 @@ if $DO_WP; then
     for lang in "${LANGUAGES[@]}"; do
         CLOCK_CRITICAL=true; STEP_LABEL="wp:$lang"
         run_step "Work-precision sweep: $lang" "wp_${lang}.log" \
-            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM" -s "$PROBLEM"
+            bash ./run_benchmark.sh -p "$lang" -d gpu -m ode -a work-precision -g "$ALGORITHM" -s "$PROBLEM" \
+                ${BENCH_FLAGS[@]+"${BENCH_FLAGS[@]}"}
         status=$?
         [ "$status" -eq 0 ] && record "wp:$lang" "OK" "-" "$status" \
                             || record "wp:$lang" "FAILED" "-" "$status"
