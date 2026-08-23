@@ -308,6 +308,9 @@ device-side cycle budget in `problems/stubs.cuh`; a solve that never
 returns is caught by a hard watchdog that records every row its process
 can no longer reach as NaN and exits, and the Julia runner launches one
 process per problem and algorithm so an exit abandons only that pair.
+MPGOS runs each sweep size as its own process, so a breach there is
+signalled by exit code 42 and the runner NaN-fills the leg's remaining
+sizes without running them.
 
 Every problem attempts every algorithm its frameworks support; a failed solve is a NaN row. `lorenz96_20` is the 20-state lorenz96 row, the smaller stiff head-to-head.
 

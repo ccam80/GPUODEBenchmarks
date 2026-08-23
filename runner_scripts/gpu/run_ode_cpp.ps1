@@ -136,6 +136,9 @@ function Build-Project {
     }
 }
 
+# Set when the last Invoke-Point exited 42, the watchdog-breach code.
+$script:PointBreached = $false
+
 function Invoke-Point {
     param([string]$ProblemName, [string]$Solver, [long]$Nt, [switch]$Wp)
     Build-Project -ProblemName $ProblemName -Solver $Solver -Nt $Nt
@@ -144,7 +147,8 @@ function Invoke-Point {
     } else {
         & "GPU_ODE_MPGOS\Bench.exe"
     }
-    if ($LASTEXITCODE -ne 0) {
+    $script:PointBreached = ($LASTEXITCODE -eq 42)
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 42) {
         Write-Error "Bench.exe ($ProblemName, $Solver) failed with exit code $LASTEXITCODE"
     }
 }
@@ -222,6 +226,10 @@ if ($Analysis -eq 'states') {
         Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
     }
     foreach ($solver in $Solvers) {
+        $breached = $false
+        $mode = Get-SolverMode $solver
+        $alg = Get-SolverAlgorithm $solver
+        $statesFile = "data\CPP\$DatasetKey\lorenz96\MPGOS_states_${mode}_${alg}.txt"
         foreach ($n in $Grid) {
             if (Test-ResumeSkip 'states' 'lorenz96' $solver "$n") {
                 Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
@@ -232,8 +240,17 @@ if ($Analysis -eq 'states') {
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
             $BuildS = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
+            # Larger sizes of a breached leg are slower still: keep the build
+            # time, which is the cold-compile datum, and NaN the solve.
+            if ($breached) {
+                Add-Content -Path $statesFile -Value "$n`tnan`tnan`t$BuildS"
+                Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
+                continue
+            }
             & "GPU_ODE_MPGOS\Bench.exe" states $BuildS
-            if ($LASTEXITCODE -ne 0) {
+            if ($LASTEXITCODE -eq 42) {
+                $breached = $true
+            } elseif ($LASTEXITCODE -ne 0) {
                 Write-Error "Bench.exe (lorenz96 states=$n, $solver) failed with exit code $LASTEXITCODE"
             }
         }
@@ -255,13 +272,26 @@ foreach ($problemName in $Problems) {
     }
     # NT is a compile-time constant, so every point is a rebuild.
     foreach ($solver in $Solvers) {
+        $breached = $false
+        $mode = Get-SolverMode $solver
+        $alg = Get-SolverAlgorithm $solver
+        $timesFile = "data\CPP\$DatasetKey\$problemName\MPGOS_times_${mode}_${alg}.txt"
         foreach ($a in $NValues) {
             if (Test-ResumeSkip 'times' $problemName $solver "$a") {
                 Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
                 continue
             }
+            # Each size is its own process, so the runner abandons a breached
+            # leg's larger (slower) sizes as NaN rows, as the other frameworks do.
+            if ($breached) {
+                Add-Content -Path $timesFile -Value "$a`tnan`tnan"
+                Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
+                continue
+            }
             Write-Host "No. of trajectories = $a ($problemName, $solver)"
+            $script:PointBreached = $false
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
+            if ($script:PointBreached) { $breached = $true }
         }
     }
 }
