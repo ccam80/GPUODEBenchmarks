@@ -308,7 +308,7 @@ device-side cycle budget in `problems/stubs.cuh`; a solve that never
 returns is caught by a hard watchdog that records every row its process
 can no longer reach as NaN and exits with status 3, and the Julia runner
 launches one process per (problem, algorithm, mode) so an exit abandons
-only that leg and the run reports the failure.
+only that leg.
 
 Every problem attempts every algorithm its frameworks support; a failed solve is a NaN row. `lorenz96_20` is the 20-state lorenz96 row, the smaller stiff head-to-head.
 
@@ -330,8 +330,7 @@ the budget.
 
 Every Julia analysis runs through `runner_scripts/gpu/julia_driver.py`:
 one process per leg — (problem, algorithm, mode) for performance and
-work-precision, so a watchdog hard-exit in one step mode cannot erase the
-sibling mode's output, and (size, algorithm) for states — with up to
+work-precision, (size, algorithm) for states — with up to
 `BENCH_JULIA_JOBS` (default 4) compiling concurrently while a pidfile
 lock serializes every timed GPU section; each leg's first solve carries
 its kernel compile outside the lock.
@@ -429,9 +428,9 @@ and comparison reports:
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in its output file and deletes nothing; NaN rows count as recorded.
-`--no-overwrite` skips only points with a finite recorded time, so NaN
-failures and absent rows are retried (the stale NaN row is dropped before
-the retry appends). `--keep` gives the no-deletion behaviour on its own.
+`--no-overwrite` skips only points with a finite recorded time; NaN and
+absent rows rerun, and a rerun point's stale rows are dropped before the
+new row is appended. `--keep` gives the no-deletion behaviour on its own.
 `--resume-from` places a cursor in the run order (problems.csv order, then
 algorithms.csv order, fixed before adaptive, N ascending) and skips
 everything before it — use it to step over a point that hangs, since a hung

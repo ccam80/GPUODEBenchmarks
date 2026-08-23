@@ -16,8 +16,7 @@ esac
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points
-# via runner_scripts/resume.py.
+# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
 RESUME_ACTIVE=""
 [ -n "${BENCH_RESUME:-}${BENCH_NO_OVERWRITE:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
 
@@ -39,8 +38,7 @@ resume_skip() {
 	fi
 }
 
-# resume_prune <times|states> <problem> <solver> <N>: drop a retried point's
-# stale rows (NaN failures, cursor overlaps) so Bench.exe's append does not duplicate.
+# resume_prune <times|states> <problem> <solver> <N>: drop a retried point's stale rows.
 resume_prune() {
 	[ -n "$RESUME_ACTIVE" ] || return 0
 	local kind=$1 problem=$2 solver=$3 n=$4

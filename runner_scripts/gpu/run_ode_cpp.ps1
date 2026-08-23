@@ -72,8 +72,7 @@ function Enter-VsEnvironment {
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
 
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points
-# via runner_scripts/resume.py.
+# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
 $ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_NO_OVERWRITE -or
                        $env:BENCH_RESUME_FROM)
 
@@ -99,8 +98,7 @@ function Test-ResumeSkip {
     return ("$verdict".Trim() -eq 'skip')
 }
 
-# Drop a retried point's stale rows (NaN failures, cursor overlaps) so
-# Bench.exe's append does not duplicate.
+# Drop a retried point's stale rows.
 function Invoke-ResumePrune {
     param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N)
     if (-not $ResumeActive) { return }

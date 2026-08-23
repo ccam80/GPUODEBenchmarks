@@ -2,12 +2,12 @@
 
 BENCH_RESUME=1 skips every point whose row is already in its output file
 (NaN rows count as recorded). BENCH_NO_OVERWRITE=1 skips only points whose
-row holds a finite time, so NaN failures and absent rows are retried.
-BENCH_RESUME_FROM is a cursor problem[:algorithm][:fixed|adaptive][:N] into
-the run order (problems.csv, then algorithms.csv, fixed before adaptive, N
-ascending); points strictly before it are skipped. The problem[:N] form
-floors every leg of that problem at N; in the states sweep N is the state
-count. A wp leg is skipped only when its file holds a row per setting.
+row holds a finite time; NaN and absent rows rerun. BENCH_RESUME_FROM is a
+cursor problem[:algorithm][:fixed|adaptive][:N] into the run order
+(problems.csv, then algorithms.csv, fixed before adaptive, N ascending);
+points strictly before it are skipped. The problem[:N] form floors every
+leg of that problem at N; in the states sweep N is the state count. A wp
+leg is skipped only when its file holds a row per setting.
 """
 
 import math
@@ -146,7 +146,7 @@ def numeric_values(path):
 
 
 def prune_reruns(outfile, ns):
-    """Drop the rows for points about to rerun, so retries do not duplicate."""
+    """Drop the rows for the points about to rerun."""
     if not active() or not ns:
         return
     rerun = set(ns)
@@ -211,8 +211,8 @@ def skip_wp_leg(problem, algorithm, mode, outfile):
 
 
 def _cli(argv):
-    """Shell entry: prints "skip" or "run" for a point or a wp leg;
-    "prune" drops one point's stale rows before a retry appends."""
+    """Shell entry: "skip"/"run" for a point or wp leg; "prune" drops one
+    point's rows."""
     usage = ("usage: resume.py point <problem> <algorithm> <mode> <N> "
              "<outfile> | leg <problem> <algorithm> <mode> <outfile> | "
              "prune <N> <outfile>")

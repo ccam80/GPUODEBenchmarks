@@ -1,5 +1,4 @@
 # Continuation of partial runs, mirroring resume.py; include problems.jl and algorithms.jl first.
-# BENCH_NO_OVERWRITE=1 keeps only finite recorded rows; NaN and absent rows are retried.
 
 const RESUME_MODES = ("fixed", "adaptive")
 
@@ -101,7 +100,7 @@ function numeric_values(path)
     return values
 end
 
-"Drop the rows for points about to rerun, so retries do not duplicate."
+"Drop the rows for the points about to rerun."
 function prune_reruns(outfile, ns)
     (resume_active() && !isempty(ns) && isfile(outfile)) || return
     rerun = Set(Int.(ns))

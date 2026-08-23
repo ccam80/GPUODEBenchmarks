@@ -247,7 +247,7 @@ def run_problem(problem, cell_counts, wp_mode):
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "times", "fixed", ALGORITHM,
         DATASET_KEY, problem)
-    # Retried points (NaN rows, cursor overlaps) must not duplicate.
+    # Drop stale rows for the points about to rerun.
     prune_reruns(str(timing_file), run_counts)
     with timing_file.open("a", encoding="utf-8") as handle:
         for index, cell_count in enumerate(run_counts):

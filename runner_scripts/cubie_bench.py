@@ -253,7 +253,7 @@ def _run_times(problem, opts, system, grid):
             if len(run_ns) < len(ns):
                 print(f"-- resume: {problem.name} {mode} {algorithm} "
                       f"runs N={','.join(str(n) for n in run_ns)}")
-            # Retried points (NaN rows, cursor overlaps) must not duplicate.
+            # Drop stale rows for the points about to rerun.
             prune_reruns(outfile, run_ns)
             solver = None
             try:

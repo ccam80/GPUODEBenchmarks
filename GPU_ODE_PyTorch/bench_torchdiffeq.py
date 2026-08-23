@@ -175,7 +175,7 @@ def run_times(problem):
         solve = make_solve(problem, algorithm)
         samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
                                        algorithm, DATASET_KEY, problem)
-        # Retried points (NaN rows, cursor overlaps) must not duplicate.
+        # Drop stale rows for the points about to rerun.
         prune_reruns(outfile, run_ns)
         with open(outfile, "a+") as file:
             for index, n in enumerate(run_ns):

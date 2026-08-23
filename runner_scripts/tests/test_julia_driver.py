@@ -1,5 +1,4 @@
-"""States-driver cancellation and backfill tests with subprocess.Popen faked,
-and per-mode process isolation tests for the performance driver."""
+"""States-driver and performance-driver tests with subprocess.Popen faked."""
 
 import os
 import sys

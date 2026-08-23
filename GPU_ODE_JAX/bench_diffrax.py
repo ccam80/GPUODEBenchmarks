@@ -284,7 +284,7 @@ def run_times(problem):
                 print("-- resume: {0} {1} {2} runs N={3}".format(
                     problem.name, mode, algorithm,
                     ",".join(str(n) for n in run_ns)))
-            # Retried points (NaN rows, cursor overlaps) must not duplicate.
+            # Drop stale rows for the points about to rerun.
             prune_reruns(outfile, run_ns)
             with open(outfile, "a+") as file:
                 for index, n in enumerate(run_ns):

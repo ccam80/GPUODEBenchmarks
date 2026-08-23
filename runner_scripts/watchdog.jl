@@ -3,7 +3,7 @@
 const WATCHDOG_SECONDS = parse(Float64,
     get(ENV, "BENCH_WATCHDOG_SECONDS", "120"))
 
-# Exit status of the hard-exit path, so drivers record the leg as failed.
+# Exit status of the hard-exit path.
 const WATCHDOG_EXIT_CODE = Cint(3)
 
 "Run f() under the watchdog; when it never returns, run on_breach() and hard-exit."

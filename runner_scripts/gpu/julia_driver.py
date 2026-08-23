@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per (problem, algorithm, mode) leg so a watchdog hard-exit in one step mode cannot take the sibling mode down with it; compiles run in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per (problem, algorithm, mode) leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -128,8 +128,7 @@ def _modes_for(algorithm):
 
 
 def _mode_legs(request, problem_request):
-    """(problem, algorithm, mode) legs, one process each: a watchdog
-    hard-exit in one mode must not erase the sibling mode's output."""
+    """(problem, algorithm, mode) legs, one process each."""
     return [(problem, algorithm, mode)
             for problem, algorithm in _julia_legs(request, problem_request)
             for mode in _modes_for(algorithm)]

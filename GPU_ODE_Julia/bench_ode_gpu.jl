@@ -248,7 +248,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
                 "runs N=" * join(run_ns, ","))
     end
-    # Retried points (NaN rows, cursor overlaps) must not append duplicates.
+    # Drop stale rows for the points about to rerun.
     prune_reruns(outfile, run_ns)
 
     for (index, n) in enumerate(run_ns)
