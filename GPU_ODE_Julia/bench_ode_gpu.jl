@@ -9,7 +9,7 @@ using CSV, DataFrames, DelimitedFiles
 using FileWatching.Pidfile: mkpidlock
 using GPU_ODE_JuliaKernels
 
-# CLI: <N|N,N,...>|wp|states:<nstates>:<N> [algorithm|all] [--problem <name|all>].
+# CLI: <N|N,N,...>|wp|states:<nstates>:<N> [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>].
 @show ARGS
 #settings
 CUDA.allowscalar(false)
@@ -30,6 +30,7 @@ const REPO_ROOT = dirname(@__DIR__)
 
 requested_algorithm = "all"
 requested_problem = "all"
+requested_mode = "all"
 let i = 2
     while i <= length(ARGS)
         tok = ARGS[i]
@@ -39,12 +40,21 @@ let i = 2
             global requested_problem = ARGS[i]
         elseif startswith(tok, "--problem=")
             global requested_problem = split(tok, "=", limit = 2)[2]
+        elseif tok == "--mode"
+            i += 1
+            i <= length(ARGS) || error("--mode requires a value")
+            global requested_mode = ARGS[i]
+        elseif startswith(tok, "--mode=")
+            global requested_mode = split(tok, "=", limit = 2)[2]
         else
             global requested_algorithm = tok
         end
         i += 1
     end
 end
+requested_mode in ("fixed", "adaptive", "all") ||
+    error("--mode takes fixed, adaptive or all, got '$(requested_mode)'")
+const REQUESTED_MODE = requested_mode
 const ALGORITHMS = resolve_algorithms(requested_algorithm, "julia")
 const FIXED_ALGORITHMS = supported_algorithms("julia", "fixed")
 const ADAPTIVE_ALGORITHMS = supported_algorithms("julia", "adaptive")
@@ -74,12 +84,13 @@ const NS = isinteractive() ? [8192] :
             (STATES_MODE ? [STATES_ARGS[2]] :
              sort(parse.(Int64, split(ARGS[1], ',')))))
 
-"Modes the algorithm runs under this framework, fixed first."
+"Modes the algorithm runs under this framework and --mode, fixed first."
 algorithm_modes(algorithm) = [mode
                               for (mode, list) in
                                   (("fixed", FIXED_ALGORITHMS),
                                    ("adaptive", ADAPTIVE_ALGORITHMS))
-                              if algorithm in list]
+                              if algorithm in list &&
+                                 REQUESTED_MODE in ("all", mode)]
 
 "Ensemble l2-at-final error against the Float64 golden reference."
 function ensemble_error(system, us, golden)
@@ -186,7 +197,7 @@ function run_wp(problem)
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
 
-        if algorithm in FIXED_ALGORITHMS
+        if "fixed" in algorithm_modes(algorithm)
             wp_sweep(system, problem, algorithm, "fixed",
                 joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
                 collect(problem_dts(problem)), golden,
@@ -200,7 +211,7 @@ function run_wp(problem)
             end
         end
 
-        if algorithm in ADAPTIVE_ALGORITHMS
+        if "adaptive" in algorithm_modes(algorithm)
             wp_sweep(system, problem, algorithm, "adaptive",
                 joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
                 [10.0^-k for k in 2:8], golden,
@@ -237,6 +248,8 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
                 "runs N=" * join(run_ns, ","))
     end
+    # Drop stale rows for the points about to rerun.
+    prune_reruns(outfile, run_ns)
 
     for (index, n) in enumerate(run_ns)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"

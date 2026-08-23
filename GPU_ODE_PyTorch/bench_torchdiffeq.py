@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
-from resume import active as resume_active, skip_point, skip_wp_leg
+from resume import (active as resume_active, prune_reruns, skip_point,
+                    skip_wp_leg)
 from wp_common import (append_samples, parse_bench_args, reset_samples,
                        sample_point, samples_outfile, times_outfile)
 
@@ -174,6 +175,8 @@ def run_times(problem):
         solve = make_solve(problem, algorithm)
         samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
                                        algorithm, DATASET_KEY, problem)
+        # Drop stale rows for the points about to rerun.
+        prune_reruns(outfile, run_ns)
         with open(outfile, "a+") as file:
             for index, n in enumerate(run_ns):
                 parameters_host = problem.sweep(n, dtype=np.float32)
@@ -261,6 +264,7 @@ def run_states():
         # A resumed leg appends to what earlier runs recorded.
         if not resume_active():
             reset_samples(samples_file)
+        prune_reruns(outfile, run_grid)
         with open(outfile, "a" if resume_active() else "w") as file:
             for index, nstates in enumerate(run_grid):
                 row = states_row(nstates)

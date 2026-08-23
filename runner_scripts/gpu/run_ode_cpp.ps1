@@ -72,8 +72,9 @@ function Enter-VsEnvironment {
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
 
-# BENCH_RESUME / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
-$ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_RESUME_FROM)
+# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
+$ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_NO_OVERWRITE -or
+                       $env:BENCH_RESUME_FROM)
 
 function Get-SolverMode { param([string]$Solver)
     if ($Solver -eq 'RK4') { return 'fixed' } else { return 'adaptive' }
@@ -95,6 +96,16 @@ function Test-ResumeSkip {
         $verdict = (& python runner_scripts\resume.py point $ProblemName $alg $mode $N $outfile)
     }
     return ("$verdict".Trim() -eq 'skip')
+}
+
+# Drop a retried point's stale rows.
+function Invoke-ResumePrune {
+    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N)
+    if (-not $ResumeActive) { return }
+    $mode = Get-SolverMode $Solver
+    $alg = Get-SolverAlgorithm $Solver
+    $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
+    & python runner_scripts\resume.py prune $N $outfile
 }
 $SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
     (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
@@ -227,6 +238,7 @@ if ($Analysis -eq 'states') {
                 Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
                 continue
             }
+            Invoke-ResumePrune 'states' 'lorenz96' $solver "$n"
             Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
             $Watch = [System.Diagnostics.Stopwatch]::StartNew()
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
@@ -260,6 +272,7 @@ foreach ($problemName in $Problems) {
                 Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
                 continue
             }
+            Invoke-ResumePrune 'times' $problemName $solver "$a"
             Write-Host "No. of trajectories = $a ($problemName, $solver)"
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
         }

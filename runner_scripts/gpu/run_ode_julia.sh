@@ -3,7 +3,7 @@ set -e
 . "$(dirname "$0")/../parse_args.sh" "$@"
 unset LD_LIBRARY_PATH
 
-# One julia process per (problem, algorithm) runs that pair's whole N sweep.
+# One julia process per (problem, algorithm, mode) runs that leg's whole N sweep.
 ALGO_LIST=$(python3 ./runner_scripts/algorithms.py julia "$ALGORITHM")
 if [ -z "$ALGO_LIST" ]; then
     echo "Julia (DiffEqGPU kernel path) runs none of the requested algorithms; skipping."

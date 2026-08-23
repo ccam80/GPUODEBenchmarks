@@ -26,6 +26,7 @@
 #   ./run_full_dataset.sh -g euler,tsit5            # several algorithms
 #   ./run_full_dataset.sh -s lorenz                 # one problem
 #   ./run_full_dataset.sh --resume                  # skip points already on disk
+#   ./run_full_dataset.sh --no-overwrite            # keep finite results, retry NaN and absent points
 #   ./run_full_dataset.sh --keep                    # never delete existing outputs
 #   ./run_full_dataset.sh --resume-from jax         # restart the perf sweep at a package
 #   ./run_full_dataset.sh --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
@@ -40,6 +41,7 @@
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts/problems.csv
 #   --resume        skip every recorded point; nothing is deleted (implies --keep)
+#   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
 #   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
 #
@@ -65,6 +67,7 @@ PROBLEM="all"
 COOLDOWN=15
 RESUME_FROM=""
 RESUME=false
+NO_OVERWRITE=false
 KEEP=false
 ALLOW_UNKNOWN_GPU=false
 LOCK_CLOCKS=true
@@ -75,7 +78,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,46p' "$0" | sed 's/^# \?//'
+    sed -n '2,48p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -122,6 +125,7 @@ while [ $# -gt 0 ]; do
         --resume-from) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    RESUME_FROM="$2"; shift 2;;
         --resume) RESUME=true; KEEP=true; shift;;
+        --no-overwrite) NO_OVERWRITE=true; KEEP=true; shift;;
         --keep) KEEP=true; shift;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    COOLDOWN="$2"; shift 2;;
@@ -177,6 +181,7 @@ fi
 BENCH_FLAGS=()
 $KEEP && BENCH_FLAGS+=(--keep)
 $RESUME && BENCH_FLAGS+=(--resume)
+$NO_OVERWRITE && BENCH_FLAGS+=(--no-overwrite)
 
 # -p accepts "all" or a comma list; each token is validated.
 LANGUAGES=()

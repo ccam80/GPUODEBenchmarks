@@ -16,9 +16,9 @@ esac
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 
-# BENCH_RESUME / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
+# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
 RESUME_ACTIVE=""
-[ -n "${BENCH_RESUME:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
+[ -n "${BENCH_RESUME:-}${BENCH_NO_OVERWRITE:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
 
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
@@ -36,6 +36,17 @@ resume_skip() {
 	else
 		[ "$(python3 ./runner_scripts/resume.py point "$problem" "$alg" "$mode" "$n" "$outfile")" == "skip" ]
 	fi
+}
+
+# resume_prune <times|states> <problem> <solver> <N>: drop a retried point's stale rows.
+resume_prune() {
+	[ -n "$RESUME_ACTIVE" ] || return 0
+	local kind=$1 problem=$2 solver=$3 n=$4
+	local mode alg outfile
+	mode=$(mode_for "$solver")
+	alg=$(alg_for "$solver")
+	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
+	python3 ./runner_scripts/resume.py prune "$n" "$outfile"
 }
 
 # Built binaries are cached per source hash, machine and build constants.
@@ -109,6 +120,7 @@ if [ "$ANALYSIS" == "states" ]; then
 				echo "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
 				continue
 			fi
+			resume_prune states lorenz96 "$solver" "$n"
 			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
@@ -156,6 +168,7 @@ do
 				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
 				continue
 			fi
+			resume_prune times "$problem" "$solver" "$a"
 			echo "No. of trajectories = $a ($problem, $solver)"
 			build "$problem" "$solver" "$a"
 			./GPU_ODE_MPGOS/Bench.exe
