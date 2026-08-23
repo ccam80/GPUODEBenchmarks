@@ -1,14 +1,16 @@
 """Continuation of partial runs; mirrored by resume.jl.
 
 BENCH_RESUME=1 skips every point whose row is already in its output file
-(NaN rows count as recorded). BENCH_RESUME_FROM is a cursor
-problem[:algorithm][:fixed|adaptive][:N] into the run order (problems.csv,
-then algorithms.csv, fixed before adaptive, N ascending); points strictly
-before it are skipped. The problem[:N] form floors every leg of that
-problem at N; in the states sweep N is the state count. A wp leg is skipped
-only when its file holds a row per setting.
+(NaN rows count as recorded). BENCH_NO_OVERWRITE=1 skips only points whose
+row holds a finite time; NaN and absent rows rerun. BENCH_RESUME_FROM is a
+cursor problem[:algorithm][:fixed|adaptive][:N] into the run order
+(problems.csv, then algorithms.csv, fixed before adaptive, N ascending);
+points strictly before it are skipped. The problem[:N] form floors every
+leg of that problem at N; in the states sweep N is the state count. A wp
+leg is skipped only when its file holds a row per setting.
 """
 
+import math
 import os
 
 from algorithms import algorithm_names, get_algorithm
@@ -22,6 +24,11 @@ _CURSOR_CACHE = []          # [] = unparsed, [None] or [dict] once parsed
 def resume_enabled():
     """True when BENCH_RESUME asks for skip-what-is-on-disk continuation."""
     return os.environ.get("BENCH_RESUME", "") not in ("", "0")
+
+
+def no_overwrite_enabled():
+    """True when BENCH_NO_OVERWRITE asks to keep only finite recorded rows."""
+    return os.environ.get("BENCH_NO_OVERWRITE", "") not in ("", "0")
 
 
 def parse_cursor(spec):
@@ -72,8 +79,8 @@ def _reset_cache():
 
 
 def active():
-    """True when either continuation mechanism is switched on."""
-    return resume_enabled() or cursor() is not None
+    """True when any continuation mechanism is switched on."""
+    return resume_enabled() or no_overwrite_enabled() or cursor() is not None
 
 
 def cursor_skips(problem, algorithm, mode, n=None):
@@ -111,10 +118,66 @@ def recorded_values(path):
     return values
 
 
-def _row_count(path):
+def _finite(token):
+    """The token as a finite float, or None."""
+    try:
+        value = float(token)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def numeric_values(path):
+    """First-column integers of the rows whose time field is finite."""
+    values = set()
     try:
         with open(path) as handle:
-            return sum(1 for line in handle if len(line.split()) >= 2)
+            for line in handle:
+                fields = line.split()
+                if len(fields) < 2 or _finite(fields[1]) is None:
+                    continue
+                try:
+                    values.add(int(float(fields[0])))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return values
+
+
+def prune_reruns(outfile, ns):
+    """Drop the rows for the points about to rerun."""
+    if not active() or not ns:
+        return
+    rerun = set(ns)
+
+    def stale(line):
+        fields = line.split()
+        if len(fields) < 2:
+            return False
+        try:
+            return int(float(fields[0])) in rerun
+        except ValueError:
+            return False
+
+    try:
+        with open(outfile) as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+    kept = [line for line in lines if not stale(line)]
+    if len(kept) < len(lines):
+        with open(outfile, "w") as handle:
+            handle.writelines(kept)
+
+
+def _row_count(path, finite_only=False):
+    try:
+        with open(path) as handle:
+            return sum(1 for line in handle
+                       if len(line.split()) >= 2
+                       and (not finite_only
+                            or _finite(line.split()[1]) is not None))
     except OSError:
         return 0
 
@@ -123,7 +186,9 @@ def skip_point(problem, algorithm, mode, n, outfile):
     """True when one (problem, algorithm, mode, n) sweep point is covered."""
     if cursor_skips(problem, algorithm, mode, n):
         return True
-    return resume_enabled() and n in recorded_values(outfile)
+    if resume_enabled() and n in recorded_values(outfile):
+        return True
+    return no_overwrite_enabled() and n in numeric_values(outfile)
 
 
 def wp_settings_count(problem, algorithm, mode):
@@ -138,18 +203,26 @@ def skip_wp_leg(problem, algorithm, mode, outfile):
     """True when a whole work-precision leg is covered."""
     if cursor_skips(problem, algorithm, mode):
         return True
-    return (resume_enabled() and _row_count(outfile)
-            >= wp_settings_count(problem, algorithm, mode))
+    expected = wp_settings_count(problem, algorithm, mode)
+    if resume_enabled() and _row_count(outfile) >= expected:
+        return True
+    return (no_overwrite_enabled()
+            and _row_count(outfile, finite_only=True) >= expected)
 
 
 def _cli(argv):
-    """Shell entry: prints "skip" or "run" for a point or a wp leg."""
+    """Shell entry: "skip"/"run" for a point or wp leg; "prune" drops one
+    point's rows."""
     usage = ("usage: resume.py point <problem> <algorithm> <mode> <N> "
-             "<outfile> | leg <problem> <algorithm> <mode> <outfile>")
+             "<outfile> | leg <problem> <algorithm> <mode> <outfile> | "
+             "prune <N> <outfile>")
     if len(argv) >= 1 and argv[0] == "point" and len(argv) == 6:
         skip = skip_point(argv[1], argv[2], argv[3], int(argv[4]), argv[5])
     elif len(argv) >= 1 and argv[0] == "leg" and len(argv) == 5:
         skip = skip_wp_leg(argv[1], argv[2], argv[3], argv[4])
+    elif len(argv) >= 1 and argv[0] == "prune" and len(argv) == 3:
+        prune_reruns(argv[2], [int(argv[1])])
+        return 0
     else:
         raise SystemExit(usage)
     print("skip" if skip else "run")

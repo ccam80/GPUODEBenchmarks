@@ -11,6 +11,7 @@ REM   -d, --device    gpu (default) | cpu
 REM   -m, --model     ode (default) | sde
 REM   --keep          keep existing output files (no pre-run deletion)
 REM   --resume        skip every point already recorded on disk; implies --keep
+REM   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones; implies --keep
 REM   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor; skips everything before it; implies --keep
 
 pushd "%~dp0"
@@ -24,6 +25,7 @@ set DEVICE=gpu
 set MODEL=ode
 set KEEP=
 set RESUME=
+set NO_OVERWRITE=
 set RESUME_FROM=
 
 REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
@@ -36,6 +38,12 @@ if /i "%~1"=="--keep" (
 )
 if /i "%~1"=="--resume" (
     set "RESUME=1"
+    set "KEEP=1"
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--no-overwrite" (
+    set "NO_OVERWRITE=1"
     set "KEEP=1"
     shift
     goto parse_loop
@@ -85,6 +93,7 @@ if /i "%PACKAGE%"=="myokit-cuda" set PACKAGE=myokit_cuda
 REM The continuation contract read by the bench scripts (runner_scripts/resume.py).
 if defined RESUME_FROM set "KEEP=1"
 if defined RESUME set "BENCH_RESUME=1"
+if defined NO_OVERWRITE set "BENCH_NO_OVERWRITE=1"
 if defined RESUME_FROM set "BENCH_RESUME_FROM=%RESUME_FROM%"
 
 if "%PACKAGE%"=="" (

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per (problem, algorithm, mode) leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
 import math
 import os
@@ -127,17 +127,23 @@ def _modes_for(algorithm):
                  if algorithm in supported_for("julia", mode))
 
 
+def _mode_legs(request, problem_request):
+    """(problem, algorithm, mode) legs, one process each."""
+    return [(problem, algorithm, mode)
+            for problem, algorithm in _julia_legs(request, problem_request)
+            for mode in _modes_for(algorithm)]
+
+
 def _prune_covered(legs, pending):
-    """Drop the (problem, algorithm) legs whose every point is covered."""
+    """Drop the (problem, algorithm, mode) legs whose every point is covered."""
     if not resume_active():
         return legs
     kept = []
-    for problem, algorithm in legs:
-        if pending(problem, algorithm):
-            kept.append((problem, algorithm))
+    for leg in legs:
+        if pending(*leg):
+            kept.append(leg)
         else:
-            print(f"-- resume: skipping {problem} {algorithm} "
-                  "(already covered)")
+            print(f"-- resume: skipping {' '.join(leg)} (already covered)")
     return kept
 
 
@@ -148,25 +154,22 @@ def run_performance(argv):
     ns = sorted(int(tok) for tok in nlist.split(","))
     key = dataset_key()
 
-    def pending(problem, algorithm):
-        for mode in _modes_for(algorithm):
-            outfile = times_outfile("Julia", "Julia", mode, algorithm, key,
-                                    problem)
-            if any(not skip_point(problem, algorithm, mode, n, outfile)
-                   for n in ns):
-                return True
-        return False
+    def pending(problem, algorithm, mode):
+        outfile = times_outfile("Julia", "Julia", mode, algorithm, key,
+                                problem)
+        return any(not skip_point(problem, algorithm, mode, n, outfile)
+                   for n in ns)
 
-    legs = _prune_covered(_julia_legs(request, problem_request), pending)
+    legs = _prune_covered(_mode_legs(request, problem_request), pending)
     if not legs:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
               "legs; skipping.")
         return 0
     jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
     jobs_args = {
-        f"{problem} {algorithm}":
-            [BENCH, nlist, algorithm, "--problem", problem]
-        for problem, algorithm in legs}
+        f"{problem} {algorithm} {mode}":
+            [BENCH, nlist, algorithm, "--problem", problem, "--mode", mode]
+        for problem, algorithm, mode in legs}
     status = 0
     for label, code in _run_pool(jobs_args, jobs):
         if code:
@@ -179,24 +182,21 @@ def run_wp(argv):
     problem_request = argv[1] if len(argv) > 1 else "all"
     key = dataset_key()
 
-    def pending(problem, algorithm):
-        for mode in _modes_for(algorithm):
-            outfile = wp_outfile("Julia", "Julia", mode, algorithm, key,
-                                 problem)
-            if not skip_wp_leg(problem, algorithm, mode, outfile):
-                return True
-        return False
+    def pending(problem, algorithm, mode):
+        outfile = wp_outfile("Julia", "Julia", mode, algorithm, key,
+                             problem)
+        return not skip_wp_leg(problem, algorithm, mode, outfile)
 
-    legs = _prune_covered(_julia_legs(request, problem_request), pending)
+    legs = _prune_covered(_mode_legs(request, problem_request), pending)
     if not legs:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
               "legs; skipping.")
         return 0
     jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
     jobs_args = {
-        f"wp {problem} {algorithm}":
-            [BENCH, "wp", algorithm, "--problem", problem]
-        for problem, algorithm in legs}
+        f"wp {problem} {algorithm} {mode}":
+            [BENCH, "wp", algorithm, "--problem", problem, "--mode", mode]
+        for problem, algorithm, mode in legs}
     status = 0
     for label, code in _run_pool(jobs_args, jobs):
         if code:

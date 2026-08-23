@@ -306,11 +306,11 @@ are abandoned — the remaining work-precision settings, or the remaining
 trajectory counts of an N sweep. MPGOS kernels end themselves through a
 device-side cycle budget in `problems/stubs.cuh`; a solve that never
 returns is caught by a hard watchdog that records every row its process
-can no longer reach as NaN and exits, and the Julia runner launches one
-process per problem and algorithm so an exit abandons only that pair.
-MPGOS runs each sweep size as its own process, so a breach there is
-signalled by exit code 42 and the runner NaN-fills the leg's remaining
-sizes without running them.
+can no longer reach as NaN and exits with status 3, and the Julia runner
+launches one process per (problem, algorithm, mode) so an exit abandons
+only that leg. MPGOS runs each sweep size as its own process, so a breach
+there is signalled by exit code 42 and the runner NaN-fills the leg's
+remaining sizes without running them.
 
 Every problem attempts every algorithm its frameworks support; a failed solve is a NaN row. `lorenz96_20` is the 20-state lorenz96 row, the smaller stiff head-to-head.
 
@@ -331,7 +331,7 @@ disables) kills any process whose first kernel has not compiled within
 the budget.
 
 Every Julia analysis runs through `runner_scripts/gpu/julia_driver.py`:
-one process per leg — (problem, algorithm) for performance and
+one process per leg — (problem, algorithm, mode) for performance and
 work-precision, (size, algorithm) for states — with up to
 `BENCH_JULIA_JOBS` (default 4) compiling concurrently while a pidfile
 lock serializes every timed GPU section; each leg's first solve carries
@@ -421,6 +421,7 @@ and comparison reports:
     $ ./run_full_dataset.sh -p cpp              # one package
     $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
     $ ./run_full_dataset.sh --resume                # skip every point already on disk
+    $ ./run_full_dataset.sh --no-overwrite          # keep finite results, retry NaN and absent points
     $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
     $ ./run_full_dataset.sh --resume \
         --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
@@ -429,12 +430,15 @@ and comparison reports:
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in its output file and deletes nothing; NaN rows count as recorded.
-`--keep` gives the no-deletion behaviour on its own. `--resume-from` places
-a cursor in the run order (problems.csv order, then algorithms.csv order,
-fixed before adaptive, N ascending) and skips everything before it — use it
-to step over a point that hangs, since a hung point leaves no row for
-`--resume` to skip. Both flags are also accepted by `run_benchmark.sh` /
-`run_benchmark.bat`, where `--resume-from` starts at the problem:
+`--no-overwrite` skips only points with a finite recorded time; NaN and
+absent rows rerun, and a rerun point's stale rows are dropped before the
+new row is appended. `--keep` gives the no-deletion behaviour on its own.
+`--resume-from` places a cursor in the run order (problems.csv order, then
+algorithms.csv order, fixed before adaptive, N ascending) and skips
+everything before it — use it to step over a point that hangs, since a hung
+point leaves no row for `--resume` to skip. All three flags are also
+accepted by `run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from`
+starts at the problem:
 
 ```bash
     $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps

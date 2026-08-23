@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 from bench_key import data_dir, dataset_key  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
+    prune_reruns,
     skip_point,
     skip_wp_leg,
 )
@@ -246,6 +247,8 @@ def run_problem(problem, cell_counts, wp_mode):
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "times", "fixed", ALGORITHM,
         DATASET_KEY, problem)
+    # Drop stale rows for the points about to rerun.
+    prune_reruns(str(timing_file), run_counts)
     with timing_file.open("a", encoding="utf-8") as handle:
         for index, cell_count in enumerate(run_counts):
             sweep = problem.sweep(cell_count, dtype=np.float32)
@@ -366,6 +369,7 @@ def run_states(grid):
     # A resumed leg appends to what earlier runs recorded.
     if not resume_active():
         reset_samples(samples_file)
+    prune_reruns(str(outfile), run_grid)
     with outfile.open("a" if resume_active() else "w",
                       encoding="utf-8") as handle:
         for index, nstates in enumerate(run_grid):
