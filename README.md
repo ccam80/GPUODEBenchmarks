@@ -255,6 +255,26 @@ and taking the minimum per (leg, point) reproduces the reduced file. The
 writers are `SampleLog` in `runner_scripts/wp_common.py`,
 `runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
 
+#### Master run-times table
+
+`runner_scripts/collect_samples.py` gathers every log under `data/` into one
+table, replacing `data/master_run_times.csv` whole each run:
+
+```bash
+python3 runner_scripts/collect_samples.py            # --data-root/--out to override
+```
+
+Rows keep their log's columns and gain the four its path and shape carry:
+`package`, `key` (the `<os>_<gpu>` directory), `prefix` (the writer, so `Cubie`
+and `Cubie_mlir` stay apart) and `series`. A `series` is one block of rows
+headed by `repeat` 0, counted from 0 within its file: one timed leg of one run.
+The N sweep appends, so a re-run or a resumed run leaves a second block for a
+leg it repeats - same point and transfers, later series - and a minimum belongs
+inside one series, never across two. Rows sort by leg, then series and repeat;
+a log being appended to while the collector runs can end in a torn line, which
+is dropped and named on stderr. Only the standard library is imported, so it
+runs under a bare `python3` on any machine holding a copy of `data/`.
+
 ### Problems
 
 `runner_scripts/problems.csv` is the problem registry: one row per benchmark
