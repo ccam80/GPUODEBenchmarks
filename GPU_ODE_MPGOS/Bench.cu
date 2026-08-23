@@ -186,8 +186,7 @@ static double WatchdogSeconds()
 	return env ? atof(env) : 120.0;
 }
 
-// Breach exit code: NT is a compile-time constant, so the runner owns the N
-// sweep and NaN-fills the leg's remaining sizes when it sees this code.
+// Breach exit code; the runner NaN-fills the leg's remaining sizes.
 static const int WatchdogExitCode = 42;
 
 // Mode and algorithm names for filenames and watchdog messages.

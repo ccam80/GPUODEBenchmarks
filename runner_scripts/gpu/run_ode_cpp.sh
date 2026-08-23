@@ -115,8 +115,7 @@ if [ "$ANALYSIS" == "states" ]; then
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
-			# Larger sizes of a breached leg are slower still: keep the build
-			# time, which is the cold-compile datum, and NaN the solve.
+			# After a breach: keep the build time, NaN the solve.
 			if [ -n "$BREACHED" ]; then
 				printf '%s\tnan\tnan\t%s\n' "$n" "$BUILD_S" >> "$STATES_FILE"
 				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
@@ -178,8 +177,7 @@ do
 				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
 				continue
 			fi
-			# Each size is its own process, so the runner abandons a breached
-			# leg's larger (slower) sizes as NaN rows, as the other frameworks do.
+			# A breached leg's larger sizes are recorded as NaN without running.
 			if [ -n "$BREACHED" ]; then
 				printf '%s\tnan\tnan\n' "$a" >> "$TIMES_FILE"
 				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"

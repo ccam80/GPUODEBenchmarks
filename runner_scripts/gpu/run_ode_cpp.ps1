@@ -240,8 +240,7 @@ if ($Analysis -eq 'states') {
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
             $BuildS = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
-            # Larger sizes of a breached leg are slower still: keep the build
-            # time, which is the cold-compile datum, and NaN the solve.
+            # After a breach: keep the build time, NaN the solve.
             if ($breached) {
                 Add-Content -Path $statesFile -Value "$n`tnan`tnan`t$BuildS"
                 Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
@@ -281,8 +280,7 @@ foreach ($problemName in $Problems) {
                 Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
                 continue
             }
-            # Each size is its own process, so the runner abandons a breached
-            # leg's larger (slower) sizes as NaN rows, as the other frameworks do.
+            # A breached leg's larger sizes are recorded as NaN without running.
             if ($breached) {
                 Add-Content -Path $timesFile -Value "$a`tnan`tnan"
                 Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
