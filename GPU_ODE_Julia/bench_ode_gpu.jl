@@ -479,8 +479,13 @@ end
 "Write the per-trajectory final states for the pairwise numerical check."
 function write_finals(system, problem, sol, name)
     final_states = Array(sol[2][end, :])  # convert to CPU Array
-    df = DataFrame([Tuple(s[system.golden_index]) for s in final_states],
-        :auto)
+    # One row per trajectory, one column per golden state.
+    m = Matrix{Float64}(undef, length(final_states),
+        length(system.golden_index))
+    for i in eachindex(final_states)
+        m[i, :] .= Float64.(final_states[i][system.golden_index])
+    end
+    df = DataFrame(m, :auto)
     CSV.write(joinpath(data_dir(REPO_ROOT, "numerical", DATASET_KEY, problem),
             name), df, header = false)
 end
