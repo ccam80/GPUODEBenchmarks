@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from resume import active as resume_active, skip_point, skip_wp_leg
+from resume import (active as resume_active, prune_reruns, skip_point,
+                    skip_wp_leg)
 from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
                        reset_samples, sample_point, samples_outfile,
                        timed_min_ms, times_outfile)
@@ -283,6 +284,8 @@ def run_times(problem):
                 print("-- resume: {0} {1} {2} runs N={3}".format(
                     problem.name, mode, algorithm,
                     ",".join(str(n) for n in run_ns)))
+            # Retried points (NaN rows, cursor overlaps) must not duplicate.
+            prune_reruns(outfile, run_ns)
             with open(outfile, "a+") as file:
                 for index, n in enumerate(run_ns):
                     parameterList = jnp.asarray(problem.sweep(n))
@@ -347,6 +350,7 @@ def run_states():
             # A resumed leg appends to what earlier runs recorded.
             if not resume_active():
                 reset_samples(samples_file)
+            prune_reruns(outfile, run_grid)
             with open(outfile, "a" if resume_active() else "w") as file:
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)

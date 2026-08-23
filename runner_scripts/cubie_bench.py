@@ -13,7 +13,8 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
-from resume import active as resume_active, skip_point, skip_wp_leg
+from resume import (active as resume_active, prune_reruns, skip_point,
+                    skip_wp_leg)
 from wp_common import TIMING_TOL, parse_bench_args, times_outfile
 
 # Timed repeats per point; min is reported.
@@ -252,6 +253,8 @@ def _run_times(problem, opts, system, grid):
             if len(run_ns) < len(ns):
                 print(f"-- resume: {problem.name} {mode} {algorithm} "
                       f"runs N={','.join(str(n) for n in run_ns)}")
+            # Retried points (NaN rows, cursor overlaps) must not duplicate.
+            prune_reruns(outfile, run_ns)
             solver = None
             try:
                 solver = (_make_fixed_solver(system, problem, algorithm)
@@ -446,6 +449,7 @@ def _run_states(opts):
             # A resumed leg appends to what earlier runs recorded.
             if not resume_active():
                 reset_samples(samples_file)
+            prune_reruns(outfile, run_grid)
             with open(outfile, "a" if resume_active() else "w") as file:
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)

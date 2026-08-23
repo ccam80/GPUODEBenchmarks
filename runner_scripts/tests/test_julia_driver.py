@@ -1,4 +1,5 @@
-"""States-driver cancellation and backfill tests with subprocess.Popen faked."""
+"""States-driver cancellation and backfill tests with subprocess.Popen faked,
+and per-mode process isolation tests for the performance driver."""
 
 import os
 import sys
@@ -12,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
                                 "runner_scripts", "gpu"))
 
 import julia_driver  # noqa: E402
+import resume  # noqa: E402
 
 
 class FakeProc(object):
@@ -203,6 +205,111 @@ class StatesDriverTests(unittest.TestCase):
         self.assertEqual([r[0] for r in rows], ["4", "8"])
         self.assertEqual(rows[0][1], "12.5")
         self.assertEqual(rows[1][1].lower(), "nan")
+
+
+class PerfProc(object):
+    """Scripted performance-leg process; exits with the given code."""
+
+    def __init__(self, code):
+        self._code = code
+        self._ticks = 1
+
+    def poll(self):
+        if self._ticks > 0:
+            self._ticks -= 1
+            return None
+        return self._code
+
+
+class PerformanceDriverTests(unittest.TestCase):
+    """One process per (problem, algorithm, mode); a hard exit fails the leg."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("BENCH_RESUME", None)
+        os.environ.pop("BENCH_NO_OVERWRITE", None)
+        os.environ.pop("BENCH_RESUME_FROM", None)
+        resume._reset_cache()
+        self.addCleanup(resume._reset_cache)
+        os.environ["BENCH_JULIA_JOBS"] = "2"
+
+        self.tmp = tempfile.mkdtemp(prefix="jd_perf_")
+        self.addCleanup(self._cleanup)
+        self.spawned = []
+        self.exit_codes = {}
+
+        def fake_popen(cmd, cwd=None, env=None):
+            # ["julia", "--project=.", BENCH, nlist, algorithm,
+            #  "--problem", problem, "--mode", mode]
+            self.spawned.append(cmd[3:])
+            key = (cmd[6], cmd[4], cmd[8])
+            return PerfProc(self.exit_codes.get(key, 0))
+
+        def fake_times_outfile(fdir, prefix, mode, algorithm, key, problem):
+            return os.path.join(self.tmp,
+                                "{0}_{1}_{2}.txt".format(problem, mode,
+                                                         algorithm))
+
+        patches = [
+            mock.patch.object(julia_driver.subprocess, "Popen", fake_popen),
+            mock.patch.object(julia_driver.time, "sleep", lambda _s: None),
+            mock.patch.object(julia_driver, "_available_ram_gb",
+                              lambda: 999.0),
+            mock.patch.object(julia_driver, "dataset_key", lambda: "test"),
+            mock.patch.object(julia_driver, "_julia_legs",
+                              lambda request, problems: [("lorenz", "tsit5")]),
+            mock.patch.object(
+                julia_driver, "supported_for",
+                lambda fw, mode: ("tsit5",)),
+            mock.patch.object(julia_driver, "times_outfile",
+                              fake_times_outfile),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _cleanup(self):
+        import shutil
+        os.environ.pop("BENCH_JULIA_JOBS", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def modes_spawned(self):
+        return [args[args.index("--mode") + 1] for args in self.spawned]
+
+    def test_each_mode_gets_its_own_process(self):
+        self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
+        self.assertEqual(len(self.spawned), 2)
+        self.assertEqual(sorted(self.modes_spawned()), ["adaptive", "fixed"])
+        for args in self.spawned:
+            self.assertIn("--problem", args)
+            self.assertIn("--mode", args)
+
+    def test_watchdog_hard_exit_fails_the_run(self):
+        self.exit_codes[("lorenz", "tsit5", "adaptive")] = 3
+        self.assertEqual(julia_driver.run_performance(["8,32"]), 1)
+        # The sibling mode still gets its own process.
+        self.assertEqual(len(self.spawned), 2)
+
+    def test_covered_mode_is_pruned_alone(self):
+        os.environ["BENCH_RESUME"] = "1"
+        fixed = os.path.join(self.tmp, "lorenz_fixed_tsit5.txt")
+        with open(fixed, "w") as handle:
+            handle.write("8 1.0 2.0\n32 1.0 2.0\n")
+        self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
+        self.assertEqual(self.modes_spawned(), ["adaptive"])
+
+    def test_no_overwrite_retries_the_nan_mode(self):
+        os.environ["BENCH_NO_OVERWRITE"] = "1"
+        fixed = os.path.join(self.tmp, "lorenz_fixed_tsit5.txt")
+        adaptive = os.path.join(self.tmp, "lorenz_adaptive_tsit5.txt")
+        with open(fixed, "w") as handle:
+            handle.write("8 1.0 2.0\n32 1.0 2.0\n")
+        with open(adaptive, "w") as handle:
+            handle.write("8 1.0 2.0\n32 nan nan\n")
+        self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
+        self.assertEqual(self.modes_spawned(), ["adaptive"])
 
 
 if __name__ == "__main__":

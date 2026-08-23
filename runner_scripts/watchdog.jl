@@ -3,6 +3,9 @@
 const WATCHDOG_SECONDS = parse(Float64,
     get(ENV, "BENCH_WATCHDOG_SECONDS", "120"))
 
+# Exit status of the hard-exit path, so drivers record the leg as failed.
+const WATCHDOG_EXIT_CODE = Cint(3)
+
 "Run f() under the watchdog; when it never returns, run on_breach() and hard-exit."
 function run_watchdogged(f, on_breach)
     finished = Threads.Atomic{Bool}(false)
@@ -15,7 +18,7 @@ function run_watchdogged(f, on_breach)
             flush(stdout)
             flush(stderr)
             # A hung kernel blocks every exit path except a hard exit.
-            ccall(:_exit, Cvoid, (Cint,), 0)
+            ccall(:_exit, Cvoid, (Cint,), WATCHDOG_EXIT_CODE)
         end
     end
     try
