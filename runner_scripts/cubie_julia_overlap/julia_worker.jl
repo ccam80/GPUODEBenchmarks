@@ -22,6 +22,7 @@ include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
 const FIXED_DT = 2.0^-10
 const DT0 = 1.0e-2
 const ADAPTIVE_TOL = 1.0e-8
+# Repeat ceilings; the count per leg follows its first timed run's duration.
 const PERFORMANCE_REPEATS = 20
 const WORK_REPEATS = 20
 const N_WP = 131072
@@ -317,11 +318,10 @@ for row in table
                 # One warmup covers both transfer paths.
                 solve_end_to_end(probs_host, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, NSTATES)
-                # Each transfer variant runs as an unbroken block, so one
-                # variant's samples are never separated by the other's
-                # allocation and transfer traffic.
+                # Unbroken block per transfer variant; repeats follow the first timed run's duration.
                 end_to_end = Float64[]
-                for _ in 1:repeats
+                lo = hi = 0
+                while true
                     finals, elapsed = solve_end_to_end(probs_host, prob, alg, mode, setting)
                     finite, failed = finite_counts(finals)
                     if failed > 0 || finite != n
@@ -330,9 +330,18 @@ for row in table
                         error("non-finite result: $(finite)/$(n) trajectories valid")
                     end
                     push!(end_to_end, elapsed)
+                    length(end_to_end) == 1 &&
+                        ((lo, hi) = repeat_bounds(end_to_end[1] / 1000.0, repeats))
+                    repeats_done(end_to_end, lo, hi) && break
                 end
-                device_only = [solve_device_only(probs, prob, alg, mode, setting)
-                               for _ in 1:repeats]
+                device_only = Float64[]
+                lo = hi = 0
+                while true
+                    push!(device_only, solve_device_only(probs, prob, alg, mode, setting))
+                    length(device_only) == 1 &&
+                        ((lo, hi) = repeat_bounds(device_only[1] / 1000.0, repeats))
+                    repeats_done(device_only, lo, hi) && break
+                end
                 for (transfers, samples) in (("both", end_to_end), ("none", device_only))
                     append_row(TIMING_FILE, "julia", alias, phase, mode, tier,
                         transfers, n, setting_kind, setting, timing_stats(samples)...)
