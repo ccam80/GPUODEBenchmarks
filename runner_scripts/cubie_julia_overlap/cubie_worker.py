@@ -273,10 +273,7 @@ def main():
                     # One warmup covers both transfer paths.
                     solve_once(solver, initials, params, duration, nstates,
                                system, problem)
-                    # Each transfer variant runs as an unbroken block, so one
-                    # variant's samples are never separated by the other's
-                    # allocation and transfer traffic. Each block's repeat
-                    # count follows its first timed run's duration.
+                    # Unbroken block per transfer variant; repeats follow the first timed run's duration.
                     end_to_end = []
                     floor = ceiling = None
                     while True:

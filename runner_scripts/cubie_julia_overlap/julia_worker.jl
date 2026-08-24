@@ -318,10 +318,7 @@ for row in table
                 # One warmup covers both transfer paths.
                 solve_end_to_end(probs_host, prob, alg, mode, setting)
                 finals = Matrix{Float32}(undef, n, NSTATES)
-                # Each transfer variant runs as an unbroken block, so one
-                # variant's samples are never separated by the other's
-                # allocation and transfer traffic. Each block's repeat count
-                # follows its first timed run's duration.
+                # Unbroken block per transfer variant; repeats follow the first timed run's duration.
                 end_to_end = Float64[]
                 lo = hi = 0
                 while true
