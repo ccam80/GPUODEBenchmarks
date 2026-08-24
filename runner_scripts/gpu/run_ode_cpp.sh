@@ -114,6 +114,8 @@ if [ "$ANALYSIS" == "states" ]; then
 	fi
 	for solver in $SOLVERS
 	do
+		BREACHED=""
+		STATES_FILE="./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_$(mode_for "$solver")_$(alg_for "$solver").txt"
 		for n in $GRID
 		do
 			if resume_skip states lorenz96 "$solver" "$n"; then
@@ -125,7 +127,19 @@ if [ "$ANALYSIS" == "states" ]; then
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
-			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S"
+			# After a breach: keep the build time, NaN the solve.
+			if [ -n "$BREACHED" ]; then
+				printf '%s\tnan\tnan\t%s\n' "$n" "$BUILD_S" >> "$STATES_FILE"
+				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
+				continue
+			fi
+			rc=0
+			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S" || rc=$?
+			if [ "$rc" -eq 42 ]; then
+				BREACHED=1
+			elif [ "$rc" -ne 0 ]; then
+				exit "$rc"
+			fi
 		done
 	done
 	exit 0
@@ -156,12 +170,19 @@ do
 				continue
 			fi
 			build "$problem" "$solver" 131072
-			./GPU_ODE_MPGOS/Bench.exe wp
+			# 42 = watchdog breach; the wp sweep NaN-fills in-process.
+			rc=0
+			./GPU_ODE_MPGOS/Bench.exe wp || rc=$?
+			if [ "$rc" -ne 0 ] && [ "$rc" -ne 42 ]; then
+				exit "$rc"
+			fi
 		done
 		continue
 	fi
 	for solver in $SOLVERS
 	do
+		BREACHED=""
+		TIMES_FILE="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_times_$(mode_for "$solver")_$(alg_for "$solver").txt"
 		for a in $NLIST
 		do
 			if resume_skip times "$problem" "$solver" "$a"; then
@@ -169,9 +190,21 @@ do
 				continue
 			fi
 			resume_prune times "$problem" "$solver" "$a"
+			# A breached leg's larger sizes are recorded as NaN without running.
+			if [ -n "$BREACHED" ]; then
+				printf '%s\tnan\tnan\n' "$a" >> "$TIMES_FILE"
+				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"
+				continue
+			fi
 			echo "No. of trajectories = $a ($problem, $solver)"
 			build "$problem" "$solver" "$a"
-			./GPU_ODE_MPGOS/Bench.exe
+			rc=0
+			./GPU_ODE_MPGOS/Bench.exe || rc=$?
+			if [ "$rc" -eq 42 ]; then
+				BREACHED=1
+			elif [ "$rc" -ne 0 ]; then
+				exit "$rc"
+			fi
 		done
 	done
 done

@@ -186,6 +186,15 @@ static double WatchdogSeconds()
 	return env ? atof(env) : 120.0;
 }
 
+// Breach exit code; the runner NaN-fills the leg's remaining sizes.
+static const int WatchdogExitCode = 42;
+
+// Mode and algorithm names for filenames and watchdog messages.
+static const char* ModeName      = (SOLVER == RK4) ? "fixed" : "adaptive";
+static const char* AlgorithmName = (SOLVER == RK4) ? "classical-rk4"
+                                                   : "cash-karp-54";
+static bool StatesRun = false;   // set in main; states rows are SD-keyed
+
 static std::mutex WatchdogLock;
 static std::string WatchdogFile;
 static std::vector<std::string> WatchdogRows;
@@ -223,9 +232,11 @@ static void WatchdogMain()
 		for (size_t i = 0; i < WatchdogRows.size(); ++i)
 			out << WatchdogRows[i] << "\n";
 		out.close();
-		std::cout << "WATCHDOG " << PROBLEM_NAME
+		std::cout << "WATCHDOG " << PROBLEM_NAME;
+		if (StatesRun) std::cout << " states=" << SD;
+		std::cout << " " << ModeName << " " << AlgorithmName << " N=" << NT
 		          << ": run never returned" << std::endl;
-		std::_Exit(0);
+		std::_Exit(WatchdogExitCode);
 	}
 }
 
@@ -238,6 +249,7 @@ int main(int argc, char *argv[])
 	bool StatesMode = (argc > 1 && string(argv[1]) == string("states"));
 	string StatesBuild = (StatesMode && argc > 2) ? string(argv[2])
 	                                              : string("nan");
+	StatesRun = StatesMode;
 
 	std::thread(WatchdogMain).detach();
 
@@ -310,8 +322,8 @@ int main(int argc, char *argv[])
 			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
 
 		// Filenames carry the cubie-vocabulary algorithm name.
-		string Mode = FixedMode ? "fixed" : "adaptive";
-		string Algorithm = FixedMode ? "classical-rk4" : "cash-karp-54";
+		string Mode = ModeName;
+		string Algorithm = AlgorithmName;
 		const std::string WpDir = DataDir("CPP");
 		const std::string WpPath = WpDir + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
 		ofstream wpfile(WpPath.c_str());
@@ -388,7 +400,8 @@ int main(int argc, char *argv[])
 				for (size_t i = 0; i < NanRows.size(); ++i)
 					wpfile << NanRows[i] << "\n";
 				wpfile.flush();
-				cout << "WATCHDOG wp setting=" << Setting
+				cout << "WATCHDOG " << PROBLEM_NAME << " " << Mode << " "
+				     << Algorithm << " wp setting=" << Setting
 				     << ": run exceeded the cap" << endl;
 				break;
 			}
@@ -417,9 +430,8 @@ int main(int argc, char *argv[])
 	const int TimingRepeats = 20;
 
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";
-	const std::string TimesMode = (SOLVER == RK4) ? "fixed" : "adaptive";
-	const std::string TimesAlgorithm = (SOLVER == RK4) ? "classical-rk4"
-	                                                   : "cash-karp-54";
+	const std::string TimesMode = ModeName;
+	const std::string TimesAlgorithm = AlgorithmName;
 	const std::string TimesDir = DataDir("CPP");
 	const std::string TimesPath = TimesDir + "MPGOS_" + TimesAnalysis +
 		"_" + TimesMode + "_" + TimesAlgorithm + ".txt";
@@ -492,8 +504,11 @@ int main(int argc, char *argv[])
 		std::ofstream out(TimesPath.c_str(), std::ios::app);
 		out << TimesNanRow[0] << "\n";
 		out.close();
-		cout << "WATCHDOG N=" << NT << ": run exceeded the cap" << endl;
-		return 0;
+		cout << "WATCHDOG " << PROBLEM_NAME;
+		if (StatesMode) cout << " states=" << SD;
+		cout << " " << TimesMode << " " << TimesAlgorithm << " N=" << NT
+		     << ": run exceeded the cap" << endl;
+		return WatchdogExitCode;
 	}
 
 	// Untimed full d2h for the ActualTime print and SaveData.
