@@ -247,7 +247,9 @@ median/min − 1 is above 2%.
 
 Each writer's repeat ceiling caps the schedule (20 for the sweeps, 10 for
 the MPGOS wp sweep). It lives in `runner_scripts/wp_common.py`,
-`runner_scripts/watchdog.jl` and `GPU_ODE_MPGOS/Bench.cu`.
+`runner_scripts/watchdog.jl` and `GPU_ODE_MPGOS/Bench.cu`. The overlap
+suite's workers follow the same schedule per transfer variant, with a
+ceiling of 20.
 
 ### Per-repeat timing log
 

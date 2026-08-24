@@ -30,6 +30,7 @@ from common import (  # noqa: E402 - suite-local bootstrap above
     write_json,
 )
 from bench_key import dataset_key  # noqa: E402
+from wp_common import repeat_bounds, repeats_done  # noqa: E402
 from cubie_systems import (build_system, final_states,  # noqa: E402
                            output_types)
 from problems import get_problem  # noqa: E402
@@ -274,9 +275,11 @@ def main():
                                system, problem)
                     # Each transfer variant runs as an unbroken block, so one
                     # variant's samples are never separated by the other's
-                    # allocation and transfer traffic.
+                    # allocation and transfer traffic. Each block's repeat
+                    # count follows its first timed run's duration.
                     end_to_end = []
-                    for _ in range(repeats):
+                    floor = ceiling = None
+                    while True:
                         finals, elapsed = solve_once(
                             solver, initials, params, duration, nstates,
                             system, problem)
@@ -295,9 +298,23 @@ def main():
                                 "non-finite result: {}/{} trajectories valid"
                                 .format(finite, n))
                         end_to_end.append(elapsed)
-                    device_only = ([solve_once_on_device(solver, *device_inputs, duration)
-                                    for _ in range(repeats)]
-                                   if device_inputs is not None else [])
+                        if floor is None:
+                            floor, ceiling = repeat_bounds(elapsed / 1000.0,
+                                                           repeats)
+                        if repeats_done(end_to_end, floor, ceiling):
+                            break
+                    device_only = []
+                    if device_inputs is not None:
+                        floor = ceiling = None
+                        while True:
+                            elapsed = solve_once_on_device(
+                                solver, *device_inputs, duration)
+                            device_only.append(elapsed)
+                            if floor is None:
+                                floor, ceiling = repeat_bounds(
+                                    elapsed / 1000.0, repeats)
+                            if repeats_done(device_only, floor, ceiling):
+                                break
                     point = {"framework": "cubie", "algorithm": alias,
                              "phase": phase, "mode": mode, "tier": tier, "n": n,
                              "setting_kind": setting_kind, "setting": setting}

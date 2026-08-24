@@ -52,6 +52,8 @@ def phases_for(analysis):
 # the problem duration.
 FIXED_DT = 2.0 ** -10
 ADAPTIVE_TOL = 1.0e-8
+# Repeat ceilings; the count per leg follows its first timed run's duration
+# (repeat_bounds/repeats_done in wp_common.py and watchdog.jl).
 PERFORMANCE_REPEATS = 20
 WORK_REPEATS = 20
 WP_DTS = [2.0 ** -k for k in range(4, 14)]
