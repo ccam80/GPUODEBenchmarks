@@ -50,6 +50,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -186,6 +187,170 @@ static double WatchdogSeconds()
 	return env ? atof(env) : 120.0;
 }
 
+// Repeat floor and ceiling from the first timed run; mirrored in wp_common.py and watchdog.jl.
+static void RepeatBounds(double FirstMs, int Cap, int& Floor, int& Ceiling)
+{
+	if      (FirstMs < 100.0)  { Floor = 20; Ceiling = 20; }
+	else if (FirstMs < 3000.0) { Floor = 10; Ceiling = 10; }
+	else if (FirstMs < 5000.0) { Floor = 5;  Ceiling = 10; }
+	else                       { Floor = 3;  Ceiling = 10; }
+	if (Floor > Cap) Floor = Cap;
+	if (Ceiling > Cap) Ceiling = Cap;
+}
+
+static double MedianMs(std::vector<double> Timed)   // by value: nth_element permutes
+{
+	size_t Half = Timed.size() / 2;
+	std::nth_element(Timed.begin(), Timed.begin() + Half, Timed.end());
+	double Upper = Timed[Half];
+	if (Timed.size() % 2) return Upper;
+	std::nth_element(Timed.begin(), Timed.begin() + Half - 1, Timed.end());
+	return 0.5 * (Timed[Half - 1] + Upper);
+}
+
+// True at the ceiling, or past the floor with median/min - 1 within 2%.
+static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling)
+{
+	if ((int)Timed.size() >= Ceiling) return true;
+	if ((int)Timed.size() < Floor) return false;
+	double Min = *std::min_element(Timed.begin(), Timed.end());
+	return MedianMs(Timed) / Min - 1.0 <= 0.02;
+}
+
+// BENCH_FLOOR: merge re-runs by keeping the lower recorded time.
+static bool FloorEnabled()
+{
+	const char* env = std::getenv("BENCH_FLOOR");
+	return env && *env && strcmp(env, "0") != 0;
+}
+
+// The lower of two times; nan loses to any finite value.
+static double LowerTime(double Recorded, double New)
+{
+	if (std::isnan(Recorded)) return New;
+	if (std::isnan(New)) return Recorded;
+	return std::min(Recorded, New);
+}
+
+static std::vector<std::string> ReadLines(const std::string& Path)
+{
+	std::vector<std::string> Lines;
+	std::ifstream In(Path.c_str());
+	std::string Line;
+	while (std::getline(In, Line)) Lines.push_back(Line);
+	return Lines;
+}
+
+// The token as a double; nan when it does not parse.
+static double ParseTime(const std::string& Token)
+{
+	const char* Start = Token.c_str();
+	char* End = NULL;
+	double Value = strtod(Start, &End);
+	return (End == Start) ? std::nan("") : Value;
+}
+
+// First whitespace-separated token as a double; nan when there is none.
+static double RowKey(const std::string& Line)
+{
+	std::istringstream Fields(Line);
+	std::string Token;
+	if (Fields >> Token) return ParseTime(Token);
+	return std::nan("");
+}
+
+// --floor: merge one tab-separated row, keeping the lower value per column.
+static void MergeMinRow(const std::string& Path, long long Key,
+                        const std::vector<double>& Values)
+{
+	std::vector<std::string> Lines = ReadLines(Path);
+	bool Merged = false;
+	for (size_t i = 0; i < Lines.size() && !Merged; ++i)
+	{
+		double Parsed = RowKey(Lines[i]);
+		if (std::isnan(Parsed) || (long long)llround(Parsed) != Key) continue;
+		std::istringstream Fields(Lines[i]);
+		std::string Token;
+		std::vector<std::string> Tokens;
+		while (Fields >> Token) Tokens.push_back(Token);
+		std::ostringstream Row;
+		Row << Key;
+		for (size_t c = 0; c < Values.size(); ++c)
+		{
+			double Recorded = std::nan("");
+			if (c + 1 < Tokens.size()) Recorded = ParseTime(Tokens[c + 1]);
+			Row << "\t" << LowerTime(Recorded, Values[c]);
+		}
+		for (size_t c = Values.size() + 1; c < Tokens.size(); ++c)
+			Row << "\t" << Tokens[c];
+		Lines[i] = Row.str();
+		Merged = true;
+	}
+	if (!Merged)
+	{
+		std::ostringstream Row;
+		Row << Key;
+		for (size_t c = 0; c < Values.size(); ++c) Row << "\t" << Values[c];
+		Lines.push_back(Row.str());
+	}
+	std::ofstream Out(Path.c_str());
+	for (size_t i = 0; i < Lines.size(); ++i) Out << Lines[i] << "\n";
+}
+
+// --floor: merge one wp row, keeping the (time, error) pair with the lower time.
+static void MergeWpRow(const std::string& Path, double Setting, double Ms,
+                       double Err)
+{
+	std::ostringstream NewRow;
+	NewRow.precision(12);
+	NewRow << Setting << " " << Ms << " " << std::scientific << Err;
+	std::vector<std::string> Lines = ReadLines(Path);
+	bool Merged = false;
+	for (size_t i = 0; i < Lines.size() && !Merged; ++i)
+	{
+		double Parsed = RowKey(Lines[i]);
+		if (std::isnan(Parsed)) continue;
+		double Tolerance = 1.0e-8 * std::max(std::fabs(Parsed), std::fabs(Setting));
+		if (std::fabs(Parsed - Setting) > Tolerance) continue;
+		Merged = true;
+		std::istringstream Fields(Lines[i]);
+		std::string Token;
+		double Recorded = std::nan("");
+		if (Fields >> Token && Fields >> Token) Recorded = ParseTime(Token);
+		if (std::isnan(Recorded) || (!std::isnan(Ms) && Ms < Recorded))
+			Lines[i] = NewRow.str();
+	}
+	if (!Merged) Lines.push_back(NewRow.str());
+	std::ofstream Out(Path.c_str());
+	for (size_t i = 0; i < Lines.size(); ++i) Out << Lines[i] << "\n";
+}
+
+// --floor's watchdog path: append only the rows whose key is not yet recorded.
+static void AppendMissingRows(const std::string& Path,
+                              const std::vector<std::string>& Rows)
+{
+	std::vector<double> Keys;
+	{
+		std::vector<std::string> Lines = ReadLines(Path);
+		for (size_t i = 0; i < Lines.size(); ++i)
+			Keys.push_back(RowKey(Lines[i]));
+	}
+	std::ofstream Out(Path.c_str(), std::ios::app);
+	for (size_t i = 0; i < Rows.size(); ++i)
+	{
+		double Key = RowKey(Rows[i]);
+		bool Present = false;
+		for (size_t k = 0; k < Keys.size() && !Present; ++k)
+		{
+			if (std::isnan(Keys[k])) continue;
+			double Tolerance = 1.0e-8 * std::max(std::fabs(Keys[k]),
+			                                     std::fabs(Key));
+			Present = std::fabs(Keys[k] - Key) <= Tolerance;
+		}
+		if (!Present) Out << Rows[i] << "\n";
+	}
+}
+
 // Breach exit code; the runner NaN-fills the leg's remaining sizes.
 static const int WatchdogExitCode = 42;
 
@@ -228,10 +393,18 @@ static void WatchdogMain()
 		long long deadline = WatchdogDeadlineMs;
 		if (deadline == 0 || NowMs() < deadline) continue;
 		std::lock_guard<std::mutex> hold(WatchdogLock);
-		std::ofstream out(WatchdogFile.c_str(), std::ios::app);
-		for (size_t i = 0; i < WatchdogRows.size(); ++i)
-			out << WatchdogRows[i] << "\n";
-		out.close();
+		if (FloorEnabled())
+		{
+			// The recorded rows already cover these points; NaN adds nothing.
+			AppendMissingRows(WatchdogFile, WatchdogRows);
+		}
+		else
+		{
+			std::ofstream out(WatchdogFile.c_str(), std::ios::app);
+			for (size_t i = 0; i < WatchdogRows.size(); ++i)
+				out << WatchdogRows[i] << "\n";
+			out.close();
+		}
 		std::cout << "WATCHDOG " << PROBLEM_NAME;
 		if (StatesRun) std::cout << " states=" << SD;
 		std::cout << " " << ModeName << " " << AlgorithmName << " N=" << NT
@@ -326,13 +499,17 @@ int main(int argc, char *argv[])
 		string Algorithm = AlgorithmName;
 		const std::string WpDir = DataDir("CPP");
 		const std::string WpPath = WpDir + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
-		ofstream wpfile(WpPath.c_str());
+		// --floor merges into the recorded file, so it must not be truncated.
+		ofstream wpfile(WpPath.c_str(), FloorEnabled()
+			? (std::ios::out | std::ios::app) : std::ios::out);
 		wpfile.precision(12);
 		const std::string WpSamplesPath = WpDir + "MPGOS_samples_wp_" + Mode
 			+ "_" + Algorithm + ".csv";
-		ResetSamples(WpSamplesPath);
+		// --floor re-runs gain a fresh series in the log instead.
+		if (!FloorEnabled()) ResetSamples(WpSamplesPath);
 		const std::string SettingKind = FixedMode ? "dt" : "tol";
 
+		// Repeat ceiling; the count follows the first timed run's duration.
 		const int Repeats = 10;
 		for (size_t si = 0; si < Settings.size(); si++)
 		{
@@ -360,7 +537,9 @@ int main(int argc, char *argv[])
 			bool Breached = false;
 			double BestMs = 1.0e300;
 			std::vector<double> WpSamples;
-			for (int r = 0; r <= Repeats; r++)
+			std::vector<double> WpTimed;
+			int WpFloor = 0, WpCeiling = 0;
+			for (int r = 0; ; r++)
 			{
 				// Reset states/time domain: Solve() advances in place.
 				FillSolverObject(Scan, Parameters_R_Values, NT);
@@ -388,7 +567,11 @@ int main(int argc, char *argv[])
 				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
 				WpSamples.push_back(Ms);
 				if (Ms > WatchdogSeconds() * 1000.0) { Breached = true; break; }
-				if (r > 0 && Ms < BestMs) BestMs = Ms;   // r == 0 is warm-up
+				if (r == 0) continue;   // r == 0 is warm-up
+				WpTimed.push_back(Ms);
+				if (Ms < BestMs) BestMs = Ms;
+				if (r == 1) RepeatBounds(WpTimed[0], Repeats, WpFloor, WpCeiling);
+				if (RepeatsDone(WpTimed, WpFloor, WpCeiling)) break;
 			}
 			// The h2d is outside the timed region; the ActualState d2h is inside.
 			SamplePoint WpPoint = {"wp", Algorithm, Mode, SettingKind, Setting,
@@ -397,9 +580,18 @@ int main(int argc, char *argv[])
 
 			if (Breached)
 			{
-				for (size_t i = 0; i < NanRows.size(); ++i)
-					wpfile << NanRows[i] << "\n";
-				wpfile.flush();
+				if (FloorEnabled())
+				{
+					for (size_t sj = si; sj < Settings.size(); sj++)
+						MergeWpRow(WpPath, Settings[sj], std::nan(""),
+							std::nan(""));
+				}
+				else
+				{
+					for (size_t i = 0; i < NanRows.size(); ++i)
+						wpfile << NanRows[i] << "\n";
+					wpfile.flush();
+				}
 				cout << "WATCHDOG " << PROBLEM_NAME << " " << Mode << " "
 				     << Algorithm << " wp setting=" << Setting
 				     << ": run exceeded the cap" << endl;
@@ -415,8 +607,15 @@ int main(int argc, char *argv[])
 				}
 			double Err = sqrt(Sum2 / (NT * (double)SD));
 
-			wpfile << Setting << " " << BestMs << " " << scientific << Err << fixed << "\n";
-			wpfile.flush();
+			if (FloorEnabled())
+			{
+				MergeWpRow(WpPath, Setting, BestMs, Err);
+			}
+			else
+			{
+				wpfile << Setting << " " << BestMs << " " << scientific << Err << fixed << "\n";
+				wpfile.flush();
+			}
 			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
 			     << " ms, err=" << scientific << Err << fixed << endl;
 		}
@@ -426,7 +625,7 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Minimum of TimingRepeats solves; r == 0 is a discarded warm-up.
+	// Repeat ceiling; the count per leg follows its first timed run.
 	const int TimingRepeats = 20;
 
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";
@@ -453,7 +652,9 @@ int main(int argc, char *argv[])
 	// Device-only timing: the untimed h2d resets the in-place solver state.
 	double ElapsedDeviceMs = 1.0e300;
 	std::vector<double> DeviceSamples;
-	for (int r = 0; r <= TimingRepeats; r++)
+	std::vector<double> DeviceTimed;
+	int DeviceFloor = 0, DeviceCeiling = 0;
+	for (int r = 0; ; r++)
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 		Scan.SynchroniseFromHostToDevice(All);
@@ -470,14 +671,21 @@ int main(int argc, char *argv[])
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
 		DeviceSamples.push_back(Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
-		if (r > 0 && Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
+		if (r == 0) continue;   // r == 0 is warm-up
+		DeviceTimed.push_back(Ms);
+		if (Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
+		if (r == 1) RepeatBounds(DeviceTimed[0], TimingRepeats, DeviceFloor,
+			DeviceCeiling);
+		if (RepeatsDone(DeviceTimed, DeviceFloor, DeviceCeiling)) break;
 	}
 	AppendSamples(TimesSamplesPath, TimesPoint, "none", DeviceSamples);
 
 	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
 	std::vector<double> EndToEndSamples;
-	for (int r = 0; !TimesBreached && r <= TimingRepeats; r++)
+	std::vector<double> EndToEndTimed;
+	int EndToEndFloor = 0, EndToEndCeiling = 0;
+	for (int r = 0; !TimesBreached; r++)
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 
@@ -495,15 +703,29 @@ int main(int argc, char *argv[])
 		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
 		EndToEndSamples.push_back(Ms);
 		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
-		if (r > 0 && Ms < ElapsedMs) ElapsedMs = Ms;
+		if (r == 0) continue;   // r == 0 is warm-up
+		EndToEndTimed.push_back(Ms);
+		if (Ms < ElapsedMs) ElapsedMs = Ms;
+		if (r == 1) RepeatBounds(EndToEndTimed[0], TimingRepeats,
+			EndToEndFloor, EndToEndCeiling);
+		if (RepeatsDone(EndToEndTimed, EndToEndFloor, EndToEndCeiling)) break;
 	}
 	AppendSamples(TimesSamplesPath, TimesPoint, "both", EndToEndSamples);
 
 	if (TimesBreached)
 	{
-		std::ofstream out(TimesPath.c_str(), std::ios::app);
-		out << TimesNanRow[0] << "\n";
-		out.close();
+		if (FloorEnabled())
+		{
+			std::vector<double> NanValues(2, std::nan(""));
+			if (StatesMode) NanValues.push_back(ParseTime(StatesBuild));
+			MergeMinRow(TimesPath, StatesMode ? SD : NT, NanValues);
+		}
+		else
+		{
+			std::ofstream out(TimesPath.c_str(), std::ios::app);
+			out << TimesNanRow[0] << "\n";
+			out.close();
+		}
 		cout << "WATCHDOG " << PROBLEM_NAME;
 		if (StatesMode) cout << " states=" << SD;
 		cout << " " << TimesMode << " " << TimesAlgorithm << " N=" << NT
@@ -527,13 +749,24 @@ int main(int argc, char *argv[])
 	cout << "Ensemble size:                   " << NT << endl << endl;
 
 
-	ofstream datafile(TimesPath.c_str(), ios::app);
-	if (StatesMode)
-		datafile << SD << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
-		         << "\t" << StatesBuild << "\n";
+	if (FloorEnabled())
+	{
+		std::vector<double> RowValues;
+		RowValues.push_back(ElapsedMs);
+		RowValues.push_back(ElapsedDeviceMs);
+		if (StatesMode) RowValues.push_back(ParseTime(StatesBuild));
+		MergeMinRow(TimesPath, StatesMode ? SD : NT, RowValues);
+	}
 	else
-		datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
-	datafile.close();
+	{
+		ofstream datafile(TimesPath.c_str(), ios::app);
+		if (StatesMode)
+			datafile << SD << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
+			         << "\t" << StatesBuild << "\n";
+		else
+			datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
+		datafile.close();
+	}
 
 	//SaveData(Scan, NT);
 

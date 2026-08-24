@@ -20,6 +20,10 @@ DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 RESUME_ACTIVE=""
 [ -n "${BENCH_RESUME:-}${BENCH_NO_OVERWRITE:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
 
+# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
+FLOOR_ACTIVE=""
+case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
+
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
@@ -108,8 +112,8 @@ warm_nt_builds() {
 if [ "$ANALYSIS" == "states" ]; then
 	STATES_N=131072
 	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
-	# A resumed run appends to what earlier runs recorded.
-	if [ -z "$RESUME_ACTIVE" ]; then
+	# A resumed or --floor run appends to what earlier runs recorded.
+	if [ -z "$RESUME_ACTIVE" ] && [ -z "$FLOOR_ACTIVE" ]; then
 		rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
 	fi
 	for solver in $SOLVERS
@@ -129,7 +133,11 @@ if [ "$ANALYSIS" == "states" ]; then
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
 			# After a breach: keep the build time, NaN the solve.
 			if [ -n "$BREACHED" ]; then
-				printf '%s\tnan\tnan\t%s\n' "$n" "$BUILD_S" >> "$STATES_FILE"
+				if [ -n "$FLOOR_ACTIVE" ]; then
+					python3 ./runner_scripts/resume.py merge "$STATES_FILE" tab "$n" nan nan "$BUILD_S"
+				else
+					printf '%s\tnan\tnan\t%s\n' "$n" "$BUILD_S" >> "$STATES_FILE"
+				fi
 				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
 				continue
 			fi
@@ -192,7 +200,11 @@ do
 			resume_prune times "$problem" "$solver" "$a"
 			# A breached leg's larger sizes are recorded as NaN without running.
 			if [ -n "$BREACHED" ]; then
-				printf '%s\tnan\tnan\n' "$a" >> "$TIMES_FILE"
+				if [ -n "$FLOOR_ACTIVE" ]; then
+					python3 ./runner_scripts/resume.py merge "$TIMES_FILE" tab "$a" nan nan
+				else
+					printf '%s\tnan\tnan\n' "$a" >> "$TIMES_FILE"
+				fi
 				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"
 				continue
 			fi

@@ -13,11 +13,11 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
-from resume import (active as resume_active, prune_reruns, skip_point,
-                    skip_wp_leg)
+from resume import (active as resume_active, floor_enabled, prune_reruns,
+                    skip_point, skip_wp_leg, write_times_row, write_wp_row)
 from wp_common import TIMING_TOL, parse_bench_args, times_outfile
 
-# Timed repeats per point; min is reported.
+# Repeat ceiling; the count per leg follows its first timed run's duration.
 REPEATS = 20
 
 PRECISION = np.float32
@@ -130,8 +130,10 @@ def _run_wp(problem, opts, system, grid):
                                        "wp", mode, algorithm,
                                        opts["dataset_key"], problem)
         setting_kind = "dt" if mode == "fixed" else "tol"
-        reset_samples(samples_file)
-        with open(outfile, "w") as f:
+        # --floor merges the new times in; the log gains a fresh series.
+        if not floor_enabled():
+            reset_samples(samples_file)
+        with open(outfile, "a" if floor_enabled() else "w") as f:
             breached = False
             for setting in settings:
                 t_ms, err = float("nan"), float("nan")
@@ -156,8 +158,7 @@ def _run_wp(problem, opts, system, grid):
                         t_ms = float("nan")
                 print(f"wp {problem.name} {mode} {algorithm} "
                       f"setting={setting:g}: {t_ms:.2f} ms, err={err:.3e}")
-                f.write(f"{setting:.10g} {t_ms} {err:.10e}\n")
-                f.flush()
+                write_wp_row(f, outfile, setting, t_ms, err)
                 if solver is not None:
                     _release(solver)
 
@@ -227,10 +228,9 @@ def _run_times(problem, opts, system, grid):
             data_dir("numerical", dataset, problem=problem), name),
             final_states(system, solution, problem), delimiter=',')
 
-    def nan_rows(file, sizes):
+    def nan_rows(file, outfile, sizes):
         for n in sizes:
-            file.write(f'{n} nan nan\n')
-        file.flush()
+            write_times_row(file, outfile, n, (float("nan"), float("nan")))
 
     for algorithm in opts["algorithms"]:
         if not problem.supports(opts["framework"]):
@@ -264,7 +264,7 @@ def _run_times(problem, opts, system, grid):
             except Exception as exc:
                 _failed(exc, f"{problem.name} {mode} {algorithm}")
                 with open(outfile, "a+") as file:
-                    nan_rows(file, run_ns)
+                    nan_rows(file, outfile, run_ns)
                 continue
             with open(outfile, "a+") as file:
                 for index, n in enumerate(run_ns):
@@ -278,7 +278,7 @@ def _run_times(problem, opts, system, grid):
                             # Larger sizes are slower, so the leg is abandoned.
                             print(f"WATCHDOG {problem.name} {mode} "
                                   f"{algorithm} N={n}: run exceeded the cap")
-                            nan_rows(file, run_ns[index:])
+                            nan_rows(file, outfile, run_ns[index:])
                             break
                         print(f"{n} ODE solves ({algorithm}, {mode}) "
                               f"completed in {best:.1f} ms ({best_dev:.1f} ms "
@@ -286,8 +286,7 @@ def _run_times(problem, opts, system, grid):
                     except Exception as exc:
                         best, best_dev = _failed(
                             exc, f"{problem.name} {mode} {algorithm} N={n}")
-                    file.write(f'{n} {best} {best_dev}\n')
-                    file.flush()
+                    write_times_row(file, outfile, n, (best, best_dev))
                     # The pairwise numerical cross-check reads these fixed CSV names.
                     if solution is not None and n == 32768:
                         if mode == "fixed" and algorithm == "classical-rk4":
@@ -446,11 +445,12 @@ def _run_states(opts):
             samples_file = samples_outfile(
                 opts["framework_dir"], opts["prefix"], "states", mode,
                 algorithm, opts["dataset_key"], STATES_PROBLEM)
-            # A resumed leg appends to what earlier runs recorded.
-            if not resume_active():
+            # A resumed or --floor leg appends to what earlier runs recorded.
+            if not (resume_active() or floor_enabled()):
                 reset_samples(samples_file)
             prune_reruns(outfile, run_grid)
-            with open(outfile, "a" if resume_active() else "w") as file:
+            with open(outfile, "a" if resume_active() or floor_enabled()
+                      else "w") as file:
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
                     duration = row["duration"]
@@ -516,17 +516,18 @@ def _run_states(opts):
                     except Exception as exc:
                         _failed(exc, f"lorenz96 states={nstates} {mode} "
                                      f"{algorithm} N={n}")
-                    file.write(f'{nstates} {t_ms} {t_dev} {build_s}\n')
-                    file.flush()
+                    write_times_row(file, outfile, nstates,
+                                    (t_ms, t_dev, build_s))
                     if solver is not None:
                         _release(solver)
                     if breached:
                         # Larger systems are slower, so the leg is abandoned.
                         print(f"WATCHDOG lorenz96 states={nstates} {mode} "
                               f"{algorithm} N={n}: run exceeded the cap")
+                        nan = float("nan")
                         for rest in run_grid[index + 1:]:
-                            file.write(f'{rest} nan nan nan\n')
-                        file.flush()
+                            write_times_row(file, outfile, rest,
+                                            (nan, nan, nan))
                         break
 
 

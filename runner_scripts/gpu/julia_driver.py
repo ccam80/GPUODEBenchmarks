@@ -18,6 +18,7 @@ from bench_key import dataset_key  # noqa: E402
 from problems import resolve_problems  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
+    floor_enabled,
     skip_point,
     skip_wp_leg,
 )
@@ -241,8 +242,9 @@ def run_states(argv):
     outfiles = {leg: states_outfile("Julia", "Julia", leg[0], leg[1], key)
                 for leg in legs}
     for path in outfiles.values():
-        # A resumed run keeps the recorded rows; a fresh one starts clean.
-        open(path, "a" if resume_active() else "w").close()
+        # A resumed or --floor run keeps the recorded rows.
+        open(path, "a" if resume_active() or floor_enabled()
+             else "w").close()
 
     lock_path = _lock_env()
     marker_dir = tempfile.mkdtemp(prefix="gpuode_states_")

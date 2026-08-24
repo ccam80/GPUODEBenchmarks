@@ -18,9 +18,12 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 from bench_key import data_dir, dataset_key  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
+    floor_enabled,
     prune_reruns,
     skip_point,
     skip_wp_leg,
+    write_times_row,
+    write_wp_row,
 )
 from wp_common import (  # noqa: E402
     WATCHDOG_SECONDS,
@@ -29,6 +32,8 @@ from wp_common import (  # noqa: E402
     ensemble_error,
     load_golden,
     parse_bench_args,
+    repeat_bounds,
+    repeats_done,
     reset_samples,
     sample_point,
     samples_outfile,
@@ -41,7 +46,7 @@ MODELS_DIR = Path(__file__).resolve().parent / "models"
 DATASET_KEY = dataset_key()
 # The N-sweep steps duration * 2^-10, so 1024 steps keep the span exact.
 STANDARD_STEPS = 1024
-# Timed repeats per point; min is reported.
+# Repeat ceiling; the count per leg follows its first timed run's duration.
 REPEATS = 20
 # Myokit's generated CUDA kernel is forward Euler only.
 ALGORITHM = "euler"
@@ -58,24 +63,29 @@ MODELS = {
 
 
 def _capped_min_ms(run, repeats, setup=None):
-    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first."""
-    best = None
+    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."""
     first = None
     samples = []
-    for attempt in range(repeats + 1):
-        if setup is not None and attempt:
+    timed = []
+    floor = ceiling = None
+    while True:
+        if setup is not None and samples:
             setup()
         started = timeit.default_timer()
         result = run()
         elapsed = timeit.default_timer() - started
-        if attempt == 0:
+        if not samples:
             first = result
         samples.append(elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
             return None, first, samples
-        if attempt and (best is None or elapsed < best):
-            best = elapsed
-    return best * 1000.0, first, samples
+        if len(samples) == 1:
+            continue                     # the warm-up carries the compile
+        timed.append(elapsed)
+        if floor is None:
+            floor, ceiling = repeat_bounds(timed[0], repeats)
+        if repeats_done(timed, floor, ceiling):
+            return min(timed) * 1000.0, first, samples
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats,
@@ -131,13 +141,16 @@ def run_work_precision(model, problem, cell_count):
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "wp", "fixed", ALGORITHM, DATASET_KEY,
         problem)
-    reset_samples(samples_file)
-    with open(output, "w", encoding="utf-8") as handle:
+    # --floor merges the new times in; the log gains a fresh series.
+    if not floor_enabled():
+        reset_samples(samples_file)
+    with open(output, "a" if floor_enabled() else "w",
+              encoding="utf-8") as handle:
         # Later settings are slower, so a breach abandons the leg.
         breached = False
         for dt in dts_for(ALGORITHM, problem):
             if breached:
-                handle.write("{0:.10g} nan nan\n".format(dt))
+                write_wp_row(handle, output, dt, float("nan"), float("nan"))
                 continue
             step_count = int(round(problem["duration"] / dt))
             elapsed_ms, _, finals = timed_solve(
@@ -162,12 +175,7 @@ def run_work_precision(model, problem, cell_count):
                 "wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}"
                 .format(dt, elapsed_ms, error)
             )
-            handle.write(
-                "{0:.10g} {1} {2:.10e}\n".format(
-                    dt, elapsed_ms, error
-                )
-            )
-            handle.flush()
+            write_wp_row(handle, output, dt, elapsed_ms, error)
 
 
 def load_model(problem):
@@ -268,9 +276,8 @@ def run_problem(problem, cell_counts, wp_mode):
                 "{2:.1f} ms ({3:.1f} ms without transfers)"
                 .format(cell_count, problem.name, elapsed_ms, elapsed_dev_ms)
             )
-            handle.write("{0} {1} {2}\n".format(
-                cell_count, elapsed_ms, elapsed_dev_ms))
-            handle.flush()
+            write_times_row(handle, str(timing_file), cell_count,
+                            (elapsed_ms, elapsed_dev_ms))
 
             # The pairwise numerical cross-check reads this fixed CSV name.
             if cell_count == 32768 and np.isfinite(elapsed_ms):
@@ -285,9 +292,10 @@ def run_problem(problem, cell_counts, wp_mode):
                 # Larger sizes are slower, so the sweep is abandoned.
                 print("WATCHDOG {0} fixed {1} N={2}: run exceeded the cap"
                       .format(problem.name, ALGORITHM, cell_count))
+                nan = float("nan")
                 for rest in run_counts[index + 1:]:
-                    handle.write("{0} nan nan\n".format(rest))
-                handle.flush()
+                    write_times_row(handle, str(timing_file), rest,
+                                    (nan, nan))
                 break
 
 
@@ -366,11 +374,11 @@ def run_states(grid):
     samples_file = samples_outfile(
         "MYOKIT_CUDA", "Myokit_cuda", "states", "fixed", ALGORITHM,
         DATASET_KEY, STATES_PROBLEM)
-    # A resumed leg appends to what earlier runs recorded.
-    if not resume_active():
+    # A resumed or --floor leg appends to what earlier runs recorded.
+    if not (resume_active() or floor_enabled()):
         reset_samples(samples_file)
     prune_reruns(str(outfile), run_grid)
-    with outfile.open("a" if resume_active() else "w",
+    with outfile.open("a" if resume_active() or floor_enabled() else "w",
                       encoding="utf-8") as handle:
         for index, nstates in enumerate(run_grid):
             row = states_row(nstates)
@@ -408,17 +416,17 @@ def run_states(grid):
             except Exception as exc:
                 print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
                       .format(nstates, ALGORITHM, cell_count, exc))
-            handle.write("{0} {1} {2} {3}\n".format(
-                nstates, elapsed_ms, elapsed_dev_ms, build_s))
-            handle.flush()
+            write_times_row(handle, str(outfile), nstates,
+                            (elapsed_ms, elapsed_dev_ms, build_s))
             if not np.isfinite(elapsed_ms) and np.isfinite(build_s):
                 # Larger systems are slower, so the sweep is abandoned.
                 print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: run "
                       "exceeded the cap".format(nstates, ALGORITHM,
                                                 cell_count))
+                nan = float("nan")
                 for rest in run_grid[index + 1:]:
-                    handle.write("{0} nan nan nan\n".format(rest))
-                handle.flush()
+                    write_times_row(handle, str(outfile), rest,
+                                    (nan, nan, nan))
                 break
 
 

@@ -231,9 +231,27 @@ Timing files are named
 (work-precision files use `_wp_` in place of `_times_`). Data without the
 algorithm field is regenerated fresh rather than migrated.
 
+### Repeat count
+
+Every timed leg is a minimum over repeated runs after one untimed warm-up.
+The first timed run picks a floor and ceiling from the schedule below; the
+leg always runs to the floor and extends toward the ceiling while
+median/min − 1 is above 2%.
+
+| first timed run | floor | ceiling |
+| --- | --- | --- |
+| < 100 ms | 20 | 20 |
+| 0.1 – 3 s | 10 | 10 |
+| 3 – 5 s | 5 | 10 |
+| > 5 s | 3 | 10 |
+
+Each writer's repeat ceiling caps the schedule (20 for the sweeps, 10 for
+the MPGOS wp sweep). It lives in `runner_scripts/wp_common.py`,
+`runner_scripts/watchdog.jl` and `GPU_ODE_MPGOS/Bench.cu`.
+
 ### Per-repeat timing log
 
-Every timed point is a minimum over `REPEATS` runs, and each of those runs is
+Every timed point is a minimum over its repeats, and each of those runs is
 also written to
 `<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv` beside
 the reduced file, one row per attempt:
@@ -241,7 +259,7 @@ the reduced file, one row per attempt:
 `analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms`
 
 * `repeat` is 0 for the warm-up, which carries the first-call compile, and
-  1..`REPEATS` for the runs the minimum is taken over.
+  1..k for the runs the minimum is taken over.
 * `transfers` is what the timed region copies: `both` (h2d and d2h), `none`
   (neither) or `d2h` (inputs already resident). Each timed leg of a point
   writes its own rows.
@@ -250,8 +268,10 @@ the reduced file, one row per attempt:
 * A run that breaches the watchdog is logged before its leg is abandoned.
 
 The samples file follows its reduced sibling's write mode: the wp and states
-sweeps rewrite theirs each run, the N sweep appends. Filtering to `repeat > 0`
-and taking the minimum per (leg, point) reproduces the reduced file. The
+sweeps rewrite theirs each run, the N sweep appends, and a `--floor` re-run
+always appends a fresh block headed by repeat 0, which `collect_samples.py`
+separates as a new series. Filtering to `repeat > 0` and taking the minimum
+per (leg, point) reproduces the reduced file. The
 writers are `SampleLog` in `runner_scripts/wp_common.py`,
 `runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
 
@@ -445,6 +465,7 @@ and comparison reports:
     $ ./run_full_dataset.sh --resume \
         --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
                                                     # ...or at an exact (problem, algorithm, mode, N)
+    $ ./run_full_dataset.sh --floor -s lorenz       # re-run and keep the lower time per point
 ```
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
@@ -455,9 +476,14 @@ new row is appended. `--keep` gives the no-deletion behaviour on its own.
 `--resume-from` places a cursor in the run order (problems.csv order, then
 algorithms.csv order, fixed before adaptive, N ascending) and skips
 everything before it — use it to step over a point that hangs, since a hung
-point leaves no row for `--resume` to skip. All three flags are also
-accepted by `run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from`
-starts at the problem:
+point leaves no row for `--resume` to skip. `--floor` re-runs the selected
+points (it skips nothing, and implies `--keep`) and merges each result into
+the recorded file by keeping the lower time — per column for the times and
+states rows, per (time, error) pair for the wp rows — so a re-run can only
+tighten a recorded minimum. Which points re-run comes from the flags that
+already select work (`-s`, `-g`, `-n`). All four flags are also accepted by
+`run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from` starts at
+the problem:
 
 ```bash
     $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps

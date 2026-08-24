@@ -76,6 +76,9 @@ $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_
 $ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_NO_OVERWRITE -or
                        $env:BENCH_RESUME_FROM)
 
+# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
+$FloorActive = [bool]($env:BENCH_FLOOR -and $env:BENCH_FLOOR -ne '0')
+
 function Get-SolverMode { param([string]$Solver)
     if ($Solver -eq 'RK4') { return 'fixed' } else { return 'adaptive' }
 }
@@ -232,8 +235,8 @@ if ($Analysis -eq 'performance') {
 if ($Analysis -eq 'states') {
     $StatesN = [long]131072
     $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-    # A resumed run appends to what earlier runs recorded.
-    if (-not $ResumeActive) {
+    # A resumed or --floor run appends to what earlier runs recorded.
+    if (-not $ResumeActive -and -not $FloorActive) {
         Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
     }
     foreach ($solver in $Solvers) {
@@ -254,7 +257,11 @@ if ($Analysis -eq 'states') {
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
             # After a breach: keep the build time, NaN the solve.
             if ($breached) {
-                Add-Content -Path $statesFile -Value "$n`tnan`tnan`t$BuildS"
+                if ($FloorActive) {
+                    & python runner_scripts\resume.py merge $statesFile tab "$n" nan nan $BuildS
+                } else {
+                    Add-Content -Path $statesFile -Value "$n`tnan`tnan`t$BuildS"
+                }
                 Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
                 continue
             }
@@ -295,7 +302,11 @@ foreach ($problemName in $Problems) {
             Invoke-ResumePrune 'times' $problemName $solver "$a"
             # A breached leg's larger sizes are recorded as NaN without running.
             if ($breached) {
-                Add-Content -Path $timesFile -Value "$a`tnan`tnan"
+                if ($FloorActive) {
+                    & python runner_scripts\resume.py merge $timesFile tab "$a" nan nan
+                } else {
+                    Add-Content -Path $timesFile -Value "$a`tnan`tnan"
+                }
                 Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
                 continue
             }

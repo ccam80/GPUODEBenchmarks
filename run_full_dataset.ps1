@@ -12,6 +12,7 @@
 #   run_full_dataset.bat --resume                  # skip points already on disk
 #   run_full_dataset.bat --no-overwrite            # keep finite results, retry NaN and absent points
 #   run_full_dataset.bat --keep                    # never delete existing outputs
+#   run_full_dataset.bat --floor                   # re-run and keep the lower recorded time per point
 #   run_full_dataset.bat --resume-from jax         # restart the perf sweep at a package
 #   run_full_dataset.bat --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 #                                                  # ... or at an exact (problem, algorithm, mode, N)
@@ -28,6 +29,7 @@
 #   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
 #   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] - restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
+#   --floor         re-run the selected points, keeping the lower of the recorded and new time (implies --keep)
 #
 # Exit code: 0 if every analysis and package succeeded, 1 if any did not.
 # Clock drift in a timed analysis also fails the run.
@@ -47,6 +49,7 @@ $ResumeFrom = ''
 $Resume = $false
 $NoOverwrite = $false
 $Keep = $false
+$Floor = $false
 $AllowUnknownGpu = $false
 $LockClocks = $true
 $ClockTarget = ''        # "SM[,MEM]"; empty means use the per-GPU table
@@ -62,7 +65,7 @@ $AllPackages = @('julia', 'cpp', 'pytorch', 'jax', 'cubie', 'cubie_mlir', 'myoki
 
 function Show-Usage {
     param([int]$Code = 0)
-    Get-Content $PSCommandPath -TotalCount 33 |
+    Get-Content $PSCommandPath -TotalCount 35 |
         ForEach-Object { $_ -replace '^# ?', '' }
     exit $Code
 }
@@ -111,6 +114,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '^--resume$' { $Resume = $true; $Keep = $true }
         '^--no-overwrite$' { $NoOverwrite = $true; $Keep = $true }
         '^--keep$' { $Keep = $true }
+        '^--floor$' { $Floor = $true; $Keep = $true }
         '^--cooldown$' { $Cooldown = [int](Get-RequiredValue $args $i $args[$i]); $i++ }
         '^--allow-unknown-gpu$' { $AllowUnknownGpu = $true }
         '^--lock-clocks$' { $ClockTarget = Get-RequiredValue $args $i $args[$i]; $LockClocks = $true; $i++ }
@@ -139,6 +143,7 @@ $BenchFlags = ''
 if ($Keep) { $BenchFlags += ' --keep' }
 if ($Resume) { $BenchFlags += ' --resume' }
 if ($NoOverwrite) { $BenchFlags += ' --no-overwrite' }
+if ($Floor) { $BenchFlags += ' --floor' }
 
 # -p accepts "all" or a comma list; each token is validated.
 $Languages = @()

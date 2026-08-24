@@ -23,8 +23,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from resume import (active as resume_active, prune_reruns, skip_point,
-                    skip_wp_leg)
+from resume import (active as resume_active, floor_enabled, prune_reruns,
+                    skip_point, skip_wp_leg, write_times_row, write_wp_row)
 from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
                        reset_samples, sample_point, samples_outfile,
                        timed_min_ms, times_outfile)
@@ -36,7 +36,7 @@ ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
 
 NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "jax")
-# Timed repeats per point; min is reported.
+# Repeat ceiling; the count per leg follows its first timed run's duration.
 REPEATS = 20
 
 # Persistent XLA compilation cache; off in states mode so compiles run cold.
@@ -195,7 +195,7 @@ def run_wp(problem, parameterList):
 
     golden = load_golden(problem)
 
-    def bench(m, setting, outfh, samples_file, point):
+    def bench(m, setting, outfh, outfile, samples_file, point):
         """Write one row; False when a run breached the watchdog."""
         breached = False
         try:
@@ -213,8 +213,7 @@ def run_wp(problem, parameterList):
             t_ms, err = float("nan"), float("nan")
         print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}".format(
             problem.name, setting, t_ms, err))
-        outfh.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
-        outfh.flush()
+        write_wp_row(outfh, outfile, setting, t_ms, err)
         return not breached
 
     def sweep(mode, algorithm, settings, make):
@@ -228,18 +227,22 @@ def run_wp(problem, parameterList):
         samples_file = samples_outfile("JAX", "Jax", "wp", mode, algorithm,
                                        DATASET_KEY, problem)
         setting_kind = "dt" if mode == "fixed" else "tol"
-        reset_samples(samples_file)
-        with open(outfile, "w") as f:
+        # --floor merges the new times in; the log gains a fresh series.
+        if not floor_enabled():
+            reset_samples(samples_file)
+        with open(outfile, "a" if floor_enabled() else "w") as f:
             breached = False
+            nan = float("nan")
             for setting in settings:
                 if breached:
-                    f.write("{0:.10g} nan nan\n".format(setting))
+                    write_wp_row(f, outfile, setting, nan, nan)
                     continue
                 # Parameters are already resident and results stay on device.
                 point = sample_point("wp", problem.name, algorithm, mode,
                                      N_WP, problem["states"], setting_kind,
                                      setting)
-                if not bench(make(setting), setting, f, samples_file, point):
+                if not bench(make(setting), setting, f, outfile,
+                             samples_file, point):
                     print("WATCHDOG wp {0} setting={1:g}: run exceeded "
                           "the cap".format(problem.name, setting))
                     breached = True
@@ -298,9 +301,8 @@ def run_times(problem):
                           "ms ({:.1f} ms without transfers)".format(
                               n, problem.name, algorithm, mode, best_time,
                               best_time_dev))
-                    file.write('{0} {1} {2}\n'.format(
-                        n, best_time, best_time_dev))
-                    file.flush()
+                    write_times_row(file, outfile, n,
+                                    (best_time, best_time_dev))
                     # The pairwise numerical cross-check reads this fixed CSV name.
                     if (mode == "fixed" and n == 32768
                             and algorithm == "tsit5"
@@ -313,9 +315,9 @@ def run_times(problem):
                             "jax.csv"), final_states, delimiter=',')
                     if abandon:
                         # Larger sizes are slower or bigger, so the leg ends.
+                        nan = float("nan")
                         for rest in run_ns[index + 1:]:
-                            file.write('{0} nan nan\n'.format(rest))
-                        file.flush()
+                            write_times_row(file, outfile, rest, (nan, nan))
                         break
 
 
@@ -347,11 +349,13 @@ def run_states():
             samples_file = samples_outfile("JAX", "Jax", "states", mode,
                                            algorithm, DATASET_KEY,
                                            STATES_PROBLEM)
-            # A resumed leg appends to what earlier runs recorded.
-            if not resume_active():
+            # A resumed or --floor leg appends to what earlier runs recorded.
+            if not (resume_active() or floor_enabled()):
                 reset_samples(samples_file)
             prune_reruns(outfile, run_grid)
-            with open(outfile, "a" if resume_active() else "w") as file:
+            nan = float("nan")
+            with open(outfile, "a" if resume_active() or floor_enabled()
+                      else "w") as file:
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
                     main = (make_fixed(row, algorithm) if mode == "fixed"
@@ -366,8 +370,8 @@ def run_states():
                     except Exception as err:
                         print("FAILED {0} at N={1} ({2}: {3})".format(
                             label, n, type(err).__name__, err))
-                        file.write('{0} nan nan nan\n'.format(nstates))
-                        file.flush()
+                        write_times_row(file, outfile, nstates,
+                                        (nan, nan, nan))
                         continue
                     best_time, best_time_dev, abandon = best_times_ms(
                         main, parameterList, label, n, samples_file,
@@ -376,14 +380,13 @@ def run_states():
                     print("{:} ODE solves ({}) completed in {:.1f} ms "
                           "({:.1f} ms without transfers)".format(
                               n, label, best_time, best_time_dev))
-                    file.write('{0} {1} {2} {3}\n'.format(
-                        nstates, best_time, best_time_dev, build_s))
-                    file.flush()
+                    write_times_row(file, outfile, nstates,
+                                    (best_time, best_time_dev, build_s))
                     if abandon:
                         # Larger systems are slower, so the leg ends.
                         for rest in run_grid[index + 1:]:
-                            file.write('{0} nan nan nan\n'.format(rest))
-                        file.flush()
+                            write_times_row(file, outfile, rest,
+                                            (nan, nan, nan))
                         break
 
 

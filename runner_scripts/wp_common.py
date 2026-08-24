@@ -30,21 +30,50 @@ SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
                  "setting_kind", "setting", "n", "states", "repeat", "ms")
 
 
+# (limit_s, floor, ceiling) repeat schedule; mirrored by the Julia and MPGOS writers.
+REPEAT_SCHEDULE = ((0.1, 20, 20), (3.0, 10, 10), (5.0, 5, 10),
+                   (float("inf"), 3, 10))
+# A leg past its floor stops once median/min - 1 is within this spread.
+REPEAT_SPREAD = 0.02
+
+
+def repeat_bounds(first_s, cap):
+    """(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."""
+    for limit, floor, ceiling in REPEAT_SCHEDULE:
+        if first_s < limit:
+            return min(floor, cap), min(ceiling, cap)
+
+
+def repeats_done(timed_s, floor, ceiling):
+    """True when the timed runs so far settle the leg's minimum: the ceiling is reached, or the floor is and median/min - 1 is within REPEAT_SPREAD."""
+    if len(timed_s) >= ceiling:
+        return True
+    if len(timed_s) < floor:
+        return False
+    import statistics
+    return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
+
+
 def timed_min_ms(run, repeats):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first."""
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."""
     import timeit
-    best = None
     samples = []
-    for attempt in range(repeats + 1):
+    timed = []
+    floor = ceiling = None
+    while True:
         elapsed = timeit.default_timer()
         result = run()
         elapsed = timeit.default_timer() - elapsed
         samples.append(elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
             return None, result, samples
-        if attempt and (best is None or elapsed < best):
-            best = elapsed
-    return best * 1000.0, result, samples
+        if len(samples) == 1:
+            continue                     # the warm-up carries the compile
+        timed.append(elapsed)
+        if floor is None:
+            floor, ceiling = repeat_bounds(timed[0], repeats)
+        if repeats_done(timed, floor, ceiling):
+            return min(timed) * 1000.0, result, samples
 
 
 def _row(problem):
