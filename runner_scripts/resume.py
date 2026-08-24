@@ -7,12 +7,9 @@ cursor problem[:algorithm][:fixed|adaptive][:N] into the run order
 (problems.csv, then algorithms.csv, fixed before adaptive, N ascending);
 points strictly before it are skipped. The problem[:N] form floors every
 leg of that problem at N; in the states sweep N is the state count. A wp
-leg is skipped only when its file holds a row per setting.
-
-BENCH_FLOOR=1 re-runs the selected points and merges each result into the
-recorded file by keeping the lower time - per column for the times and
-states rows, per (time, error) pair for the wp rows. It skips nothing and
-prunes nothing: the recorded rows are what the new times merge against.
+leg is skipped only when its file holds a row per setting. BENCH_FLOOR=1
+skips and prunes nothing; each result merges into the recorded file,
+keeping the lower time per column (per (time, error) pair for wp rows).
 """
 
 import math

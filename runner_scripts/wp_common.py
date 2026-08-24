@@ -30,11 +30,10 @@ SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
                  "setting_kind", "setting", "n", "states", "repeat", "ms")
 
 
-# Repeat floor and ceiling from the first timed run's duration, and the
-# median/min spread that ends a leg once the floor is reached; mirrored by
-# the Julia and MPGOS writers.
+# (limit_s, floor, ceiling) repeat schedule; mirrored by the Julia and MPGOS writers.
 REPEAT_SCHEDULE = ((0.1, 20, 20), (3.0, 10, 10), (5.0, 5, 10),
                    (float("inf"), 3, 10))
+# A leg past its floor stops once median/min - 1 is within this spread.
 REPEAT_SPREAD = 0.02
 
 

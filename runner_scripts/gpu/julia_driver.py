@@ -242,8 +242,7 @@ def run_states(argv):
     outfiles = {leg: states_outfile("Julia", "Julia", leg[0], leg[1], key)
                 for leg in legs}
     for path in outfiles.values():
-        # A resumed or --floor run keeps the recorded rows; a fresh one
-        # starts clean.
+        # A resumed or --floor run keeps the recorded rows.
         open(path, "a" if resume_active() or floor_enabled()
              else "w").close()
 

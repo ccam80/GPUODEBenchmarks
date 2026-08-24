@@ -29,11 +29,10 @@ function run_watchdogged(f, on_breach)
     end
 end
 
-# Repeat floor and ceiling from the first timed run's duration, and the
-# median/min spread that ends a leg once the floor is reached; mirrored in
-# runner_scripts/wp_common.py and GPU_ODE_MPGOS/Bench.cu.
+# (limit_s, floor, ceiling) repeat schedule; mirrored in wp_common.py and Bench.cu.
 const REPEAT_SCHEDULE = ((0.1, 20, 20), (3.0, 10, 10), (5.0, 5, 10),
     (Inf, 3, 10))
+# A leg past its floor stops once median/min - 1 is within this spread.
 const REPEAT_SPREAD = 0.02
 
 "(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."

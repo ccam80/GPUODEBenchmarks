@@ -187,9 +187,7 @@ static double WatchdogSeconds()
 	return env ? atof(env) : 120.0;
 }
 
-// Repeat floor and ceiling from the first timed run's duration, and the
-// median/min spread that ends a leg once the floor is reached; mirrored in
-// runner_scripts/wp_common.py and runner_scripts/watchdog.jl.
+// Repeat floor and ceiling from the first timed run; mirrored in wp_common.py and watchdog.jl.
 static void RepeatBounds(double FirstMs, int Cap, int& Floor, int& Ceiling)
 {
 	if      (FirstMs < 100.0)  { Floor = 20; Ceiling = 20; }
@@ -210,8 +208,7 @@ static double MedianMs(std::vector<double> Timed)   // by value: nth_element per
 	return 0.5 * (Timed[Half - 1] + Upper);
 }
 
-// True when the timed runs settle the leg's minimum: the ceiling is reached,
-// or the floor is and median/min - 1 is within 2%.
+// True at the ceiling, or past the floor with median/min - 1 within 2%.
 static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling)
 {
 	if ((int)Timed.size() >= Ceiling) return true;
@@ -220,8 +217,7 @@ static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling
 	return MedianMs(Timed) / Min - 1.0 <= 0.02;
 }
 
-// --floor (BENCH_FLOOR): merge re-runs into the recorded file, keeping the
-// lower time; mirrored in runner_scripts/resume.py.
+// BENCH_FLOOR: merge re-runs by keeping the lower recorded time.
 static bool FloorEnabled()
 {
 	const char* env = std::getenv("BENCH_FLOOR");
@@ -263,8 +259,7 @@ static double RowKey(const std::string& Line)
 	return std::nan("");
 }
 
-// --floor: merge one tab-separated times/states row, keeping the lower value
-// per column; recorded fields beyond the merged columns survive.
+// --floor: merge one tab-separated row, keeping the lower value per column.
 static void MergeMinRow(const std::string& Path, long long Key,
                         const std::vector<double>& Values)
 {
@@ -630,8 +625,7 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Repeat ceiling; the count per leg follows its first timed run's
-	// duration, and r == 0 is a discarded warm-up.
+	// Repeat ceiling; the count per leg follows its first timed run.
 	const int TimingRepeats = 20;
 
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";

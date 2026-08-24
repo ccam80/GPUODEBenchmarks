@@ -45,7 +45,7 @@
 #   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
 #   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
-#   --floor         re-run the selected points and merge each result by keeping the lower of the recorded and new time (implies --keep)
+#   --floor         re-run the selected points, keeping the lower of the recorded and new time (implies --keep)
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #

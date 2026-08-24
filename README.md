@@ -234,12 +234,9 @@ algorithm field is regenerated fresh rather than migrated.
 ### Repeat count
 
 Every timed leg is a minimum over repeated runs after one untimed warm-up.
-The repeat count follows the leg's own duration: the first timed run picks a
-floor and ceiling from the schedule below, the leg always runs to the floor,
-and it extends toward the ceiling while the runs still look unsettled
-(median/min − 1 above 2%). Legs under 100 ms keep all 20 repeats — in
-relative terms they are the noisy ones — and the saving comes from the slow
-legs, which hold nearly all the wall time (#63).
+The first timed run picks a floor and ceiling from the schedule below; the
+leg always runs to the floor and extends toward the ceiling while
+median/min − 1 is above 2%.
 
 | first timed run | floor | ceiling |
 | --- | --- | --- |
@@ -248,8 +245,8 @@ legs, which hold nearly all the wall time (#63).
 | 3 – 5 s | 5 | 10 |
 | > 5 s | 3 | 10 |
 
-The schedule is capped by each writer's repeat ceiling (20 for the sweeps,
-10 for the MPGOS wp sweep) and is mirrored in `runner_scripts/wp_common.py`,
+Each writer's repeat ceiling caps the schedule (20 for the sweeps, 10 for
+the MPGOS wp sweep). It lives in `runner_scripts/wp_common.py`,
 `runner_scripts/watchdog.jl` and `GPU_ODE_MPGOS/Bench.cu`.
 
 ### Per-repeat timing log
@@ -272,10 +269,9 @@ the reduced file, one row per attempt:
 
 The samples file follows its reduced sibling's write mode: the wp and states
 sweeps rewrite theirs each run, the N sweep appends, and a `--floor` re-run
-always appends — a fresh block headed by repeat 0, which
-`collect_samples.py` separates as a new series, so every attempt behind both
-the old and the new number stays on record. Filtering to `repeat > 0`
-and taking the minimum per (leg, point) reproduces the reduced file. The
+always appends a fresh block headed by repeat 0, which `collect_samples.py`
+separates as a new series. Filtering to `repeat > 0` and taking the minimum
+per (leg, point) reproduces the reduced file. The
 writers are `SampleLog` in `runner_scripts/wp_common.py`,
 `runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
 
