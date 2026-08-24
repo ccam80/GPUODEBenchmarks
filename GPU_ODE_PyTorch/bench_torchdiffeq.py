@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
-from resume import (active as resume_active, prune_reruns, skip_point,
-                    skip_wp_leg)
+from resume import (active as resume_active, floor_enabled, prune_reruns,
+                    skip_point, skip_wp_leg, write_times_row, write_wp_row)
 from wp_common import (append_samples, parse_bench_args, reset_samples,
                        sample_point, samples_outfile, times_outfile)
 
@@ -26,7 +26,7 @@ FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
 NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "pytorch")
-# Timed repeats per point; min is reported.
+# Repeat ceiling; the count per leg follows its first timed run's duration.
 REPEATS = 20
 
 # %%
@@ -119,13 +119,15 @@ def run_wp(problem, parameters):
             continue
         samples_file = samples_outfile("PYTORCH", "Torch", "wp", "fixed",
                                        algorithm, DATASET_KEY, problem)
-        reset_samples(samples_file)
-        with open(outfile, "w") as f:
+        # --floor merges the new times in; the log gains a fresh series.
+        if not floor_enabled():
+            reset_samples(samples_file)
+        with open(outfile, "a" if floor_enabled() else "w") as f:
             # Later settings are slower, so a breach abandons the leg.
             breached = False
             for dt in dts_for(algorithm, problem):
                 if breached:
-                    f.write("{0:.10g} nan nan\n".format(dt))
+                    write_wp_row(f, outfile, dt, float("nan"), float("nan"))
                     continue
                 solve_dt = make_solve(problem, algorithm, dt)
 
@@ -148,8 +150,7 @@ def run_wp(problem, parameters):
                     err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
                 print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}"
                       .format(problem.name, algorithm, dt, t_ms, err))
-                f.write("{0:.10g} {1} {2:.10e}\n".format(dt, t_ms, err))
-                f.flush()
+                write_wp_row(f, outfile, dt, t_ms, err)
 
 
 def run_times(problem):
@@ -217,9 +218,7 @@ def run_times(problem):
                               n, problem.name, algorithm, best_time,
                               best_time_dev))
 
-                file.write('{0} {1} {2}\n'.format(
-                    n, best_time, best_time_dev))
-                file.flush()
+                write_times_row(file, outfile, n, (best_time, best_time_dev))
 
                 # The pairwise numerical cross-check reads this fixed CSV name.
                 if (n == 32768 and algorithm == "classical-rk4"
@@ -233,9 +232,9 @@ def run_times(problem):
 
                 if breached:
                     # Larger sizes are slower, so the leg is abandoned.
+                    nan = float("nan")
                     for rest in run_ns[index + 1:]:
-                        file.write('{0} nan nan\n'.format(rest))
-                    file.flush()
+                        write_times_row(file, outfile, rest, (nan, nan))
                     break
 
 
@@ -261,11 +260,12 @@ def run_states():
             continue
         samples_file = samples_outfile("PYTORCH", "Torch", "states", "fixed",
                                        algorithm, DATASET_KEY, STATES_PROBLEM)
-        # A resumed leg appends to what earlier runs recorded.
-        if not resume_active():
+        # A resumed or --floor leg appends to what earlier runs recorded.
+        if not (resume_active() or floor_enabled()):
             reset_samples(samples_file)
         prune_reruns(outfile, run_grid)
-        with open(outfile, "a" if resume_active() else "w") as file:
+        with open(outfile, "a" if resume_active() or floor_enabled()
+                  else "w") as file:
             for index, nstates in enumerate(run_grid):
                 row = states_row(nstates)
                 solve = make_solve(row, algorithm)
@@ -309,17 +309,16 @@ def run_states():
                 except Exception as exc:
                     print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
                           .format(nstates, algorithm, n, exc))
-                file.write('{0} {1} {2} {3}\n'.format(
-                    nstates, t_ms, t_dev, build_s))
-                file.flush()
+                write_times_row(file, outfile, nstates,
+                                (t_ms, t_dev, build_s))
                 if breached:
                     # Larger systems are slower, so the leg is abandoned.
                     print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
                           "run exceeded the cap".format(nstates, algorithm,
                                                         n))
+                    nan = float("nan")
                     for rest in run_grid[index + 1:]:
-                        file.write('{0} nan nan nan\n'.format(rest))
-                    file.flush()
+                        write_times_row(file, outfile, rest, (nan, nan, nan))
                     break
 
 

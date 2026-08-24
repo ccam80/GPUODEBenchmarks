@@ -69,7 +69,7 @@ if isempty(PROBLEMS)
     exit(0)
 end
 
-# Fixed sample count to match the other frameworks.
+# Repeat ceiling; the count per leg follows its first timed run's duration.
 const REPEATS = 20
 const WP_MODE = !isempty(ARGS) && ARGS[1] == "wp"
 const STATES_MODE = !isempty(ARGS) && startswith(ARGS[1], "states:")
@@ -108,9 +108,15 @@ function failed(what, err)
     return NaN
 end
 
-"Append `n NaN NaN` timing rows for the given sweep sizes."
+"Append `n NaN NaN` timing rows for the given sweep sizes; --floor merges them so recorded rows survive."
 function nan_rows(outfile, ns)
     isinteractive() && return
+    if floor_enabled()
+        for n in ns
+            merge_min_row(outfile, n, (NaN, NaN))
+        end
+        return
+    end
     open(outfile, "a+") do io
         for n in ns
             println(io, n, " NaN NaN")
@@ -129,13 +135,14 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
     samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
         "wp", mode, algorithm, problem)
     setting_kind = mode == "fixed" ? "dt" : "tol"
-    reset_samples(samples_file)
-    open(path, "w") do io
+    # --floor merges the new times in; the log gains a fresh series instead.
+    floor_enabled() || reset_samples(samples_file)
+    open(path, floor_enabled() ? "a" : "w") do io
         breached = false
         compiled = false
         for (index, setting) in enumerate(settings)
             if breached
-                println(io, setting, " NaN NaN")
+                write_wp_row(io, path, setting, NaN, NaN)
                 continue
             end
             point = sample_point("wp", problem["problem"], algorithm, mode,
@@ -143,7 +150,7 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
                 setting = setting)
             on_breach = () -> begin
                 for s in settings[index:end]
-                    println(io, s, " NaN NaN")
+                    write_wp_row(io, path, s, NaN, NaN)
                 end
                 flush(io)
                 println("WATCHDOG $(label) setting=$(setting): run never returned")
@@ -175,8 +182,7 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
                 println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
                 breached = true
             end
-            println(io, setting, " ", t_ms, " ", err)
-            flush(io)
+            write_wp_row(io, path, setting, t_ms, err)
             println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err)")
         end
     end
@@ -321,11 +327,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         end
         ran = !isnan(t_ms)
 
-        if !isinteractive()
-            open(outfile, "a+") do io
-                println(io, n, " ", t_ms, " ", t_dev_ms)
-            end
-        end
+        isinteractive() || record_row(outfile, n, (t_ms, t_dev_ms))
 
         # Save numerical output for 32768-trajectory run
         if ran && !isinteractive() && n == 32768 && algorithm == "tsit5"
@@ -447,12 +449,8 @@ function run_states(nstates, n)
                 (failed("lorenz96 states=$(nstates) $(mode) $(algorithm) " *
                         "N=$(n)", err), NaN, NaN)
             end
-            if !isinteractive()
-                open(outfile, "a+") do io
-                    println(io, nstates, " ", t_ms, " ", t_dev_ms, " ",
-                        build_s)
-                end
-            end
+            isinteractive() ||
+                record_row(outfile, nstates, (t_ms, t_dev_ms, build_s))
             GC.gc()
             CUDA.reclaim()
             println("states=$(nstates) $(mode) $(algorithm): $(t_ms) ms")

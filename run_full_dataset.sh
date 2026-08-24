@@ -28,6 +28,7 @@
 #   ./run_full_dataset.sh --resume                  # skip points already on disk
 #   ./run_full_dataset.sh --no-overwrite            # keep finite results, retry NaN and absent points
 #   ./run_full_dataset.sh --keep                    # never delete existing outputs
+#   ./run_full_dataset.sh --floor                   # re-run and keep the lower recorded time per point
 #   ./run_full_dataset.sh --resume-from jax         # restart the perf sweep at a package
 #   ./run_full_dataset.sh --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 #                                                   # ... or at an exact (problem, algorithm, mode, N)
@@ -44,6 +45,7 @@
 #   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones (implies --keep)
 #   --keep          keep existing output files (no pre-run deletion)
 #   --resume-from   package[:problem[:algorithm[:fixed|adaptive[:N]]]] — restart the performance sweep there; a bare package re-runs in full, a cursor tail keeps that package's files and skips every point before the cursor
+#   --floor         re-run the selected points and merge each result by keeping the lower of the recorded and new time (implies --keep)
 #
 # On Windows, run_full_dataset.bat takes the same flags.
 #
@@ -69,6 +71,7 @@ RESUME_FROM=""
 RESUME=false
 NO_OVERWRITE=false
 KEEP=false
+FLOOR=false
 ALLOW_UNKNOWN_GPU=false
 LOCK_CLOCKS=true
 CLOCK_TARGET=""          # "SM[,MEM]"; empty means use the per-GPU table
@@ -78,7 +81,7 @@ ALL_PACKAGES=(julia cpp pytorch jax cubie cubie_mlir myokit_cuda)
 source ./runner_scripts/clock_guard.sh
 
 usage() {
-    sed -n '2,48p' "$0" | sed 's/^# \?//'
+    sed -n '2,50p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -127,6 +130,7 @@ while [ $# -gt 0 ]; do
         --resume) RESUME=true; KEEP=true; shift;;
         --no-overwrite) NO_OVERWRITE=true; KEEP=true; shift;;
         --keep) KEEP=true; shift;;
+        --floor) FLOOR=true; KEEP=true; shift;;
         --cooldown) [ $# -ge 2 ] || { echo "$1 requires a value"; exit 1; }
                    COOLDOWN="$2"; shift 2;;
         --allow-unknown-gpu) ALLOW_UNKNOWN_GPU=true; shift;;
@@ -182,6 +186,7 @@ BENCH_FLAGS=()
 $KEEP && BENCH_FLAGS+=(--keep)
 $RESUME && BENCH_FLAGS+=(--resume)
 $NO_OVERWRITE && BENCH_FLAGS+=(--no-overwrite)
+$FLOOR && BENCH_FLAGS+=(--floor)
 
 # -p accepts "all" or a comma list; each token is validated.
 LANGUAGES=()

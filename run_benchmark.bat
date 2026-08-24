@@ -13,6 +13,7 @@ REM   --keep          keep existing output files (no pre-run deletion)
 REM   --resume        skip every point already recorded on disk; implies --keep
 REM   --no-overwrite  skip only points with a finite recorded time; retry NaN and absent ones; implies --keep
 REM   --resume-from   problem[:algorithm][:fixed|adaptive][:N] run-order cursor; skips everything before it; implies --keep
+REM   --floor         re-run the selected points and keep the lower of the recorded and new time; implies --keep
 
 pushd "%~dp0"
 
@@ -27,6 +28,7 @@ set KEEP=
 set RESUME=
 set NO_OVERWRITE=
 set RESUME_FROM=
+set FLOOR=
 
 REM cmd splits unquoted commas into arguments; rejoin value tokens until the next -flag.
 :parse_loop
@@ -44,6 +46,12 @@ if /i "%~1"=="--resume" (
 )
 if /i "%~1"=="--no-overwrite" (
     set "NO_OVERWRITE=1"
+    set "KEEP=1"
+    shift
+    goto parse_loop
+)
+if /i "%~1"=="--floor" (
+    set "FLOOR=1"
     set "KEEP=1"
     shift
     goto parse_loop
@@ -95,6 +103,7 @@ if defined RESUME_FROM set "KEEP=1"
 if defined RESUME set "BENCH_RESUME=1"
 if defined NO_OVERWRITE set "BENCH_NO_OVERWRITE=1"
 if defined RESUME_FROM set "BENCH_RESUME_FROM=%RESUME_FROM%"
+if defined FLOOR set "BENCH_FLOOR=1"
 
 if "%PACKAGE%"=="" (
     echo -p/--package is required
