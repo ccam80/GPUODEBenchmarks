@@ -117,8 +117,8 @@ def solve_once_on_device(solver, d_initials, d_parameters, duration):
 
 
 def time_device_leg(solver, duration, repeats):
-    """Device-only samples reusing the host leg's uploaded inputs, repeats scheduled by the first run's duration."""
-    # Raises after a chunked host leg: the buffers hold one chunk.
+    """Device-only samples on the resident inputs; repeats follow the first run's duration."""
+    # Raises after a chunked host leg.
     d_initials = solver.device_initial_values
     d_parameters = solver.device_parameters
     samples = []

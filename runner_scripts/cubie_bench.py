@@ -92,10 +92,10 @@ def _failed(exc, what):
 
 
 def _device_leg(solver, duration, repeats):
-    """(best_ms, samples) with the host leg's uploaded inputs reused in place and results left on the device; best_ms is None on a breach."""
+    """(best_ms, samples) on the resident inputs with results left on the device; best_ms is None on a breach."""
     from wp_common import timed_min_ms
 
-    # Raises after a chunked host leg: the buffers hold one chunk.
+    # Raises after a chunked host leg.
     d_initials = solver.device_initial_values
     d_parameters = solver.device_parameters
 
