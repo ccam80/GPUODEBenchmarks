@@ -129,11 +129,30 @@ def solve_once_on_device(solver, d_initials, d_parameters, duration):
     return (time.perf_counter() - start) * 1000.0
 
 
-def to_device_inputs(initials, parameters):
-    """Upload the grid once; None when no CUDA handle is available."""
-    if cuda is None:
-        return None
-    return cuda.to_device(initials), cuda.to_device(parameters)
+def time_device_leg(solver, initials, parameters, duration, repeats):
+    """Device-only samples, repeats scheduled by the first run's duration.
+
+    The inputs are uploaded for this leg alone and freed before returning:
+    cubie allocates its own copies for the end-to-end solves, so holding
+    them longer is duplicate residency, and numba's deferred frees are
+    flushed so the next point's chunk decision sees the VRAM as free."""
+    inputs = []
+    samples = []
+    try:
+        inputs.append(cuda.to_device(initials))
+        inputs.append(cuda.to_device(parameters))
+        floor = ceiling = None
+        while True:
+            elapsed = solve_once_on_device(solver, inputs[0], inputs[1],
+                                           duration)
+            samples.append(elapsed)
+            if floor is None:
+                floor, ceiling = repeat_bounds(elapsed / 1000.0, repeats)
+            if repeats_done(samples, floor, ceiling):
+                return samples
+    finally:
+        inputs.clear()
+        cuda.current_context().memory_manager.deallocations.clear()
 
 
 def import_numerical_from_ne(output, alias, family, problem, metric_file,
@@ -214,16 +233,19 @@ def main():
     phases = phases_for(args.analysis)
     point_failure_count = 0
 
-    def failure(algorithm, phase, mode, tier, n, setting_kind, setting, exc):
+    def failure(algorithm, phase, mode, tier, n, setting_kind, setting, exc,
+                leg=""):
+        """One failure row; `leg` names the timed leg when only it failed."""
         nonlocal point_failure_count
         point_failure_count += 1
+        message = (leg + ": " if leg else "") + str(exc)
         append_csv(failure_file, FAILURE_FIELDS, {
             "framework": "cubie", "algorithm": algorithm, "phase": phase,
             "mode": mode, "tier": tier, "n": n, "setting_kind": setting_kind,
             "setting": setting, "error_type": type(exc).__name__,
-            "message": str(exc).replace("\n", " ")[:2000],
+            "message": message.replace("\n", " ")[:2000],
         })
-        print("FAILED cubie {} {} {} {}={}: {}".format(algorithm, phase, mode, setting_kind, setting, exc), flush=True)
+        print("FAILED cubie {} {} {} {}={}: {}".format(algorithm, phase, mode, setting_kind, setting, message), flush=True)
 
     for row in algorithms(args.algorithm):
         alias, order, family = row["cubie_alias"], row["order"], row["family"]
@@ -260,17 +282,19 @@ def main():
                 repeats = protocol["work_repeats"]
 
             for mode, tier, setting_kind, setting, n in points:
+                point = {"framework": "cubie", "algorithm": alias,
+                         "phase": phase, "mode": mode, "tier": tier, "n": n,
+                         "setting_kind": setting_kind, "setting": setting}
                 try:
                     # Release the previous point before allocating this one.
-                    solver = initials = params = finals = device_inputs = None
+                    solver = initials = params = finals = None
                     solver = make_solver(system, alias, mode, setting, order,
                                          family, tier, pins)
                     initials, params = solver.build_grid(
                         initial_values=initial_values,
                         parameters={problem["sweep_parameter"]:
                                     sweep_grid(problem, phase, n)})
-                    device_inputs = to_device_inputs(initials, params)
-                    # One warmup covers both transfer paths.
+                    # One warmup carries the compile for both transfer paths.
                     solve_once(solver, initials, params, duration, nstates,
                                system, problem)
                     # Unbroken block per transfer variant; repeats follow the first timed run's duration.
@@ -300,27 +324,9 @@ def main():
                                                            repeats)
                         if repeats_done(end_to_end, floor, ceiling):
                             break
-                    device_only = []
-                    if device_inputs is not None:
-                        floor = ceiling = None
-                        while True:
-                            elapsed = solve_once_on_device(
-                                solver, *device_inputs, duration)
-                            device_only.append(elapsed)
-                            if floor is None:
-                                floor, ceiling = repeat_bounds(
-                                    elapsed / 1000.0, repeats)
-                            if repeats_done(device_only, floor, ceiling):
-                                break
-                    point = {"framework": "cubie", "algorithm": alias,
-                             "phase": phase, "mode": mode, "tier": tier, "n": n,
-                             "setting_kind": setting_kind, "setting": setting}
-                    for transfers, samples in (("both", end_to_end),
-                                               ("none", device_only)):
-                        if samples:
-                            append_csv(timing_file, TIMING_FIELDS,
-                                       dict(point, transfers=transfers,
-                                            **timing_stats(samples)))
+                    append_csv(timing_file, TIMING_FIELDS,
+                               dict(point, transfers="both",
+                                    **timing_stats(end_to_end)))
                     finite, failed = finite_counts(finals)
                     if phase == "performance":
                         append_csv(metric_file, METRIC_FIELDS, {
@@ -346,6 +352,20 @@ def main():
                     print("OK cubie {} {} {} {} {}={} N={}".format(alias, phase, mode, tier, setting_kind, setting, n), flush=True)
                 except Exception as exc:
                     failure(alias, phase, mode, tier, n, setting_kind, setting, exc)
+                    continue
+                if cuda is None:
+                    continue
+                # Its own leg: the device-resident solve cannot chunk, so its
+                # failure must leave the end-to-end row standing.
+                try:
+                    device_only = time_device_leg(solver, initials, params,
+                                                  duration, repeats)
+                    append_csv(timing_file, TIMING_FIELDS,
+                               dict(point, transfers="none",
+                                    **timing_stats(device_only)))
+                except Exception as exc:
+                    failure(alias, phase, mode, tier, n, setting_kind, setting,
+                            exc, leg="device-only")
 
     return 1 if point_failure_count else 0
 

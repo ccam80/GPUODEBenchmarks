@@ -89,7 +89,46 @@ def _run_problem(problem, opts):
 def _failed(exc, what):
     """An algorithm that cannot run this system is a NaN row, not an abort."""
     print("FAILED {0}: {1}".format(what, exc))
-    return float("nan"), float("nan")
+    return float("nan")
+
+
+def _release_device_arrays(arrays):
+    """Drop the device copies and flush numba's deferred frees: cubie's
+    chunk decision reads free VRAM, so a pending free counts against it.
+    Device frees queue on the context's memory manager, whichever plugin
+    backs it."""
+    arrays.clear()
+    cuda.current_context().memory_manager.deallocations.clear()
+
+
+def _device_leg(solver, initials_array, parameter_array, duration, repeats):
+    """(best_ms, samples) for solves with device-resident inputs and results;
+    best_ms is None on a breach. The inputs live on the device for this leg
+    only: cubie allocates its own copies for the host-path leg, so holding
+    them any longer is duplicate residency and eats the host path's room to
+    fit in one chunk."""
+    from wp_common import timed_min_ms
+
+    inputs = []
+
+    def device_only(blocksize=64):
+        solver.solve(
+            initial_values=inputs[0],
+            parameters=inputs[1],
+            blocksize=blocksize,
+            duration=duration,
+            on_device=True,
+        )
+        # on_device solves return before the stream drains.
+        cuda.synchronize()
+
+    try:
+        inputs.append(cuda.to_device(initials_array))
+        inputs.append(cuda.to_device(parameter_array))
+        best, _, samples = timed_min_ms(device_only, repeats)
+    finally:
+        _release_device_arrays(inputs)
+    return best, samples
 
 
 def _run_wp(problem, opts, system, grid):
@@ -147,7 +186,7 @@ def _run_wp(problem, opts, system, grid):
                             problem["states"], setting_kind, setting),
                             "both", samples)
                     except Exception as exc:
-                        t_ms, err = _failed(
+                        t_ms = err = _failed(
                             exc, f"{problem.name} {mode} {algorithm} "
                             f"setting={setting:g}")
                     if t_ms is None:
@@ -185,13 +224,16 @@ def _run_times(problem, opts, system, grid):
     duration = problem["duration"]
     dataset = opts["dataset_key"]
     ns = opts["ns"]
+    # The pairwise numerical cross-check reads these fixed CSV names.
+    numerical_names = {("fixed", "classical-rk4"): "_unadaptive.csv",
+                       ("adaptive", "tsit5"): "_adaptive.csv"}
 
-    def bench_times(solver, n, samples_file, mode, algorithm):
-        """(with_transfers_ms, device_only_ms, solution); times None on a breach."""
+    def host_leg(solver, n, want_finals):
+        """(best_ms, finals, samples) for solves through host arrays;
+        best_ms is None on a breach. Only the finals survive: the solution
+        owns the solver's host output buffers, and holding it through the
+        device leg would make the next solve allocate a second set."""
         initials_array, parameter_array = grid(solver, n)
-        # Uploaded once per size so the device-only timing excludes the h2d.
-        d_initials = cuda.to_device(initials_array)
-        d_parameters = cuda.to_device(parameter_array)
 
         def with_transfers(blocksize=64):
             return solver.solve(
@@ -201,32 +243,18 @@ def _run_times(problem, opts, system, grid):
                 duration=duration
             )
 
-        def device_only(blocksize=64):
-            solution = solver.solve(
-                initial_values=d_initials,
-                parameters=d_parameters,
-                blocksize=blocksize,
-                duration=duration,
-                on_device=True
-            )
-            cuda.synchronize()
-            return solution
-
-        point = sample_point("times", problem.name, algorithm, mode, n,
-                             problem["states"])
         best, solution, samples = timed_min_ms(with_transfers, REPEATS)
-        append_samples(samples_file, point, "both", samples)
-        if best is None:
-            return None, None, None
-        best_dev, _, samples = timed_min_ms(device_only, REPEATS)
-        append_samples(samples_file, point, "none", samples)
-        return best, best_dev, solution
+        finals = None
+        if want_finals and best is not None:
+            # A copy: final_states views the buffer the next solve reuses.
+            finals = np.array(final_states(system, solution, problem))
+        return best, finals, samples
 
-    def save_numerical(solution, name):
+    def save_numerical(finals, name):
         """Final states for the 32768-run numerical cross-check."""
         np.savetxt(os.path.join(
             data_dir("numerical", dataset, problem=problem), name),
-            final_states(system, solution, problem), delimiter=',')
+            finals, delimiter=',')
 
     def nan_rows(file, outfile, sizes):
         for n in sizes:
@@ -267,36 +295,58 @@ def _run_times(problem, opts, system, grid):
                     nan_rows(file, outfile, run_ns)
                 continue
             with open(outfile, "a+") as file:
+                # The device leg cannot chunk, so it dies before the host
+                # leg does; its column is abandoned on its own breach.
+                device_breached = False
                 for index, n in enumerate(run_ns):
                     print(f"Running {problem.name}, {n} trajectories, "
                           f"{mode} dt, {algorithm}...")
-                    solution = None
+                    label = f"{problem.name} {mode} {algorithm} N={n}"
+                    point = sample_point("times", problem.name, algorithm,
+                                         mode, n, problem["states"])
+                    want_finals = (n == 32768
+                                   and (mode, algorithm) in numerical_names)
+                    finals = None
                     try:
-                        best, best_dev, solution = bench_times(
-                            solver, n, samples_file, mode, algorithm)
-                        if best is None or best_dev is None:
-                            # Larger sizes are slower, so the leg is abandoned.
-                            print(f"WATCHDOG {problem.name} {mode} "
-                                  f"{algorithm} N={n}: run exceeded the cap")
-                            nan_rows(file, outfile, run_ns[index:])
-                            break
+                        best, finals, samples = host_leg(solver, n,
+                                                         want_finals)
+                        append_samples(samples_file, point, "both", samples)
+                    except Exception as exc:
+                        best = _failed(exc, label)
+                    if best is None:
+                        # Larger sizes are slower, so the leg is abandoned.
+                        print(f"WATCHDOG {label}: run exceeded the cap")
+                        nan_rows(file, outfile, run_ns[index:])
+                        break
+                    # The device leg needs the host leg's memory in a single
+                    # chunk, so it is measured only after a host-path number.
+                    best_dev = float("nan")
+                    if np.isnan(best):
+                        print(f"SKIP {label} device-only: no host-path time")
+                    elif device_breached:
+                        print(f"SKIP {label} device-only: breached at a "
+                              "smaller size")
+                    else:
+                        try:
+                            best_dev, samples = _device_leg(
+                                solver, *grid(solver, n), duration, REPEATS)
+                            append_samples(samples_file, point, "none",
+                                           samples)
+                        except Exception as exc:
+                            best_dev = _failed(exc, label + " device-only")
+                        if best_dev is None:
+                            device_breached = True
+                            best_dev = float("nan")
+                            print(f"WATCHDOG {label} device-only: run "
+                                  "exceeded the cap")
+                    if not np.isnan(best):
                         print(f"{n} ODE solves ({algorithm}, {mode}) "
                               f"completed in {best:.1f} ms ({best_dev:.1f} ms "
                               "without transfers)")
-                    except Exception as exc:
-                        best, best_dev = _failed(
-                            exc, f"{problem.name} {mode} {algorithm} N={n}")
                     write_times_row(file, outfile, n, (best, best_dev))
-                    # The pairwise numerical cross-check reads these fixed CSV names.
-                    if solution is not None and n == 32768:
-                        if mode == "fixed" and algorithm == "classical-rk4":
-                            save_numerical(
-                                solution,
-                                opts["numerical_tag"] + "_unadaptive.csv")
-                        if mode == "adaptive" and algorithm == "tsit5":
-                            save_numerical(
-                                solution,
-                                opts["numerical_tag"] + "_adaptive.csv")
+                    if finals is not None:
+                        save_numerical(finals, opts["numerical_tag"]
+                                       + numerical_names[(mode, algorithm)])
                     gc.collect()
             _release(solver)
 
@@ -451,11 +501,18 @@ def _run_states(opts):
             prune_reruns(outfile, run_grid)
             with open(outfile, "a" if resume_active() or floor_enabled()
                       else "w") as file:
+                # The device leg's column is abandoned on its own breach;
+                # the host leg carries on.
+                device_breached = False
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
                     duration = row["duration"]
                     print(f"Running lorenz96 states={nstates}, "
                           f"{n} trajectories, {mode} dt, {algorithm}...")
+                    label = (f"lorenz96 states={nstates} {mode} {algorithm} "
+                             f"N={n}")
+                    point = sample_point("states", STATES_PROBLEM,
+                                         algorithm, mode, n, nstates)
                     t_ms = t_dev = build_s = float("nan")
                     breached = False
                     solver = None
@@ -480,50 +537,46 @@ def _run_states(opts):
 
                         with_transfers()
                         build_s = default_timer() - started
-
-                        d_initials = cuda.to_device(initials_array)
-                        d_parameters = cuda.to_device(parameter_array)
-
-                        def device_only(blocksize=64):
-                            solution = solver.solve(
-                                initial_values=d_initials,
-                                parameters=d_parameters,
-                                blocksize=blocksize,
-                                duration=duration,
-                                on_device=True,
-                            )
-                            cuda.synchronize()
-                            return solution
-
-                        point = sample_point("states", STATES_PROBLEM,
-                                             algorithm, mode, n, nstates)
                         best, _, samples = timed_min_ms(with_transfers,
                                                         REPEATS)
                         append_samples(samples_file, point, "both", samples)
-                        best_dev = None
-                        if best is not None:
-                            best_dev, _, samples = timed_min_ms(device_only,
-                                                                REPEATS)
-                            append_samples(samples_file, point, "none",
-                                           samples)
-                        breached = best is None or best_dev is None
+                        breached = best is None
                         if not breached:
-                            t_ms, t_dev = best, best_dev
-                            print(f"{n} ODE solves (lorenz96 "
-                                  f"states={nstates}, {algorithm}, {mode}) "
-                                  f"completed in {t_ms:.1f} ms ({t_dev:.1f} "
-                                  "ms without transfers)")
+                            t_ms = best
                     except Exception as exc:
-                        _failed(exc, f"lorenz96 states={nstates} {mode} "
-                                     f"{algorithm} N={n}")
+                        _failed(exc, label)
+                    # Measured only after a host-path time: the device leg
+                    # needs the same memory, in one chunk.
+                    if not np.isnan(t_ms):
+                        if device_breached:
+                            print(f"SKIP {label} device-only: breached at a "
+                                  "smaller size")
+                        else:
+                            try:
+                                best_dev, samples = _device_leg(
+                                    solver, initials_array, parameter_array,
+                                    duration, REPEATS)
+                                append_samples(samples_file, point, "none",
+                                               samples)
+                                if best_dev is None:
+                                    device_breached = True
+                                    print(f"WATCHDOG {label} device-only: "
+                                          "run exceeded the cap")
+                                else:
+                                    t_dev = best_dev
+                            except Exception as exc:
+                                _failed(exc, label + " device-only")
+                        print(f"{n} ODE solves (lorenz96 "
+                              f"states={nstates}, {algorithm}, {mode}) "
+                              f"completed in {t_ms:.1f} ms ({t_dev:.1f} "
+                              "ms without transfers)")
                     write_times_row(file, outfile, nstates,
                                     (t_ms, t_dev, build_s))
                     if solver is not None:
                         _release(solver)
                     if breached:
                         # Larger systems are slower, so the leg is abandoned.
-                        print(f"WATCHDOG lorenz96 states={nstates} {mode} "
-                              f"{algorithm} N={n}: run exceeded the cap")
+                        print(f"WATCHDOG {label}: run exceeded the cap")
                         nan = float("nan")
                         for rest in run_grid[index + 1:]:
                             write_times_row(file, outfile, rest,
