@@ -7,7 +7,6 @@ import os
 import sys
 
 import numpy as np
-from numba import cuda
 
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
@@ -92,35 +91,26 @@ def _failed(exc, what):
     return float("nan")
 
 
-def _release_device_arrays(arrays):
-    """Drop the device copies and flush numba's pending frees."""
-    arrays.clear()
-    cuda.current_context().memory_manager.deallocations.clear()
-
-
-def _device_leg(solver, initials_array, parameter_array, duration, repeats):
-    """(best_ms, samples) with device-resident inputs and results, the inputs freed before returning; best_ms is None on a breach."""
+def _device_leg(solver, duration, repeats):
+    """(best_ms, samples) with the host leg's uploaded inputs reused in place and results left on the device; best_ms is None on a breach."""
     from wp_common import timed_min_ms
 
-    inputs = []
+    # Raises after a chunked host leg: the buffers hold one chunk.
+    d_initials = solver.device_initial_values
+    d_parameters = solver.device_parameters
 
     def device_only(blocksize=64):
-        solver.solve(
-            initial_values=inputs[0],
-            parameters=inputs[1],
+        result = solver.solve(
+            initial_values=d_initials,
+            parameters=d_parameters,
             blocksize=blocksize,
             duration=duration,
             on_device=True,
         )
         # on_device solves return before the stream drains.
-        cuda.synchronize()
+        result.stream.synchronize()
 
-    try:
-        inputs.append(cuda.to_device(initials_array))
-        inputs.append(cuda.to_device(parameter_array))
-        best, _, samples = timed_min_ms(device_only, repeats)
-    finally:
-        _release_device_arrays(inputs)
+    best, _, samples = timed_min_ms(device_only, repeats)
     return best, samples
 
 
@@ -317,7 +307,7 @@ def _run_times(problem, opts, system, grid):
                     else:
                         try:
                             best_dev, samples = _device_leg(
-                                solver, *grid(solver, n), duration, REPEATS)
+                                solver, duration, REPEATS)
                             append_samples(samples_file, point, "none",
                                            samples)
                         except Exception as exc:
@@ -540,8 +530,7 @@ def _run_states(opts):
                         else:
                             try:
                                 best_dev, samples = _device_leg(
-                                    solver, initials_array, parameter_array,
-                                    duration, REPEATS)
+                                    solver, duration, REPEATS)
                                 append_samples(samples_file, point, "none",
                                                samples)
                                 if best_dev is None:

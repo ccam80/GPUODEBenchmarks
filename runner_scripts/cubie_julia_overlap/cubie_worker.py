@@ -41,11 +41,6 @@ try:
 except Exception:
     pass
 
-try:
-    from numba import cuda
-except Exception:
-    cuda = None
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -56,11 +51,6 @@ def parse_args():
     parser.add_argument("--algorithm", default="all")
     parser.add_argument("--problem", default="lorenz")
     return parser.parse_args()
-
-
-def sync():
-    if cuda is not None:
-        cuda.synchronize()
 
 
 def package_version():
@@ -105,14 +95,12 @@ def make_solver(system, alias, mode, setting, order, family, tier, pins):
 
 def solve_once(solver, initials, parameters, duration, nstates, system,
                problem):
-    """Time one solve including the h2d and d2h transfers."""
-    sync()
+    """Time one solve including the h2d and d2h transfers; solve() returns synchronised."""
     start = time.perf_counter()
     solution = solver.solve(initial_values=initials, parameters=parameters,
                             blocksize=64, duration=duration)
     # solve() already returns host buffers; this is a host-side view.
     finals = final_states(system, solution, problem)
-    sync()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     if finals.ndim != 2 or finals.shape[1] != nstates:
         raise ValueError("unexpected final-state shape {!r}".format(finals.shape))
@@ -120,34 +108,29 @@ def solve_once(solver, initials, parameters, duration, nstates, system,
 
 
 def solve_once_on_device(solver, d_initials, d_parameters, duration):
-    """Time one solve with neither transfer: device arrays in, results left there."""
-    sync()
+    """Time one solve with neither transfer: resident inputs in, results left on the device."""
     start = time.perf_counter()
-    solver.solve(initial_values=d_initials, parameters=d_parameters,
-                 blocksize=64, duration=duration, on_device=True)
-    sync()
+    result = solver.solve(initial_values=d_initials, parameters=d_parameters,
+                          blocksize=64, duration=duration, on_device=True)
+    result.stream.synchronize()
     return (time.perf_counter() - start) * 1000.0
 
 
-def time_device_leg(solver, initials, parameters, duration, repeats):
-    """Device-only samples, repeats scheduled by the first run's duration; the inputs are uploaded here and freed before returning."""
-    inputs = []
+def time_device_leg(solver, duration, repeats):
+    """Device-only samples reusing the host leg's uploaded inputs, repeats scheduled by the first run's duration."""
+    # Raises after a chunked host leg: the buffers hold one chunk.
+    d_initials = solver.device_initial_values
+    d_parameters = solver.device_parameters
     samples = []
-    try:
-        inputs.append(cuda.to_device(initials))
-        inputs.append(cuda.to_device(parameters))
-        floor = ceiling = None
-        while True:
-            elapsed = solve_once_on_device(solver, inputs[0], inputs[1],
-                                           duration)
-            samples.append(elapsed)
-            if floor is None:
-                floor, ceiling = repeat_bounds(elapsed / 1000.0, repeats)
-            if repeats_done(samples, floor, ceiling):
-                return samples
-    finally:
-        inputs.clear()
-        cuda.current_context().memory_manager.deallocations.clear()
+    floor = ceiling = None
+    while True:
+        elapsed = solve_once_on_device(solver, d_initials, d_parameters,
+                                       duration)
+        samples.append(elapsed)
+        if floor is None:
+            floor, ceiling = repeat_bounds(elapsed / 1000.0, repeats)
+        if repeats_done(samples, floor, ceiling):
+            return samples
 
 
 def import_numerical_from_ne(output, alias, family, problem, metric_file,
@@ -348,12 +331,9 @@ def main():
                 except Exception as exc:
                     failure(alias, phase, mode, tier, n, setting_kind, setting, exc)
                     continue
-                if cuda is None:
-                    continue
                 # A device-only failure leaves the end-to-end row standing.
                 try:
-                    device_only = time_device_leg(solver, initials, params,
-                                                  duration, repeats)
+                    device_only = time_device_leg(solver, duration, repeats)
                     append_csv(timing_file, TIMING_FIELDS,
                                dict(point, transfers="none",
                                     **timing_stats(device_only)))
