@@ -130,12 +130,7 @@ def solve_once_on_device(solver, d_initials, d_parameters, duration):
 
 
 def time_device_leg(solver, initials, parameters, duration, repeats):
-    """Device-only samples, repeats scheduled by the first run's duration.
-
-    The inputs are uploaded for this leg alone and freed before returning:
-    cubie allocates its own copies for the end-to-end solves, so holding
-    them longer is duplicate residency, and numba's deferred frees are
-    flushed so the next point's chunk decision sees the VRAM as free."""
+    """Device-only samples, repeats scheduled by the first run's duration; the inputs are uploaded here and freed before returning."""
     inputs = []
     samples = []
     try:
@@ -355,8 +350,7 @@ def main():
                     continue
                 if cuda is None:
                     continue
-                # Its own leg: the device-resident solve cannot chunk, so its
-                # failure must leave the end-to-end row standing.
+                # A device-only failure leaves the end-to-end row standing.
                 try:
                     device_only = time_device_leg(solver, initials, params,
                                                   duration, repeats)

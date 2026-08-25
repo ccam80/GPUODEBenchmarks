@@ -1,5 +1,4 @@
-"""Cubie sweep legs: device inputs resident for the device leg only, and a
-device-only failure or breach leaves the host-path number standing."""
+"""Cubie sweep legs: device inputs held for the device leg only, each leg's failure recorded in its own column."""
 
 import math
 import os

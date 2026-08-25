@@ -93,20 +93,13 @@ def _failed(exc, what):
 
 
 def _release_device_arrays(arrays):
-    """Drop the device copies and flush numba's deferred frees: cubie's
-    chunk decision reads free VRAM, so a pending free counts against it.
-    Device frees queue on the context's memory manager, whichever plugin
-    backs it."""
+    """Drop the device copies and flush numba's pending frees."""
     arrays.clear()
     cuda.current_context().memory_manager.deallocations.clear()
 
 
 def _device_leg(solver, initials_array, parameter_array, duration, repeats):
-    """(best_ms, samples) for solves with device-resident inputs and results;
-    best_ms is None on a breach. The inputs live on the device for this leg
-    only: cubie allocates its own copies for the host-path leg, so holding
-    them any longer is duplicate residency and eats the host path's room to
-    fit in one chunk."""
+    """(best_ms, samples) with device-resident inputs and results, the inputs freed before returning; best_ms is None on a breach."""
     from wp_common import timed_min_ms
 
     inputs = []
@@ -229,10 +222,7 @@ def _run_times(problem, opts, system, grid):
                        ("adaptive", "tsit5"): "_adaptive.csv"}
 
     def host_leg(solver, n, want_finals):
-        """(best_ms, finals, samples) for solves through host arrays;
-        best_ms is None on a breach. Only the finals survive: the solution
-        owns the solver's host output buffers, and holding it through the
-        device leg would make the next solve allocate a second set."""
+        """(best_ms, finals, samples) through host arrays; best_ms is None on a breach, finals a copy or None."""
         initials_array, parameter_array = grid(solver, n)
 
         def with_transfers(blocksize=64):
@@ -295,8 +285,7 @@ def _run_times(problem, opts, system, grid):
                     nan_rows(file, outfile, run_ns)
                 continue
             with open(outfile, "a+") as file:
-                # The device leg cannot chunk, so it dies before the host
-                # leg does; its column is abandoned on its own breach.
+                # A device-only breach abandons that column alone.
                 device_breached = False
                 for index, n in enumerate(run_ns):
                     print(f"Running {problem.name}, {n} trajectories, "
@@ -318,8 +307,7 @@ def _run_times(problem, opts, system, grid):
                         print(f"WATCHDOG {label}: run exceeded the cap")
                         nan_rows(file, outfile, run_ns[index:])
                         break
-                    # The device leg needs the host leg's memory in a single
-                    # chunk, so it is measured only after a host-path number.
+                    # The device leg runs only after a host-path time.
                     best_dev = float("nan")
                     if np.isnan(best):
                         print(f"SKIP {label} device-only: no host-path time")
@@ -501,8 +489,7 @@ def _run_states(opts):
             prune_reruns(outfile, run_grid)
             with open(outfile, "a" if resume_active() or floor_enabled()
                       else "w") as file:
-                # The device leg's column is abandoned on its own breach;
-                # the host leg carries on.
+                # A device-only breach abandons that column alone.
                 device_breached = False
                 for index, nstates in enumerate(run_grid):
                     row = states_row(nstates)
@@ -545,8 +532,7 @@ def _run_states(opts):
                             t_ms = best
                     except Exception as exc:
                         _failed(exc, label)
-                    # Measured only after a host-path time: the device leg
-                    # needs the same memory, in one chunk.
+                    # The device leg runs only after a host-path time.
                     if not np.isnan(t_ms):
                         if device_breached:
                             print(f"SKIP {label} device-only: breached at a "
