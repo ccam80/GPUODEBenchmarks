@@ -27,8 +27,7 @@ case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
-# nan_row <file> <key> [extra]: append one NaN row (merging under --floor);
-# Bench.exe creates the directory only on success.
+# nan_row <file> <key> [extra]: append one NaN row, merging under --floor; creates the problem directory.
 nan_row() {
 	local file=$1 key=$2 extra=${3:-}
 	mkdir -p "$(dirname "$file")"
@@ -190,8 +189,7 @@ do
 				continue
 			fi
 			build "$problem" "$solver" 131072
-			# 42 = watchdog breach; the wp sweep NaN-fills in-process. Any other
-			# failure ends this leg only; the recorded settings stay.
+			# 42 = watchdog breach; the wp sweep NaN-fills in-process. Any other failure ends this leg only.
 			rc=0
 			./GPU_ODE_MPGOS/Bench.exe wp || rc=$?
 			if [ "$rc" -ne 0 ] && [ "$rc" -ne 42 ]; then

@@ -150,8 +150,7 @@ function Build-Project {
     }
 }
 
-# Set by Invoke-Point: 42 is the watchdog-breach code; any other non-zero exit
-# (OOM, launch error) is a failed point, which the caller records as NaN.
+# Set by Invoke-Point: exit 42 is a watchdog breach, any other non-zero exit a failed point.
 $script:PointBreached = $false
 $script:PointFailed = $false
 
@@ -171,7 +170,7 @@ function Invoke-Point {
     }
 }
 
-# Append one NaN row (merging under --floor); Bench.exe creates the directory only on success.
+# Append one NaN row, merging under --floor; creates the problem directory.
 function Add-NanRow {
     param([string]$File, [string]$Key, [string]$Extra = '')
     New-Item -ItemType Directory -Force (Split-Path $File) | Out-Null

@@ -293,8 +293,7 @@ data_prefix_for() {
     esac
 }
 
-# Largest N with a finite time in any problem's file, so a truncated sweep is
-# visible in the summary; NaN rows are recorded points, not reached ones.
+# Largest N with a finite time across the framework's per-problem files.
 max_n_reached() {
     local dir prefix f best=0 n
     dir="data/$(data_dir_for "$1")"

@@ -252,8 +252,7 @@ function Get-DataPrefixFor {
     }
 }
 
-# Largest N with a finite time in any problem's file, so a truncated sweep is
-# visible in the summary; NaN rows are recorded points, not reached ones.
+# Largest N with a finite time across the framework's per-problem files.
 function Get-MaxNReached {
     param([string]$Lang)
     $dir = Join-Path 'data' (Get-DataDirFor $Lang)
