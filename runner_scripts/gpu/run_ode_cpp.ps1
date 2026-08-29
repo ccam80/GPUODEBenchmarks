@@ -150,8 +150,10 @@ function Build-Project {
     }
 }
 
-# Set when the last Invoke-Point exited 42, the watchdog-breach code.
+# Set by Invoke-Point: 42 is the watchdog-breach code; any other non-zero exit
+# (OOM, launch error) is a failed point, which the caller records as NaN.
 $script:PointBreached = $false
+$script:PointFailed = $false
 
 function Invoke-Point {
     param([string]$ProblemName, [string]$Solver, [long]$Nt, [switch]$Wp)
@@ -162,8 +164,24 @@ function Invoke-Point {
         & "GPU_ODE_MPGOS\Bench.exe"
     }
     $script:PointBreached = ($LASTEXITCODE -eq 42)
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 42) {
-        Write-Error "Bench.exe ($ProblemName, $Solver) failed with exit code $LASTEXITCODE"
+    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 42)
+    if ($script:PointFailed) {
+        $what = if ($Wp) { "wp" } else { "N=$Nt" }
+        Write-Host "FAILED $ProblemName $(Get-SolverMode $Solver) $(Get-SolverAlgorithm $Solver) ${what}: Bench.exe exit $LASTEXITCODE"
+    }
+}
+
+# Append one NaN row (merging under --floor); Bench.exe creates the directory only on success.
+function Add-NanRow {
+    param([string]$File, [string]$Key, [string]$Extra = '')
+    New-Item -ItemType Directory -Force (Split-Path $File) | Out-Null
+    if ($FloorActive) {
+        if ($Extra) { & python runner_scripts\resume.py merge $File tab $Key nan nan $Extra }
+        else { & python runner_scripts\resume.py merge $File tab $Key nan nan }
+    } else {
+        $row = "$Key`tnan`tnan"
+        if ($Extra) { $row += "`t$Extra" }
+        Add-Content -Path $File -Value $row
     }
 }
 
@@ -257,11 +275,7 @@ if ($Analysis -eq 'states') {
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
             # After a breach: keep the build time, NaN the solve.
             if ($breached) {
-                if ($FloorActive) {
-                    & python runner_scripts\resume.py merge $statesFile tab "$n" nan nan $BuildS
-                } else {
-                    Add-Content -Path $statesFile -Value "$n`tnan`tnan`t$BuildS"
-                }
+                Add-NanRow $statesFile "$n" $BuildS
                 Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
                 continue
             }
@@ -269,7 +283,9 @@ if ($Analysis -eq 'states') {
             if ($LASTEXITCODE -eq 42) {
                 $breached = $true
             } elseif ($LASTEXITCODE -ne 0) {
-                Write-Error "Bench.exe (lorenz96 states=$n, $solver) failed with exit code $LASTEXITCODE"
+                # A failed point is a NaN row with its build time; the grid goes on.
+                Write-Host "FAILED lorenz96 states=$n $mode ${alg}: Bench.exe exit $LASTEXITCODE"
+                Add-NanRow $statesFile "$n" $BuildS
             }
         }
     }
@@ -302,18 +318,17 @@ foreach ($problemName in $Problems) {
             Invoke-ResumePrune 'times' $problemName $solver "$a"
             # A breached leg's larger sizes are recorded as NaN without running.
             if ($breached) {
-                if ($FloorActive) {
-                    & python runner_scripts\resume.py merge $timesFile tab "$a" nan nan
-                } else {
-                    Add-Content -Path $timesFile -Value "$a`tnan`tnan"
-                }
+                Add-NanRow $timesFile "$a"
                 Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
                 continue
             }
             Write-Host "No. of trajectories = $a ($problemName, $solver)"
             $script:PointBreached = $false
+            $script:PointFailed = $false
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
             if ($script:PointBreached) { $breached = $true }
+            # A failed point (OOM, launch error) is a NaN row; the sweep goes on.
+            if ($script:PointFailed) { Add-NanRow $timesFile "$a" }
         }
     }
 }

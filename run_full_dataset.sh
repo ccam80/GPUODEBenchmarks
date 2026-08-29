@@ -277,7 +277,7 @@ fi
 trap 'clocks_monitor_stop; clocks_reset' EXIT INT TERM
 clocks_monitor_start "$LOG_DIR/clocks.csv" || true
 
-# data/<dir>/<prefix>_times_*.txt per framework, for the progress report.
+# data/<dir>/<key>/<problem>/<prefix>_times_*.txt per framework, for the progress report.
 data_dir_for() {
     case "$1" in
         julia) echo "Julia";;
@@ -293,16 +293,16 @@ data_prefix_for() {
     esac
 }
 
-# Largest N actually recorded for a framework, so a truncated sweep is visible
-# in the summary rather than silently looking like a plain failure.
+# Largest N with a finite time in any problem's file, so a truncated sweep is
+# visible in the summary; NaN rows are recorded points, not reached ones.
 max_n_reached() {
     local dir prefix f best=0 n
     dir="data/$(data_dir_for "$1")"
     prefix="$(data_prefix_for "$1")"
     [ -d "$dir" ] || { echo 0; return; }
-    for f in "$dir/${DATASET_KEY}/${prefix}"_times_*.txt; do
+    for f in "$dir/${DATASET_KEY}"/*/"${prefix}"_times_*.txt; do
         [ -f "$f" ] || continue
-        n=$(awk 'NF{print $1}' "$f" | sort -n | tail -1)
+        n=$(awk 'NF >= 2 && tolower($2) != "nan" && tolower($2) != "inf" {print $1}' "$f" | sort -n | tail -1)
         [ -n "$n" ] && [ "${n%.*}" -gt "$best" ] 2>/dev/null && best="${n%.*}"
     done
     echo "$best"
