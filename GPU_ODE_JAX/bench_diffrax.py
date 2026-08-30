@@ -195,12 +195,20 @@ def run_wp(problem, parameterList):
 
     golden = load_golden(problem)
 
-    def bench(m, setting, outfh, outfile, samples_file, point):
+    def bench(m, setting, outfh, outfile, samples_file, point, remaining):
         """Write one row; False when a run breached the watchdog."""
         breached = False
+
+        def on_breach():
+            # The hard exit skips sweep()'s abandon path, so fill the leg here.
+            for rest in remaining:
+                write_wp_row(outfh, outfile, rest, float("nan"), float("nan"))
+            print("WATCHDOG wp {0} setting={1:g}: run never returned"
+                  .format(problem.name, setting))
+
         try:
             t_ms, sol, samples = timed_min_ms(
-                lambda: jax.block_until_ready(m(parameterList)), 20)
+                lambda: jax.block_until_ready(m(parameterList)), 20, on_breach)
             append_samples(samples_file, point, "none", samples)
             if t_ms is None:
                 breached = True
@@ -230,10 +238,11 @@ def run_wp(problem, parameterList):
         # --floor merges the new times in; the log gains a fresh series.
         if not floor_enabled():
             reset_samples(samples_file)
+        settings = list(settings)
         with open(outfile, "a" if floor_enabled() else "w") as f:
             breached = False
             nan = float("nan")
-            for setting in settings:
+            for index, setting in enumerate(settings):
                 if breached:
                     write_wp_row(f, outfile, setting, nan, nan)
                     continue
@@ -242,7 +251,7 @@ def run_wp(problem, parameterList):
                                      N_WP, problem["states"], setting_kind,
                                      setting)
                 if not bench(make(setting), setting, f, outfile,
-                             samples_file, point):
+                             samples_file, point, settings[index:]):
                     print("WATCHDOG wp {0} setting={1:g}: run exceeded "
                           "the cap".format(problem.name, setting))
                     breached = True

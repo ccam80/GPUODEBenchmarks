@@ -18,9 +18,21 @@ if [ "$ANALYSIS" == "states" ]; then
 fi
 
 if [ "$ANALYSIS" == "work-precision" ]; then
-    python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py wp "$ALGORITHM" --problem "$PROBLEM"
+    # One process per (problem, algorithm) leg, so a watchdog
+    # hard-exit (status 3) abandons that leg, not the sweep.
+    WP_STATUS=0
+    while read -r WP_PROB WP_ALG; do
+        [ -n "$WP_PROB" ] || continue
+        python3 ./GPU_ODE_PyTorch/bench_torchdiffeq.py wp "$WP_ALG" \
+            --problem "$WP_PROB" && WP_RC=0 || WP_RC=$?
+        case "$WP_RC" in
+            0) ;;
+            3) echo "wp $WP_PROB $WP_ALG: watchdog hard-exit, leg abandoned";;
+            *) echo "wp $WP_PROB $WP_ALG: exit $WP_RC"; WP_STATUS=1;;
+        esac
+    done < <(python3 runner_scripts/gpu/wp_legs.py pytorch "$ALGORITHM" "$PROBLEM")
     deactivate
-    exit 0
+    exit $WP_STATUS
 fi
 
 # The whole ascending N sweep runs in one process on kernels compiled once.

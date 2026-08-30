@@ -1,6 +1,8 @@
 """Work-precision sweep protocol: setting, time and error rows under data/<package>/<key>/<problem>/, mirrored by the Julia and MPGOS writers."""
 
 import os
+import sys
+import threading
 
 import numpy as np
 
@@ -23,6 +25,40 @@ TIMING_TOL = 1.0e-5
 
 # Per-run wall-clock ceiling in seconds; mirrored by the Julia and MPGOS writers.
 WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))
+
+# Exit status of the hard-exit path; mirrors runner_scripts/watchdog.jl.
+WATCHDOG_EXIT_CODE = 3
+
+
+def run_watchdogged(run, on_breach):
+    """Run run(); when it never returns, run on_breach() and hard-exit.
+
+    The soft cap in timed_min_ms only sees a run that comes back, so a solve
+    that never returns needs this. Mirrors run_watchdogged in
+    runner_scripts/watchdog.jl.
+    """
+    finished = threading.Event()
+
+    def fire():
+        if finished.is_set():
+            return
+        try:
+            on_breach()
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            # A hung kernel blocks every exit path except a hard exit.
+            os._exit(WATCHDOG_EXIT_CODE)
+
+    # Margin over the soft cap: only never-returning runs reach the hard exit.
+    timer = threading.Timer(WATCHDOG_SECONDS * 2.0 + 30.0, fire)
+    timer.daemon = True
+    timer.start()
+    try:
+        return run()
+    finally:
+        finished.set()
+        timer.cancel()
 
 
 # Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
@@ -54,15 +90,16 @@ def repeats_done(timed_s, floor, ceiling):
     return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
 
 
-def timed_min_ms(run, repeats):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."""
+def timed_min_ms(run, repeats, on_breach=None):
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged."""
     import timeit
     samples = []
     timed = []
     floor = ceiling = None
     while True:
         elapsed = timeit.default_timer()
-        result = run()
+        result = (run() if on_breach is None
+                  else run_watchdogged(run, on_breach))
         elapsed = timeit.default_timer() - elapsed
         samples.append(elapsed * 1000.0)
         if elapsed > WATCHDOG_SECONDS:
