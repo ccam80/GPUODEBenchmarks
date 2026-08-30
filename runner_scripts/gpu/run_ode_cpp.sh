@@ -27,6 +27,19 @@ case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
+# nan_row <file> <key> [extra]: append one NaN row, merging under --floor; creates the problem directory.
+nan_row() {
+	local file=$1 key=$2 extra=${3:-}
+	mkdir -p "$(dirname "$file")"
+	if [ -n "$FLOOR_ACTIVE" ]; then
+		python3 ./runner_scripts/resume.py merge "$file" tab "$key" nan nan ${extra:+"$extra"}
+	elif [ -n "$extra" ]; then
+		printf '%s\tnan\tnan\t%s\n' "$key" "$extra" >> "$file"
+	else
+		printf '%s\tnan\tnan\n' "$key" >> "$file"
+	fi
+}
+
 # resume_skip <times|states|wp> <problem> <solver> [N]: true when covered.
 resume_skip() {
 	[ -n "$RESUME_ACTIVE" ] || return 1
@@ -133,11 +146,7 @@ if [ "$ANALYSIS" == "states" ]; then
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
 			# After a breach: keep the build time, NaN the solve.
 			if [ -n "$BREACHED" ]; then
-				if [ -n "$FLOOR_ACTIVE" ]; then
-					python3 ./runner_scripts/resume.py merge "$STATES_FILE" tab "$n" nan nan "$BUILD_S"
-				else
-					printf '%s\tnan\tnan\t%s\n' "$n" "$BUILD_S" >> "$STATES_FILE"
-				fi
+				nan_row "$STATES_FILE" "$n" "$BUILD_S"
 				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
 				continue
 			fi
@@ -146,7 +155,9 @@ if [ "$ANALYSIS" == "states" ]; then
 			if [ "$rc" -eq 42 ]; then
 				BREACHED=1
 			elif [ "$rc" -ne 0 ]; then
-				exit "$rc"
+				# A failed point is a NaN row with its build time; the grid goes on.
+				echo "FAILED lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): Bench.exe exit $rc"
+				nan_row "$STATES_FILE" "$n" "$BUILD_S"
 			fi
 		done
 	done
@@ -178,11 +189,11 @@ do
 				continue
 			fi
 			build "$problem" "$solver" 131072
-			# 42 = watchdog breach; the wp sweep NaN-fills in-process.
+			# 42 = watchdog breach; the wp sweep NaN-fills in-process. Any other failure ends this leg only.
 			rc=0
 			./GPU_ODE_MPGOS/Bench.exe wp || rc=$?
 			if [ "$rc" -ne 0 ] && [ "$rc" -ne 42 ]; then
-				exit "$rc"
+				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") wp: Bench.exe exit $rc"
 			fi
 		done
 		continue
@@ -200,11 +211,7 @@ do
 			resume_prune times "$problem" "$solver" "$a"
 			# A breached leg's larger sizes are recorded as NaN without running.
 			if [ -n "$BREACHED" ]; then
-				if [ -n "$FLOOR_ACTIVE" ]; then
-					python3 ./runner_scripts/resume.py merge "$TIMES_FILE" tab "$a" nan nan
-				else
-					printf '%s\tnan\tnan\n' "$a" >> "$TIMES_FILE"
-				fi
+				nan_row "$TIMES_FILE" "$a"
 				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"
 				continue
 			fi
@@ -215,7 +222,9 @@ do
 			if [ "$rc" -eq 42 ]; then
 				BREACHED=1
 			elif [ "$rc" -ne 0 ]; then
-				exit "$rc"
+				# A failed point (OOM, launch error) is a NaN row; the sweep goes on.
+				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: Bench.exe exit $rc"
+				nan_row "$TIMES_FILE" "$a"
 			fi
 		done
 	done

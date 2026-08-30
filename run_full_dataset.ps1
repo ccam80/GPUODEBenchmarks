@@ -234,7 +234,7 @@ if ($LockClocks) {
     }
 }
 
-# data\<dir>\<prefix>_times_*.txt per framework, for the progress report.
+# data\<dir>\<key>\<problem>\<prefix>_times_*.txt per framework, for the progress report.
 function Get-DataDirFor {
     param([string]$Lang)
     switch ($Lang) {
@@ -252,19 +252,27 @@ function Get-DataPrefixFor {
     }
 }
 
-# Largest N actually recorded, so a truncated sweep is visible in the summary.
+# Largest N with a finite time across the framework's per-problem files.
 function Get-MaxNReached {
     param([string]$Lang)
     $dir = Join-Path 'data' (Get-DataDirFor $Lang)
     $prefix = Get-DataPrefixFor $Lang
     $best = [long]0
     if (-not (Test-Path $dir)) { return 0 }
-    $files = Get-ChildItem -Path (Join-Path $dir $DatasetKey) -Filter "${prefix}_times_*.txt" -ErrorAction SilentlyContinue
+    $files = Get-ChildItem -Path (Join-Path $dir $DatasetKey) -Recurse -Filter "${prefix}_times_*.txt" -ErrorAction SilentlyContinue
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $styles = [System.Globalization.NumberStyles]::Float
     foreach ($file in $files) {
         foreach ($line in Get-Content $file.FullName -ErrorAction SilentlyContinue) {
-            $tok = ($line.Trim() -split '\s+')[0] -replace '\..*$', ''
+            $cols = $line.Trim() -split '\s+'
+            if ($cols.Count -lt 2) { continue }
+            $tok = $cols[0] -replace '\..*$', ''
             $n = [long]0
-            if ([long]::TryParse($tok, [ref]$n) -and $n -gt $best) { $best = $n }
+            $t = [double]0
+            if (-not [long]::TryParse($tok, [ref]$n)) { continue }
+            if (-not [double]::TryParse($cols[1], $styles, $culture, [ref]$t)) { continue }
+            if ([double]::IsNaN($t) -or [double]::IsInfinity($t)) { continue }
+            if ($n -gt $best) { $best = $n }
         }
     }
     return $best
