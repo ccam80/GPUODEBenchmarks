@@ -98,3 +98,4 @@ from `runner_scripts/problems.csv`:
   numerical-equivalence (ne) reference. The first column is the
   float32-rounded parameter grid every ne consumer integrates. Generated
   by `runner_scripts/numerical_equivalence/generate_golden_ne.jl`.
+- `golden*_retcodes.csv` — unconverged golden rows as `row,retcode` (1-based); absent when every solve converged.
