@@ -9,6 +9,7 @@ using DelimitedFiles
 
 include(joinpath(dirname(@__DIR__), "problems.jl"))
 include(joinpath(dirname(@__DIR__), "reference_systems.jl"))
+include(joinpath(dirname(@__DIR__), "golden", "retcode_sidecar.jl"))
 
 const N = 1024
 
@@ -50,6 +51,7 @@ function generate(problem)
           "$(Threads.nthreads()) threads..."
     out = Matrix{Float64}(undef, N, nstates + 1)
     out[:, 1] .= grid
+    codes = Vector{Any}(undef, N)
     @time Threads.@threads for i in 1:N
         # Per-value construction keeps DAE initial derivatives consistent.
         prob = reference_problem(system, problem, grid[i])
@@ -59,12 +61,14 @@ function generate(problem)
             save_start = false, dense = false, maxiters = 10^8,
             reference_solve_kwargs(system)...)
         out[i, 2:end] .= sol.u[end]
+        codes[i] = sol.retcode
     end
 
     mkpath(outdir)
     open(outfile, "w") do io
         writedlm(io, out, ',')
     end
+    write_retcode_sidecar(outfile, codes)
     @info "Wrote $(outfile)"
 end
 
