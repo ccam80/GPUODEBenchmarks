@@ -125,7 +125,8 @@ def run_wp(problem, parameters):
         with open(outfile, "a" if floor_enabled() else "w") as f:
             # Later settings are slower, so a breach abandons the leg.
             breached = False
-            for dt in dts_for(algorithm, problem):
+            dts = list(dts_for(algorithm, problem))
+            for index, dt in enumerate(dts):
                 if breached:
                     write_wp_row(f, outfile, dt, float("nan"), float("nan"))
                     continue
@@ -136,8 +137,16 @@ def run_wp(problem, parameters):
                     torch.cuda.synchronize()
                     return traj
 
+                def on_breach(rest=dts[index:], at=dt):
+                    # The hard exit skips the abandon path, so fill it here.
+                    for other in rest:
+                        write_wp_row(f, outfile, other, float("nan"),
+                                     float("nan"))
+                    print("WATCHDOG wp {0} fixed {1} dt={2:g}: run never "
+                          "returned".format(problem.name, algorithm, at))
+
                 # Parameters are already resident and results stay on device.
-                t_ms, traj, samples = timed_min_ms(run, 5)
+                t_ms, traj, samples = timed_min_ms(run, 5, on_breach)
                 append_samples(samples_file, sample_point(
                     "wp", problem.name, algorithm, "fixed", N_WP,
                     problem["states"], "dt", dt), "none", samples)

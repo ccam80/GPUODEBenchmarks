@@ -28,6 +28,7 @@ from resume import (  # noqa: E402
 from wp_common import (  # noqa: E402
     WATCHDOG_SECONDS,
     append_samples,
+    run_watchdogged,
     dts_for,
     ensemble_error,
     load_golden,
@@ -62,8 +63,8 @@ MODELS = {
 }
 
 
-def _capped_min_ms(run, repeats, setup=None):
-    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."""
+def _capped_min_ms(run, repeats, setup=None, on_breach=None):
+    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged."""
     first = None
     samples = []
     timed = []
@@ -72,7 +73,8 @@ def _capped_min_ms(run, repeats, setup=None):
         if setup is not None and samples:
             setup()
         started = timeit.default_timer()
-        result = run()
+        result = (run() if on_breach is None
+                  else run_watchdogged(run, on_breach))
         elapsed = timeit.default_timer() - started
         if not samples:
             first = result
@@ -89,8 +91,8 @@ def _capped_min_ms(run, repeats, setup=None):
 
 
 def timed_solve(model, cell_count, rho, dt, step_count, repeats,
-                samples_file, point):
-    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. Each timed leg's attempts go to samples_file."""
+                samples_file, point, on_breach=None):
+    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. Each timed leg's attempts go to samples_file. on_breach fills the leg before a watchdog hard-exit."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -101,7 +103,8 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
             diffusion_values=rho,
         )
 
-    elapsed_ms, finals, samples = _capped_min_ms(run, repeats)
+    elapsed_ms, finals, samples = _capped_min_ms(run, repeats,
+                                                 on_breach=on_breach)
     append_samples(samples_file, point, "both", samples)
     if elapsed_ms is None:
         return float("nan"), float("nan"), finals
@@ -119,7 +122,8 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
         device_states[...] = pristine
 
     elapsed_dev_ms, _, samples = _capped_min_ms(run_on_device, repeats,
-                                                setup=restore)
+                                                setup=restore,
+                                                on_breach=on_breach)
     append_samples(samples_file, point, "none", samples)
     if elapsed_dev_ms is None:
         return elapsed_ms, float("nan"), finals
@@ -148,11 +152,21 @@ def run_work_precision(model, problem, cell_count):
               encoding="utf-8") as handle:
         # Later settings are slower, so a breach abandons the leg.
         breached = False
-        for dt in dts_for(ALGORITHM, problem):
+        dts = list(dts_for(ALGORITHM, problem))
+        for index, dt in enumerate(dts):
             if breached:
                 write_wp_row(handle, output, dt, float("nan"), float("nan"))
                 continue
             step_count = int(round(problem["duration"] / dt))
+
+            def on_breach(rest=dts[index:], at=dt):
+                # The hard exit skips the abandon path, so fill it here.
+                for other in rest:
+                    write_wp_row(handle, output, other, float("nan"),
+                                 float("nan"))
+                print("WATCHDOG wp fixed dt={0:g}: run never returned"
+                      .format(at))
+
             elapsed_ms, _, finals = timed_solve(
                 model,
                 cell_count,
@@ -163,6 +177,7 @@ def run_work_precision(model, problem, cell_count):
                 samples_file=samples_file,
                 point=sample_point("wp", problem.name, ALGORITHM, "fixed",
                                    cell_count, problem["states"], "dt", dt),
+                on_breach=on_breach,
             )
             if np.isnan(elapsed_ms):
                 print("WATCHDOG wp fixed dt={0:g}: run exceeded the cap"
