@@ -181,7 +181,7 @@ def run_times(problem):
         with open(outfile, "a+") as file:
             for index, n in enumerate(run_ns):
                 parameters_host = problem.sweep(n, dtype=np.float32)
-                parameters = torch.from_numpy(parameters_host).cuda()
+                parameters = None
 
                 def with_transfers():
                     # .cuda() is the h2d, .cpu() the d2h.
@@ -198,17 +198,32 @@ def run_times(problem):
 
                 point = sample_point("times", problem.name, algorithm,
                                      "fixed", n, problem["states"])
-                best_time, _, samples = timed_min_ms(with_transfers, REPEATS)
-                append_samples(samples_file, point, "both", samples)
+                # An exhausted card ends the leg the way a breach does.
+                exhausted = False
+                best_time = None
                 best_time_dev = None
-                if best_time is not None:
-                    best_time_dev, _, samples = timed_min_ms(device_only,
-                                                             REPEATS)
-                    append_samples(samples_file, point, "none", samples)
-                breached = best_time is None or best_time_dev is None
+                try:
+                    parameters = torch.from_numpy(parameters_host).cuda()
+                    best_time, _, samples = timed_min_ms(with_transfers,
+                                                         REPEATS)
+                    append_samples(samples_file, point, "both", samples)
+                    if best_time is not None:
+                        best_time_dev, _, samples = timed_min_ms(device_only,
+                                                                 REPEATS)
+                        append_samples(samples_file, point, "none", samples)
+                except torch.OutOfMemoryError as err:
+                    exhausted = True
+                    parameters = None
+                    torch.cuda.empty_cache()
+                    print("OOM {0} fixed {1} N={2}: {3}".format(
+                        problem.name, algorithm, n,
+                        str(err).splitlines()[0]))
+                breached = (exhausted or best_time is None
+                            or best_time_dev is None)
                 if breached:
-                    print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
-                          "cap".format(problem.name, algorithm, n))
+                    if not exhausted:
+                        print("WATCHDOG {0} fixed {1} N={2}: run exceeded the "
+                              "cap".format(problem.name, algorithm, n))
                     best_time = (float("nan") if best_time is None
                                  else best_time)
                     best_time_dev = float("nan")
