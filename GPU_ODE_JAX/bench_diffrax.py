@@ -107,6 +107,12 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
+def unconverged(sol):
+    """Count of trajectories whose sol.result is not successful."""
+    ok = np.asarray(sol.result == diffrax.RESULTS.successful)
+    return int(ok.size - ok.sum())
+
+
 def best_times_ms(solve, args, label, n, samples_file, point):
     """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
     try:
@@ -138,8 +144,14 @@ def best_times_ms(solve, args, label, n, samples_file, point):
         return jax.block_until_ready(solve(args))
 
     try:
-        both, _, samples = timed_min_ms(with_transfers, REPEATS)
+        both, sol, samples = timed_min_ms(with_transfers, REPEATS)
         append_samples(samples_file, point, "both", samples)
+        # None on a breach; the watchdog path below handles it.
+        bad = None if both is None else unconverged(sol)
+        if bad:
+            print("FAILED {0} at N={1}: {2} of {3} trajectories did not "
+                  "converge; no timing recorded".format(label, n, bad, n))
+            return float("nan"), float("nan"), False
         none = None
         if both is not None:
             none, _, samples = timed_min_ms(device_only, REPEATS)
@@ -169,11 +181,17 @@ def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
     def main(p):
         terms = diffrax.ODETerm(vector_field(p))
         return diffrax.diffeqsolve(
-            terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps)
+            terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps,
+            throw=False)
     return main
 
 
-def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
+# duration/dt_min at DT_MIN_FRACTION 1e-6, rounded up to a power of two.
+ADAPTIVE_MAX_STEPS = 1048576
+
+
+def make_adaptive(problem, algorithm, tol=TIMING_TOL,
+                  max_steps=ADAPTIVE_MAX_STEPS):
     solver = make_solver(algorithm)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
@@ -185,7 +203,8 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL, max_steps=65536):
         terms = diffrax.ODETerm(vector_field(p))
         return diffrax.diffeqsolve(
             terms, solver, 0.0, duration, dt0, y0, max_steps=max_steps,
-            stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol))
+            stepsize_controller=diffrax.PIDController(rtol=tol, atol=tol),
+            throw=False)
     return main
 
 
@@ -214,8 +233,14 @@ def run_wp(problem, parameterList):
             t_ms, sol, samples = timed_min_ms(
                 lambda: jax.block_until_ready(m(parameterList)), 20, on_breach)
             append_samples(samples_file, point, "none", samples)
+            bad = unconverged(sol)
             if t_ms is None:
                 breached = True
+                t_ms, err = float("nan"), float("nan")
+            elif bad:
+                # A NaN row; the sweep continues.
+                print("FAILED wp {0} setting={1:g}: {2} trajectories did not "
+                      "converge".format(problem.name, setting, bad))
                 t_ms, err = float("nan"), float("nan")
             else:
                 err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
