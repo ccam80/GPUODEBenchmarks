@@ -27,6 +27,7 @@ from resume import (  # noqa: E402
 )
 from wp_common import (  # noqa: E402
     WATCHDOG_SECONDS,
+    errored_pct,
     append_samples,
     run_watchdogged,
     dts_for,
@@ -155,7 +156,8 @@ def run_work_precision(model, problem, cell_count):
         dts = list(dts_for(ALGORITHM, problem))
         for index, dt in enumerate(dts):
             if breached:
-                write_wp_row(handle, output, dt, float("nan"), float("nan"))
+                write_wp_row(handle, output, dt, float("nan"),
+                             float("nan"), 100.0)
                 continue
             step_count = int(round(problem["duration"] / dt))
 
@@ -163,7 +165,7 @@ def run_work_precision(model, problem, cell_count):
                 # The hard exit skips the abandon path, so fill it here.
                 for other in rest:
                     write_wp_row(handle, output, other, float("nan"),
-                                 float("nan"))
+                                 float("nan"), 100.0)
                 print("WATCHDOG wp fixed dt={0:g}: run never returned"
                       .format(at))
 
@@ -186,11 +188,12 @@ def run_work_precision(model, problem, cell_count):
                 error = float("nan")
             else:
                 error = ensemble_error(finals, golden)
+            pct = errored_pct(finals)
             print(
-                "wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}"
-                .format(dt, elapsed_ms, error)
+                "wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}, errored={3:.1f}%"
+                .format(dt, elapsed_ms, error, pct)
             )
-            write_wp_row(handle, output, dt, elapsed_ms, error)
+            write_wp_row(handle, output, dt, elapsed_ms, error, pct)
 
 
 def load_model(problem):
@@ -291,8 +294,9 @@ def run_problem(problem, cell_counts, wp_mode):
                 "{2:.1f} ms ({3:.1f} ms without transfers)"
                 .format(cell_count, problem.name, elapsed_ms, elapsed_dev_ms)
             )
+            pct = 100.0 if finals is None else errored_pct(finals)
             write_times_row(handle, str(timing_file), cell_count,
-                            (elapsed_ms, elapsed_dev_ms))
+                            (elapsed_ms, elapsed_dev_ms, pct))
 
             # The pairwise numerical cross-check reads this fixed CSV name.
             if cell_count == 32768 and np.isfinite(elapsed_ms):
@@ -310,7 +314,7 @@ def run_problem(problem, cell_counts, wp_mode):
                 nan = float("nan")
                 for rest in run_counts[index + 1:]:
                     write_times_row(handle, str(timing_file), rest,
-                                    (nan, nan))
+                                    (nan, nan, 100.0))
                 break
 
 
@@ -399,6 +403,7 @@ def run_states(grid):
             row = states_row(nstates)
             sweep = row.sweep(cell_count, dtype=np.float32)
             elapsed_ms = elapsed_dev_ms = build_s = float("nan")
+            finals = None
             try:
                 started = timeit.default_timer()
                 model = MyokitCudaModel(
@@ -412,7 +417,7 @@ def run_states(grid):
                     diffusion_values=sweep,
                 )
                 build_s = timeit.default_timer() - started
-                elapsed_ms, elapsed_dev_ms, _ = timed_solve(
+                elapsed_ms, elapsed_dev_ms, finals = timed_solve(
                     model,
                     cell_count,
                     sweep,
@@ -431,8 +436,9 @@ def run_states(grid):
             except Exception as exc:
                 print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
                       .format(nstates, ALGORITHM, cell_count, exc))
+            pct = 100.0 if finals is None else errored_pct(finals)
             write_times_row(handle, str(outfile), nstates,
-                            (elapsed_ms, elapsed_dev_ms, build_s))
+                            (elapsed_ms, elapsed_dev_ms, build_s, pct))
             if not np.isfinite(elapsed_ms) and np.isfinite(build_s):
                 # Larger systems are slower, so the sweep is abandoned.
                 print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: run "
@@ -441,7 +447,7 @@ def run_states(grid):
                 nan = float("nan")
                 for rest in run_grid[index + 1:]:
                     write_times_row(handle, str(outfile), rest,
-                                    (nan, nan, nan))
+                                    (nan, nan, nan, 100.0))
                 break
 
 

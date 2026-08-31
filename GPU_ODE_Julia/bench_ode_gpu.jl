@@ -21,6 +21,7 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "errored.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
 # Precompiled entries take precedence over runtime-built ones.
@@ -113,13 +114,13 @@ function nan_rows(outfile, ns)
     isinteractive() && return
     if floor_enabled()
         for n in ns
-            merge_min_row(outfile, n, (NaN, NaN))
+            merge_min_row(outfile, n, (NaN, NaN, 100.0))
         end
         return
     end
     open(outfile, "a+") do io
         for n in ns
-            println(io, n, " NaN NaN")
+            println(io, n, " NaN NaN 100.0")
         end
         flush(io)
     end
@@ -142,7 +143,7 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
         compiled = false
         for (index, setting) in enumerate(settings)
             if breached
-                write_wp_row(io, path, setting, NaN, NaN)
+                write_wp_row(io, path, setting, NaN, NaN, 100.0)
                 continue
             end
             point = sample_point("wp", problem["problem"], algorithm, mode,
@@ -150,12 +151,12 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
                 setting = setting)
             on_breach = () -> begin
                 for s in settings[index:end]
-                    write_wp_row(io, path, s, NaN, NaN)
+                    write_wp_row(io, path, s, NaN, NaN, 100.0)
                 end
                 flush(io)
                 println("WATCHDOG $(label) setting=$(setting): run never returned")
             end
-            t_ms, err = try
+            t_ms, err, pct = try
                 if !compiled
                     # The first solve carries the kernel compile, off the GPU lock.
                     run_watchdogged(() -> solve_once(setting), on_breach)
@@ -165,25 +166,27 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
                     warm = @elapsed sol = run_watchdogged(
                         () -> solve_once(setting), on_breach)
                     if warm > WATCHDOG_SECONDS
-                        (NaN, NaN)
+                        (NaN, NaN, 100.0)
                     else
                         e = ensemble_error(system, sol[2], golden)
-                        t, samples = watchdogged_min_ms(
+                        p = errored_pct(@view sol[2][end, :])
+                        t, samples, _ = watchdogged_min_ms(
                             () -> solve_once(setting), on_breach, REPEATS)
                         # The ensemble is resident, so only the d2h is timed.
                         append_samples(samples_file, point, "d2h", samples)
-                        (t, isnan(t) ? NaN : e)
+                        (t, isnan(t) ? NaN : e, p)
                     end
                 end
             catch err
-                (failed("wp $(label) setting=$(setting)", err), NaN)
+                (failed("wp $(label) setting=$(setting)", err), NaN, 100.0)
             end
             if isnan(t_ms)
                 println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
                 breached = true
             end
-            write_wp_row(io, path, setting, t_ms, err)
-            println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err)")
+            write_wp_row(io, path, setting, t_ms, err, pct)
+            println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err), " *
+                    "errored=$(round(pct, digits = 1))%")
         end
     end
 end
@@ -302,7 +305,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
                     "N=$(n): run never returned")
         end
 
-        t_ms, t_dev_ms, breached = try
+        t_ms, t_dev_ms, pct, breached = try
             if !compiled
                 # The first solve carries the kernel compile, off the GPU lock.
                 run_watchdogged(device_solve, on_breach)
@@ -310,24 +313,25 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             end
             point = sample_point("times", problem["problem"], algorithm, mode,
                 n, problem["states"])
-            t_dev, t = with_gpu_lock() do
-                td, samples = watchdogged_min_ms(device_solve, on_breach,
-                    REPEATS)
+            t_dev, t, pct = with_gpu_lock() do
+                td, samples, dev_sol = watchdogged_min_ms(device_solve,
+                    on_breach, REPEATS)
                 append_samples(samples_file, point, "none", samples)
-                isnan(td) && return (td, NaN)
-                tt, samples = watchdogged_min_ms(full_solve, on_breach,
+                isnan(td) && return (td, NaN, 100.0)
+                p = errored_pct(@view dev_sol[2][end, :])
+                tt, samples, _ = watchdogged_min_ms(full_solve, on_breach,
                     REPEATS)
                 append_samples(samples_file, point, "both", samples)
-                (td, tt)
+                (td, tt, p)
             end
-            (t, t_dev, isnan(t))
+            (t, t_dev, pct, isnan(t))
         catch err
             (failed("$(problem["problem"]) $(mode) $(algorithm) N=$(n)", err),
-                NaN, false)
+                NaN, 100.0, false)
         end
         ran = !isnan(t_ms)
 
-        isinteractive() || record_row(outfile, n, (t_ms, t_dev_ms))
+        isinteractive() || record_row(outfile, n, (t_ms, t_dev_ms, pct))
 
         # Save numerical output for 32768-trajectory run
         if ran && !isinteractive() && n == 32768 && algorithm == "tsit5"
@@ -391,7 +395,7 @@ function run_states(nstates, n)
             samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
                 "Julia", "states", mode, algorithm, row)
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
-            t_ms, t_dev_ms, build_s = try
+            t_ms, t_dev_ms, build_s, pct = try
                 probs_host, probs = build_ensemble(system, prob, row, n)
                 device_solve = () -> begin
                     if mode == "fixed"
@@ -432,26 +436,27 @@ function run_states(nstates, n)
                     "run never returned")
                 point = sample_point("states", row["problem"], algorithm,
                     mode, n, nstates)
-                t_dev, t = with_gpu_lock() do
-                    td, samples = watchdogged_min_ms(device_solve, on_breach,
-                        REPEATS)
+                t_dev, t, pct = with_gpu_lock() do
+                    td, samples, dev_sol = watchdogged_min_ms(device_solve,
+                        on_breach, REPEATS)
                     append_samples(samples_file, point, "none", samples)
-                    isnan(td) && return (td, NaN)
-                    tt, samples = watchdogged_min_ms(full_solve, on_breach,
+                    isnan(td) && return (td, NaN, 100.0)
+                    p = errored_pct(@view dev_sol[2][end, :])
+                    tt, samples, _ = watchdogged_min_ms(full_solve, on_breach,
                         REPEATS)
                     append_samples(samples_file, point, "both", samples)
-                    (td, tt)
+                    (td, tt, p)
                 end
                 isnan(t) &&
                     println("WATCHDOG lorenz96 states=$(nstates) $(mode) " *
                             "$(algorithm) N=$(n): run exceeded the cap")
-                (t, t_dev, build)
+                (t, t_dev, build, pct)
             catch err
                 (failed("lorenz96 states=$(nstates) $(mode) $(algorithm) " *
-                        "N=$(n)", err), NaN, NaN)
+                        "N=$(n)", err), NaN, NaN, 100.0)
             end
             isinteractive() ||
-                record_row(outfile, nstates, (t_ms, t_dev_ms, build_s))
+                record_row(outfile, nstates, (t_ms, t_dev_ms, build_s, pct))
             GC.gc()
             CUDA.reclaim()
             println("states=$(nstates) $(mode) $(algorithm): $(t_ms) ms")

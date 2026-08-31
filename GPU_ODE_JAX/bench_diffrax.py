@@ -25,9 +25,9 @@ from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (TIMING_TOL, append_samples, parse_bench_args,
-                       reset_samples, sample_point, samples_outfile,
-                       timed_min_ms, times_outfile)
+from wp_common import (TIMING_TOL, append_samples, errored_pct,
+                       parse_bench_args, reset_samples, sample_point,
+                       samples_outfile, timed_min_ms, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -107,20 +107,21 @@ def make_solver(algorithm, fixed_tol=None):
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
-def unconverged(sol):
-    """Count of trajectories whose sol.result is not successful."""
-    ok = np.asarray(sol.result == diffrax.RESULTS.successful)
-    return int(ok.size - ok.sum())
+def final_states(sol):
+    """(N, states) final states, with a NaN row wherever sol.result is not successful."""
+    finals = np.array(sol.ys[:, -1, :], dtype=np.float64)
+    finals[~np.asarray(sol.result == diffrax.RESULTS.successful)] = np.nan
+    return finals
 
 
 def best_times_ms(solve, args, label, n, samples_file, point):
-    """Best of REPEATS timed runs in ms as (with_transfers, device_only, abandon); abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
+    """(with_transfers_ms, device_only_ms, errored_percent, abandon) over REPEATS timed runs; abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
             label, n, type(err).__name__, err))
-        return float("nan"), float("nan"), True
+        return float("nan"), float("nan"), 100.0, True
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
     if usage is not None:
@@ -131,7 +132,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
         if needed > limit:
             print("ERROR: the {0} solve does not fit in device memory at "
                   "N={1}; no timing recorded.".format(label, n))
-            return float("nan"), float("nan"), True
+            return float("nan"), float("nan"), 100.0, True
 
     host_args = np.asarray(jax.device_get(args))
 
@@ -146,12 +147,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
     try:
         both, sol, samples = timed_min_ms(with_transfers, REPEATS)
         append_samples(samples_file, point, "both", samples)
-        # None on a breach; the watchdog path below handles it.
-        bad = None if both is None else unconverged(sol)
-        if bad:
-            print("FAILED {0} at N={1}: {2} of {3} trajectories did not "
-                  "converge; no timing recorded".format(label, n, bad, n))
-            return float("nan"), float("nan"), False
+        pct = errored_pct(final_states(sol))
         none = None
         if both is not None:
             none, _, samples = timed_min_ms(device_only, REPEATS)
@@ -160,12 +156,12 @@ def best_times_ms(solve, args, label, n, samples_file, point):
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
                 label, n))
             return (float("nan") if both is None else both, float("nan"),
-                    True)
+                    pct, True)
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
             label, n, type(err).__name__, err))
-        return float("nan"), float("nan"), False
-    return both, none, False
+        return float("nan"), float("nan"), 100.0, False
+    return both, none, pct, False
 
 
 # %%
@@ -221,11 +217,13 @@ def run_wp(problem, parameterList):
     def bench(m, setting, outfh, outfile, samples_file, point, remaining):
         """Write one row; False when a run breached the watchdog."""
         breached = False
+        pct = 100.0
 
         def on_breach():
             # The hard exit skips sweep()'s abandon path, so fill the leg here.
             for rest in remaining:
-                write_wp_row(outfh, outfile, rest, float("nan"), float("nan"))
+                write_wp_row(outfh, outfile, rest, float("nan"), float("nan"),
+                             100.0)
             print("WATCHDOG wp {0} setting={1:g}: run never returned"
                   .format(problem.name, setting))
 
@@ -233,24 +231,20 @@ def run_wp(problem, parameterList):
             t_ms, sol, samples = timed_min_ms(
                 lambda: jax.block_until_ready(m(parameterList)), 20, on_breach)
             append_samples(samples_file, point, "none", samples)
-            bad = unconverged(sol)
+            finals = final_states(sol)
+            pct = errored_pct(finals)
             if t_ms is None:
                 breached = True
                 t_ms, err = float("nan"), float("nan")
-            elif bad:
-                # A NaN row; the sweep continues.
-                print("FAILED wp {0} setting={1:g}: {2} trajectories did not "
-                      "converge".format(problem.name, setting, bad))
-                t_ms, err = float("nan"), float("nan")
             else:
-                err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
+                err = ensemble_error(finals, golden)
         except Exception as err_exc:
             print("FAILED wp {0} setting={1:g}: {2}".format(
                 problem.name, setting, err_exc))
             t_ms, err = float("nan"), float("nan")
-        print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}".format(
-            problem.name, setting, t_ms, err))
-        write_wp_row(outfh, outfile, setting, t_ms, err)
+        print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}, "
+              "errored={4:.1f}%".format(problem.name, setting, t_ms, err, pct))
+        write_wp_row(outfh, outfile, setting, t_ms, err, pct)
         return not breached
 
     def sweep(mode, algorithm, settings, make):
@@ -273,7 +267,7 @@ def run_wp(problem, parameterList):
             nan = float("nan")
             for index, setting in enumerate(settings):
                 if breached:
-                    write_wp_row(f, outfile, setting, nan, nan)
+                    write_wp_row(f, outfile, setting, nan, nan, 100.0)
                     continue
                 # Parameters are already resident and results stay on device.
                 point = sample_point("wp", problem.name, algorithm, mode,
@@ -330,7 +324,7 @@ def run_times(problem):
             with open(outfile, "a+") as file:
                 for index, n in enumerate(run_ns):
                     parameterList = jnp.asarray(problem.sweep(n))
-                    best_time, best_time_dev, abandon = best_times_ms(
+                    best_time, best_time_dev, pct, abandon = best_times_ms(
                         main, parameterList,
                         "{0} {1}".format(mode, algorithm), n, samples_file,
                         sample_point("times", problem.name, algorithm, mode,
@@ -340,22 +334,22 @@ def run_times(problem):
                               n, problem.name, algorithm, mode, best_time,
                               best_time_dev))
                     write_times_row(file, outfile, n,
-                                    (best_time, best_time_dev))
+                                    (best_time, best_time_dev, pct))
                     # The pairwise numerical cross-check reads this fixed CSV name.
                     if (mode == "fixed" and n == 32768
                             and algorithm == "tsit5"
                             and np.isfinite(best_time)):
-                        sol = main(parameterList)
-                        final_states = np.array(sol.ys[:, -1, :])
                         np.savetxt(os.path.join(
                             data_dir("numerical", DATASET_KEY,
                                      problem=problem),
-                            "jax.csv"), final_states, delimiter=',')
+                            "jax.csv"), final_states(main(parameterList)),
+                            delimiter=',')
                     if abandon:
                         # Larger sizes are slower or bigger, so the leg ends.
                         nan = float("nan")
                         for rest in run_ns[index + 1:]:
-                            write_times_row(file, outfile, rest, (nan, nan))
+                            write_times_row(file, outfile, rest,
+                                            (nan, nan, 100.0))
                         break
 
 
@@ -409,9 +403,9 @@ def run_states():
                         print("FAILED {0} at N={1} ({2}: {3})".format(
                             label, n, type(err).__name__, err))
                         write_times_row(file, outfile, nstates,
-                                        (nan, nan, nan))
+                                        (nan, nan, nan, 100.0))
                         continue
-                    best_time, best_time_dev, abandon = best_times_ms(
+                    best_time, best_time_dev, pct, abandon = best_times_ms(
                         main, parameterList, label, n, samples_file,
                         sample_point("states", STATES_PROBLEM, algorithm,
                                      mode, n, nstates))
@@ -419,12 +413,12 @@ def run_states():
                           "({:.1f} ms without transfers)".format(
                               n, label, best_time, best_time_dev))
                     write_times_row(file, outfile, nstates,
-                                    (best_time, best_time_dev, build_s))
+                                    (best_time, best_time_dev, build_s, pct))
                     if abandon:
                         # Larger systems are slower, so the leg ends.
                         for rest in run_grid[index + 1:]:
                             write_times_row(file, outfile, rest,
-                                            (nan, nan, nan))
+                                            (nan, nan, nan, 100.0))
                         break
 
 

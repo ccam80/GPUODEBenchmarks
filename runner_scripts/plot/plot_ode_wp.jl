@@ -3,6 +3,7 @@ using DelimitedFiles
 using Dates
 using Statistics
 using Plots.PlotMeasures
+include(joinpath(dirname(@__DIR__), "errored.jl"))
 
 # Reads data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
 # and emits one error-vs-time plot per (group, problem, mode, algorithm) plus an
@@ -76,6 +77,10 @@ function collect_series(base_path, frameworks)
                     # sweep (loose -> tight setting) so the float32 roundoff U-turn
                     # in the fixed curves is traced rather than folded onto itself.
                     keep = err .> 0
+                    if size(data, 2) >= 4
+                        # Drop rows past the errored bar.
+                        keep = keep .& within_error_budget.(data[:, 4])
+                    end
                     setting, err, time_s = setting[keep], err[keep], time_s[keep]
                     isempty(err) && continue
                     order = sortperm(setting, rev = true)

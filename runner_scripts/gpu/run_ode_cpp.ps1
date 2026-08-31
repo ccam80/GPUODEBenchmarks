@@ -170,16 +170,17 @@ function Invoke-Point {
     }
 }
 
-# Append one NaN row, merging under --floor; creates the problem directory.
+# Append one NaN row (errored 100%), merging under --floor; creates the problem directory.
 function Add-NanRow {
     param([string]$File, [string]$Key, [string]$Extra = '')
     New-Item -ItemType Directory -Force (Split-Path $File) | Out-Null
     if ($FloorActive) {
-        if ($Extra) { & python runner_scripts\resume.py merge $File tab $Key nan nan $Extra }
-        else { & python runner_scripts\resume.py merge $File tab $Key nan nan }
+        if ($Extra) { & python runner_scripts\resume.py merge $File tab $Key nan nan $Extra 100 }
+        else { & python runner_scripts\resume.py merge $File tab $Key nan nan 100 }
     } else {
         $row = "$Key`tnan`tnan"
         if ($Extra) { $row += "`t$Extra" }
+        $row += "`t100"
         Add-Content -Path $File -Value $row
     }
 }

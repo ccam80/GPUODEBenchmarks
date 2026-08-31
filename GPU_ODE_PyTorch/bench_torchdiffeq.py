@@ -17,8 +17,9 @@ from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (append_samples, parse_bench_args, reset_samples,
-                       sample_point, samples_outfile, times_outfile)
+from wp_common import (append_samples, errored_pct, parse_bench_args,
+                       reset_samples, sample_point, samples_outfile,
+                       times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -128,7 +129,8 @@ def run_wp(problem, parameters):
             dts = list(dts_for(algorithm, problem))
             for index, dt in enumerate(dts):
                 if breached:
-                    write_wp_row(f, outfile, dt, float("nan"), float("nan"))
+                    write_wp_row(f, outfile, dt, float("nan"), float("nan"),
+                                 100.0)
                     continue
                 solve_dt = make_solve(problem, algorithm, dt)
 
@@ -141,7 +143,7 @@ def run_wp(problem, parameters):
                     # The hard exit skips the abandon path, so fill it here.
                     for other in rest:
                         write_wp_row(f, outfile, other, float("nan"),
-                                     float("nan"))
+                                     float("nan"), 100.0)
                     print("WATCHDOG wp {0} fixed {1} dt={2:g}: run never "
                           "returned".format(problem.name, algorithm, at))
 
@@ -150,16 +152,19 @@ def run_wp(problem, parameters):
                 append_samples(samples_file, sample_point(
                     "wp", problem.name, algorithm, "fixed", N_WP,
                     problem["states"], "dt", dt), "none", samples)
+                finals = traj[:, -1, :].cpu().numpy()
+                pct = errored_pct(finals)
                 if t_ms is None:
                     print("WATCHDOG wp {0} fixed {1} dt={2:g}: run exceeded "
                           "the cap".format(problem.name, algorithm, dt))
                     breached = True
                     t_ms, err = float("nan"), float("nan")
                 else:
-                    err = ensemble_error(traj[:, -1, :].cpu().numpy(), golden)
-                print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}"
-                      .format(problem.name, algorithm, dt, t_ms, err))
-                write_wp_row(f, outfile, dt, t_ms, err)
+                    err = ensemble_error(finals, golden)
+                print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}, "
+                      "errored={5:.1f}%".format(problem.name, algorithm, dt,
+                                                t_ms, err, pct))
+                write_wp_row(f, outfile, dt, t_ms, err, pct)
 
 
 def run_times(problem):
@@ -211,10 +216,11 @@ def run_times(problem):
                 exhausted = False
                 best_time = None
                 best_time_dev = None
+                out = None
                 try:
                     parameters = torch.from_numpy(parameters_host).cuda()
-                    best_time, _, samples = timed_min_ms(with_transfers,
-                                                         REPEATS)
+                    best_time, out, samples = timed_min_ms(with_transfers,
+                                                           REPEATS)
                     append_samples(samples_file, point, "both", samples)
                     if best_time is not None:
                         best_time_dev, _, samples = timed_min_ms(device_only,
@@ -242,7 +248,10 @@ def run_times(problem):
                               n, problem.name, algorithm, best_time,
                               best_time_dev))
 
-                write_times_row(file, outfile, n, (best_time, best_time_dev))
+                pct = (100.0 if out is None
+                       else errored_pct(np.asarray(out[:, -1, :])))
+                write_times_row(file, outfile, n,
+                                (best_time, best_time_dev, pct))
 
                 # The pairwise numerical cross-check reads this fixed CSV name.
                 if (n == 32768 and algorithm == "classical-rk4"
@@ -258,7 +267,8 @@ def run_times(problem):
                     # Larger sizes are slower, so the leg is abandoned.
                     nan = float("nan")
                     for rest in run_ns[index + 1:]:
-                        write_times_row(file, outfile, rest, (nan, nan))
+                        write_times_row(file, outfile, rest,
+                                        (nan, nan, 100.0))
                     break
 
 
@@ -308,6 +318,7 @@ def run_states():
                     return out
 
                 t_ms = t_dev = build_s = float("nan")
+                out = None
                 breached = False
                 try:
                     started = timeit.default_timer()
@@ -316,7 +327,8 @@ def run_states():
 
                     point = sample_point("states", STATES_PROBLEM, algorithm,
                                          "fixed", n, nstates)
-                    best, _, samples = timed_min_ms(with_transfers, REPEATS)
+                    best, out, samples = timed_min_ms(with_transfers,
+                                                      REPEATS)
                     append_samples(samples_file, point, "both", samples)
                     best_dev = None
                     if best is not None:
@@ -333,8 +345,10 @@ def run_states():
                 except Exception as exc:
                     print("FAILED lorenz96 states={0} fixed {1} N={2}: {3}"
                           .format(nstates, algorithm, n, exc))
+                pct = (100.0 if out is None
+                       else errored_pct(np.asarray(out[:, -1, :])))
                 write_times_row(file, outfile, nstates,
-                                (t_ms, t_dev, build_s))
+                                (t_ms, t_dev, build_s, pct))
                 if breached:
                     # Larger systems are slower, so the leg is abandoned.
                     print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: "
@@ -342,7 +356,8 @@ def run_states():
                                                         n))
                     nan = float("nan")
                     for rest in run_grid[index + 1:]:
-                        write_times_row(file, outfile, rest, (nan, nan, nan))
+                        write_times_row(file, outfile, rest,
+                                        (nan, nan, nan, 100.0))
                     break
 
 

@@ -268,9 +268,10 @@ def merge_min_row(path, key, values, sep=" "):
         handle.writelines(out)
 
 
-def merge_wp_row(path, setting, t_ms, err):
-    """--floor: merge one wp row, keeping the (time, error) pair with the lower time."""
-    new_row = "{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err)
+def merge_wp_row(path, setting, t_ms, err, errored_pct):
+    """--floor: merge one wp row, keeping the (time, error, errored percent) triple with the lower time."""
+    new_row = "{0:.10g} {1} {2:.10e} {3:.4f}\n".format(
+        setting, t_ms, err, float(errored_pct))
     out = []
     merged = False
     for line in _read_lines(path):
@@ -311,12 +312,13 @@ def write_times_row(handle, path, key, values):
     handle.flush()
 
 
-def write_wp_row(handle, path, setting, t_ms, err):
-    """One wp row through the open handle, or a --floor merge into path keeping the pair with the lower time."""
+def write_wp_row(handle, path, setting, t_ms, err, errored_pct):
+    """One `setting t_ms err errored_pct` row through the open handle, or a --floor merge into path keeping the row with the lower time."""
     if floor_enabled():
-        merge_wp_row(path, setting, t_ms, err)
+        merge_wp_row(path, setting, t_ms, err, errored_pct)
         return
-    handle.write("{0:.10g} {1} {2:.10e}\n".format(setting, t_ms, err))
+    handle.write("{0:.10g} {1} {2:.10e} {3:.4f}\n".format(
+        setting, t_ms, err, float(errored_pct)))
     handle.flush()
 
 

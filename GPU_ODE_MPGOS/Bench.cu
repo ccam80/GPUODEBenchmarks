@@ -298,13 +298,34 @@ static void MergeMinRow(const std::string& Path, long long Key,
 	for (size_t i = 0; i < Lines.size(); ++i) Out << Lines[i] << "\n";
 }
 
+// Percent of trajectories whose final state is not finite; mirrors errored_pct in runner_scripts/wp_common.py.
+template<class SolverT>
+static double ErroredPct(SolverT& Solver, int Threads, int States)
+{
+	int Bad = 0;
+	for (int tid = 0; tid < Threads; ++tid)
+	{
+		for (int c = 0; c < States; ++c)
+		{
+			if (!std::isfinite((double) Solver.template GetHost<PRECISION>(
+					tid, ActualState, c)))
+			{
+				++Bad;
+				break;
+			}
+		}
+	}
+	return 100.0 * (double) Bad / (double) Threads;
+}
+
 // --floor: merge one wp row, keeping the (time, error) pair with the lower time.
 static void MergeWpRow(const std::string& Path, double Setting, double Ms,
-                       double Err)
+                       double Err, double ErroredPercent)
 {
 	std::ostringstream NewRow;
 	NewRow.precision(12);
-	NewRow << Setting << " " << Ms << " " << std::scientific << Err;
+	NewRow << Setting << " " << Ms << " " << std::scientific << Err
+	       << std::fixed << " " << ErroredPercent;
 	std::vector<std::string> Lines = ReadLines(Path);
 	bool Merged = false;
 	for (size_t i = 0; i < Lines.size() && !Merged; ++i)
@@ -531,7 +552,7 @@ int main(int argc, char *argv[])
 			{
 				std::ostringstream row;
 				row.precision(12);
-				row << Settings[sj] << " nan nan";
+				row << Settings[sj] << " nan nan 100";
 				NanRows.push_back(row.str());
 			}
 
@@ -585,7 +606,7 @@ int main(int argc, char *argv[])
 				{
 					for (size_t sj = si; sj < Settings.size(); sj++)
 						MergeWpRow(WpPath, Settings[sj], std::nan(""),
-							std::nan(""));
+							std::nan(""), 100.0);
 				}
 				else
 				{
@@ -607,18 +628,21 @@ int main(int argc, char *argv[])
 					Sum2 += D*D;
 				}
 			double Err = sqrt(Sum2 / (NT * (double)SD));
+			const double WpErroredPct = ErroredPct(Scan, NT, SD);
 
 			if (FloorEnabled())
 			{
-				MergeWpRow(WpPath, Setting, BestMs, Err);
+				MergeWpRow(WpPath, Setting, BestMs, Err, WpErroredPct);
 			}
 			else
 			{
-				wpfile << Setting << " " << BestMs << " " << scientific << Err << fixed << "\n";
+				wpfile << Setting << " " << BestMs << " " << scientific << Err
+				       << fixed << " " << WpErroredPct << "\n";
 				wpfile.flush();
 			}
 			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
-			     << " ms, err=" << scientific << Err << fixed << endl;
+			     << " ms, err=" << scientific << Err << fixed
+			     << ", errored=" << WpErroredPct << "%" << endl;
 		}
 		wpfile.close();
 
@@ -643,9 +667,9 @@ int main(int argc, char *argv[])
 	{
 		std::ostringstream row;
 		if (StatesMode)
-			row << SD << "\tnan\tnan\t" << StatesBuild;
+			row << SD << "\tnan\tnan\t" << StatesBuild << "\t100";
 		else
-			row << NT << "\tnan\tnan";
+			row << NT << "\tnan\tnan\t100";
 		TimesNanRow.push_back(row.str());
 	}
 	bool TimesBreached = false;
@@ -719,6 +743,7 @@ int main(int argc, char *argv[])
 		{
 			std::vector<double> NanValues(2, std::nan(""));
 			if (StatesMode) NanValues.push_back(ParseTime(StatesBuild));
+			NanValues.push_back(100.0);
 			MergeMinRow(TimesPath, StatesMode ? SD : NT, NanValues);
 		}
 		else
@@ -744,6 +769,7 @@ int main(int argc, char *argv[])
 		std::cerr << "No timing recorded for NT = " << NT << "." << std::endl;
 		return 1;
 	}
+	const double ErroredPercent = ErroredPct(Scan, NT, SD);
 	std::cout << Scan.GetHost<PRECISION>(0, ActualTime) << std::endl;
 	cout << "Total simulation time:           " << ElapsedMs << "ms" << endl;
 	cout << "Device-only time (no h2d/d2h):   " << ElapsedDeviceMs << "ms" << endl;
@@ -756,6 +782,7 @@ int main(int argc, char *argv[])
 		RowValues.push_back(ElapsedMs);
 		RowValues.push_back(ElapsedDeviceMs);
 		if (StatesMode) RowValues.push_back(ParseTime(StatesBuild));
+		RowValues.push_back(ErroredPercent);
 		MergeMinRow(TimesPath, StatesMode ? SD : NT, RowValues);
 	}
 	else
@@ -763,9 +790,10 @@ int main(int argc, char *argv[])
 		ofstream datafile(TimesPath.c_str(), ios::app);
 		if (StatesMode)
 			datafile << SD << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
-			         << "\t" << StatesBuild << "\n";
+			         << "\t" << StatesBuild << "\t" << ErroredPercent << "\n";
 		else
-			datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs << "\n";
+			datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
+			         << "\t" << ErroredPercent << "\n";
 		datafile.close();
 	}
 

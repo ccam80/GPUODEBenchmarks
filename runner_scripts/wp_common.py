@@ -61,6 +61,17 @@ def run_watchdogged(run, on_breach):
         timer.cancel()
 
 
+def errored_pct(finals):
+    """Percent of trajectories (rows) with a non-finite final state."""
+    a = np.asarray(finals)
+    if a.size == 0:
+        return 0.0
+    bad = ~np.isfinite(a)
+    if bad.ndim > 1:
+        bad = bad.any(axis=tuple(range(1, bad.ndim)))
+    return 100.0 * float(bad.sum()) / float(bad.size)
+
+
 # Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
 SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
                  "setting_kind", "setting", "n", "states", "repeat", "ms")

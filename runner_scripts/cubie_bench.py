@@ -14,7 +14,8 @@ from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import TIMING_TOL, parse_bench_args, times_outfile
+from wp_common import (TIMING_TOL, errored_pct, parse_bench_args,
+                       times_outfile)
 
 # Repeat ceiling; the count per leg follows its first timed run's duration.
 REPEATS = 20
@@ -124,7 +125,7 @@ def _run_wp(problem, opts, system, grid):
     golden = load_golden(problem)
 
     def bench_solver(solver, repeats=REPEATS):
-        """(best_ms, err, samples); best_ms is None when a run breaches the watchdog."""
+        """(best_ms, err, errored_percent, samples); best_ms is None when a run breaches the watchdog."""
         initials_array, parameter_array = grid(solver, N_WP)
 
         def run():
@@ -136,10 +137,10 @@ def _run_wp(problem, opts, system, grid):
             )
         best_ms, solution, samples = timed_min_ms(run, repeats)
         if best_ms is None:
-            return None, float("nan"), samples
-        err = ensemble_error(final_states(system, solution, problem),
-                             golden)
-        return best_ms, err, samples
+            return None, float("nan"), 100.0, samples
+        view = final_states(system, solution, problem)
+        err = ensemble_error(view, golden)
+        return best_ms, err, errored_pct(view), samples
 
     def sweep(mode, make_solver, settings):
         outfile = wp_outfile(opts["framework_dir"], opts["prefix"], mode,
@@ -159,11 +160,12 @@ def _run_wp(problem, opts, system, grid):
             breached = False
             for setting in settings:
                 t_ms, err = float("nan"), float("nan")
+                pct = 100.0
                 solver = None
                 if not breached:
                     try:
                         solver = make_solver(setting)
-                        t_ms, err, samples = bench_solver(solver)
+                        t_ms, err, pct, samples = bench_solver(solver)
                         append_samples(samples_file, sample_point(
                             "wp", problem.name, algorithm, mode, N_WP,
                             problem["states"], setting_kind, setting),
@@ -172,6 +174,7 @@ def _run_wp(problem, opts, system, grid):
                         t_ms = err = _failed(
                             exc, f"{problem.name} {mode} {algorithm} "
                             f"setting={setting:g}")
+                        pct = 100.0
                     if t_ms is None:
                         # Later settings are slower, so the leg is abandoned.
                         print(f"WATCHDOG {problem.name} {mode} {algorithm} "
@@ -179,8 +182,9 @@ def _run_wp(problem, opts, system, grid):
                         breached = True
                         t_ms = float("nan")
                 print(f"wp {problem.name} {mode} {algorithm} "
-                      f"setting={setting:g}: {t_ms:.2f} ms, err={err:.3e}")
-                write_wp_row(f, outfile, setting, t_ms, err)
+                      f"setting={setting:g}: {t_ms:.2f} ms, err={err:.3e}, "
+                      f"errored={pct:.1f}%")
+                write_wp_row(f, outfile, setting, t_ms, err, pct)
                 if solver is not None:
                     _release(solver)
 
@@ -212,7 +216,7 @@ def _run_times(problem, opts, system, grid):
                        ("adaptive", "tsit5"): "_adaptive.csv"}
 
     def host_leg(solver, n, want_finals):
-        """(best_ms, finals, samples) through host arrays; best_ms is None on a breach, finals a copy or None."""
+        """(best_ms, finals, errored_percent, samples) through host arrays; best_ms is None on a breach, finals a copy or None."""
         initials_array, parameter_array = grid(solver, n)
 
         def with_transfers(blocksize=64):
@@ -225,10 +229,14 @@ def _run_times(problem, opts, system, grid):
 
         best, solution, samples = timed_min_ms(with_transfers, REPEATS)
         finals = None
-        if want_finals and best is not None:
-            # A copy: final_states views the buffer the next solve reuses.
-            finals = np.array(final_states(system, solution, problem))
-        return best, finals, samples
+        pct = 100.0
+        if best is not None:
+            view = final_states(system, solution, problem)
+            pct = errored_pct(view)
+            if want_finals:
+                # A copy: the view aliases the buffer the next solve reuses.
+                finals = np.array(view)
+        return best, finals, pct, samples
 
     def save_numerical(finals, name):
         """Final states for the 32768-run numerical cross-check."""
@@ -238,7 +246,8 @@ def _run_times(problem, opts, system, grid):
 
     def nan_rows(file, outfile, sizes):
         for n in sizes:
-            write_times_row(file, outfile, n, (float("nan"), float("nan")))
+            write_times_row(file, outfile, n,
+                            (float("nan"), float("nan"), 100.0))
 
     for algorithm in opts["algorithms"]:
         if not problem.supports(opts["framework"]):
@@ -286,9 +295,10 @@ def _run_times(problem, opts, system, grid):
                     want_finals = (n == 32768
                                    and (mode, algorithm) in numerical_names)
                     finals = None
+                    pct = 100.0
                     try:
-                        best, finals, samples = host_leg(solver, n,
-                                                         want_finals)
+                        best, finals, pct, samples = host_leg(
+                            solver, n, want_finals)
                         append_samples(samples_file, point, "both", samples)
                     except Exception as exc:
                         best = _failed(exc, label)
@@ -321,7 +331,7 @@ def _run_times(problem, opts, system, grid):
                         print(f"{n} ODE solves ({algorithm}, {mode}) "
                               f"completed in {best:.1f} ms ({best_dev:.1f} ms "
                               "without transfers)")
-                    write_times_row(file, outfile, n, (best, best_dev))
+                    write_times_row(file, outfile, n, (best, best_dev, pct))
                     if finals is not None:
                         save_numerical(finals, opts["numerical_tag"]
                                        + numerical_names[(mode, algorithm)])
@@ -491,6 +501,7 @@ def _run_states(opts):
                     point = sample_point("states", STATES_PROBLEM,
                                          algorithm, mode, n, nstates)
                     t_ms = t_dev = build_s = float("nan")
+                    pct = 100.0
                     breached = False
                     solver = None
                     try:
@@ -514,12 +525,14 @@ def _run_states(opts):
 
                         with_transfers()
                         build_s = default_timer() - started
-                        best, _, samples = timed_min_ms(with_transfers,
-                                                        REPEATS)
+                        best, solution, samples = timed_min_ms(with_transfers,
+                                                               REPEATS)
                         append_samples(samples_file, point, "both", samples)
                         breached = best is None
                         if not breached:
                             t_ms = best
+                            pct = errored_pct(
+                                final_states(system, solution, row))
                     except Exception as exc:
                         _failed(exc, label)
                     # The device leg runs only after a host-path time.
@@ -546,7 +559,7 @@ def _run_states(opts):
                               f"completed in {t_ms:.1f} ms ({t_dev:.1f} "
                               "ms without transfers)")
                     write_times_row(file, outfile, nstates,
-                                    (t_ms, t_dev, build_s))
+                                    (t_ms, t_dev, build_s, pct))
                     if solver is not None:
                         _release(solver)
                     if breached:
@@ -555,7 +568,7 @@ def _run_states(opts):
                         nan = float("nan")
                         for rest in run_grid[index + 1:]:
                             write_times_row(file, outfile, rest,
-                                            (nan, nan, nan))
+                                            (nan, nan, nan, 100.0))
                         break
 
 
