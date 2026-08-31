@@ -87,8 +87,7 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
-# Newton target for the fixed-step implicit stage solve; TIMING_TOL here left
-# kvaerno3 unconverged on most trajectories at no gain in accuracy (#73).
+# Newton convergence target for the fixed-step implicit stage solve.
 ROOT_FINDER_TOL = 1.0e-2
 
 
