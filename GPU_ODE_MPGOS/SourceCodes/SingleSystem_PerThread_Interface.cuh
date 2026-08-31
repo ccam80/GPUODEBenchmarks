@@ -24,10 +24,10 @@ template <class DataType>
 DataType* AllocateHostMemory(int);
 
 template <class DataType>
-DataType* AllocateHostPinnedMemory(int);
+DataType* AllocateHostPinnedMemory(size_t);
 
 template <class DataType>
-DataType* AllocateDeviceMemory(int);
+DataType* AllocateDeviceMemory(size_t);
 
 enum Algorithms{ RK4, RKCK45 };
 
@@ -131,18 +131,19 @@ class ProblemSolver
 		size_t GlobalMemoryFree;
 		size_t GlobalMemoryTotal;
 		
-		long SizeOfTimeDomain;
-		long SizeOfActualState;
-		long SizeOfActualTime;
-		long SizeOfControlParameters;
-		long SizeOfSharedParameters;
-		long SizeOfIntegerSharedParameters;
-		long SizeOfAccessories;
-		long SizeOfIntegerAccessories;
-		long SizeOfEvents;
-		long SizeOfDenseOutputIndex;
-		long SizeOfDenseOutputTimeInstances;
-		long SizeOfDenseOutputStates;
+		// size_t: long is 32 bits under MSVC and NT * SD * NDO passes 2^31.
+		size_t SizeOfTimeDomain;
+		size_t SizeOfActualState;
+		size_t SizeOfActualTime;
+		size_t SizeOfControlParameters;
+		size_t SizeOfSharedParameters;
+		size_t SizeOfIntegerSharedParameters;
+		size_t SizeOfAccessories;
+		size_t SizeOfIntegerAccessories;
+		size_t SizeOfEvents;
+		size_t SizeOfDenseOutputIndex;
+		size_t SizeOfDenseOutputTimeInstances;
+		size_t SizeOfDenseOutputStates;
 		
 		Precision* h_TimeDomain;
 		Precision* h_ActualState;
@@ -363,25 +364,21 @@ ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,Algorithm,Precision>::ProblemSolv
 	// GLOBAL MEMORY MANAGEMENT
 	std::cout << "GLOBAL MEMORY MANAGEMENT:" << std::endl;
 	
-	// NT, SD and NDO are int template parameters, so these products are
-	// evaluated in int and only then widened to long. NT * SD * NDO passes
-	// 2^31 at NT = 8388608 with SD = 32 and NDO = 10, wrapping negative and
-	// then to ~2^64 in the size_t below. Widening the first factor keeps the
-	// whole product in 64 bits. Host-side sizing only, no device impact.
-	const long NTl = (long) NT;
+	// Widened before multiplying: the int template parameters overflow otherwise.
+	const size_t Threads = (size_t) NT;
 
-	SizeOfTimeDomain               = NTl * 2;
-	SizeOfActualState              = NTl * SD;
-	SizeOfActualTime               = NTl;
-	SizeOfControlParameters        = NTl * NCP;
+	SizeOfTimeDomain               = Threads * 2;
+	SizeOfActualState              = Threads * SD;
+	SizeOfActualTime               = Threads;
+	SizeOfControlParameters        = Threads * NCP;
 	SizeOfSharedParameters         = NSP;
-	SizeOfIntegerSharedParameters  = NTl * NISP;
-	SizeOfAccessories              = NTl * NA;
-	SizeOfIntegerAccessories       = NTl * NIA;
-	SizeOfEvents                   = NTl * NE;
-	SizeOfDenseOutputIndex         = NTl;
-	SizeOfDenseOutputTimeInstances = NTl * NDO;
-	SizeOfDenseOutputStates        = NTl * SD * NDO;
+	SizeOfIntegerSharedParameters  = Threads * NISP;
+	SizeOfAccessories              = Threads * NA;
+	SizeOfIntegerAccessories       = Threads * NIA;
+	SizeOfEvents                   = Threads * NE;
+	SizeOfDenseOutputIndex         = Threads;
+	SizeOfDenseOutputTimeInstances = Threads * NDO;
+	SizeOfDenseOutputStates        = Threads * SD * NDO;
 	
 	GlobalMemoryRequired = sizeof(Precision) * ( SizeOfTimeDomain + \
 												 SizeOfActualState + \
@@ -1331,7 +1328,7 @@ void ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,Algorithm,Precision>::Synchr
 // --- AUXILIARY FUNCTIONS ---
 
 template <class DataType>
-DataType* AllocateDeviceMemory(int N)
+DataType* AllocateDeviceMemory(size_t N)
 {
     cudaError_t Error = cudaSuccess;
 	
@@ -1348,7 +1345,7 @@ DataType* AllocateDeviceMemory(int N)
 }
 
 template <class DataType>
-DataType* AllocateHostPinnedMemory(int N)
+DataType* AllocateHostPinnedMemory(size_t N)
 {
     cudaError_t Error = cudaSuccess;
 	
