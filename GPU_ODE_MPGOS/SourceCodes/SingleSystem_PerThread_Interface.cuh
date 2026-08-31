@@ -131,7 +131,7 @@ class ProblemSolver
 		size_t GlobalMemoryFree;
 		size_t GlobalMemoryTotal;
 		
-		// size_t: long is 32 bits under MSVC and NT * SD * NDO passes 2^31.
+		// Element counts; products of the int template parameters exceed 32 bits.
 		size_t SizeOfTimeDomain;
 		size_t SizeOfActualState;
 		size_t SizeOfActualTime;
@@ -364,7 +364,7 @@ ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,Algorithm,Precision>::ProblemSolv
 	// GLOBAL MEMORY MANAGEMENT
 	std::cout << "GLOBAL MEMORY MANAGEMENT:" << std::endl;
 	
-	// Widened before multiplying: the int template parameters overflow otherwise.
+	// Widened first so every product below is formed in size_t.
 	const size_t Threads = (size_t) NT;
 
 	SizeOfTimeDomain               = Threads * 2;
