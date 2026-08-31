@@ -104,12 +104,7 @@ def make_solver(algorithm, fixed_tol=None):
 
 
 def unconverged(sol):
-    """Trajectories whose solve did not converge. throw=False reports through
-    sol.result instead of raising, so one bad trajectory no longer costs the
-    whole vmapped batch - but a non-converged solve must not be timed or
-    scored, so every caller gates on this."""
-    # No fallback: a silent 0 here would report a diverged solve as converged
-    # and hand it a timing, which is the whole failure this guards against.
+    """Count of trajectories whose sol.result is not successful (throw=False reports there instead of raising)."""
     ok = np.asarray(sol.result == diffrax.RESULTS.successful)
     return int(ok.size - ok.sum())
 
@@ -147,10 +142,9 @@ def best_times_ms(solve, args, label, n, samples_file, point):
     try:
         both, sol, samples = timed_min_ms(with_transfers, REPEATS)
         append_samples(samples_file, point, "both", samples)
-        bad = unconverged(sol)
+        # A breach falls through to the watchdog path below, which ends the leg.
+        bad = None if both is None else unconverged(sol)
         if bad:
-            # Timing a solve that never converged measures the step budget,
-            # not the problem, so the point gets no time.
             print("FAILED {0} at N={1}: {2} of {3} trajectories did not "
                   "converge; no timing recorded".format(label, n, bad, n))
             return float("nan"), float("nan"), False
@@ -188,8 +182,7 @@ def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
     return main
 
 
-# duration/dt_min with the suite's DT_MIN_FRACTION of 1e-6 is 1e6 steps; 2**20
-# is the power of two at or above it, matching the other caps here.
+# 2**20, the power of two at or above duration/dt_min for DT_MIN_FRACTION 1e-6.
 ADAPTIVE_MAX_STEPS = 1048576
 
 
@@ -241,11 +234,9 @@ def run_wp(problem, parameterList):
                 breached = True
                 t_ms, err = float("nan"), float("nan")
             elif bad:
-                # Scoring a non-converged solve against the golden yields a
-                # finite number that means nothing, so the point is a NaN row.
+                # A NaN row, not an abandoned leg: the next setting may converge.
                 print("FAILED wp {0} setting={1:g}: {2} trajectories did not "
                       "converge".format(problem.name, setting, bad))
-                breached = True
                 t_ms, err = float("nan"), float("nan")
             else:
                 err = ensemble_error(np.array(sol.ys[:, -1, :]), golden)
