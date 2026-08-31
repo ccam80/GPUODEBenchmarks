@@ -27,16 +27,16 @@ case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
-# nan_row <file> <key> [extra]: append one NaN row, merging under --floor; creates the problem directory.
+# nan_row <file> <key> [extra]: append one NaN row (errored 100%), merging under --floor; creates the problem directory.
 nan_row() {
 	local file=$1 key=$2 extra=${3:-}
 	mkdir -p "$(dirname "$file")"
 	if [ -n "$FLOOR_ACTIVE" ]; then
-		python3 ./runner_scripts/resume.py merge "$file" tab "$key" nan nan ${extra:+"$extra"}
+		python3 ./runner_scripts/resume.py merge "$file" tab "$key" nan nan ${extra:+"$extra"} 100
 	elif [ -n "$extra" ]; then
-		printf '%s\tnan\tnan\t%s\n' "$key" "$extra" >> "$file"
+		printf '%s\tnan\tnan\t%s\t100\n' "$key" "$extra" >> "$file"
 	else
-		printf '%s\tnan\tnan\n' "$key" >> "$file"
+		printf '%s\tnan\tnan\t100\n' "$key" >> "$file"
 	fi
 }
 

@@ -1,6 +1,7 @@
 using Plots
 using DelimitedFiles
 using Plots.PlotMeasures
+include(joinpath(dirname(@__DIR__), "errored.jl"))
 
 # Reads data/<package>/<os>_<gpu>/lorenz96/<Prefix>_states_<mode>_<algorithm>.txt
 # (rows: states t_ms t_dev_ms build_s) and emits one figure per
@@ -49,11 +50,17 @@ function collect_series(base_path, frameworks)
             for file in sort(readdir(ppath))
                 m = match(pat, file)
                 m === nothing && continue
-                raw = readdlm(joinpath(ppath, file), Float64)
+                # Untyped: rows that predate the errored column read as "".
+                raw = readdlm(joinpath(ppath, file))
                 size(raw, 2) >= 4 || continue
+                if size(raw, 2) >= 5
+                    # Rows past the errored bar carry no timing evidence.
+                    raw = raw[within_error_budget.(raw[:, 5]), :]
+                    isempty(raw) && continue
+                end
                 push!(series, StatesSeries(display, String(m[1]),
-                    String(m[2]), key, raw[:, 1], raw[:, 2] ./ 1000.0,
-                    raw[:, 4]))
+                    String(m[2]), key, Float64.(raw[:, 1]),
+                    Float64.(raw[:, 2]) ./ 1000.0, Float64.(raw[:, 4])))
             end
         end
     end

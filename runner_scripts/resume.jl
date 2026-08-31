@@ -171,9 +171,9 @@ function merge_min_row(path, key, values)
     end
 end
 
-"--floor: merge one wp row, keeping the (time, error) pair with the lower time."
-function merge_wp_row(path, setting, t_ms, err)
-    new_row = string(setting, " ", t_ms, " ", err)
+"--floor: merge one wp row, keeping the (time, error, errored percent) triple with the lower time."
+function merge_wp_row(path, setting, t_ms, err, errored_pct)
+    new_row = string(setting, " ", t_ms, " ", err, " ", errored_pct)
     out = String[]
     merged = false
     for line in (isfile(path) ? readlines(path) : String[])
@@ -214,13 +214,13 @@ function record_row(outfile, key, values)
     end
 end
 
-"Write one wp row through the open handle, or --floor-merge it into path."
-function write_wp_row(io, path, setting, t_ms, err)
+"Write one `setting t_ms err errored_pct` row through the open handle, or --floor-merge it into path."
+function write_wp_row(io, path, setting, t_ms, err, errored_pct)
     if floor_enabled()
-        merge_wp_row(path, setting, t_ms, err)
+        merge_wp_row(path, setting, t_ms, err, errored_pct)
         return
     end
-    println(io, setting, " ", t_ms, " ", err)
+    println(io, setting, " ", t_ms, " ", err, " ", errored_pct)
     flush(io)
 end
 

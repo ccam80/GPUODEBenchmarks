@@ -93,33 +93,33 @@ class TestMergeMinRow(FileCase):
 
 
 class TestMergeWpRow(FileCase):
-    def test_the_lower_time_brings_its_error_along(self):
-        self.write("0.001 5.0 1.0000000000e-03\n")
-        merge_wp_row(self.path, 0.001, 4.0, 2e-3)
-        self.assertEqual(["0.001 4.0 2.0000000000e-03"], self.lines())
+    def test_the_lower_time_brings_its_error_and_errored_percent_along(self):
+        self.write("0.001 5.0 1.0000000000e-03 0.0000\n")
+        merge_wp_row(self.path, 0.001, 4.0, 2e-3, 12.5)
+        self.assertEqual(["0.001 4.0 2.0000000000e-03 12.5000"], self.lines())
 
     def test_a_higher_time_leaves_the_recorded_pair(self):
-        self.write("0.001 5.0 1.0000000000e-03\n")
-        merge_wp_row(self.path, 0.001, 6.0, 2e-3)
-        self.assertEqual(["0.001 5.0 1.0000000000e-03"], self.lines())
+        self.write("0.001 5.0 1.0000000000e-03 0.0000\n")
+        merge_wp_row(self.path, 0.001, 6.0, 2e-3, 0.0)
+        self.assertEqual(["0.001 5.0 1.0000000000e-03 0.0000"], self.lines())
 
     def test_nan_replaces_nothing_but_fills_a_gap(self):
-        self.write("0.001 5.0 1.0000000000e-03\n")
-        merge_wp_row(self.path, 0.001, float("nan"), float("nan"))
-        self.assertEqual(["0.001 5.0 1.0000000000e-03"], self.lines())
-        merge_wp_row(self.path, 0.0005, float("nan"), float("nan"))
+        self.write("0.001 5.0 1.0000000000e-03 0.0000\n")
+        merge_wp_row(self.path, 0.001, float("nan"), float("nan"), 100.0)
+        self.assertEqual(["0.001 5.0 1.0000000000e-03 0.0000"], self.lines())
+        merge_wp_row(self.path, 0.0005, float("nan"), float("nan"), 100.0)
         self.assertEqual(2, len(self.lines()))
-        self.assertTrue(self.lines()[1].startswith("0.0005 nan"))
+        self.assertEqual("0.0005 nan nan 100.0000", self.lines()[1])
 
     def test_a_recorded_nan_is_replaced(self):
         self.write("0.001 nan nan\n")
-        merge_wp_row(self.path, 0.001, 4.0, 2e-3)
-        self.assertEqual(["0.001 4.0 2.0000000000e-03"], self.lines())
+        merge_wp_row(self.path, 0.001, 4.0, 2e-3, 0.0)
+        self.assertEqual(["0.001 4.0 2.0000000000e-03 0.0000"], self.lines())
 
     def test_settings_match_across_formattings(self):
         # Julia prints the raw float; the merge must still find the row.
         self.write("0.0009765625 5.0 1e-03\n")
-        merge_wp_row(self.path, 9.765625e-4, 4.0, 2e-3)
+        merge_wp_row(self.path, 9.765625e-4, 4.0, 2e-3, 0.0)
         self.assertEqual(1, len(self.lines()))
         self.assertIn("4.0", self.lines()[0])
 
@@ -141,11 +141,11 @@ class TestWriteRows(FileCase):
 
     def test_wp_rows_follow_the_same_split(self):
         handle = io.StringIO()
-        write_wp_row(handle, self.path, 1e-3, 5.0, 1e-3)
-        self.assertEqual("0.001 5.0 1.0000000000e-03\n", handle.getvalue())
+        write_wp_row(handle, self.path, 1e-3, 5.0, 1e-3, 0.0)
+        self.assertEqual("0.001 5.0 1.0000000000e-03 0.0000\n", handle.getvalue())
         os.environ["BENCH_FLOOR"] = "1"
-        write_wp_row(handle, self.path, 1e-3, 4.0, 2e-3)
-        self.assertEqual(["0.001 4.0 2.0000000000e-03"], self.lines())
+        write_wp_row(handle, self.path, 1e-3, 4.0, 2e-3, 0.0)
+        self.assertEqual(["0.001 4.0 2.0000000000e-03 0.0000"], self.lines())
 
 
 class TestFloorNeverPrunes(FileCase):

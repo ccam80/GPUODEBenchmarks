@@ -319,7 +319,7 @@ def run_states(argv):
         rows = {}
         with open(path) as handle:
             for line in handle:
-                # Keep only complete `states t_ms t_dev_ms build_s` rows.
+                # Keep only complete `states t_ms t_dev_ms build_s [errored]` rows.
                 fields = line.split()
                 if len(fields) < 4:
                     continue
@@ -330,7 +330,7 @@ def run_states(argv):
         with open(path, "w") as handle:
             for nstates in grid:
                 handle.write(rows.get(nstates,
-                                      f"{nstates} nan nan nan") + "\n")
+                                      f"{nstates} nan nan nan 100.0") + "\n")
     return 0
 
 

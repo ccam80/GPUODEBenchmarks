@@ -3,6 +3,7 @@ using DelimitedFiles
 using Dates
 using Statistics
 using Plots.PlotMeasures
+include(joinpath(dirname(@__DIR__), "errored.jl"))
 
 # Reads data/<package>/<os>_<gpu>/<problem>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt
 # and emits one plot per (group, problem, mode, algorithm, transfer variant)
@@ -67,10 +68,17 @@ function collect_series(base_path, frameworks)
                     algorithm = String(m.captures[2])
                     data = readdlm(joinpath(ppath, fname))
                     isempty(data) && continue
+                    ncol = size(data, 2)
+                    ncol in (3, 4) || error(
+                        "$(fname) has $(ncol) columns; expected 3 " *
+                        "(N, time_with_transfers_ms, time_device_only_ms) " *
+                        "or 4 with a trailing errored percent")
+                    if ncol == 4
+                        # Rows past the errored bar carry no timing evidence.
+                        data = data[within_error_budget.(data[:, 4]), :]
+                        isempty(data) && continue
+                    end
                     order = sortperm(data[:, 1])
-                    size(data, 2) == 3 || error(
-                        "$(fname) has $(size(data, 2)) columns; expected 3 " *
-                        "(N, time_with_transfers_ms, time_device_only_ms)")
                     ns = Float64.(data[order, 1])
                     push!(series, Series(display, problem, mode, algorithm,
                                          "both", os, gpu, key, ns,

@@ -229,7 +229,8 @@ class TestTimesLegIsolation(SweepCase):
     def test_host_failure_skips_the_device_leg_and_continues(self):
         solver = FakeSolver(host_fail_at=4096)
         rows, _ = self.run_times(solver, [1024, 4096, 16384])
-        self.assertTrue(all(math.isnan(v) for v in rows[4096]))
+        self.assertTrue(all(math.isnan(v) for v in rows[4096][:-1]))
+        self.assertEqual(100.0, rows[4096][-1])
         self.assertTrue(all(math.isfinite(v) for v in rows[16384]))
         self.assertFalse(any(n == 4096 and on_device
                              for n, on_device in solver.calls))
@@ -255,7 +256,7 @@ class TestStatesLegIsolation(SweepCase):
                             "Cubie_states_fixed_classical-rk4.txt")
         rows = read_rows(path)
         for nstates in (4, 8):
-            t_ms, t_dev, build_s = rows[nstates]
+            t_ms, t_dev, build_s, pct = rows[nstates]
             self.assertTrue(math.isfinite(t_ms))
             self.assertTrue(math.isnan(t_dev))
             self.assertTrue(math.isfinite(build_s))
