@@ -333,7 +333,8 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         if ran && !isinteractive() && n == 32768 && algorithm == "tsit5"
             sol = device_solve()
             write_finals(system, problem, sol,
-                mode == "fixed" ? "julia_fixed.csv" : "julia_adaptive.csv")
+                mode == "fixed" ? "julia_fixed.csv" : "julia_adaptive.csv",
+                duration)
         end
 
         # Ensembles are per-size; only the compiled kernels carry over.
@@ -474,14 +475,27 @@ function run_times(problem)
     end
 end
 
-"Write the per-trajectory final states for the pairwise numerical check."
-function write_finals(system, problem, sol, name)
-    final_states = Array(sol[2][end, :])  # convert to CPU Array
+"Write the per-trajectory final states for the pairwise numerical check; a trajectory that never reached `duration` is a NaN row."
+function write_finals(system, problem, sol, name, duration)
+    # Do not count solves that never wrote a final time
+    final_times = Array(sol[1][end, :])
+    final_states = Array(sol[2][end, :])
     # One row per trajectory, one column per golden state.
     m = Matrix{Float64}(undef, length(final_states),
         length(system.golden_index))
+    arrived = 0
     for i in eachindex(final_states)
-        m[i, :] .= Float64.(final_states[i][system.golden_index])
+        if isapprox(Float64(final_times[i]), Float64(duration); rtol = 1.0f-4)
+            m[i, :] .= Float64.(final_states[i][system.golden_index])
+            arrived += 1
+        else
+            m[i, :] .= NaN
+        end
+    end
+    if arrived < length(final_states)
+        @warn "$(name): $(length(final_states) - arrived) of " *
+              "$(length(final_states)) trajectories stopped before " *
+              "t=$(duration); written as NaN rows"
     end
     df = DataFrame(m, :auto)
     CSV.write(joinpath(data_dir(REPO_ROOT, "numerical", DATASET_KEY, problem),
