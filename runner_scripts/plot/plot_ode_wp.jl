@@ -78,7 +78,7 @@ function collect_series(base_path, frameworks)
                     # in the fixed curves is traced rather than folded onto itself.
                     keep = err .> 0
                     if size(data, 2) >= 4
-                        # Rows past the errored bar carry no evidence either way.
+                        # Drop rows past the errored bar.
                         keep = keep .& within_error_budget.(data[:, 4])
                     end
                     setting, err, time_s = setting[keep], err[keep], time_s[keep]

@@ -74,7 +74,7 @@ function collect_series(base_path, frameworks)
                         "(N, time_with_transfers_ms, time_device_only_ms) " *
                         "or 4 with a trailing errored percent")
                     if ncol == 4
-                        # Rows past the errored bar carry no timing evidence.
+                        # Drop rows past the errored bar.
                         data = data[within_error_budget.(data[:, 4]), :]
                         isempty(data) && continue
                     end

@@ -50,11 +50,11 @@ function collect_series(base_path, frameworks)
             for file in sort(readdir(ppath))
                 m = match(pat, file)
                 m === nothing && continue
-                # Untyped: rows that predate the errored column read as "".
+                # Untyped, so a short row reads as "" in the errored column.
                 raw = readdlm(joinpath(ppath, file))
                 size(raw, 2) >= 4 || continue
                 if size(raw, 2) >= 5
-                    # Rows past the errored bar carry no timing evidence.
+                    # Drop rows past the errored bar.
                     raw = raw[within_error_budget.(raw[:, 5]), :]
                     isempty(raw) && continue
                 end

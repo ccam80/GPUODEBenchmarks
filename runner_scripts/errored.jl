@@ -1,5 +1,4 @@
-# Errored-percent column shared by the Julia writers and the plot scripts; the
-# Python writers compute it with errored_pct in runner_scripts/wp_common.py.
+# Errored-percent column shared by the Julia writers and the plot scripts.
 
 # Rows errored past this percent are dropped by the plot scripts.
 const MAX_ERRORED_PCT = 10.0
@@ -11,5 +10,5 @@ function errored_pct(finals)
     return 100.0 * bad / length(finals)
 end
 
-"True unless the cell holds a percent past MAX_ERRORED_PCT; a missing or unparsed cell keeps the row."
+"True unless the cell is a number past MAX_ERRORED_PCT."
 within_error_budget(pct) = !(pct isa Real && pct > MAX_ERRORED_PCT)

@@ -62,7 +62,7 @@ def run_watchdogged(run, on_breach):
 
 
 def errored_pct(finals):
-    """Percent of trajectories (rows) with a non-finite final state; the plots drop rows past the bar in runner_scripts/errored.jl."""
+    """Percent of trajectories (rows) with a non-finite final state."""
     a = np.asarray(finals)
     if a.size == 0:
         return 0.0
