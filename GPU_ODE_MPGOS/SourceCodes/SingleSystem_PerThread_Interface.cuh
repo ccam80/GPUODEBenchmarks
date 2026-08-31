@@ -363,18 +363,25 @@ ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,Algorithm,Precision>::ProblemSolv
 	// GLOBAL MEMORY MANAGEMENT
 	std::cout << "GLOBAL MEMORY MANAGEMENT:" << std::endl;
 	
-	SizeOfTimeDomain               = NT * 2;
-	SizeOfActualState              = NT * SD;
-	SizeOfActualTime               = NT;
-	SizeOfControlParameters        = NT * NCP;
+	// NT, SD and NDO are int template parameters, so these products are
+	// evaluated in int and only then widened to long. NT * SD * NDO passes
+	// 2^31 at NT = 8388608 with SD = 32 and NDO = 10, wrapping negative and
+	// then to ~2^64 in the size_t below. Widening the first factor keeps the
+	// whole product in 64 bits. Host-side sizing only, no device impact.
+	const long NTl = (long) NT;
+
+	SizeOfTimeDomain               = NTl * 2;
+	SizeOfActualState              = NTl * SD;
+	SizeOfActualTime               = NTl;
+	SizeOfControlParameters        = NTl * NCP;
 	SizeOfSharedParameters         = NSP;
-	SizeOfIntegerSharedParameters  = NT * NISP;
-	SizeOfAccessories              = NT * NA;
-	SizeOfIntegerAccessories       = NT * NIA;
-	SizeOfEvents                   = NT * NE;
-	SizeOfDenseOutputIndex         = NT;
-	SizeOfDenseOutputTimeInstances = NT * NDO;
-	SizeOfDenseOutputStates        = NT * SD * NDO;
+	SizeOfIntegerSharedParameters  = NTl * NISP;
+	SizeOfAccessories              = NTl * NA;
+	SizeOfIntegerAccessories       = NTl * NIA;
+	SizeOfEvents                   = NTl * NE;
+	SizeOfDenseOutputIndex         = NTl;
+	SizeOfDenseOutputTimeInstances = NTl * NDO;
+	SizeOfDenseOutputStates        = NTl * SD * NDO;
 	
 	GlobalMemoryRequired = sizeof(Precision) * ( SizeOfTimeDomain + \
 												 SizeOfActualState + \
