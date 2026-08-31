@@ -104,7 +104,7 @@ def make_solver(algorithm, fixed_tol=None):
 
 
 def unconverged(sol):
-    """Count of trajectories whose sol.result is not successful (throw=False reports there instead of raising)."""
+    """Count of trajectories whose sol.result is not successful."""
     ok = np.asarray(sol.result == diffrax.RESULTS.successful)
     return int(ok.size - ok.sum())
 
@@ -142,7 +142,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
     try:
         both, sol, samples = timed_min_ms(with_transfers, REPEATS)
         append_samples(samples_file, point, "both", samples)
-        # A breach falls through to the watchdog path below, which ends the leg.
+        # None on a breach; the watchdog path below handles it.
         bad = None if both is None else unconverged(sol)
         if bad:
             print("FAILED {0} at N={1}: {2} of {3} trajectories did not "
@@ -182,7 +182,7 @@ def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
     return main
 
 
-# 2**20, the power of two at or above duration/dt_min for DT_MIN_FRACTION 1e-6.
+# duration/dt_min at DT_MIN_FRACTION 1e-6, rounded up to a power of two.
 ADAPTIVE_MAX_STEPS = 1048576
 
 
@@ -234,7 +234,7 @@ def run_wp(problem, parameterList):
                 breached = True
                 t_ms, err = float("nan"), float("nan")
             elif bad:
-                # A NaN row, not an abandoned leg: the next setting may converge.
+                # A NaN row; the sweep continues.
                 print("FAILED wp {0} setting={1:g}: {2} trajectories did not "
                       "converge".format(problem.name, setting, bad))
                 t_ms, err = float("nan"), float("nan")
