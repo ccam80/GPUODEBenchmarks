@@ -477,9 +477,7 @@ end
 
 "Write the per-trajectory final states for the pairwise numerical check; a trajectory that never reached `duration` is a NaN row."
 function write_finals(system, problem, sol, name, duration)
-    # A solve that stops early never writes its saveat slot, so the slot keeps
-    # the zero it was allocated with. sol[1] carries the times, so an arrival
-    # at `duration` is what separates a real final state from an unwritten one.
+    # Do not count solves that never wrote a final time
     final_times = Array(sol[1][end, :])
     final_states = Array(sol[2][end, :])
     # One row per trajectory, one column per golden state.
