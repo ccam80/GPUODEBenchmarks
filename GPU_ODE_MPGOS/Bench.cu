@@ -34,7 +34,8 @@ const int NISP = 1;     // NumberOfIntegerSharedParameters (run budget)
 const int NE   = 0;     // NumberOfEvents
 const int NA   = 0;     // NumberOfAccessories
 const int NIA  = 1;     // NumberOfIntegerAccessories (start clock)
-const int NDO  = 10;     // NumberOfPointsOfDenseOutput
+const int NDO  = 0;      // NumberOfPointsOfDenseOutput: nothing reads it, and
+                         // storing it is work the other suites do not do
 
 const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
 // The N sweep steps duration * 2^-10, matching the other frameworks.
