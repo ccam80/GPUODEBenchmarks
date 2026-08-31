@@ -87,6 +87,15 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
+# Tolerance for the implicit stage solve under a fixed step size. This is the
+# Newton iteration's own convergence target, not the integration error target,
+# and the two are different quantities. Measured on lorenz against the Float64
+# golden, 1024 fixed steps: at 1e-5 only 13 of 64 trajectories converge, at
+# 1e-2 all 64 do, and the solution error is 1.048e-04 either way because it is
+# set by float32 and the step size rather than by this tolerance.
+ROOT_FINDER_TOL = 1.0e-2
+
+
 def make_solver(algorithm, fixed_tol=None):
     """Diffrax solver; a fixed step size leaves nothing for an implicit solver to take its root-finder tolerances from, so fixed_tol supplies them."""
     if algorithm == "euler":
@@ -155,7 +164,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm, fixed_tol=TIMING_TOL)
+    solver = make_solver(algorithm, fixed_tol=ROOT_FINDER_TOL)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0
