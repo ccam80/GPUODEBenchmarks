@@ -87,6 +87,10 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
+# Newton convergence target for the fixed-step implicit stage solve.
+ROOT_FINDER_TOL = 1.0e-2
+
+
 def make_solver(algorithm, fixed_tol=None):
     """Diffrax solver; a fixed step size leaves nothing for an implicit solver to take its root-finder tolerances from, so fixed_tol supplies them."""
     if algorithm == "euler":
@@ -155,7 +159,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm, fixed_tol=TIMING_TOL)
+    solver = make_solver(algorithm, fixed_tol=ROOT_FINDER_TOL)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0
