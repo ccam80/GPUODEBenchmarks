@@ -141,7 +141,8 @@ function setup(problem)
 
     system = julia_system(problem)
     duration = Float32(problem["duration"])
-    u0 = Vector{Float32}(system.u0)
+    # Trajectory 1's consistent u0, so the controller-constants init passes CheckInit.
+    u0 = Vector{Float32}(system.u0_for(sweep32[1]))
     f = system.mass_matrix === nothing ?
         ODEFunction{true}(system.rhs!; jac = system.jac!) :
         ODEFunction{true}(system.rhs!; jac = system.jac!,

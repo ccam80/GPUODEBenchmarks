@@ -52,8 +52,8 @@ from ne_common import (TOLS_NE, N_NE, algorithm_names, dts_ne, dt_pins_ne,
 _parser = argparse.ArgumentParser(description="cubie Float32 equivalence sweeps.")
 _parser.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
 _parser.add_argument("--algorithm", choices=algorithm_names(), default="all")
-_parser.add_argument("--problem", choices=["all"] + problem_names(),
-                     default="all")
+_parser.add_argument("--problem", default="all",
+                     help="all | comma list of " + ", ".join(problem_names()))
 _args = _parser.parse_args()
 MODE = _args.controller
 ALGORITHM = _args.algorithm
@@ -171,7 +171,7 @@ def run_fixed(ctx):
 # Adaptive error-vs-tolerance sweeps (default + matched controller tiers)
 # ---------------------------------------------------------------------------
 def run_adaptive(ctx):
-    constants = load_controller_constants()
+    constants = load_controller_constants(ctx["problem"])
 
     def matched_controller_settings(alias, order):
         """Cubie controller kwargs mirroring Julia's resolved defaults.

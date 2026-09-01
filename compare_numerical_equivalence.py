@@ -299,10 +299,11 @@ def compare_problem(problem, algorithms, keys):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--problem", choices=["all"] + problem_names(),
-                        default="all")
+    parser.add_argument("--problem", default="all",
+                        help="all | comma list of " + ", ".join(problem_names()))
     args = parser.parse_args()
 
+    problems = resolve_problems(args.problem, "cubie")
     algorithms = load_algorithms()
     keys = discover_keys()
     if not keys:
@@ -311,7 +312,7 @@ def main():
               .format(CUBIE_NE_DIR))
         return 1
 
-    for problem in resolve_problems(args.problem, "cubie"):
+    for problem in problems:
         compare_problem(problem, algorithms, keys)
     return 0
 

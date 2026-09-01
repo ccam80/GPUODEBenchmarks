@@ -300,24 +300,21 @@ def cubie_ne_adaptive_file(alias, tier, dataset_key,
                         "{0}_adaptive_{1}.csv".format(alias, tier))
 
 
-CONTROLLER_CONSTANTS_CSV = os.path.join(JULIA_NE_DIR,
-                                        "controller_constants.csv")
+def controller_constants_csv(problem=DEFAULT_PROBLEM):
+    """Path of a problem's resolved default-controller constants."""
+    return os.path.join(julia_ne_dir(problem), "controller_constants.csv")
 
 
-def load_controller_constants():
-    """Julia's resolved default-controller constants, keyed by cubie alias.
-
-    Written by ne_diffeq.jl. Values: controller (type name), beta1, beta2,
-    qmin, qmax, gamma, order (classical), floats parsed; missing numeric
-    fields come back as None.
-    """
-    if not os.path.isfile(CONTROLLER_CONSTANTS_CSV):
+def load_controller_constants(problem=DEFAULT_PROBLEM):
+    """One problem's default-controller constants keyed by cubie alias; missing numeric fields are None."""
+    path = controller_constants_csv(problem)
+    if not os.path.isfile(path):
         raise FileNotFoundError(
             "{0} not found - run the Julia adaptive sweep first "
             "(runner_scripts/numerical_equivalence/ne_diffeq.jl)"
-            .format(CONTROLLER_CONSTANTS_CSV))
+            .format(path))
     out = {}
-    with open(CONTROLLER_CONSTANTS_CSV, newline="") as f:
+    with open(path, newline="") as f:
         for row in csv.DictReader(f):
             entry = {"controller": row["controller"]}
             for key in ("beta1", "beta2", "qmin", "qmax", "gamma", "order"):
