@@ -210,6 +210,8 @@ a number.
 
 One worktree, one branch off `main`, one PR per packet. "Done" is the
 acceptance line; "Review" is what the PR is read against.
+- A packet replaces what it touches: no compatibility shim, no dual path.
+- `main` may not run between packets.
 
 ### P1 base cleanup
 Depends on: nothing.
