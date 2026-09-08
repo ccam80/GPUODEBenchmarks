@@ -159,7 +159,7 @@ def _run_wp(problem, opts, system, grid):
         leg = Leg(opts["framework"], opts["dataset_key"], "wp", problem,
                   algorithm, mode)
         settings = list(settings)
-        if skip_wp_leg(leg, settings):
+        if skip_wp_leg(leg, settings, tier):
             print(f"-- resume: skipping wp {problem.name} {mode} "
                   f"{algorithm} [{tier}] (already covered)")
             return

@@ -265,19 +265,23 @@ class Leg:
         self.path = store_path(package, key, root)
         self.setting_kind, self.setting = timing_setting(self.problem, mode)
 
-    def _ident(self, n, states, setting=None):
-        return dict(package=self.package, key=self.key,
-                    analysis=self.analysis, problem=self.problem.name,
-                    algorithm=self.algorithm, mode=self.mode,
-                    setting_kind=self.setting_kind,
-                    setting=_fmt(float(self.setting if setting is None
-                                       else setting)),
-                    n=str(int(n)), states=str(int(states)))
+    def _ident(self, n, states, setting=None, tier=None):
+        ident = dict(package=self.package, key=self.key,
+                     analysis=self.analysis, problem=self.problem.name,
+                     algorithm=self.algorithm, mode=self.mode,
+                     setting_kind=self.setting_kind,
+                     setting=_fmt(float(self.setting if setting is None
+                                        else setting)),
+                     n=str(int(n)), states=str(int(states)))
+        if tier is not None:
+            ident["tier"] = tier
+        return ident
 
-    def status(self, n, states=None, setting=None):
+    def status(self, n, states=None, setting=None, tier=None):
+        """'absent', 'nan' or 'finite' for the point; tier None matches any tier."""
         return point_status(self.path, **self._ident(
             n, self.problem["states"] if states is None else states,
-            setting))
+            setting, tier))
 
     def record(self, n, transfers, states=None, setting=None, tier="default",
                **values):

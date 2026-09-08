@@ -114,13 +114,13 @@ def skip_point(leg, n, states=None):
     return _status_skips(leg.status(n, states))
 
 
-def skip_wp_leg(leg, settings):
-    """True when every setting of a work-precision results.Leg is covered."""
+def skip_wp_leg(leg, settings, tier="default"):
+    """True when every setting of a work-precision results.Leg is covered in the tier."""
     if cursor_skips(leg.problem.name, leg.algorithm, leg.mode):
         return True
     if not (resume_enabled() or no_overwrite_enabled()):
         return False
-    return all(_status_skips(leg.status(N_WP, setting=setting))
+    return all(_status_skips(leg.status(N_WP, setting=setting, tier=tier))
                for setting in settings)
 
 
