@@ -52,7 +52,7 @@ def _ratio(err_c, err_j):
 def analyse_algorithm(row, key, golden_states, problem):
     """Per-dt errors for one algorithm's fixed-step sweep."""
     alias = row["cubie_alias"]
-    jfile = julia_ne_file(alias, problem)
+    jfile = julia_ne_file(alias, problem, key)
     cfile = cubie_ne_file(alias, key, problem)
     julia = read_ne_csv_masked(jfile) if os.path.isfile(jfile) else None
     cubie = read_ne_csv_masked(cfile) if os.path.isfile(cfile) else None
@@ -91,7 +91,7 @@ def analyse_algorithm(row, key, golden_states, problem):
 def analyse_adaptive(row, key, golden_states, problem):
     """Per-tolerance errors for one algorithm's adaptive tiers."""
     alias = row["cubie_alias"]
-    jfile = julia_ne_adaptive_file(alias, problem)
+    jfile = julia_ne_adaptive_file(alias, problem, key)
     julia = read_ne_adaptive_csv_masked(jfile) if os.path.isfile(jfile) else None
     tiers = {}
     for tier in ("default", "matched"):

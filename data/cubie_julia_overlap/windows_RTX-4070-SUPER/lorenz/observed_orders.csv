@@ -1,0 +1,4 @@
+framework,algorithm,tier,observed_order,usable_intervals
+julia,kvaerno3,fixed,2.7918079318303195,9
+julia,kvaerno5,fixed,3.8742616562935357,6
+julia,rosenbrock23_sciml,fixed,1.9426429484599361,8

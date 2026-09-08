@@ -1096,11 +1096,9 @@ comparison, and exit non-zero when any step fails.
 `run_all_benchmarks.sh -a numerical` appends the same suite to a full
 benchmark run.
 
-Reproducibility: the golden reference and the DifferentialEquations.jl
-outputs under `data/numerical_equivalence/julia/<problem>/` are machine-independent
-CPU results — once committed, a fresh machine (or cubie's CI) can skip
-Julia entirely and only re-run the cubie sweeps + comparison against the
-committed reference. The golden is regenerated only if its file is missing
+The golden reference is Float64 and unkeyed; the DifferentialEquations.jl
+sweeps are keyed by `<os>_<gpu>`, and the comparison pairs Julia and cubie
+files of the same key. The golden is regenerated only if its file is missing
 (~1 s of solve time); the Julia sweeps take ~1–3 minutes; the cubie sweeps
 dominate the wall time (one kernel compile per algorithm/setting point,
 ~20–25 minutes per mode on an RTX 4070 SUPER). On a fresh checkout run
@@ -1115,9 +1113,9 @@ take the same optional `fixed|adaptive|all` mode argument):
 julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl
 #   -> data/numerical/golden_ne_<problem>_1024.csv  (Float64, machine independent)
 julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
-#   -> data/numerical_equivalence/julia/<problem>/<algorithm>.csv            (fixed sweep)
-#   -> data/numerical_equivalence/julia/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
-#   -> data/numerical_equivalence/julia/<problem>/controller_constants.csv   (resolved defaults)
+#   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>.csv            (fixed sweep)
+#   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
+#   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/controller_constants.csv   (resolved defaults)
 GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
 #   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>.csv
 #   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
@@ -1163,8 +1161,5 @@ trajectory counts. Errors use only the trajectories both stacks solved.
 Each package runs its own implementation and its own defaults; nothing is
 pinned on one stack to make it resemble the other.
 
-The golden file and the DifferentialEquations.jl outputs are machine
-independent and cheap to regenerate (seconds and ~1 minute respectively), so
-the suite is cheap to re-run against a fixed reference: commit (or
-regenerate) the golden + Julia reference CSVs, then run only the cubie
+With the golden and this machine's Julia CSVs on disk, re-run only the cubie
 sweep and the comparison.

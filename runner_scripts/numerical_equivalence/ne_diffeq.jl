@@ -22,10 +22,8 @@
 # asserted to still be Float32 — a Float64 anywhere means the solve silently
 # promoted and the point is recorded as failed.
 #
-# Outputs (machine independent, CPU), rows are 0-based traj indices:
-#   data/numerical_equivalence/julia/<alias>.csv            dt,traj,x,y,z
-#   data/numerical_equivalence/julia/<alias>_adaptive.csv   tol,traj,x,y,z,naccept,nreject
-#   data/numerical_equivalence/julia/controller_constants.csv
+# Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
+#   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
 #
 # Run from the repo root:
 #   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [fixed|adaptive|all]
@@ -62,6 +60,8 @@ MODE in ("fixed", "adaptive", "all") ||
 const REPO_ROOT = dirname(dirname(@__DIR__))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
+const DATASET_KEY = dataset_key()
 const N_NE = 1024
 # Adaptive protocol (same as ne_common): tolerance grid and dt pins as
 # fractions of the problem duration.
@@ -158,8 +158,8 @@ function setup(problem)
             sol.stats.naccept, sol.stats.nreject), false),
         safetycopy = false)
 
-    outdir = joinpath(REPO_ROOT, "data", "numerical_equivalence", "julia", name)
-    mkpath(outdir)
+    outdir = data_dir(REPO_ROOT, joinpath("numerical_equivalence", "julia"),
+        DATASET_KEY, name)
     return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,

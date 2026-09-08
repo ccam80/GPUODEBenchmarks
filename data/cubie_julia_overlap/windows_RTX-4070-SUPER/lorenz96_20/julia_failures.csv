@@ -1,0 +1,4 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+julia,rosenbrock23_sciml,performance,adaptive,julia,8192,tol,1.0e-8,ErrorException,watchdog: run exceeded 120.0 s
+julia,rosenbrock23_sciml,performance,fixed,fixed,32768,dt,0.0009765625,ErrorException,watchdog: run exceeded 120.0 s
+julia,rosenbrock23_sciml,performance,adaptive,julia,32768,tol,1.0e-8,Watchdog,run never returned within 120.0 s

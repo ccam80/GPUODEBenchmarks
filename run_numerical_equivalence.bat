@@ -90,7 +90,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo --- DifferentialEquations.jl Float32 sweeps ^(CPU, machine independent^) ---
+echo --- DifferentialEquations.jl Float32 sweeps ^(CPU, keyed per machine^) ---
 julia -t auto --project=. runner_scripts\numerical_equivalence\ne_diffeq.jl --controller %CONTROLLER% --algorithm %ALGORITHM% --problem "%PROBLEM%"
 if errorlevel 1 (
     echo DifferentialEquations.jl sweeps failed

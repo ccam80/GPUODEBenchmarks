@@ -1,0 +1,9 @@
+analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,6.25e-05,131072,15,0,14734.040600
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,6.25e-05,131072,15,1,14741.118900
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,6.25e-05,131072,15,2,14754.887300
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,6.25e-05,131072,15,3,14720.885700
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,3.125e-05,131072,15,0,29382.251700
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,3.125e-05,131072,15,1,29421.353400
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,3.125e-05,131072,15,2,29436.641700
+wp,ring_modulator,kvaerno3,fixed,d2h,dt,3.125e-05,131072,15,3,29412.506500

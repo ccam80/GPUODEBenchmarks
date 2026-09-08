@@ -14,7 +14,7 @@ runner_scripts/numerical_equivalence/ne_common.py):
     - "default" tier: cubie's shipped controller defaults — cubie's real
       controller dynamics.
     - "matched" tier: controller constants mirrored from the Julia run's
-      resolved defaults (data/numerical_equivalence/julia/
+      resolved defaults (data/numerical_equivalence/julia/<key>/<problem>/
       controller_constants.csv, written by ne_diffeq.jl), so both stacks
       run identical controller type, gains and tolerances, isolating
       controller-caused error. When the matched settings equal the default

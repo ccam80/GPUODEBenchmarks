@@ -1,0 +1,7 @@
+framework,algorithm,phase,mode,tier,transfers,n,setting_kind,setting,samples,min_ms,p05_ms,median_ms,p95_ms,max_ms
+julia,tsit5,performance,adaptive,julia,both,8,tol,1.0e-8,10,971.4433,971.50612,972.53825,973.773625,973.8877
+julia,tsit5,performance,adaptive,julia,none,8,tol,1.0e-8,10,971.3317,971.336695,972.6248,974.155255,974.3938
+julia,tsit5,performance,fixed,fixed,both,32,dt,0.0029296875,20,19.7659,19.78376,19.8816,20.022834999999997,20.0387
+julia,tsit5,performance,fixed,fixed,both,8,dt,0.0029296875,20,19.7776,19.78292,20.82915,28.716405,29.334
+julia,tsit5,performance,fixed,fixed,none,32,dt,0.0029296875,20,19.7257,19.728075000000004,19.782049999999998,19.856305,19.8659
+julia,tsit5,performance,fixed,fixed,none,8,dt,0.0029296875,20,19.7188,19.728679999999997,19.801099999999998,19.921765,19.9534
