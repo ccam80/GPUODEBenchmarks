@@ -26,6 +26,12 @@ class PythonViewTests(unittest.TestCase):
                          protocol.TOL_K[1] - protocol.TOL_K[0] + 1)
         self.assertEqual(lorenz.timing_dt, 2.0 ** -protocol.TIMING_DT_K)
 
+    def test_newton_scale_is_one_table(self):
+        self.assertEqual(protocol.NEWTON_ATOL, protocol.get("newton.atol"))
+        self.assertEqual(protocol.NEWTON_RTOL, protocol.get("newton.rtol"))
+        self.assertGreater(protocol.NEWTON_ATOL, 0.0)
+        self.assertGreater(protocol.NEWTON_RTOL, 0.0)
+
     def test_wp_common_reexports(self):
         self.assertIs(wp_common.TOLS, protocol.TOLS)
         self.assertEqual(wp_common.N_WP, protocol.N_WP)
@@ -80,7 +86,8 @@ class JuliaViewTests(unittest.TestCase):
             'include(joinpath("{0}", "runner_scripts", "watchdog.jl")); '
             'println(N_WP, " ", N_NE, " ", TIMING_TOL, " ", REPEAT_CAP, " ", '
             'WATCHDOG_SECONDS, " ", length(TOLS), " ", '
-            'join(problem_dts(get_problem("lorenz")), ","))'
+            'join(problem_dts(get_problem("lorenz")), ","), " ", '
+            'NEWTON_ATOL, " ", NEWTON_RTOL)'
         ).format(ROOT.replace("\\", "/"))
         out = subprocess.run(
             ["julia", "--startup-file=no", "--project=" + ROOT, "-e", script],
@@ -94,6 +101,8 @@ class JuliaViewTests(unittest.TestCase):
         self.assertEqual(int(fields[5]), len(protocol.TOLS))
         self.assertEqual([float(v) for v in fields[6].split(",")],
                          get_problem("lorenz").dts())
+        self.assertEqual(float(fields[7]), protocol.NEWTON_ATOL)
+        self.assertEqual(float(fields[8]), protocol.NEWTON_RTOL)
 
 
 if __name__ == "__main__":

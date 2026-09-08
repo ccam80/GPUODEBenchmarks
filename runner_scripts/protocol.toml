@@ -25,6 +25,20 @@ overlap_tol = 1.0e-8
 tol_k = [2, 8]
 dt_min_fraction = 1.0e-6
 
+# Fixed-step implicit stages: the Newton iteration stops when eta * ||dz|| < kappa, with ||dz|| the rms of dz_i / (atol + rtol * |u_i|),
+# eta = theta / (1 - theta) the contraction estimate, and kappa each library's default 0.01 (OrdinaryDiffEq NLNewton, diffrax VeryChord,
+# cubie's hard-coded acceptance bound). atol and rtol below are the abstol/reltol OrdinaryDiffEq takes with adaptive = false, diffrax's
+# VeryChord(rtol, atol, norm = rms_norm) and cubie's newton_atol/newton_rtol; they sit under the Float32 roundoff floor of the fixed-step
+# sweeps so the stage solve never limits a curve. Adaptive solves scale the Newton norm by the step tolerance instead (OrdinaryDiffEq
+# and diffrax by construction; cubie is told newton_atol = newton_rtol = tol, its own default being the controller tolerance / 10, and it
+# warns that the two are equal and floors newton_rtol at 4 eps(Float32) = 4.8e-7). Left to each library: the iteration cap (OrdinaryDiffEq
+# 10, diffrax 10, cubie 8) and the linear solve inside each Newton step (dense LU in OrdinaryDiffEq and diffrax; cubie's per-family
+# default, LU for dirk and firk, a five-step minimal-residual Krylov solve at the step tolerance for backwards_euler). DiffEqGPU's kernels
+# take none of this: their Newton stops at an unscaled residual rms below 100 eps(Float32) within 30 iterations.
+[newton]
+atol = 1.0e-6
+rtol = 1.0e-6
+
 # Solver.optimize runs on an n-trajectory batch; families listed are optimised at every setting, the rest once per leg.
 [optimize]
 n = 262144

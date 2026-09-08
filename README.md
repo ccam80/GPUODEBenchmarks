@@ -212,11 +212,25 @@ cubie's controller set to the DIRK PI defaults (`pi_tier_controller` in
 
 `eps(Float32)` is 1.2e-7, so the tightest points of the tolerance grid and
 the 1e-8 `TIMING_TOL` ask for more than the working precision resolves.
-Cubie warns `newton_rtol is at or above the step controller rtol` from 1e-7
-down. A fixed step leaves diffrax's implicit solvers nothing to take their
-root-finder tolerances from, so the bench passes the run's tolerance the way
-an adaptive controller would; its chord iteration still diverges on lorenz,
-and that point records NaN.
+
+### Implicit stage solves
+
+The `[newton]` table of `runner_scripts/protocol.toml` sets the scale of the
+fixed-step Newton termination test in every stack that exposes it:
+OrdinaryDiffEq's `abstol`/`reltol` with `adaptive = false` (the
+DifferentialEquations.jl NE sweep), diffrax's `VeryChord(rtol, atol, norm =
+rms_norm)` root finder, and cubie's `newton_atol`/`newton_rtol`. All three
+stop when `eta * ||dz|| < 0.01` with `||dz||` the rms of the update scaled by
+`atol + rtol * |u|`, so the table means the same thing in each. Adaptive solves
+scale that norm by the step tolerance instead: OrdinaryDiffEq and diffrax by
+construction, cubie because the bench passes `newton_atol = newton_rtol = tol`
+(its own default is the controller tolerance divided by ten; it warns
+`newton_rtol is at or above the step controller rtol` when told otherwise and
+floors `newton_rtol` at `4 eps(Float32)`, so the 1e-7 and 1e-8 points run
+their Newton at 4.8e-7 relative).
+DiffEqGPU's kernels expose neither: their Newton stops at an unscaled residual
+rms below `100 eps(Float32)`. The comment above the table records the
+iteration caps and linear solvers each library keeps.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
