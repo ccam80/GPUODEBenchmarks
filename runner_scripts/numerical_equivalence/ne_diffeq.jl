@@ -62,13 +62,7 @@ include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
-const N_NE = 1024
-# Adaptive protocol (same as ne_common): tolerance grid and dt pins as
-# fractions of the problem duration.
-const TOLS_NE = [10.0^-k for k in 2:8]
-const DT0_FRACTION = 1.0f-2
-const DT_MIN_FRACTION = 1.0f-6
-const DT_MAX_FRACTION = 0.5f0
+const TOLS_NE = TOLS
 
 const PROBLEM = get(NE_OPT, "problem", "all")
 const PROBLEMS = resolve_problems(PROBLEM, "julia")
@@ -164,8 +158,9 @@ function setup(problem)
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
         dts = problem_dts_ne(problem),
-        dt0 = duration * DT0_FRACTION, dtmin = duration * DT_MIN_FRACTION,
-        dtmax = duration * DT_MAX_FRACTION)
+        dt0 = duration * Float32(DT0_FRACTION),
+        dtmin = duration * Float32(DT_MIN_FRACTION),
+        dtmax = duration * Float32(DT_MAX_FRACTION))
 end
 
 problem_dts_ne(problem) = problem_ne_dts(problem)

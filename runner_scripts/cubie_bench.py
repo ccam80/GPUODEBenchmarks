@@ -14,11 +14,10 @@ from cubie_systems import (build_system, final_states, output_types,
                            sweep_parameters)
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (TIMING_TOL, errored_pct, parse_bench_args,
+from wp_common import (REPEAT_CAP, TIMING_TOL, errored_pct, parse_bench_args,
                        times_outfile)
 
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-REPEATS = 20
+REPEATS = REPEAT_CAP
 
 PRECISION = np.float32
 

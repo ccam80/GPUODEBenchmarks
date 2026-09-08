@@ -110,7 +110,13 @@ function Invoke-ResumePrune {
     $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
     & python runner_scripts\resume.py prune $N $outfile
 }
+# The protocol header is generated before the build and hashed with the sources.
+& python runner_scripts\protocol.py --cxx-header GPU_ODE_MPGOS\protocol.h
+if ($LASTEXITCODE -ne 0) { Write-Error "protocol header generation failed" }
+$NWp = [long](& python runner_scripts\protocol.py get ensemble.n_wp)
+$NStates = [long](& python runner_scripts\protocol.py get ensemble.n_states)
 $SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
+    (Resolve-Path "GPU_ODE_MPGOS\protocol.h").Path,
     (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
     @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
       Sort-Object FullName | ForEach-Object { $_.FullName })
@@ -230,7 +236,7 @@ function Invoke-WarmBuilds {
 
 function Get-NtTargets {
     $targets = @()
-    $nts = @($NValues + [long]131072 | Sort-Object -Unique)
+    $nts = @($NValues + $NWp | Sort-Object -Unique)
     foreach ($p in $Problems) {
         foreach ($s in $Solvers) {
             foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
@@ -251,7 +257,7 @@ if ($Analysis -eq 'performance') {
 }
 
 if ($Analysis -eq 'states') {
-    $StatesN = [long]131072
+    $StatesN = $NStates
     $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
     # A resumed or --floor run appends to what earlier runs recorded.
     if (-not $ResumeActive -and -not $FloorActive) {
@@ -300,7 +306,7 @@ foreach ($problemName in $Problems) {
                 Write-Host "-- resume: skipping wp $problemName ($solver) (already covered)"
                 continue
             }
-            Invoke-Point -ProblemName $problemName -Solver $solver -Nt 131072 -Wp
+            Invoke-Point -ProblemName $problemName -Solver $solver -Nt $NWp -Wp
         }
         continue
     }

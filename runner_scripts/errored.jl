@@ -1,7 +1,6 @@
 # Errored-percent column shared by the Julia writers and the plot scripts.
 
-# Rows errored past this percent are dropped by the plot scripts.
-const MAX_ERRORED_PCT = 10.0
+include(joinpath(@__DIR__, "protocol.jl"))
 
 "Percent of trajectories with a non-finite final state; a device array reduces in place."
 function errored_pct(finals)

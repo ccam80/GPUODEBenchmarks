@@ -18,6 +18,8 @@
 #include PROBLEM_HEADER
 #include "problems/stubs.cuh"
 #include "SingleSystem_PerThread_Interface.cuh"
+// Generated from runner_scripts/protocol.toml by the launcher before every build.
+#include "protocol.h"
 
 #define PI 3.14159265358979323846
 
@@ -38,8 +40,8 @@ const int NDO  = 0;      // NumberOfPointsOfDenseOutput: nothing reads it, and
                          // storing it is work the other suites do not do
 
 const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
-// The N sweep steps duration * 2^-10, matching the other frameworks.
-const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION / 1024.0);
+// The N sweep steps duration * 2^-timing_k.
+const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION * pow(2.0, -PROTOCOL_TIMING_K));
 
 void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
 void Logspace(vector<PRECISION>&, PRECISION, PRECISION, int);
@@ -185,16 +187,22 @@ static void AppendSamples(const std::string& Path, const SamplePoint& Point,
 static double WatchdogSeconds()
 {
 	const char* env = std::getenv("BENCH_WATCHDOG_SECONDS");
-	return env ? atof(env) : 120.0;
+	return env ? atof(env) : PROTOCOL_WATCHDOG_SECONDS;
 }
 
-// Repeat floor and ceiling from the first timed run; mirrored in wp_common.py and watchdog.jl.
+// Repeat floor and ceiling from the first timed run's seconds, per the protocol schedule.
 static void RepeatBounds(double FirstMs, int Cap, int& Floor, int& Ceiling)
 {
-	if      (FirstMs < 100.0)  { Floor = 20; Ceiling = 20; }
-	else if (FirstMs < 3000.0) { Floor = 10; Ceiling = 10; }
-	else if (FirstMs < 5000.0) { Floor = 5;  Ceiling = 10; }
-	else                       { Floor = 3;  Ceiling = 10; }
+	double FirstS = FirstMs / 1000.0;
+	for (int i = 0; i < PROTOCOL_REPEAT_SCHEDULE_ROWS; i++)
+	{
+		if (FirstS < PROTOCOL_REPEAT_SCHEDULE[i][0])
+		{
+			Floor = (int)PROTOCOL_REPEAT_SCHEDULE[i][1];
+			Ceiling = (int)PROTOCOL_REPEAT_SCHEDULE[i][2];
+			break;
+		}
+	}
 	if (Floor > Cap) Floor = Cap;
 	if (Ceiling > Cap) Ceiling = Cap;
 }
@@ -209,13 +217,13 @@ static double MedianMs(std::vector<double> Timed)   // by value: nth_element per
 	return 0.5 * (Timed[Half - 1] + Upper);
 }
 
-// True at the ceiling, or past the floor with median/min - 1 within 2%.
+// True at the ceiling, or past the floor with median/min - 1 within the protocol spread.
 static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling)
 {
 	if ((int)Timed.size() >= Ceiling) return true;
 	if ((int)Timed.size() < Floor) return false;
 	double Min = *std::min_element(Timed.begin(), Timed.end());
-	return MedianMs(Timed) / Min - 1.0 <= 0.02;
+	return MedianMs(Timed) / Min - 1.0 <= PROTOCOL_REPEAT_SPREAD;
 }
 
 // BENCH_FLOOR: merge re-runs by keeping the lower recorded time.
@@ -472,12 +480,12 @@ int main(int argc, char *argv[])
 
 	Scan.SolverOption(ThreadsPerBlock, BlockSize);
 	Scan.SolverOption(InitialTimeStep, TIMING_DT);
-	// Adaptive N-sweep tolerance; mirrors TIMING_TOL in runner_scripts/wp_common.py.
+	// Adaptive N-sweep tolerance.
 	if (SOLVER != RK4)
 		for (int c = 0; c < SD; c++)
 		{
-			Scan.SolverOption(RelativeTolerance, c, 1.0e-5);
-			Scan.SolverOption(AbsoluteTolerance, c, 1.0e-5);
+			Scan.SolverOption(RelativeTolerance, c, PROTOCOL_TIMING_TOL);
+			Scan.SolverOption(AbsoluteTolerance, c, PROTOCOL_TIMING_TOL);
 		}
 
 	// Device-side run budget, 1.25 over the host cap; see problems/stubs.cuh.
@@ -487,12 +495,13 @@ int main(int argc, char *argv[])
 	long long BudgetCycles = (long long)(WatchdogSeconds() * 1.25 * ClockKHz * 1000.0);
 	Scan.SetHost(IntegerSharedParameters, 0, (int)(BudgetCycles >> WATCHDOG_CLOCK_SHIFT));
 
-	// `<exe> wp` sweeps step size (RK4) or tolerance (RKCK45); grids mirror runner_scripts/wp_common.py.
+	// `<exe> wp` sweeps step size (RK4) or tolerance (RKCK45) over the protocol grids.
 	if (argc > 1 && string(argv[1]) == string("wp"))
 	{
 		vector< vector<double> > golden(NT, vector<double>(SD, 0.0));
 		{
-			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_131072.csv";
+			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_"
+				+ std::to_string(PROTOCOL_N_WP) + ".csv";
 			ifstream gf(gpath.c_str());
 			if (!gf)
 			{
@@ -512,9 +521,11 @@ int main(int argc, char *argv[])
 		const bool FixedMode = (SOLVER == RK4);
 		vector<double> Settings;
 		if (FixedMode)
-			for (int k = 4; k <= 13; k++) Settings.push_back(PROBLEM_DURATION * pow(2.0, -k));
+			for (int k = PROTOCOL_WP_K_LO; k <= PROTOCOL_WP_K_HI; k++)
+				Settings.push_back(PROBLEM_DURATION * pow(2.0, -k));
 		else
-			for (int k = 2; k <= 8; k++) Settings.push_back(pow(10.0, -k));
+			for (int k = PROTOCOL_TOL_K_LO; k <= PROTOCOL_TOL_K_HI; k++)
+				Settings.push_back(pow(10.0, -k));
 
 		// Filenames carry the cubie-vocabulary algorithm name.
 		string Mode = ModeName;
@@ -532,7 +543,7 @@ int main(int argc, char *argv[])
 		const std::string SettingKind = FixedMode ? "dt" : "tol";
 
 		// Repeat ceiling; the count follows the first timed run's duration.
-		const int Repeats = 10;
+		const int Repeats = PROTOCOL_REPEAT_CAP;
 		for (size_t si = 0; si < Settings.size(); si++)
 		{
 			double Setting = Settings[si];
@@ -651,7 +662,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Repeat ceiling; the count per leg follows its first timed run.
-	const int TimingRepeats = 20;
+	const int TimingRepeats = PROTOCOL_REPEAT_CAP;
 
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";
 	const std::string TimesMode = ModeName;

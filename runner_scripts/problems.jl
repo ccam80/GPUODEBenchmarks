@@ -1,16 +1,12 @@
 # The problem axis: one row per benchmark ODE/DAE in problems.csv, mirrored by problems.py.
 
+include(joinpath(@__DIR__, "protocol.jl"))
+
 const PROBLEMS_CSV = joinpath(@__DIR__, "problems.csv")
 const DEFAULT_PROBLEM = "lorenz"
 
 const _INT_FIELDS = ("states",)
 const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
-
-# Dyadic dt-grid exponents as duration fractions; mirrored in problems.py.
-const WP_K = (4, 13)
-const EULER_K = (8, 17)
-const NE_K = (1, 13)
-const TIMING_DT_K = 10
 
 "Every problem in declaration order, as a vector of Dict{String,Any}."
 function load_problems()

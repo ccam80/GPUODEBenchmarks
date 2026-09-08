@@ -25,7 +25,7 @@ from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (TIMING_TOL, append_samples, errored_pct,
+from wp_common import (REPEAT_CAP, TIMING_TOL, append_samples, errored_pct,
                        parse_bench_args, reset_samples, sample_point,
                        samples_outfile, timed_min_ms, times_outfile)
 
@@ -36,8 +36,7 @@ ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
 
 NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "jax")
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-REPEATS = 20
+REPEATS = REPEAT_CAP
 
 # Persistent XLA compilation cache; off in states mode so compiles run cold.
 if ANALYSIS != "states":

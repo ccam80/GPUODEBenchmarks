@@ -11,7 +11,7 @@ include(joinpath(dirname(@__DIR__), "problems.jl"))
 include(joinpath(dirname(@__DIR__), "reference_systems.jl"))
 include(joinpath(@__DIR__, "retcode_sidecar.jl"))
 
-const N = 131072
+const N = N_WP
 
 requested = "all"
 force = false

@@ -70,15 +70,11 @@ if isempty(PROBLEMS)
     exit(0)
 end
 
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-const REPEATS = 20
+const REPEATS = REPEAT_CAP
 const WP_MODE = !isempty(ARGS) && ARGS[1] == "wp"
 const STATES_MODE = !isempty(ARGS) && startswith(ARGS[1], "states:")
 # states:<nstates>:<ensemble>, one system size per process.
 const STATES_ARGS = STATES_MODE ? parse.(Int, split(ARGS[1], ':')[2:3]) : Int[]
-# Mirrors TIMING_TOL and N_WP in runner_scripts/wp_common.py.
-const TIMING_TOL = 1.0f-5
-const N_WP = 131072
 # The N sweep runs ascending inside one process so each kernel compiles once.
 const NS = isinteractive() ? [8192] :
            (WP_MODE ? [N_WP] :
@@ -272,7 +268,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             else
                 CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob, solver,
                     saveat = duration, save_everystep = false,
-                    reltol = TIMING_TOL, abstol = TIMING_TOL, dt = dt0)
+                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
             end
         end
         full_solve = () -> begin
@@ -284,7 +280,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             else
                 CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob, solver,
                     saveat = duration, save_everystep = false,
-                    reltol = TIMING_TOL, abstol = TIMING_TOL, dt = dt0)
+                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
             end
             ts = Array(sol[1])
             us = Array(sol[2])
@@ -406,7 +402,7 @@ function run_states(nstates, n)
                         CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob,
                             solver, saveat = duration,
                             save_everystep = false,
-                            reltol = TIMING_TOL, abstol = TIMING_TOL,
+                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
                             dt = dt0)
                     end
                 end
@@ -420,7 +416,7 @@ function run_states(nstates, n)
                         CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob,
                             solver, saveat = duration,
                             save_everystep = false,
-                            reltol = TIMING_TOL, abstol = TIMING_TOL,
+                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
                             dt = dt0)
                     end
                     ts = Array(sol[1])

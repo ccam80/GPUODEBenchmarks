@@ -1,0 +1,39 @@
+# Benchmark protocol shared by every writer: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates.
+
+[ensemble]
+n_wp = 131072
+n_ne = 1024
+n_states = 131072
+n_min = 8
+n_step = 4
+nmax_default = 16777216
+states_grid = [4, 8, 16, 32, 64, 128]
+
+# Fixed steps are duration * 2^-k.
+[fixed]
+timing_k = 10
+wp_k = [4, 13]
+euler_k = [8, 17]
+ne_k = [1, 13]
+
+# Tolerances are atol = rtol; the sweep grid is 10^-k.
+[adaptive]
+timing_tol = 1.0e-5
+overlap_tol = 1.0e-8
+tol_k = [2, 8]
+dt0_fraction = 1.0e-2
+dt_min_fraction = 1.0e-6
+dt_max_fraction = 0.5
+
+# Rows are [first-run seconds below, floor, ceiling]; a leg stops past its floor once median/min - 1 is within spread.
+[repeats]
+cap = 20
+schedule = [[0.1, 20, 20], [3.0, 10, 10], [5.0, 5, 10], [inf, 3, 10]]
+spread = 0.02
+
+[watchdog]
+seconds = 120
+exit_code = 3
+
+[plots]
+max_errored_pct = 10.0

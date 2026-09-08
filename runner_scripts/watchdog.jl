@@ -1,10 +1,6 @@
 # Per-run wall-clock watchdog shared by the Julia GPU writers.
 
-const WATCHDOG_SECONDS = parse(Float64,
-    get(ENV, "BENCH_WATCHDOG_SECONDS", "120"))
-
-# Exit status of the hard-exit path.
-const WATCHDOG_EXIT_CODE = Cint(3)
+include(joinpath(@__DIR__, "protocol.jl"))
 
 "Run f() under the watchdog; when it never returns, run on_breach() and hard-exit."
 function run_watchdogged(f, on_breach)
@@ -28,12 +24,6 @@ function run_watchdogged(f, on_breach)
         close(timer)
     end
 end
-
-# (limit_s, floor, ceiling) repeat schedule; mirrored in wp_common.py and Bench.cu.
-const REPEAT_SCHEDULE = ((0.1, 20, 20), (3.0, 10, 10), (5.0, 5, 10),
-    (Inf, 3, 10))
-# A leg past its floor stops once median/min - 1 is within this spread.
-const REPEAT_SPREAD = 0.02
 
 "(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."
 function repeat_bounds(first_s, cap)

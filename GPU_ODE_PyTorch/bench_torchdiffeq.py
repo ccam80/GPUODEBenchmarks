@@ -17,9 +17,9 @@ from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
 from resume import (active as resume_active, floor_enabled, prune_reruns,
                     skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (append_samples, errored_pct, parse_bench_args,
-                       reset_samples, sample_point, samples_outfile,
-                       times_outfile)
+from wp_common import (REPEAT_CAP, append_samples, errored_pct,
+                       parse_bench_args, reset_samples, sample_point,
+                       samples_outfile, times_outfile)
 
 DATASET_KEY = dataset_key()
 
@@ -27,8 +27,7 @@ FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
 
 NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
     sys.argv[1:], "pytorch")
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-REPEATS = 20
+REPEATS = REPEAT_CAP
 
 # %%
 

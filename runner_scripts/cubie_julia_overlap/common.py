@@ -15,14 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from ne_common import (  # noqa: E402 - path bootstrap above
-    TOLS_NE as NE_TOLS, N_NE, DT0_FRACTION as DT0,
-    DT_MIN_FRACTION as DT_MIN, DT_MAX_FRACTION as DT_MAX, controllers_equal,
-    cubie_default_controller, read_ne_csv, read_ne_adaptive_csv,
+    controllers_equal, cubie_default_controller, read_ne_csv,
+    read_ne_adaptive_csv,
 )
-from problems import NE_K  # noqa: E402 - path bootstrap above
+from protocol import (  # noqa: E402 - path bootstrap above
+    DT0_FRACTION as DT0, DT_MAX_FRACTION as DT_MAX,
+    DT_MIN_FRACTION as DT_MIN, N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP,
+    TIMING_DT_K, TOLS, WP_K, fixed_dts, parse_ns, performance_ns,
+)
 
-# The ne dt grid as duration fractions; the workers scale by the duration.
-NE_DTS = [2.0 ** -k for k in range(NE_K[0], NE_K[1] + 1)]
+# dt grids as duration fractions; the workers scale by the duration.
+NE_DTS = fixed_dts(1.0, NE_K)
 
 CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
 
@@ -48,17 +51,13 @@ PHASES = ("performance", "numerical", "work_precision")
 def phases_for(analysis):
     return PHASES if analysis == "all" else (analysis.replace("-", "_"),)
 
-# Protocol constants; mirrored in julia_worker.jl. dt values are fractions of
-# the problem duration.
-FIXED_DT = 2.0 ** -10
-ADAPTIVE_TOL = 1.0e-8
-# Repeat ceilings; the count per leg follows its first timed run's duration.
-PERFORMANCE_REPEATS = 20
-WORK_REPEATS = 20
-WP_DTS = [2.0 ** -k for k in range(4, 14)]
-WP_TOLS = [10.0 ** -k for k in range(2, 9)]
-# Mirrors runner_scripts/wp_common.py.
-N_WP = 131072
+FIXED_DT = 2.0 ** -TIMING_DT_K
+ADAPTIVE_TOL = OVERLAP_TOL
+PERFORMANCE_REPEATS = REPEAT_CAP
+WORK_REPEATS = REPEAT_CAP
+WP_DTS = fixed_dts(1.0, WP_K)
+WP_TOLS = TOLS
+NE_TOLS = TOLS
 
 # Overlap family labels -> ne_common family keys.
 NE_FAMILY = {"ERK": "erk", "ESDIRK": "dirk", "Rosenbrock-W": "rosenbrock"}
@@ -91,24 +90,6 @@ def algorithms(name="all"):
 
 def algorithm_names():
     return ["all"] + [row["cubie_alias"] for row in algorithms()]
-
-
-def performance_ns(nmax, from_n=0):
-    values, n = [], 8
-    while n <= nmax:
-        if n >= from_n:
-            values.append(n)
-        n *= 4
-    return values
-
-
-def parse_ns(spec, from_n=0):
-    """A single value is a sweep ceiling; a comma list is the exact counts."""
-    text = str(spec)
-    if "," not in text:
-        return performance_ns(int(text), from_n)
-    values = sorted({int(part) for part in text.split(",") if part})
-    return [n for n in values if n >= max(from_n, 8)]
 
 
 def protocol(nmax, from_n=0):
