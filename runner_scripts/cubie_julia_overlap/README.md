@@ -37,10 +37,8 @@ The overlap set is every row of `runner_scripts/algorithms.csv` with a
 `julia_gpu` constructor. The complete eight-method
 DiffEqGPU ODE inventory, including the three exclusions, is
 `diffeqgpu_ode_inventory.csv`; `GPUEM` and `GPUSIEA` are SDE-only and outside
-this suite. The Julia worker loads `GPU_ODE_JuliaKernels` and solves through
-`runner_scripts/julia_prob.jl`, the same kernel path as the timed sweeps; it
-requires the root Julia project to be instantiated already and never runs
-package setup.
+this suite. The Julia worker solves through `runner_scripts/julia_prob.jl`
+with `GPU_ODE_JuliaKernels` loaded and requires an instantiated root project.
 
 A worker records individual point failures, continues through the remaining
 sweep, then exits nonzero so the launcher marks the run incomplete. Every
