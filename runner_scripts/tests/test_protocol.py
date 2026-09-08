@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import protocol  # noqa: E402
 import wp_common  # noqa: E402
+from launch import julia_command  # noqa: E402
 from problems import get_problem  # noqa: E402
 
 
@@ -78,7 +79,7 @@ class CxxHeaderTests(unittest.TestCase):
         self.assertEqual(os.stat(path).st_mtime_ns, first)
 
 
-@unittest.skipUnless(shutil.which("julia"), "julia not on PATH")
+@unittest.skipUnless(shutil.which(julia_command()[0]), "julia not on PATH")
 class JuliaViewTests(unittest.TestCase):
     def test_julia_reads_the_same_values(self):
         script = (
@@ -90,7 +91,7 @@ class JuliaViewTests(unittest.TestCase):
             'NEWTON_ATOL, " ", NEWTON_RTOL)'
         ).format(ROOT.replace("\\", "/"))
         out = subprocess.run(
-            ["julia", "--startup-file=no", "--project=" + ROOT, "-e", script],
+            julia_command() + ["--startup-file=no", "--project=" + ROOT, "-e", script],
             capture_output=True, text=True, check=True, cwd=ROOT)
         fields = out.stdout.split()
         self.assertEqual(int(fields[0]), protocol.N_WP)

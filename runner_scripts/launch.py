@@ -67,8 +67,8 @@ def suite_python():
 
 
 def julia_command():
-    """The julia launcher as argv; JULIA may name a channel such as `julia +1.13`."""
-    return shlex.split(os.environ.get("JULIA", "julia"))
+    """The julia launcher as argv: `julia +1.13`, or JULIA when set."""
+    return shlex.split(os.environ.get("JULIA", "julia +1.13"))
 
 
 def mode_args(mode):

@@ -86,9 +86,9 @@ class DriverHarness(object):
                      for mode in ("fixed", "adaptive")}
 
         def fake_popen(cmd, cwd=None, env=None):
-            spec = cmd[3]  # ["julia", "--project=.", BENCH, spec, algorithm]
+            # [<julia launcher...>, "--project=.", BENCH, spec, algorithm]
+            spec, algorithm = cmd[cmd.index(julia_driver.BENCH) + 1:][:2]
             nstates = int(spec.split(":")[1])
-            algorithm = cmd[4]
             behavior = self.behaviors.get((nstates, algorithm), "ok")
             proc = FakeProc(nstates, algorithm, self.legs, behavior)
             self.spawned.append((nstates, algorithm))
@@ -223,10 +223,10 @@ class PerformanceDriverTests(unittest.TestCase):
         self.exit_codes = {}
 
         def fake_popen(cmd, cwd=None, env=None):
-            # ["julia", "--project=.", BENCH, nlist, algorithm,
-            #  "--problem", problem, "--mode", mode]
-            self.spawned.append(cmd[3:])
-            key = (cmd[6], cmd[4], cmd[8])
+            # [<julia launcher...>, "--project=.", BENCH, nlist, algorithm, "--problem", problem, "--mode", mode]
+            args = cmd[cmd.index(julia_driver.BENCH) + 1:]
+            self.spawned.append(args)
+            key = (args[3], args[1], args[5])
             return PerfProc(self.exit_codes.get(key, 0))
 
         patches = [

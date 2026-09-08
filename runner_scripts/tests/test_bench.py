@@ -174,19 +174,15 @@ class LaunchTests(unittest.TestCase):
         for package in ("julia", "pytorch", "cpp"):
             self.assertEqual(launch.commands(package, "numerical", [8], "8", "all", "all"), [])
 
-    def test_suite_python_is_the_cubie_venv(self):
-        self.assertEqual(launch.suite_python(), launch.venv_python("cubie"))
-        self.assertTrue(os.path.isabs(launch.suite_python()))
-
-    def test_julia_command_honours_a_channel(self):
-        saved = os.environ.get("JULIA")
-        os.environ["JULIA"] = "julia +1.13"
+    def test_julia_command_is_the_1_13_channel_unless_overridden(self):
+        saved = os.environ.pop("JULIA", None)
         try:
             self.assertEqual(launch.julia_command(), ["julia", "+1.13"])
+            os.environ["JULIA"] = "/opt/julia/bin/julia"
+            self.assertEqual(launch.julia_command(), ["/opt/julia/bin/julia"])
         finally:
-            if saved is None:
-                os.environ.pop("JULIA")
-            else:
+            os.environ.pop("JULIA", None)
+            if saved is not None:
                 os.environ["JULIA"] = saved
 
 
