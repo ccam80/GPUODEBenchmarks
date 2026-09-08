@@ -10,6 +10,7 @@ using CSV
 using DelimitedFiles
 using Printf
 using Statistics
+using GPU_ODE_JuliaKernels
 
 CUDA.allowscalar(false)
 
@@ -18,10 +19,12 @@ const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "julia_prob.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
-# The fixed step is a fraction of the duration and also the adaptive start step.
+# Precompiled entries take precedence over runtime-built ones.
+merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
+# The fixed step is a fraction of the duration.
 const FIXED_DT = 2.0^-TIMING_DT_K
-const DT0 = FIXED_DT
 const ADAPTIVE_TOL = OVERLAP_TOL
 const PERFORMANCE_REPEATS = REPEAT_CAP
 const WORK_REPEATS = REPEAT_CAP
@@ -98,14 +101,7 @@ function append_row(path, values...)
     end
 end
 
-const SYSTEM = julia_system(PROBLEM)
-const ODEF = SYSTEM.mass_matrix === nothing ?
-             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
-    tgrad = SYSTEM.tgrad) :
-             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
-    tgrad = SYSTEM.tgrad, mass_matrix = SYSTEM.mass_matrix)
-const U0 = SYSTEM.u0
-const TSPAN = (0.0f0, DURATION)
+const SYSTEM, PROB, _ = build_prob(PROBLEM)
 
 const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
     "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
@@ -120,27 +116,10 @@ function sweep_grid(kind, n)
     return Float32.(problem_sweep(PROBLEM, n))
 end
 
+"Host and device ensembles over one phase's grid, and the shared problem."
 function build_problems(kind, n)
-    sweep = sweep_grid(kind, n)
-    prob = ODEProblem{false}(ODEF, U0, TSPAN, @SVector [sweep[1]])
-    probs = map(eachindex(sweep)) do i
-        DiffEqGPU.make_prob_compatible(remake(prob,
-            u0 = SYSTEM.u0_for(sweep[i]), p = @SVector [sweep[i]]))
-    end
-    # Host vector is returned too so the end-to-end timing can re-upload it.
-    return probs, cu(probs), prob
-end
-
-function run_solve(probs, prob, alg, mode, setting)
-    if mode == "fixed"
-        return DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = DURATION,
-            save_everystep = false, dt = Float32(setting))
-    else
-        return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = DURATION,
-            save_everystep = false, dt = DURATION * Float32(DT0),
-            dtmin = DURATION * Float32(DT_MIN_FRACTION),
-            abstol = Float32(setting), reltol = Float32(setting))
-    end
+    probs_host, probs = build_ensemble(SYSTEM, PROB, sweep_grid(kind, n))
+    return probs_host, probs, PROB
 end
 
 # The armed point's identity, for the watchdog's failure row.
@@ -160,20 +139,13 @@ function solve_end_to_end(probs_host, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
     host_us = run_watchdogged(watchdog_breach) do
-        probs = cu(probs_host)
-        sol = run_solve(probs, prob, alg, mode, setting)
-        us = Array(sol[2])
-        CUDA.synchronize()
+        _, _, us = gpu_solve_host(probs_host, prob, alg, mode, setting, PROBLEM)
         us
     end
     elapsed_ms = (time_ns() - start) / 1.0e6
     elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
         error("watchdog: run exceeded $(WATCHDOG_SECONDS) s")
-    final_vectors = host_us[end, :]
-    finals = Matrix{Float32}(undef, length(final_vectors), NSTATES)
-    for i in eachindex(final_vectors)
-        finals[i, :] .= final_vectors[i][SYSTEM.golden_index]
-    end
+    finals = final_states(SYSTEM, host_us[end, :])
     size(finals) == (length(probs_host), NSTATES) || error(
         "unexpected final-state size $(size(finals)); expected " *
         "($(length(probs_host)), $(NSTATES))")
@@ -185,8 +157,7 @@ function solve_device_only(probs, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
     run_watchdogged(watchdog_breach) do
-        run_solve(probs, prob, alg, mode, setting)
-        CUDA.synchronize()
+        gpu_solve_device(probs, prob, alg, mode, setting, PROBLEM)
     end
     elapsed_ms = (time_ns() - start) / 1.0e6
     elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
@@ -240,7 +211,7 @@ phases = ANALYSIS == "all" ? ("performance", "numerical", "work_precision") :
 for row in table
     alias = row["algorithm"]
     alg = try
-        eval(Meta.parse(row["julia_gpu"]))
+        gpu_solver(alias)
     catch err
         for phase in phases
             record_failure(alias, phase, "all", "julia", 0, "constructor", NaN, err)

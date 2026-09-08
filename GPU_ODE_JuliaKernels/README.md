@@ -1,6 +1,6 @@
 # GPU_ODE_JuliaKernels
 
-Precompiled benchmark systems for the DiffEqGPU kernel path. `SYSTEMS_CODEGEN` (`runner_scripts/julia_systems.jl`) evals the ModelingToolkit-generated functions into this module, and the `@compile_workload` runs one zero-step fixed and adaptive solve per (problem × algorithm) leg through the shared constructors in `runner_scripts/julia_prob.jl`; kernels specialize on types, so those solves warm the same kernels the full-size sweeps use in bounded time. `bench_ode_gpu.jl` merges `GPU_ODE_JuliaKernels.ENTRIES` over its lazy entry table. States-sweep grid sizes run under `julia_driver.py run_states` instead; a size worth caching becomes a problems.csv row.
+Precompiled benchmark systems for the DiffEqGPU kernel path. `SYSTEMS_CODEGEN` (`runner_scripts/julia_systems.jl`) evals the ModelingToolkit-generated functions into this module, and the `@compile_workload` runs one zero-step fixed and adaptive solve per (problem × algorithm) leg through `runner_scripts/julia_prob.jl`, for every algorithm the timed sweeps or the overlap suite run; kernels specialize on types, so those solves warm the same kernels the full-size sweeps use in bounded time. `bench_ode_gpu.jl` and the overlap worker merge `GPU_ODE_JuliaKernels.ENTRIES` over their lazy entry table. States-sweep grid sizes run under `julia_driver.py run_states` instead; a size worth caching becomes a problems.csv row.
 
 ## What persists across processes
 

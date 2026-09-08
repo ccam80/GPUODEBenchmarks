@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-rc3"
 manifest_format = "2.1"
-project_hash = "bb0362c8f26fa71c688f08b7415bacf863692495"
+project_hash = "2974d6697ea11799bd5f57f6ec4ee7790e19d4b8"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "5970c86505ae9c07bf5bc521ef2bbbb3849e8b7b"
@@ -1162,7 +1162,7 @@ uuid = "096a3bc2-3ced-46d0-87f4-dd12716f4bfc"
 version = "3.0.0"
 
 [[deps.GPU_ODE_JuliaKernels]]
-deps = ["CUDA", "DiffEqGPU", "LinearAlgebra", "ModelingToolkit", "PrecompileTools", "SciMLBase", "StaticArrays"]
+deps = ["CUDA", "DiffEqGPU", "LinearAlgebra", "ModelingToolkit", "PrecompileTools", "SciMLBase", "StaticArrays", "TOML"]
 path = "GPU_ODE_JuliaKernels"
 uuid = "b3c4e5d6-8a91-4f27-9d3c-2e7a61c0f4b2"
 version = "0.1.0"
