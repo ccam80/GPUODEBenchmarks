@@ -201,7 +201,8 @@ comparison is what each package delivers for a requested accuracy, which is
 why the figures plot achieved error rather than step counts. Adaptive points
 take `atol = rtol` from `adaptive.timing_tol` in `runner_scripts/protocol.toml`
 for the N-sweep and from its `tol_k` grid for work-precision, and start from the
-problem's timing dt; cubie floors the step at `duration * adaptive.dt_min_fraction`.
+problem's timing dt; cubie and the DifferentialEquations.jl NE sweep floor the
+step at `duration * adaptive.dt_min_fraction`, DiffEqGPU's kernels at 1e-14.
 Nothing else is set: every package runs its shipped step-controller defaults.
 
 Controllers are matched in one place only, the cubie against

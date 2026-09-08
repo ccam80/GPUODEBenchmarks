@@ -93,11 +93,7 @@ algorithm_modes(algorithm) = [mode
 
 "Ensemble l2-at-final error against the Float64 golden reference."
 function ensemble_error(system, us, golden)
-    final = Array(us[end, :])
-    m = Matrix{Float64}(undef, length(final), length(system.golden_index))
-    for i in eachindex(final)
-        m[i, :] .= Float64.(final[i][system.golden_index])
-    end
+    m = Float64.(final_states(system, Array(us[end, :])))
     return sqrt(sum(abs2, m .- golden) / length(m))
 end
 
@@ -196,35 +192,18 @@ function run_wp(problem)
     golden = readdlm(golden_path(problem), ',', Float64)
     system, prob, duration = build_prob(problem)
     probs_host, probs = build_ensemble(system, prob, problem, N_WP)
-    dt0 = Float32(problem_timing_dt(problem))
 
     for algorithm in ALGORITHMS
         problem_supports(problem, "julia") || continue
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
-
-        if "fixed" in algorithm_modes(algorithm)
-            wp_sweep(system, problem, algorithm, "fixed",
-                collect(problem_dts(problem, algorithm)), golden,
-                "$(label) fixed") do dt
-                CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob,
-                    solver; saveat = duration, save_everystep = false,
-                    dt = Float32(dt))
-                ts = Array(sol[1])
-                us = Array(sol[2])
-                sol
-            end
-        end
-
-        if "adaptive" in algorithm_modes(algorithm)
-            wp_sweep(system, problem, algorithm, "adaptive", TOLS, golden,
-                "$(label) adaptive") do tol
-                CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
-                    solver; saveat = duration, save_everystep = false,
-                    reltol = Float32(tol), abstol = Float32(tol), dt = dt0)
-                ts = Array(sol[1])
-                us = Array(sol[2])
-                sol
+        settings = Dict("fixed" => collect(problem_dts(problem, algorithm)),
+            "adaptive" => TOLS)
+        for mode in algorithm_modes(algorithm)
+            # The ensemble is resident; each solve is timed with its d2h.
+            wp_sweep(system, problem, algorithm, mode, settings[mode], golden,
+                "$(label) $(mode)") do setting
+                gpu_solve_d2h(probs, prob, solver, mode, setting, problem)[1]
             end
         end
     end
@@ -233,7 +212,7 @@ end
 # One (algorithm, mode) leg: every sweep size ascending on one compiled kernel.
 function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     solver = gpu_solver(algorithm)
-    dt0 = Float32(problem_timing_dt(problem))
+    _, setting = timing_setting(problem, mode)
     samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
         "times", mode, algorithm, problem)
     compiled = false
@@ -255,32 +234,10 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
         probs_host, probs = build_ensemble(system, prob, problem, n)
 
-        device_solve = () -> begin
-            # Device-only: probs already resident, results left there.
-            if mode == "fixed"
-                CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob, solver,
-                    saveat = duration, save_everystep = false, dt = dt0)
-            else
-                CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob, solver,
-                    saveat = duration, save_everystep = false,
-                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
-            end
-        end
-        full_solve = () -> begin
-            # Array(ts), Array(us) mirror what the higher-level wrapper transfers back.
-            probs_d = cu(probs_host)
-            sol = if mode == "fixed"
-                CUDA.@sync DiffEqGPU.vectorized_solve(probs_d, prob, solver,
-                    saveat = duration, save_everystep = false, dt = dt0)
-            else
-                CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob, solver,
-                    saveat = duration, save_everystep = false,
-                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
-            end
-            ts = Array(sol[1])
-            us = Array(sol[2])
-            sol
-        end
+        device_solve = () -> gpu_solve_device(probs, prob, solver, mode,
+            setting, problem)
+        full_solve = () -> gpu_solve_host(probs_host, prob, solver, mode,
+            setting, problem)[1]
         # NaN rows for every uncovered point this process will no longer reach.
         on_breach = () -> begin
             nan_rows(problem, algorithm, mode, run_ns[index:end])
@@ -373,11 +330,11 @@ function run_states(nstates, n)
     row = copy(get_problem("lorenz96"))
     row["states"] = nstates
     system, prob, duration = build_prob_parts(entry, row)
-    dt0 = Float32(problem_timing_dt(row))
 
     for algorithm in ALGORITHMS
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
+            _, setting = timing_setting(row, mode)
             if point_covered("states", row, algorithm, mode, n, nstates)
                 println("-- resume: skipping states=$(nstates) $(mode) " *
                         "$(algorithm) (already covered)")
@@ -389,36 +346,10 @@ function run_states(nstates, n)
             samples_none = samples_both = nothing
             t_ms, t_dev_ms, build_s, pct = try
                 probs_host, probs = build_ensemble(system, prob, row, n)
-                device_solve = () -> begin
-                    if mode == "fixed"
-                        CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob,
-                            solver, saveat = duration,
-                            save_everystep = false, dt = dt0)
-                    else
-                        CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob,
-                            solver, saveat = duration,
-                            save_everystep = false,
-                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
-                            dt = dt0)
-                    end
-                end
-                full_solve = () -> begin
-                    probs_d = cu(probs_host)
-                    sol = if mode == "fixed"
-                        CUDA.@sync DiffEqGPU.vectorized_solve(probs_d, prob,
-                            solver, saveat = duration,
-                            save_everystep = false, dt = dt0)
-                    else
-                        CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob,
-                            solver, saveat = duration,
-                            save_everystep = false,
-                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
-                            dt = dt0)
-                    end
-                    ts = Array(sol[1])
-                    us = Array(sol[2])
-                    sol
-                end
+                device_solve = () -> gpu_solve_device(probs, prob, solver,
+                    mode, setting, row)
+                full_solve = () -> gpu_solve_host(probs_host, prob, solver,
+                    mode, setting, row)[1]
                 # Uncapped: the first solve carries the kernel compile.
                 build = @elapsed device_solve()
                 marker = get(ENV, "BENCH_STATES_MARKER", "")
@@ -478,22 +409,18 @@ end
 function write_finals(system, problem, sol, name, duration)
     # Do not count solves that never wrote a final time
     final_times = Array(sol[1][end, :])
-    final_states = Array(sol[2][end, :])
-    # One row per trajectory, one column per golden state.
-    m = Matrix{Float64}(undef, length(final_states),
-        length(system.golden_index))
+    m = Float64.(final_states(system, Array(sol[2][end, :])))
     arrived = 0
-    for i in eachindex(final_states)
+    for i in eachindex(final_times)
         if isapprox(Float64(final_times[i]), Float64(duration); rtol = 1.0f-4)
-            m[i, :] .= Float64.(final_states[i][system.golden_index])
             arrived += 1
         else
             m[i, :] .= NaN
         end
     end
-    if arrived < length(final_states)
-        @warn "$(name): $(length(final_states) - arrived) of " *
-              "$(length(final_states)) trajectories stopped before " *
+    if arrived < length(final_times)
+        @warn "$(name): $(length(final_times) - arrived) of " *
+              "$(length(final_times)) trajectories stopped before " *
               "t=$(duration); written as NaN rows"
     end
     df = DataFrame(m, :auto)
