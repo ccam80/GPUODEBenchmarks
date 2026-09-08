@@ -1,0 +1,2 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+julia,tsit5,performance,adaptive,julia,32,tol,1.0e-8,Watchdog,run never returned within 120.0 s

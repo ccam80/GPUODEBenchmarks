@@ -1,0 +1,61 @@
+{
+  "dataset_key": "windows_RTX-4070-SUPER",
+  "problem": "ring_modulator",
+  "analysis": "all",
+  "package": "julia",
+  "cubie_backend": "numba-cuda",
+  "nmax": "16777216",
+  "performance_ns": [
+    8,
+    32,
+    128,
+    512,
+    2048,
+    8192,
+    32768,
+    131072,
+    524288,
+    2097152,
+    8388608
+  ],
+  "from_n": 0,
+  "algorithm": "all",
+  "commands": [
+    [
+      "julia",
+      "--startup-file=no",
+      "-t",
+      "auto",
+      "--project=C:\\local_working_projects\\GPUODEBenchmarks",
+      "C:\\local_working_projects\\GPUODEBenchmarks\\runner_scripts\\cubie_julia_overlap\\julia_worker.jl",
+      "--output",
+      "C:\\local_working_projects\\GPUODEBenchmarks\\data\\cubie_julia_overlap\\windows_RTX-4070-SUPER\\ring_modulator",
+      "--analysis",
+      "all",
+      "--nmax",
+      "8,32,128,512,2048,8192,32768,131072,524288,2097152,8388608",
+      "--from-n",
+      "0",
+      "--algorithm",
+      "all",
+      "--problem",
+      "ring_modulator"
+    ],
+    [
+      "C:\\local_working_projects\\GPUODEBenchmarks\\GPU_ODE_CUBIE\\venv\\Scripts\\python.exe",
+      "C:\\local_working_projects\\GPUODEBenchmarks\\runner_scripts\\cubie_julia_overlap\\analyze.py",
+      "--output",
+      "C:\\local_working_projects\\GPUODEBenchmarks\\data\\cubie_julia_overlap\\windows_RTX-4070-SUPER\\ring_modulator",
+      "--key",
+      "windows_RTX-4070-SUPER",
+      "--problem",
+      "ring_modulator"
+    ]
+  ],
+  "started_utc": "2026-08-30T19:12:38.776168+00:00",
+  "results": {
+    "julia": 3,
+    "analysis": 0
+  },
+  "finished_utc": "2026-08-30T19:22:42.002986+00:00"
+}

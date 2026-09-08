@@ -1,0 +1,13 @@
+analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.01,131072,20,0,55303.781200
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.01,131072,20,1,54298.297500
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.01,131072,20,2,54160.631200
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.01,131072,20,3,54289.041800
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.001,131072,20,0,63353.922600
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.001,131072,20,1,63383.181900
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.001,131072,20,2,63583.257200
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.001,131072,20,3,63438.021500
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.0001,131072,20,0,43878.649400
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.0001,131072,20,1,43823.952800
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.0001,131072,20,2,44071.312700
+wp,pollu,kvaerno3,adaptive,d2h,tol,0.0001,131072,20,3,43915.772900

@@ -1,0 +1,3 @@
+framework,algorithm,mode,tier,transfers,n,setting_kind,setting,samples,min_ms,p05_ms,median_ms,p95_ms,max_ms,golden_rmse,finite_trajectories,failed_trajectories
+julia,vern7,adaptive,julia,both,131072,tol,1.0e-8,20,4.9884,5.19398,5.937799999999999,13.719040000000001,14.723,0.1759600523483419,131072,0
+julia,vern7,adaptive,julia,none,131072,tol,1.0e-8,20,1.6002,1.614355,1.6471,1.79241,1.8268,0.1759600523483419,131072,0

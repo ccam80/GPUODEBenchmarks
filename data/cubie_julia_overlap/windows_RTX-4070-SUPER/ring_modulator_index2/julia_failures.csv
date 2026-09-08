@@ -1,0 +1,15 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+julia,tsit5,performance,fixed,fixed,8,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/8 trajectories valid
+julia,tsit5,performance,adaptive,julia,8,tol,1.0e-8,ErrorException,non-finite result: 4/8 trajectories valid
+julia,tsit5,performance,fixed,fixed,32,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/32 trajectories valid
+julia,tsit5,performance,fixed,fixed,128,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/128 trajectories valid
+julia,tsit5,performance,fixed,fixed,512,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/512 trajectories valid
+julia,tsit5,performance,adaptive,julia,512,tol,1.0e-8,ErrorException,non-finite result: 384/512 trajectories valid
+julia,tsit5,performance,fixed,fixed,2048,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/2048 trajectories valid
+julia,tsit5,performance,fixed,fixed,8192,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/8192 trajectories valid
+julia,tsit5,performance,fixed,fixed,32768,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/32768 trajectories valid
+julia,tsit5,performance,fixed,fixed,131072,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/131072 trajectories valid
+julia,tsit5,performance,adaptive,julia,131072,tol,1.0e-8,ErrorException,non-finite result: 66364/131072 trajectories valid
+julia,tsit5,performance,fixed,fixed,524288,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/524288 trajectories valid
+julia,tsit5,performance,fixed,fixed,2097152,dt,9.765625463842298e-7,ErrorException,non-finite result: 0/2097152 trajectories valid
+julia,tsit5,performance,fixed,fixed,8388608,dt,9.765625463842298e-7,Watchdog,run never returned within 120.0 s

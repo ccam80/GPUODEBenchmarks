@@ -1,0 +1,15 @@
+framework,algorithm,phase,mode,tier,transfers,n,setting_kind,setting,samples,min_ms,p05_ms,median_ms,p95_ms,max_ms
+julia,tsit5,performance,adaptive,julia,both,32,tol,1.0e-8,20,0.3648,0.36632000000000003,0.4468,0.5942250000000003,1.0564
+julia,tsit5,performance,adaptive,julia,none,32,tol,1.0e-8,20,0.1925,0.19411500000000004,0.21939999999999998,0.3178600000000004,0.8358
+julia,tsit5,performance,adaptive,julia,both,128,tol,1.0e-8,20,0.4784,0.486475,0.5166999999999999,0.608525,0.6223
+julia,tsit5,performance,adaptive,julia,none,128,tol,1.0e-8,20,0.3203,0.323245,0.34704999999999997,0.38464,0.4082
+julia,tsit5,performance,adaptive,julia,both,2048,tol,1.0e-8,20,0.6098,0.619965,0.6704,0.7801750000000007,1.7373
+julia,tsit5,performance,adaptive,julia,none,2048,tol,1.0e-8,20,0.1203,0.120965,0.12635000000000002,0.14255500000000002,0.1683
+julia,tsit5,performance,adaptive,julia,both,8192,tol,1.0e-8,20,0.8434,0.85461,1.59975,2.7184250000000003,2.7626
+julia,tsit5,performance,adaptive,julia,none,8192,tol,1.0e-8,20,0.0837,0.08389,0.10264999999999999,0.20314500000000002,0.2135
+julia,tsit5,performance,adaptive,julia,both,32768,tol,1.0e-8,20,3.5412,3.7933299999999996,5.483499999999999,10.647915000000054,83.973
+julia,tsit5,performance,adaptive,julia,none,32768,tol,1.0e-8,20,0.4549,0.46801,0.51335,1.578975,1.5937
+julia,tsit5,performance,adaptive,julia,both,524288,tol,1.0e-8,20,53.9186,57.191919999999996,66.2644,149.1839,156.3545
+julia,tsit5,performance,adaptive,julia,none,524288,tol,1.0e-8,20,8.7705,8.776105000000001,8.8553,10.643965,10.8352
+julia,tsit5,performance,adaptive,julia,both,2097152,tol,1.0e-8,10,220.1255,226.78360999999998,277.95804999999996,379.2243400000001,413.107
+julia,tsit5,performance,adaptive,julia,none,2097152,tol,1.0e-8,20,22.1909,22.243055,22.3838,22.71037,23.3273
