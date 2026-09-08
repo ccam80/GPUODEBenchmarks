@@ -6,7 +6,9 @@ import os
 ALGORITHMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "algorithms.csv")
 
-_MODES = ("fixed", "adaptive")
+# The mode axis, fixed first: the order every sweep and cursor walks.
+MODES = ("fixed", "adaptive")
+_MODES = MODES
 _BOOLS = ("ne", "ne_adaptive")
 FAMILIES = ("erk", "dirk", "firk", "rosenbrock", "implicit")
 
@@ -80,6 +82,18 @@ def resolve_algorithms(request, framework):
     for name in names:
         get_algorithm(name)
     return [name for name in names if name in supported]
+
+
+def resolve_modes(request):
+    """Resolve "all" or a comma list to the modes to run, fixed first; an unknown name exits."""
+    if request in (None, "", "all"):
+        return MODES
+    names = [name for name in request.split(",") if name]
+    for name in names:
+        if name not in MODES:
+            raise SystemExit("unknown mode '{0}' (expected one of: all, {1})"
+                             .format(name, ", ".join(MODES)))
+    return tuple(mode for mode in MODES if mode in names)
 
 
 def _select(rows, request):

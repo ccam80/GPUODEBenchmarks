@@ -105,8 +105,11 @@ class RecordTests(StoreCase):
         wp.record_wp(0.0625, 1.0, 0.1, 0.0)
         self.assertEqual(wp.status(N_WP, setting=0.0625 * (1 + 1e-10)),
                          "finite")
+        # A list value matches any of its members, so a run can clear exactly its Ns.
         self.assertEqual(results.clear(leg.path, package="cubie",
-                                       analysis="times"), 4)
+                                       analysis="times", n=["32", "128"]), 2)
+        self.assertEqual(results.clear(leg.path, package="cubie",
+                                       analysis="times"), 2)
         self.assertEqual(len(results.load(leg.path)), 1)
 
     def test_cli_record_nan_and_status(self):

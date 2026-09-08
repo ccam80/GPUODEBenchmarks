@@ -24,10 +24,11 @@ from wp_common import (REPEAT_CAP, append_samples, errored_pct,
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = supported_for("pytorch", "fixed")
-
-NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS, MODES = parse_bench_args(
     sys.argv[1:], "pytorch")
+# torchdiffeq is fixed-step only, so an adaptive-only run has no legs.
+FIXED_ALGORITHMS = supported_for("pytorch", "fixed") if "fixed" in MODES else ()
+ALGORITHMS = [name for name in ALGORITHMS if name in FIXED_ALGORITHMS]
 REPEATS = REPEAT_CAP
 
 # %%

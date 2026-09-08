@@ -8,8 +8,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from algorithms import (  # noqa: E402
-    FAMILIES, algorithm_names, get_algorithm, load_algorithms, ne_algorithms,
-    overlap_algorithms, resolve_algorithms, supported_for,
+    FAMILIES, MODES, algorithm_names, get_algorithm, load_algorithms,
+    ne_algorithms, overlap_algorithms, resolve_algorithms, resolve_modes,
+    supported_for,
 )
 from wp_common import N_WP, parse_bench_args  # noqa: E402
 
@@ -73,21 +74,31 @@ class RegistryTests(unittest.TestCase):
 
 
 class ParseTests(unittest.TestCase):
-    def test_bench_args_resolve_both_axes(self):
-        ns, analysis, algorithms, problems = parse_bench_args(
+    def test_bench_args_resolve_every_axis(self):
+        ns, analysis, algorithms, problems, modes = parse_bench_args(
             ["wp", "kvaerno3", "--problem", "lorenz"], "cubie")
         self.assertEqual([N_WP], ns)
         self.assertEqual("wp", analysis)
         self.assertEqual(["kvaerno3"], algorithms)
         self.assertEqual(["lorenz"], [p.name for p in problems])
+        self.assertEqual(MODES, modes)
+
+    def test_mode_narrows_and_rejects_unknown_names(self):
+        self.assertEqual(parse_bench_args(["wp", "--mode", "adaptive"], "cubie")[4], ("adaptive",))
+        self.assertEqual(parse_bench_args(["wp", "--mode=fixed,adaptive"], "cubie")[4], MODES)
+        self.assertEqual(resolve_modes("adaptive,fixed"), MODES)
+        with self.assertRaises(SystemExit):
+            parse_bench_args(["wp", "--mode", "sideways"], "cubie")
+        with self.assertRaises(SystemExit):
+            parse_bench_args(["wp", "--mode"], "cubie")
 
     def test_a_timing_count_parses_without_wp(self):
-        ns, analysis, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
         self.assertEqual([1024], ns)
         self.assertEqual("times", analysis)
 
     def test_an_algorithm_the_framework_lacks_yields_an_empty_list(self):
-        _, _, algorithms, _ = parse_bench_args(
+        _, _, algorithms, _, _ = parse_bench_args(
             ["1024", "radau_iia_5"], "pytorch")
         self.assertEqual([], algorithms)
 

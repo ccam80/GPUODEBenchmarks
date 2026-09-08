@@ -32,11 +32,12 @@ from wp_common import (REPEAT_CAP, TIMING_TOL, append_samples, errored_pct,
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = supported_for("jax", "fixed")
-ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
-
-NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS, MODES = parse_bench_args(
     sys.argv[1:], "jax")
+# A mode outside --mode runs nothing.
+FIXED_ALGORITHMS = supported_for("jax", "fixed") if "fixed" in MODES else ()
+ADAPTIVE_ALGORITHMS = (supported_for("jax", "adaptive")
+                       if "adaptive" in MODES else ())
 REPEATS = REPEAT_CAP
 
 # Persistent XLA compilation cache; off in states mode so compiles run cold.

@@ -591,11 +591,12 @@ def run(argv, package):
         warm_shard = tuple(int(t) for t in argv[position + 1].split("/"))
         del argv[position:position + 2]
 
-    ns, analysis, algorithms, problems = parse_bench_args(argv, package)
+    ns, analysis, algorithms, problems, modes = parse_bench_args(argv, package)
     if not problems:
         print("{0} runs none of the requested problems; skipping."
               .format(package))
         return 0
+    # A mode outside --mode has an empty membership, so every sweep skips it.
     opts = {
         "ns": ns,
         "analysis": analysis,
@@ -604,8 +605,9 @@ def run(argv, package):
         "framework_dir": PACKAGE_DIRS[package],
         "prefix": PREFIXES[PACKAGE_DIRS[package]],
         "numerical_tag": package,
-        "fixed": supported_for(package, "fixed"),
-        "adaptive": supported_for(package, "adaptive"),
+        "fixed": supported_for(package, "fixed") if "fixed" in modes else (),
+        "adaptive": (supported_for(package, "adaptive")
+                     if "adaptive" in modes else ()),
         "dataset_key": dataset_key(),
         "warm_shard": warm_shard,
     }

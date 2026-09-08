@@ -480,26 +480,38 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`run_full_dataset.sh` drives every suite in one set-and-forget run — the
-timing sweeps, the work-precision sweeps, the numerical-equivalence suite, the
-per-algorithm cubie vs. DiffEqGPU overlap comparison, and finally the plots
-and comparison reports:
+`bench.py` runs every stage: cubie optimize and warm, the timing, states and
+work-precision sweeps, numerical equivalence, the overlap comparison, plots and
+reports. Every axis (package, analysis, algorithm, problem, mode, N) takes a
+comma list and `--point` retakes single points; the `run_*.sh`/`.bat` scripts
+forward to it. Without `--keep` a run first drops only the store rows it is
+about to record.
 
 ```bash
-    $ ./run_full_dataset.sh                     # everything, nmax = 2^24
-    $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
-    $ ./run_full_dataset.sh -n $((2**23)),$((2**27))  # exact trajectory counts only
-    $ ./run_full_dataset.sh -a performance      # one analysis
-    $ ./run_full_dataset.sh -p cpp              # one package
-    $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
-    $ ./run_full_dataset.sh --resume                # skip every point already on disk
-    $ ./run_full_dataset.sh --no-overwrite          # keep finite results, retry NaN and absent points
-    $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
-    $ ./run_full_dataset.sh --resume \
+    $ python3 bench.py                           # everything, nmax = 2^24
+    $ python3 bench.py -n $((2**25))             # larger ceiling
+    $ python3 bench.py -n $((2**23)),$((2**27))  # exact trajectory counts only
+    $ python3 bench.py -a performance            # one analysis
+    $ python3 bench.py -a optimize,warm -p cubie # tune and fill the cubie caches only
+    $ python3 bench.py -p cpp                    # one package
+    $ python3 bench.py -p cubie,julia -g euler,tsit5   # subsets of both
+    $ python3 bench.py --mode adaptive -s pollu  # one mode of one problem
+    $ python3 bench.py --resume                  # skip every point already on disk
+    $ python3 bench.py --no-overwrite            # keep finite results, retry NaN and absent points
+    $ python3 bench.py --resume-from jax         # restart the perf sweep at a package
+    $ python3 bench.py --resume \
         --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
-                                                    # ...or at an exact (problem, algorithm, mode, N)
-    $ ./run_full_dataset.sh --floor -s lorenz       # re-run and keep the lower time per point
+                                                 # ...or at an exact (problem, algorithm, mode, N)
+    $ python3 bench.py --floor -s lorenz         # re-run and keep the lower time per point
+    $ python3 bench.py --point times:cubie:lorenz:tsit5:fixed:32768 \
+                       --point wp:julia:pollu:kvaerno3 --point states:cpp:lorenz96:classical-rk4:16
+    $ python3 bench.py --points-file retakes.txt # one point per line
 ```
+
+A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
+state count>]`; a run of points replaces only those rows and redraws the plots,
+and a point without a mode re-measures both modes. `JULIA` names the
+julia launcher, e.g. `JULIA="julia +1.13"`.
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in the result store and deletes nothing; NaN rows count as recorded.
@@ -523,11 +535,10 @@ the problem:
         --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 ```
 
-**On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper
-for `run_full_dataset.ps1`:
+**On Windows** the same flags apply:
 
 ```cmd
-    > run_full_dataset.bat -n 16777216 -a performance,work-precision
+    > python bench.py -n 16777216 -a performance,work-precision
 ```
 
 At high trajectory counts some frameworks will exhaust GPU memory. Each
@@ -630,12 +641,9 @@ to specify the upper bound of the trajectories to benchmark. By default
 $N = 2^{24}$, where the simulation runs for $n \in 8 \le n < N$, with
 the multiples of $4$.
 
-The data will be generated in the `data/Julia` directory, with two files
-for fixed and adaptive time-stepping simulations. Each \".txt\" row is
-`N time_ms time_device_only_ms`: the number of trajectories, the
-end-to-end time (h2d + solve + d2h) in milliseconds, and the same solve
-with the inputs already resident and the results left on the device.
-Every framework's timing files share this format.
+Rows land in `data/Julia/<os>_<gpu>/results.csv` with `analysis = times`, two
+per (problem, algorithm, mode, N): `transfers = both` times h2d + solve + d2h,
+`transfers = none` the resident solve alone. See "Result store" above.
 
 Additionally, to benchmark ODE solvers for other backends:
 
@@ -685,7 +693,7 @@ programs can be run with the same script by changing the arguments as:
     > run_benchmark.bat -p cpp -d gpu -m ode
 ```
 
-It will generate the data files in the `data/cpp` folder.
+Its rows land in `data/CPP/<os>_<gpu>/results.csv`.
 
 **Note for Windows:** The C++ runner script uses PowerShell for file manipulation. Ensure PowerShell is available and that the execution policy allows running scripts.
 
@@ -1108,7 +1116,7 @@ sweeps, both cubie sweeps, comparison report + plots):
 run_numerical_equivalence.bat               # Windows
 ```
 
-Both take `--controller fixed|adaptive|all` (default `all`) to run just one
+Both take `--mode fixed|adaptive|all` (default `all`) to run just one
 of the two sweep types, `-p julia|cubie|all` to run one side of the
 comparison, and exit non-zero when any step fails.
 `run_all_benchmarks.sh -a numerical` appends the same suite to a full

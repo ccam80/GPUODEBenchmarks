@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 
-from algorithms import resolve_algorithms
+from algorithms import resolve_algorithms, resolve_modes
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
@@ -176,10 +176,11 @@ def append_samples(path, point, transfers, samples):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
+    """Parse <N|N,N,...>|wp|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes)."""
     if not argv:
         raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...]|optimize "
-                         "[algorithm|all] [--problem <name|all>]")
+                         "[algorithm|all] [--problem <name|all>] "
+                         "[--mode <fixed|adaptive|all>]")
     if argv[0] == "wp":
         analysis, ns = "wp", [N_WP]
     elif argv[0] == "optimize":
@@ -197,17 +198,23 @@ def parse_bench_args(argv, framework):
         ns = sorted(int(tok) for tok in argv[0].split(","))
     request = "all"
     problem_request = "all"
+    mode_request = "all"
     rest = list(argv[1:])
     while rest:
         tok = rest.pop(0)
-        if tok in ("--problem", "-s"):
+        if tok in ("--problem", "-s", "--mode"):
             if not rest:
-                raise SystemExit("--problem requires a value")
-            problem_request = rest.pop(0)
+                raise SystemExit("{0} requires a value".format(tok))
+            if tok == "--mode":
+                mode_request = rest.pop(0)
+            else:
+                problem_request = rest.pop(0)
         elif tok.startswith("--problem="):
             problem_request = tok.split("=", 1)[1]
+        elif tok.startswith("--mode="):
+            mode_request = tok.split("=", 1)[1]
         else:
             request = tok
     algorithms = resolve_algorithms(request, framework)
     problems = resolve_problems(problem_request, framework)
-    return ns, analysis, algorithms, problems
+    return ns, analysis, algorithms, problems, resolve_modes(mode_request)

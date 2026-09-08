@@ -1,8 +1,9 @@
-# Sets ANALYSIS, NMAX, NLIST, ALGORITHM and PROBLEM in the caller; -n takes a sweep ceiling or a comma list, -s a problem name, comma list, or all.
+# Sets ANALYSIS, NMAX, NLIST, ALGORITHM, PROBLEM and MODE in the caller; -n takes a sweep ceiling or a comma list, -s a problem name, comma list, or all, -m fixed, adaptive or all.
 ANALYSIS=performance
 NMAX=16777216
 ALGORITHM=all
 PROBLEM=all
+MODE=all
 NLIST=
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -18,6 +19,9 @@ while [ $# -gt 0 ]; do
         -s|--problem)
             [ $# -ge 2 ] || { echo "$1 requires a value" >&2; exit 1; }
             PROBLEM=$2; shift 2;;
+        -m|--mode)
+            [ $# -ge 2 ] || { echo "$1 requires a value" >&2; exit 1; }
+            MODE=$2; shift 2;;
         *) echo "Unknown option $1" >&2; exit 1;;
     esac
 done
@@ -25,6 +29,10 @@ done
 case "$ANALYSIS" in
     performance|work-precision|states|warm|optimize) ;;
     *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|states|warm|optimize)" >&2; exit 1;;
+esac
+case "$MODE" in
+    fixed|adaptive|all) ;;
+    *) echo "Unknown mode '$MODE' (fixed|adaptive|all)" >&2; exit 1;;
 esac
 case ",$NMAX," in
     *[!0-9,]*|*,,*)
