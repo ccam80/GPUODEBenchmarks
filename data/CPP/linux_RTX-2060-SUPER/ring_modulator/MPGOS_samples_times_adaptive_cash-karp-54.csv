@@ -1,0 +1,7 @@
+analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,8,15,0,168311.424579
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,32,15,0,168325.253880
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,128,15,0,168331.913254
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,512,15,0,168338.401385
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,2048,15,0,168350.269365
+times,ring_modulator,cash-karp-54,adaptive,none,none,nan,8192,15,0,168448.088121
