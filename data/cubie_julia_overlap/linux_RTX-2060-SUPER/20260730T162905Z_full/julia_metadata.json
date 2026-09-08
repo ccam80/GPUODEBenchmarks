@@ -1,0 +1,7 @@
+{
+  "framework": "DiffEqGPU",
+  "julia_version": "1.12.6",
+  "diffeqgpu_version": "3.15.3",
+  "cuda_runtime": "13.3.0",
+  "profile": "full"
+}

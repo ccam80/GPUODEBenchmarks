@@ -1,0 +1,9 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+julia,tsit5,performance,fixed,fixed,134217728,dt,0.0009765625,OutOfGPUMemoryError,Out of GPU memory trying to allocate 3.000 GiB Effective GPU memory usage: 99.50% (7.544 GiB/7.582 GiB) Memory pool usage: 5.375 GiB (7.000 GiB reserved) 
+julia,tsit5,performance,adaptive,julia,134217728,tol,1.0e-8,OutOfGPUMemoryError,Out of GPU memory trying to allocate 3.500 GiB Effective GPU memory usage: 99.50% (7.544 GiB/7.582 GiB) Memory pool usage: 4.375 GiB (7.000 GiB reserved) 
+julia,tsit5,performance,fixed,fixed,536870912,dt,0.0009765625,OutOfGPUMemoryError,Out of GPU memory trying to allocate 14.000 GiB Effective GPU memory usage: 65.29% (4.951 GiB/7.582 GiB) Memory pool usage: 4.375 GiB (4.406 GiB reserved) 
+julia,tsit5,performance,adaptive,julia,536870912,tol,1.0e-8,OutOfGPUMemoryError,Out of GPU memory trying to allocate 14.000 GiB Effective GPU memory usage: 65.29% (4.951 GiB/7.582 GiB) Memory pool usage: 4.375 GiB (4.406 GiB reserved) 
+julia,tsit5,numerical,fixed,fixed,1024,dt,0.5,ErrorException,non-finite result: 35/1024 trajectories valid
+julia,tsit5,numerical,fixed,fixed,1024,dt,0.25,ErrorException,non-finite result: 289/1024 trajectories valid
+julia,vern7,performance,fixed,fixed,134217728,dt,0.0009765625,OutOfGPUMemoryError,Out of GPU memory trying to allocate 3.000 GiB Effective GPU memory usage: 99.50% (7.544 GiB/7.582 GiB) Memory pool usage: 5.375 GiB (7.000 GiB reserved) 
+julia,vern7,performance,adaptive,julia,134217728,tol,1.0e-8,OutOfGPUMemoryError,Out of GPU memory trying to allocate 3.500 GiB Effective GPU memory usage: 99.50% (7.544 GiB/7.582 GiB) Memory pool usage: 4.375 GiB (7.000 GiB reserved) 

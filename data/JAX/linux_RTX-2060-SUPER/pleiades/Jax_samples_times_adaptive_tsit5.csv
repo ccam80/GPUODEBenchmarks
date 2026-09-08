@@ -1,0 +1,4 @@
+analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
+times,pleiades,tsit5,adaptive,both,none,nan,8,28,0,179904.838686
+times,pleiades,tsit5,adaptive,both,none,nan,8,28,0,166535.575983
+times,pleiades,tsit5,adaptive,both,none,nan,8,28,0,163649.877285

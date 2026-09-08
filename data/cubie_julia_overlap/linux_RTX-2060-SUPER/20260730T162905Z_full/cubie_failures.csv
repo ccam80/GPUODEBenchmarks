@@ -1,0 +1,4 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+cubie,tsit5,performance,fixed,fixed,134217728,dt,0.0009765625,OutOfMemoryError,"Out of memory allocating 285,296,072 bytes (allocated so far: 7,381,975,040 bytes, limit set to: 18,446,744,073,709,551,615 bytes)."
+cubie,tsit5,performance,adaptive,default,134217728,tol,1e-08,ValueError,"Device-resident results require the batch to fit in a single chunk, but this run is split into 334 chunks. Reduce the batch size or use a host solve."
+cubie,tsit5,performance,adaptive,pi,134217728,tol,1e-08,ValueError,"Device-resident results require the batch to fit in a single chunk, but this run is split into 438 chunks. Reduce the batch size or use a host solve."

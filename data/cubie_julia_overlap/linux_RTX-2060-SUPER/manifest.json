@@ -1,0 +1,67 @@
+{
+  "dataset_key": "linux_RTX-2060-SUPER",
+  "analysis": "all",
+  "package": "all",
+  "cubie_backend": "numba-cuda",
+  "nmax": "32768",
+  "performance_ns": [
+    8,
+    32,
+    128,
+    512,
+    2048,
+    8192,
+    32768
+  ],
+  "from_n": 0,
+  "algorithm": "all",
+  "commands": [
+    [
+      "julia",
+      "--startup-file=no",
+      "-t",
+      "auto",
+      "--project=/home/cca79/projects/GPUODEBenchmarks",
+      "/home/cca79/projects/GPUODEBenchmarks/runner_scripts/cubie_julia_overlap/julia_worker.jl",
+      "--output",
+      "/home/cca79/projects/GPUODEBenchmarks/data/cubie_julia_overlap/linux_RTX-2060-SUPER",
+      "--analysis",
+      "all",
+      "--nmax",
+      "8,32,128,512,2048,8192,32768",
+      "--from-n",
+      "0",
+      "--algorithm",
+      "all"
+    ],
+    [
+      "/home/cca79/projects/GPUODEBenchmarks/GPU_ODE_CUBIE/venv/bin/python",
+      "/home/cca79/projects/GPUODEBenchmarks/runner_scripts/cubie_julia_overlap/cubie_worker.py",
+      "--output",
+      "/home/cca79/projects/GPUODEBenchmarks/data/cubie_julia_overlap/linux_RTX-2060-SUPER",
+      "--analysis",
+      "all",
+      "--nmax",
+      "8,32,128,512,2048,8192,32768",
+      "--from-n",
+      "0",
+      "--algorithm",
+      "all"
+    ],
+    [
+      "/home/cca79/projects/GPUODEBenchmarks/GPU_ODE_CUBIE/venv/bin/python",
+      "/home/cca79/projects/GPUODEBenchmarks/runner_scripts/cubie_julia_overlap/analyze.py",
+      "--output",
+      "/home/cca79/projects/GPUODEBenchmarks/data/cubie_julia_overlap/linux_RTX-2060-SUPER",
+      "--key",
+      "linux_RTX-2060-SUPER"
+    ]
+  ],
+  "started_utc": "2026-08-14T01:57:49.935693+00:00",
+  "results": {
+    "julia": 1,
+    "cubie": 1,
+    "analysis": 0
+  },
+  "finished_utc": "2026-08-14T02:13:32.701607+00:00"
+}

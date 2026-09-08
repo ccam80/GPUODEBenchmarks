@@ -1,0 +1,20 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+cubie,tsit5,numerical,fixed,fixed,1024,dt,0.5,FloatingPointError,non-finite result: 82/1024 trajectories valid
+cubie,tsit5,numerical,fixed,fixed,1024,dt,0.25,FloatingPointError,non-finite result: 298/1024 trajectories valid
+cubie,vern7,numerical,fixed,fixed,1024,dt,0.5,FloatingPointError,non-finite result: 27/1024 trajectories valid
+cubie,vern7,numerical,fixed,fixed,1024,dt,0.25,FloatingPointError,non-finite result: 722/1024 trajectories valid
+cubie,rosenbrock23_sciml,numerical,fixed,fixed,1024,dt,0.5,FloatingPointError,non-finite result: 375/1024 trajectories valid
+cubie,rosenbrock23_sciml,numerical,fixed,fixed,1024,dt,0.25,FloatingPointError,non-finite result: 667/1024 trajectories valid
+cubie,kvaerno3,numerical,fixed,fixed,1024,dt,0.5,FloatingPointError,non-finite result: 1/1024 trajectories valid
+cubie,kvaerno3,numerical,fixed,fixed,1024,dt,0.25,FloatingPointError,non-finite result: 312/1024 trajectories valid
+cubie,kvaerno3,numerical,fixed,fixed,1024,dt,0.125,FloatingPointError,non-finite result: 648/1024 trajectories valid
+cubie,kvaerno3,numerical,fixed,fixed,1024,dt,0.0625,FloatingPointError,non-finite result: 1023/1024 trajectories valid
+cubie,kvaerno3,numerical,fixed,fixed,1024,dt,0.03125,FloatingPointError,non-finite result: 1023/1024 trajectories valid
+cubie,kvaerno3,work_precision,fixed,fixed,32768,dt,0.0625,FloatingPointError,non-finite result: 32635/32768 trajectories valid
+cubie,kvaerno3,work_precision,fixed,fixed,32768,dt,0.03125,FloatingPointError,non-finite result: 32755/32768 trajectories valid
+cubie,kvaerno5,numerical,fixed,fixed,1024,dt,0.5,FloatingPointError,non-finite result: 219/1024 trajectories valid
+cubie,kvaerno5,numerical,fixed,fixed,1024,dt,0.25,FloatingPointError,non-finite result: 401/1024 trajectories valid
+cubie,kvaerno5,numerical,fixed,fixed,1024,dt,0.125,FloatingPointError,non-finite result: 883/1024 trajectories valid
+cubie,kvaerno5,numerical,fixed,fixed,1024,dt,0.0625,FloatingPointError,non-finite result: 1023/1024 trajectories valid
+cubie,kvaerno5,work_precision,fixed,fixed,32768,dt,0.0625,FloatingPointError,non-finite result: 32728/32768 trajectories valid
+cubie,kvaerno5,work_precision,fixed,fixed,32768,dt,0.03125,FloatingPointError,non-finite result: 32767/32768 trajectories valid

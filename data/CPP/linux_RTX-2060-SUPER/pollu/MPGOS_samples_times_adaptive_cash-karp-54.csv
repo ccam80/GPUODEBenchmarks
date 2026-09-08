@@ -1,0 +1,7 @@
+analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
+times,pollu,cash-karp-54,adaptive,none,none,nan,8,20,0,168325.537916
+times,pollu,cash-karp-54,adaptive,none,none,nan,32,20,0,168332.268158
+times,pollu,cash-karp-54,adaptive,none,none,nan,128,20,0,168344.095258
+times,pollu,cash-karp-54,adaptive,none,none,nan,512,20,0,168352.076401
+times,pollu,cash-karp-54,adaptive,none,none,nan,2048,20,0,168381.151098
+times,pollu,cash-karp-54,adaptive,none,none,nan,8192,20,0,168424.029055
