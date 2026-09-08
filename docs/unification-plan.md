@@ -249,10 +249,11 @@ exists); NE `controller_constants.csv` to `controllers/<problem>.csv`;
 `data/numerical/<key>/<problem>/` 32768 files attached as finals to the matching
 times row (cubie `_unadaptive` = classical-rk4 fixed, `_adaptive` = tsit5
 adaptive, `jax.csv` = tsit5 fixed, `pytorch.csv` = classical-rk4 fixed,
-`myokit_cuda.csv` = euler fixed, `julia_fixed`/`julia_adaptive` = tsit5;
-`mpgos.csv` = cash-karp-54 adaptive when that key's RKCK45 row at n = 32768 is
-finite, else classical-rk4 fixed; `mpgos_internalsave.csv` dropped). Old trees
-deleted; goldens untouched.
+`myokit_cuda.csv` = euler fixed). Old trees deleted; goldens untouched.
+Dropped, not converted, on both keys: every `cpp` row and `mpgos*.csv`; every
+wp row with `transfers != none`; every jax `kvaerno3` row; the
+`julia_fixed.csv` and `julia_adaptive.csv` finals; the overlap `numerical`
+phase metrics and finals. The script prints the dropped counts per rule.
 Done: a DuckDB count per (key, package) equals the converted input counts
 printed by the script; the PR body carries the table.
 Review: no row invented; dropped inputs listed; `.gitignore` no longer ignores
@@ -351,8 +352,11 @@ Done: tests pass; grep finds no reference to a removed script.
 ### P12 end-to-end smoke and reruns
 Depends on: P11.
 `bench.py run -n 128 --for perf,wp,ne,states,overlap` on the 4070 for every
-package; fallout fixed in small PRs; then the owed GPU-time reruns (every wp leg,
-julia_cpu NE legs for nand_gate and ring_modulator_index2) as data PRs.
+package; fallout fixed in small PRs. Then the reruns as data PRs, per key:
+`cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` in full
+(WSL); julia_gpu finals at n = 32768; julia_cpu `ne` for nand_gate and
+ring_modulator_index2; overlap `ne`-grid finals for julia_gpu; cubie and
+cubie_mlir in full.
 
 ## 3. Schedule
 
