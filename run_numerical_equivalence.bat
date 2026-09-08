@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-REM Forwards to `bench.py -a numerical`; -p all|julia|cubie, --controller, --algorithm and -s map onto its flags.
+REM Forwards to `bench.py -a numerical`; -p all|julia|cubie, --mode, --algorithm and -s map onto its flags.
 pushd "%~dp0"
 set "ARGS=-a numerical --no-lock-clocks"
 set "PKG=cubie,julia"
@@ -8,7 +8,7 @@ set "PKG=cubie,julia"
 if "%~1"=="" goto parse_done
 if /i "%~1"=="-p" goto set_package
 if /i "%~1"=="--package" goto set_package
-if /i "%~1"=="--controller" ( set "ARGS=!ARGS! --controller %~2" & shift & shift & goto parse_loop )
+if /i "%~1"=="--mode" ( set "ARGS=!ARGS! --mode %~2" & shift & shift & goto parse_loop )
 if /i "%~1"=="--algorithm" ( set "ARGS=!ARGS! -g %~2" & shift & shift & goto parse_loop )
 if /i "%~1"=="-s" ( set "ARGS=!ARGS! -s %~2" & shift & shift & goto parse_loop )
 if /i "%~1"=="--problem" ( set "ARGS=!ARGS! -s %~2" & shift & shift & goto parse_loop )

@@ -10,7 +10,10 @@ param(
     [Alias('g')]
     [string]$Algorithm = 'all',
     [Alias('s')]
-    [string]$Problem = 'all'
+    [string]$Problem = 'all',
+    [Alias('m')]
+    [ValidateSet('fixed', 'adaptive', 'all')]
+    [string]$Mode = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,15 +33,20 @@ if ($Nmax.Contains(',')) {
     }
 }
 
-# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
-$Solvers = switch ($Algorithm) {
-    'all' { @('RK4', 'RKCK45') }
-    'classical-rk4' { @('RK4') }
-    'cash-karp-54' { @('RKCK45') }
-    default {
-        Write-Host "MPGOS does not support algorithm '$Algorithm'; skipping."
-        exit 0
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive); -g and -m each narrow the pair.
+$Solvers = @()
+foreach ($alg in $Algorithm.Split(',')) {
+    switch ($alg) {
+        'all' { $Solvers = @('RK4', 'RKCK45') }
+        'classical-rk4' { $Solvers += 'RK4' }
+        'cash-karp-54' { $Solvers += 'RKCK45' }
     }
+}
+if ($Mode -eq 'fixed') { $Solvers = @($Solvers | Where-Object { $_ -eq 'RK4' }) }
+if ($Mode -eq 'adaptive') { $Solvers = @($Solvers | Where-Object { $_ -eq 'RKCK45' }) }
+if ($Solvers.Count -eq 0) {
+    Write-Host "MPGOS runs none of algorithm '$Algorithm' in mode '$Mode'; skipping."
+    exit 0
 }
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.

@@ -1,9 +1,10 @@
 @echo off
-REM Sets ANALYSIS, NMAX, NLIST, ALGORITHM and PROBLEM in the caller; -n takes a sweep ceiling or comma list, -s a problem name, comma list, or all.
+REM Sets ANALYSIS, NMAX, NLIST, ALGORITHM, PROBLEM and MODE in the caller; -n takes a sweep ceiling or comma list, -s a problem name, comma list, or all, -m fixed, adaptive or all.
 set ANALYSIS=performance
 set NMAX=16777216
 set ALGORITHM=all
 set PROBLEM=all
+set MODE=all
 set NLIST=
 
 REM Tokens split on spaces and commas; value tokens after a flag are comma-joined.
@@ -22,12 +23,19 @@ if defined PA_TARGET if not defined PA_HAVE (
 )
 :parse_args_done
 
-if /i "%ANALYSIS%"=="performance" goto check_nmax
-if /i "%ANALYSIS%"=="work-precision" goto check_nmax
-if /i "%ANALYSIS%"=="states" goto check_nmax
-if /i "%ANALYSIS%"=="warm" goto check_nmax
-if /i "%ANALYSIS%"=="optimize" goto check_nmax
+if /i "%ANALYSIS%"=="performance" goto check_mode
+if /i "%ANALYSIS%"=="work-precision" goto check_mode
+if /i "%ANALYSIS%"=="states" goto check_mode
+if /i "%ANALYSIS%"=="warm" goto check_mode
+if /i "%ANALYSIS%"=="optimize" goto check_mode
 echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^|optimize^)
+exit /b 1
+
+:check_mode
+if /i "%MODE%"=="fixed" goto check_nmax
+if /i "%MODE%"=="adaptive" goto check_nmax
+if /i "%MODE%"=="all" goto check_nmax
+echo Unknown mode "%MODE%" ^(fixed^|adaptive^|all^)
 exit /b 1
 
 :check_nmax
@@ -75,6 +83,8 @@ if /i "!TOK!"=="-g" set "PA_FLAG=ALGORITHM"
 if /i "!TOK!"=="--algorithm" set "PA_FLAG=ALGORITHM"
 if /i "!TOK!"=="-s" set "PA_FLAG=PROBLEM"
 if /i "!TOK!"=="--problem" set "PA_FLAG=PROBLEM"
+if /i "!TOK!"=="-m" set "PA_FLAG=MODE"
+if /i "!TOK!"=="--mode" set "PA_FLAG=MODE"
 if defined PA_FLAG (
     if defined PA_TARGET if not defined PA_HAVE (
         echo !PA_TARGET! requires a value

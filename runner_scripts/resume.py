@@ -12,12 +12,10 @@ and each result merges into the store keeping the lower time.
 
 import os
 
-from algorithms import algorithm_names, get_algorithm
+from algorithms import MODES, algorithm_names, get_algorithm
 from problems import get_problem, problem_names
 from protocol import N_WP, STATES_N, TOLS
 from results import floor_enabled  # noqa: F401
-
-MODES = ("fixed", "adaptive")
 
 _CURSOR_CACHE = []          # [] = unparsed, [None] or [dict] once parsed
 

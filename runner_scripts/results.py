@@ -79,14 +79,17 @@ def setting_matches(a, b):
 
 
 def same_point(row, ident):
-    """True when a row carries the identity columns of ident."""
+    """True when a row carries the identity columns of ident; a list, tuple or set value matches any of its members."""
     for field in IDENTITY:
         if field not in ident:
             continue
+        wanted = ident[field]
+        if not isinstance(wanted, (list, tuple, set)):
+            wanted = (wanted,)
         if field == "setting":
-            if not setting_matches(row[field], ident[field]):
+            if not any(setting_matches(row[field], v) for v in wanted):
                 return False
-        elif str(row[field]) != str(ident[field]):
+        elif str(row[field]) not in {str(v) for v in wanted}:
             return False
     return True
 

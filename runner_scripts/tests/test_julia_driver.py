@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
 
 import julia_driver  # noqa: E402
 import resume  # noqa: E402
+from problems import get_problem  # noqa: E402
 from protocol import STATES_N  # noqa: E402
 from results import Leg  # noqa: E402
 
@@ -250,8 +251,10 @@ class PerformanceDriverTests(unittest.TestCase):
             mock.patch.object(julia_driver, "_available_ram_gb",
                               lambda: 999.0),
             mock.patch.object(julia_driver, "dataset_key", lambda: "test"),
-            mock.patch.object(julia_driver, "_julia_legs",
-                              lambda request, problems: [("lorenz", "tsit5")]),
+            mock.patch.object(julia_driver, "resolve_algorithms",
+                              lambda request, fw: ["tsit5"]),
+            mock.patch.object(julia_driver, "resolve_problems",
+                              lambda request, fw: [get_problem("lorenz")]),
             mock.patch.object(
                 julia_driver, "supported_for",
                 lambda fw, mode: ("tsit5",)),
@@ -275,6 +278,13 @@ class PerformanceDriverTests(unittest.TestCase):
         for args in self.spawned:
             self.assertIn("--problem", args)
             self.assertIn("--mode", args)
+
+    def test_mode_narrows_the_legs(self):
+        self.assertEqual(julia_driver.run_performance(["8,32", "--mode", "fixed"]), 0)
+        self.assertEqual(self.modes_spawned(), ["fixed"])
+        self.assertNotIn("--mode", self.spawned[0][:3])
+        with self.assertRaises(SystemExit):
+            julia_driver.run_performance(["8,32", "--mode", "sideways"])
 
     def test_watchdog_hard_exit_fails_the_run(self):
         self.exit_codes[("lorenz", "tsit5", "adaptive")] = 3

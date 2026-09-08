@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""The benchmark entry point: one run of any subset of packages, analyses, algorithms, problems and points.
+"""The benchmark entry point: one run of any subset of packages, analyses, algorithms, problems, modes and points.
 
 Usage:
   bench.py                                   every analysis, every package
   bench.py -p cubie,julia -a performance     two packages, one analysis
   bench.py -a optimize,warm -p cubie         the cubie tuning and cache stages
   bench.py -n 8388608,134217728 -g euler     exact trajectory counts, one algorithm
+  bench.py --mode adaptive -s pollu          one mode, one problem
   bench.py --point times:cubie:lorenz:tsit5:fixed:32768 --point wp:julia:pollu:kvaerno3
   bench.py --points-file retakes.txt         one point per line
   bench.py --resume                          skip every recorded point
@@ -16,9 +17,9 @@ Usage:
   -n, --nmax      sweep ceiling (8, 32, ... <= n) or a comma list of exact Ns
   -g, --algorithm all | comma list of names in runner_scripts/algorithms.csv
   -s, --problem   all | comma list of names in runner_scripts/problems.csv
+  --mode          all | fixed | adaptive; the timed sweeps and the numerical-equivalence sweeps take it
   --point         <times|wp|states>:<package>:<problem>:<algorithm>[:<fixed|adaptive>][:<N|states>]; repeatable
   --points-file   a file of --point lines
-  --controller    fixed | adaptive | all, for the numerical-equivalence stage
   --resume        skip every recorded point (implies --keep)
   --no-overwrite  skip only points with a finite recorded time (implies --keep)
   --keep          keep existing rows; a run replaces only what it records
@@ -27,11 +28,15 @@ Usage:
   --cooldown      seconds between packages (default 15)
   --allow-unknown-gpu, --lock-clocks SM[,MEM], --no-lock-clocks, --clock-tolerance MHZ
 
+Without --keep a run first drops the store rows it is about to record: the selected
+packages, analyses, algorithms, problems, modes and Ns (or state counts), nothing else.
+
 Exit code: 0 when every stage succeeded, 1 otherwise. Clock drift in a timed stage also fails the run.
 """
 
 import argparse
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -41,23 +46,28 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "runner_scripts"))
 
 import launch  # noqa: E402
-from algorithms import get_algorithm  # noqa: E402
+from algorithms import (MODES, get_algorithm, ne_algorithms,  # noqa: E402
+                        overlap_algorithms, resolve_modes)
 from bench_key import dataset_key  # noqa: E402
 from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
 from problems import get_problem  # noqa: E402
-from protocol import NMAX_DEFAULT, parse_ns  # noqa: E402
+from protocol import NMAX_DEFAULT, STATES_GRID, parse_ns  # noqa: E402
 
 ALL_ANALYSES = ("optimize", "warm", "performance", "states", "work-precision",
                 "numerical", "overlap", "plots")
 DEFAULT_ANALYSES = ("performance", "states", "work-precision", "numerical",
                     "overlap", "plots")
 POINT_ANALYSES = ("times", "wp", "states")
-MODES = ("fixed", "adaptive")
+STAGE_OF = {"times": "performance", "wp": "work-precision", "states": "states"}
 
 
 def parse_list(text):
-    return [tok.strip().replace("-", "_") if tok.strip() in ("cubie-mlir", "myokit-cuda")
-            else tok.strip() for tok in text.split(",") if tok.strip()]
+    return [tok.strip() for tok in text.split(",") if tok.strip()]
+
+
+def package_name(token):
+    """A package token as launch.PACKAGES spells it; hyphens are accepted."""
+    return token.replace("-", "_")
 
 
 class Point:
@@ -69,7 +79,7 @@ class Point:
             raise SystemExit("--point takes <times|wp|states>:<package>:<problem>"
                              ":<algorithm>[:<mode>][:<N|states>], got '{0}'".format(spec))
         self.analysis, self.package, self.problem, self.algorithm = parts[:4]
-        self.package = self.package.replace("-", "_")
+        self.package = package_name(self.package)
         if self.analysis not in POINT_ANALYSES:
             raise SystemExit("--point analysis must be one of {0}, got '{1}'".format(
                 "|".join(POINT_ANALYSES), self.analysis))
@@ -77,7 +87,7 @@ class Point:
             raise SystemExit("--point names an unknown package '{0}'".format(self.package))
         get_problem(self.problem)
         get_algorithm(self.algorithm)
-        self.mode = None
+        self.mode = "all"
         self.n = None
         for tok in parts[4:]:
             if tok in MODES:
@@ -91,12 +101,12 @@ class Point:
 
     @property
     def stage(self):
-        return {"times": "performance", "wp": "work-precision", "states": "states"}[self.analysis]
+        return STAGE_OF[self.analysis]
 
     def identity(self, key):
         ident = {"package": self.package, "key": key, "analysis": self.analysis,
                  "problem": self.problem, "algorithm": self.algorithm}
-        if self.mode:
+        if self.mode != "all":
             ident["mode"] = self.mode
         if self.analysis == "times":
             ident["n"] = str(self.n)
@@ -112,9 +122,9 @@ def parse_args(argv):
     p.add_argument("-n", "--nmax", default=str(NMAX_DEFAULT))
     p.add_argument("-g", "--algorithm", default="all")
     p.add_argument("-s", "--problem", default="all")
+    p.add_argument("--mode", default="all")
     p.add_argument("--point", action="append", default=[])
     p.add_argument("--points-file", default=None)
-    p.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--no-overwrite", action="store_true")
     p.add_argument("--keep", action="store_true")
@@ -137,7 +147,7 @@ def parse_args(argv):
 
 def resolve(args):
     """Validate the axes and expand the points into a plan dict."""
-    packages = parse_list(args.package)
+    packages = [package_name(tok) for tok in parse_list(args.package)]
     if "all" in packages:
         packages = list(launch.PACKAGES)
     for pkg in packages:
@@ -167,6 +177,9 @@ def resolve(args):
             get_problem(name)
     problem = "all" if "all" in problems else ",".join(problems)
 
+    modes = resolve_modes(args.mode)
+    mode = "all" if modes == MODES else modes[0]
+
     try:
         nlist = parse_ns(args.nmax)
     except ValueError:
@@ -183,12 +196,12 @@ def resolve(args):
     resume_pkg, resume_tail = "", ""
     if args.resume_from:
         resume_pkg, _, resume_tail = args.resume_from.partition(":")
-        resume_pkg = resume_pkg.replace("-", "_")
+        resume_pkg = package_name(resume_pkg)
         if resume_pkg not in launch.PACKAGES:
             raise SystemExit("--resume-from names an unknown package '{0}'".format(resume_pkg))
 
     return {"packages": packages, "analyses": analyses, "plot_all": plot_all,
-            "algorithm": algorithm, "problem": problem, "nlist": nlist,
+            "algorithm": algorithm, "problem": problem, "mode": mode, "nlist": nlist,
             "nmax": args.nmax, "points": points, "resume_pkg": resume_pkg,
             "resume_tail": resume_tail}
 
@@ -223,6 +236,23 @@ def bench_env(args):
     if args.floor:
         env["BENCH_FLOOR"] = "1"
     return env
+
+
+def clear_identity(package, key, analysis, algorithm, problem, mode, nlist):
+    """The store identity a stage is about to record, with comma lists as any-of members."""
+    ident = {"package": package, "key": key, "analysis": launch.store_analysis(analysis)}
+    if algorithm != "all":
+        ident["algorithm"] = algorithm.split(",")
+    if mode != "all":
+        ident["mode"] = mode
+    if analysis == "states":
+        ident["states"] = [str(s) for s in STATES_GRID]
+    else:
+        if problem != "all":
+            ident["problem"] = problem.split(",")
+        if analysis == "performance":
+            ident["n"] = [str(n) for n in nlist]
+    return ident
 
 
 class Run:
@@ -300,40 +330,30 @@ class Run:
                 worst = worst or status
         return worst
 
-    def clear_rows(self, package, analysis, algorithm, problem):
-        """Drop the store rows a package's analysis is about to regenerate."""
-        import cubie_adapter
+    def clear_rows(self, package, analysis, algorithm, problem, mode, nlist):
+        """Drop the store rows a package's analysis is about to record, and nothing beyond them."""
         if analysis == "optimize":
             if package in launch.CUBIE_PACKAGES:
+                import cubie_adapter
                 cubie_adapter.clear_optimized(package, self.key, algorithm, problem)
             return
         if analysis == "warm":
             return
-        ident = {"package": package, "key": self.key,
-                 "analysis": launch.store_analysis(analysis)}
-        if algorithm != "all":
-            for name in algorithm.split(","):
-                self._clear(package, dict(ident, algorithm=name), problem)
-        else:
-            self._clear(package, ident, problem)
-
-    def _clear(self, package, ident, problem):
         import results
-        path = results.store_path(package, self.key)
-        if problem != "all" and ident["analysis"] != "states":
-            for name in problem.split(","):
-                results.clear(path, **dict(ident, problem=name))
-        else:
-            results.clear(path, **ident)
+        results.clear(results.store_path(package, self.key),
+                      **clear_identity(package, self.key, analysis, algorithm, problem, mode, nlist))
 
-    def max_n_reached(self, package):
-        """Largest N with a finite time in the package's times rows."""
+    def max_n_reached(self, package, algorithm, problem):
+        """Largest N with a finite time in the package's times rows of the stage's algorithms and problems."""
         import math
         import results
+        ident = {"package": package, "key": self.key, "analysis": "times"}
+        if algorithm != "all":
+            ident["algorithm"] = algorithm.split(",")
+        if problem != "all":
+            ident["problem"] = problem.split(",")
         best = 0
-        for row in results.load(results.store_path(package, self.key)):
-            if row["analysis"] != "times":
-                continue
+        for row in results.rows_for(results.store_path(package, self.key), **ident):
             try:
                 if math.isfinite(float(row["min_ms"])):
                     best = max(best, int(row["n"]))
@@ -342,35 +362,26 @@ class Run:
         return best
 
     # --------------------------------------------------------------- stages
-    def package_stage(self, analysis, package, nlist, algorithm, problem, extra_env=None,
-                      label=None, logfile=None):
-        """One (analysis, package) stage over the algorithm tokens; returns the recorded status."""
+    def package_stage(self, analysis, package, nlist, algorithm, problem, mode="all",
+                      extra_env=None, label=None, logfile=None):
+        """One (analysis, package) stage; returns the recorded status."""
         stage = label or "{0}:{1}".format({"performance": "perf", "work-precision": "wp"}.get(analysis, analysis), package)
         logfile = logfile or "{0}_{1}.log".format(analysis.replace("-", "_"), package)
-        tokens = ["all"] if algorithm == "all" else algorithm.split(",")
         critical = analysis not in ("warm", "optimize")
-        worst = 0
-        ran = False
-        for token in tokens:
-            commands = launch.commands(package, analysis, nlist, self.plan_nmax(nlist),
-                                       token, problem)
-            if not commands:
-                continue
-            ran = True
-            if not self.args.keep:
-                self.clear_rows(package, analysis, token, problem)
-            saved = dict(self.env)
-            self.env.update(extra_env or {})
-            try:
-                status = self.run_commands(stage, logfile, commands, critical)
-            finally:
-                self.env = saved
-            worst = worst or status
-        if not ran:
+        commands = launch.commands(package, analysis, nlist, self.plan_nmax(nlist), algorithm, problem, mode)
+        if not commands:
             self.record(stage, "SKIPPED", "no {0} step".format(analysis), "-")
             return "SKIPPED"
+        if not self.args.keep:
+            self.clear_rows(package, analysis, algorithm, problem, mode, nlist)
+        saved = dict(self.env)
+        self.env.update(extra_env or {})
+        try:
+            worst = self.run_commands(stage, logfile, commands, critical)
+        finally:
+            self.env = saved
         if analysis == "performance":
-            reached = self.max_n_reached(package)
+            reached = self.max_n_reached(package, algorithm, problem)
             if worst == 0:
                 self.record(stage, "OK", "maxN={0}".format(reached), worst)
             elif reached > 0:
@@ -419,14 +430,13 @@ class Run:
                 nlist = [point.n]
             elif point.analysis == "states":
                 extra["BENCH_STATES_GRID"] = str(point.n)
-            label = "point:{0}:{1}:{2}:{3}".format(point.package, point.problem, point.algorithm,
-                                                   point.mode or "both")
+            label = "point:{0}:{1}:{2}:{3}".format(point.package, point.problem, point.algorithm, point.mode)
             saved_keep = self.args.keep
             self.args.keep = True
             try:
                 self.package_stage(point.stage, point.package, nlist, point.algorithm,
                                    point.problem if point.analysis != "states" else "all",
-                                   extra_env=extra, label=label,
+                                   mode=point.mode, extra_env=extra, label=label,
                                    logfile="points_{0}.log".format(point.package))
             finally:
                 self.args.keep = saved_keep
@@ -437,15 +447,15 @@ class Run:
     def run_stages(self):
         plan = self.plan
         packages, analyses = plan["packages"], plan["analyses"]
-        algorithm, problem, nlist = plan["algorithm"], plan["problem"], plan["nlist"]
+        algorithm, problem, mode, nlist = plan["algorithm"], plan["problem"], plan["mode"], plan["nlist"]
         skipping = bool(plan["resume_pkg"])
 
         if "optimize" in analyses:
             for package in packages:
-                self.package_stage("optimize", package, nlist, algorithm, problem)
+                self.package_stage("optimize", package, nlist, algorithm, problem, mode)
         if "warm" in analyses:
             for package in packages:
-                self.package_stage("warm", package, nlist, algorithm, problem)
+                self.package_stage("warm", package, nlist, algorithm, problem, mode)
         if "performance" in analyses:
             for package in packages:
                 extra = {}
@@ -457,12 +467,12 @@ class Run:
                     else:
                         self.record("perf:" + package, "SKIPPED", "before --resume-from", "-")
                         continue
-                self.package_stage("performance", package, nlist, algorithm, problem, extra_env=extra)
+                self.package_stage("performance", package, nlist, algorithm, problem, mode, extra_env=extra)
                 self.replot("plot_ode_comp.jl")
                 self.cooldown()
         if "states" in analyses:
             for package in packages:
-                self.package_stage("states", package, nlist, algorithm, "all")
+                self.package_stage("states", package, nlist, algorithm, "all", mode)
                 self.replot("plot_states.jl")
                 self.cooldown()
         if "work-precision" in analyses:
@@ -472,20 +482,23 @@ class Run:
             self.record("wp:golden", "OK" if status == 0 else "FAILED",
                         "-" if status == 0 else "wp sweeps cannot score", status)
             for package in packages:
-                self.package_stage("work-precision", package, nlist, algorithm, problem)
+                self.package_stage("work-precision", package, nlist, algorithm, problem, mode)
                 self.replot("plot_ode_wp.jl")
                 self.cooldown()
         if "numerical" in analyses:
-            self.numerical(ne_package(packages), cubie_packages(packages), algorithm, problem)
+            self.numerical(ne_package(packages), cubie_packages(packages), algorithm, problem, mode)
         if "overlap" in analyses:
             self.overlap(ne_package(packages), cubie_packages(packages), nlist, algorithm, problem)
         if "plots" in analyses:
             self.plots(ne_package(packages), plan["plot_all"])
 
-    def numerical(self, package, cubie_pkgs, algorithm, problem):
+    def numerical(self, package, cubie_pkgs, algorithm, problem, mode):
         """Golden NE references, the Float32 DifferentialEquations.jl sweep, one cubie sweep per cubie package, and the comparison."""
         if not package:
             self.record("ne", "SKIPPED", "no requested package is in the ne suite", "-")
+            return
+        if not ne_algorithms(algorithm):
+            self.record("ne", "SKIPPED", "no requested algorithm is in the ne suite", "-")
             return
         worst = 0
         if package in ("all", "julia"):
@@ -495,14 +508,14 @@ class Run:
                                        critical=False)
             worst = worst or self.step("ne: DifferentialEquations.jl sweeps", "numerical_equivalence.log",
                                        self.julia(os.path.join("runner_scripts", "numerical_equivalence", "ne_diffeq.jl"),
-                                                  "--controller", self.args.controller, "--algorithm", algorithm,
+                                                  "--controller", mode, "--algorithm", algorithm,
                                                   "--problem", problem), critical=False)
         for cubie_pkg in cubie_pkgs:
             if worst != 0:
                 break
             worst = self.step("ne: {0} sweeps".format(cubie_pkg), "numerical_equivalence.log", launch.Command(
                 cubie_pkg, [launch.cubie_python(), os.path.join(ROOT, "GPU_ODE_CUBIE", "numerical_equivalence.py"),
-                            "--package", cubie_pkg, "--controller", self.args.controller,
+                            "--package", cubie_pkg, "--controller", mode,
                             "--algorithm", algorithm, "--problem", problem]), critical=False)
         if worst != 0:
             self.record("ne", "FAILED", "-", worst)
@@ -521,6 +534,9 @@ class Run:
         """The overlap suite once per requested cubie backend; julia alone runs once."""
         if not package:
             self.record("overlap", "SKIPPED", "no requested package is in the overlap suite", "-")
+            return
+        if not overlap_algorithms(algorithm):
+            self.record("overlap", "SKIPPED", "no requested algorithm is in the overlap suite", "-")
             return
         backends = cubie_pkgs or [None]
         for backend in backends:
@@ -576,14 +592,13 @@ class Run:
         lines = ["dataset_key=" + self.key,
                  "started_utc=" + datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                  "nmax=" + self.plan["nmax"], "algorithm=" + self.plan["algorithm"],
-                 "problem=" + self.plan["problem"], "packages=" + ",".join(self.plan["packages"]),
+                 "problem=" + self.plan["problem"], "mode=" + self.plan["mode"],
+                 "packages=" + ",".join(self.plan["packages"]),
                  "analyses=" + ",".join(self.plan["analyses"]),
-                 "points=" + ";".join(p.identity(self.key).__repr__() for p in self.plan["points"]),
+                 "points=" + ";".join(repr(p.identity(self.key)) for p in self.plan["points"]),
                  "git_rev=" + (rev.stdout.strip() or "unknown"),
                  "git_dirty=" + ("yes" if dirty.stdout.strip() else "no"),
-                 "host={0} {1}".format(os.environ.get("COMPUTERNAME") or os.uname().nodename
-                                       if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", ""),
-                                       sys.platform),
+                 "host={0} {1}".format(platform.node(), sys.platform),
                  "clocks=" + self.clock_status]
         lines += ["gpu=" + line.strip() for line in gpu.stdout.splitlines() if line.strip()]
         with open(path, "w", encoding="utf-8") as handle:
@@ -620,6 +635,7 @@ class Run:
         print("nmax        : " + self.plan["nmax"])
         print("Algorithm   : " + self.plan["algorithm"])
         print("Problems    : " + self.plan["problem"])
+        print("Mode        : " + self.plan["mode"])
         print("Packages    : " + ", ".join(self.plan["packages"]))
         print("Analyses    : " + ", ".join(self.plan["analyses"]))
         print("Points      : " + str(len(self.plan["points"])))

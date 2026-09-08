@@ -5,11 +5,13 @@ import platform
 import shlex
 import sys
 
+from algorithms import MODES
+from cubie_adapter import PACKAGES as CUBIE_PACKAGES
+from protocol import WATCHDOG_EXIT_CODE
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PACKAGES = ("cubie", "cubie_mlir", "julia", "cpp", "pytorch", "jax",
-            "myokit_cuda")
-CUBIE_PACKAGES = ("cubie", "cubie_mlir")
+PACKAGES = CUBIE_PACKAGES + ("julia", "cpp", "pytorch", "jax", "myokit_cuda")
 ANALYSES = ("optimize", "warm", "performance", "states", "work-precision")
 
 VENV = {"cubie": "GPU_ODE_CUBIE/venv", "cubie_mlir": "GPU_ODE_CUBIE_MLIR/venv",
@@ -27,7 +29,6 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
 WP_PER_LEG = ("pytorch", "jax", "myokit_cuda")
 # Packages whose performance sweep fills its cache before timing.
 PERF_WARM = ("cubie", "cubie_mlir", "jax", "myokit_cuda")
-WATCHDOG_EXIT = 3
 
 
 class Command:
@@ -65,32 +66,34 @@ def julia_command():
     return shlex.split(os.environ.get("JULIA", "julia"))
 
 
-def python_command():
-    return [sys.executable]
+def mode_args(mode):
+    """The --mode tail a bench script or driver takes; nothing when every mode runs."""
+    return [] if mode == "all" else ["--mode", mode]
 
 
-def wp_legs(package, algorithm, problem):
-    """(problem, algorithm) work-precision legs the package runs."""
-    from algorithms import resolve_algorithms, supported_for
+def wp_legs(package, algorithm, problem, mode="all"):
+    """(problem, algorithm) work-precision legs the package runs in the requested modes."""
+    from algorithms import resolve_algorithms, resolve_modes, supported_for
     from problems import resolve_problems
     algorithms = resolve_algorithms(algorithm, package)
+    modes = resolve_modes(mode)
     legs = []
     for row in resolve_problems(problem, package):
         for name in algorithms:
-            if any(name in supported_for(package, mode)
-                   for mode in ("fixed", "adaptive")):
+            if any(name in supported_for(package, m) for m in modes):
                 legs.append((row.name, name))
     return legs
 
 
-def _python_commands(package, analysis, nlist, algorithm, problem):
+def _python_commands(package, analysis, nlist, algorithm, problem, mode):
     python = venv_python(package)
     script = os.path.join(REPO_ROOT, SCRIPT[package])
     env = ENV.get(package, {})
     csv = ",".join(str(n) for n in nlist)
+    tail = mode_args(mode)
 
     def bench(*args):
-        return [python, script] + list(args)
+        return [python, script] + list(args) + tail
 
     if analysis == "optimize":
         if package not in CUBIE_PACKAGES:
@@ -105,11 +108,11 @@ def _python_commands(package, analysis, nlist, algorithm, problem):
         if package in CUBIE_PACKAGES:
             commands.append(Command("optimize", bench("optimize", algorithm, "--problem", problem), env))
         if package in WP_PER_LEG:
-            for leg_problem, leg_algorithm in wp_legs(package, algorithm, problem):
+            for leg_problem, leg_algorithm in wp_legs(package, algorithm, problem, mode):
                 commands.append(Command(
                     "wp {0} {1}".format(leg_problem, leg_algorithm),
                     bench("wp", leg_algorithm, "--problem", leg_problem), env,
-                    ok=(0, WATCHDOG_EXIT)))
+                    ok=(0, WATCHDOG_EXIT_CODE)))
         else:
             commands.append(Command("wp", bench("wp", algorithm, "--problem", problem), env))
         return commands
@@ -122,21 +125,22 @@ def _python_commands(package, analysis, nlist, algorithm, problem):
     return commands
 
 
-def _julia_commands(analysis, nlist, algorithm, problem):
+def _julia_commands(analysis, nlist, algorithm, problem, mode):
     driver = [sys.executable, os.path.join(REPO_ROOT, "runner_scripts", "gpu", "julia_driver.py")]
+    tail = mode_args(mode)
     if analysis == "optimize":
         return []
     if analysis == "warm":
         return [Command("warm", julia_command() + ["--project=.", "-e", "using Pkg; Pkg.precompile()"])]
     if analysis == "states":
-        return [Command("states", driver + ["states", algorithm])]
+        return [Command("states", driver + ["states", algorithm] + tail)]
     if analysis == "work-precision":
-        return [Command("wp", driver + ["wp", algorithm, problem])]
+        return [Command("wp", driver + ["wp", algorithm, problem] + tail)]
     csv = ",".join(str(n) for n in nlist)
-    return [Command("performance", driver + ["performance", csv, algorithm, problem])]
+    return [Command("performance", driver + ["performance", csv, algorithm, problem] + tail)]
 
 
-def _cpp_commands(analysis, nmax, algorithm, problem):
+def _cpp_commands(analysis, nmax, algorithm, problem, mode):
     if analysis == "optimize":
         return []
     if platform.system() == "Windows":
@@ -144,17 +148,19 @@ def _cpp_commands(analysis, nmax, algorithm, problem):
                 os.path.join(REPO_ROOT, "runner_scripts", "gpu", "run_ode_cpp.ps1")]
     else:
         argv = ["bash", os.path.join(REPO_ROOT, "runner_scripts", "gpu", "run_ode_cpp.sh")]
-    argv += ["-a", analysis, "-n", nmax, "-g", algorithm, "-s", problem]
+    argv += ["-a", analysis, "-n", nmax, "-g", algorithm, "-s", problem, "-m", mode]
     return [Command(analysis, argv)]
 
 
-def commands(package, analysis, nlist, nmax, algorithm, problem):
-    """The commands one (package, analysis) stage runs for an algorithm token and problem list."""
+def commands(package, analysis, nlist, nmax, algorithm, problem, mode="all"):
+    """The commands one (package, analysis) stage runs for an algorithm token, a problem list and a mode token."""
+    if mode != "all" and mode not in MODES:
+        raise ValueError("unknown mode '{0}'".format(mode))
     if package == "julia":
-        return _julia_commands(analysis, nlist, algorithm, problem)
+        return _julia_commands(analysis, nlist, algorithm, problem, mode)
     if package == "cpp":
-        return _cpp_commands(analysis, nmax, algorithm, problem)
-    return _python_commands(package, analysis, nlist, algorithm, problem)
+        return _cpp_commands(analysis, nmax, algorithm, problem, mode)
+    return _python_commands(package, analysis, nlist, algorithm, problem, mode)
 
 
 def store_analysis(analysis):

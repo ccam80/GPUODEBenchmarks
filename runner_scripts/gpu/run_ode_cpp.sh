@@ -5,14 +5,23 @@ set -e
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
-# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive); -g and -m each narrow the pair.
 SOLVERS=""
-case "$ALGORITHM" in
-    all) SOLVERS="RK4 RKCK45";;
-    classical-rk4) SOLVERS="RK4";;
-    cash-karp-54) SOLVERS="RKCK45";;
-    *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
+for alg in ${ALGORITHM//,/ }; do
+	case "$alg" in
+		all) SOLVERS="RK4 RKCK45";;
+		classical-rk4) SOLVERS="$SOLVERS RK4";;
+		cash-karp-54) SOLVERS="$SOLVERS RKCK45";;
+	esac
+done
+case "$MODE" in
+	fixed) SOLVERS=$(echo "$SOLVERS" | tr ' ' '\n' | awk '$1 == "RK4"');;
+	adaptive) SOLVERS=$(echo "$SOLVERS" | tr ' ' '\n' | awk '$1 == "RKCK45"');;
 esac
+if [ -z "$(echo "$SOLVERS" | tr -d ' \n')" ]; then
+	echo "MPGOS runs none of algorithm '$ALGORITHM' in mode '$MODE'; skipping."
+	exit 0
+fi
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 

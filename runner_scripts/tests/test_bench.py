@@ -13,6 +13,7 @@ sys.path.insert(0, ROOT)
 import bench  # noqa: E402
 import clocks  # noqa: E402
 import launch  # noqa: E402
+from protocol import STATES_GRID, WATCHDOG_EXIT_CODE  # noqa: E402
 
 
 class ResolveTests(unittest.TestCase):
@@ -57,6 +58,24 @@ class ResolveTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.plan("-s", "lorenz1000")
 
+    def test_mode_axis(self):
+        self.assertEqual(self.plan()["mode"], "all")
+        self.assertEqual(self.plan("--mode", "adaptive")["mode"], "adaptive")
+        self.assertEqual(self.plan("--mode", "fixed,adaptive")["mode"], "all")
+        with self.assertRaises(SystemExit):
+            self.plan("--mode", "sideways")
+
+    def test_a_run_clears_only_what_it_records(self):
+        ident = bench.clear_identity("cubie", "k", "performance", "euler,tsit5", "lorenz", "fixed", [8, 32])
+        self.assertEqual(ident, {"package": "cubie", "key": "k", "analysis": "times",
+                                 "algorithm": ["euler", "tsit5"], "problem": ["lorenz"],
+                                 "mode": "fixed", "n": ["8", "32"]})
+        states = bench.clear_identity("cpp", "k", "states", "all", "all", "all", [8])
+        self.assertEqual(states, {"package": "cpp", "key": "k", "analysis": "states",
+                                  "states": [str(s) for s in STATES_GRID]})
+        wp = bench.clear_identity("julia", "k", "work-precision", "all", "pollu", "all", [8])
+        self.assertEqual(wp, {"package": "julia", "key": "k", "analysis": "wp", "problem": ["pollu"]})
+
     def test_continuation_flags_imply_keep(self):
         for flag in ("--resume", "--no-overwrite", "--floor"):
             self.assertTrue(bench.parse_args([flag]).keep)
@@ -80,7 +99,9 @@ class PointTests(unittest.TestCase):
     def test_wp_point_needs_no_n_and_states_point_carries_the_count(self):
         wp = bench.Point("wp:julia:pollu:kvaerno3")
         self.assertEqual(wp.stage, "work-precision")
+        self.assertEqual(wp.mode, "all")
         self.assertNotIn("n", wp.identity("k"))
+        self.assertNotIn("mode", wp.identity("k"))
         states = bench.Point("states:cpp:lorenz96:classical-rk4:16")
         self.assertEqual(states.identity("k")["states"], "16")
 
@@ -118,7 +139,7 @@ class LaunchTests(unittest.TestCase):
         labels = self.labels("pytorch", "work-precision", "euler", "lorenz,pollu")
         self.assertEqual(labels, ["wp lorenz euler", "wp pollu euler"])
         command = launch.commands("pytorch", "work-precision", [8], "8", "euler", "lorenz")[0]
-        self.assertIn(launch.WATCHDOG_EXIT, command.ok)
+        self.assertIn(WATCHDOG_EXIT_CODE, command.ok)
         self.assertEqual(command.argv[-2:], ["--problem", "lorenz"])
 
     def test_julia_and_cpp_go_through_their_drivers(self):
@@ -126,7 +147,20 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(julia.argv[1].endswith("julia_driver.py"))
         self.assertEqual(julia.argv[2:], ["performance", "8,32", "tsit5", "lorenz"])
         cpp = launch.commands("cpp", "states", [8], "8", "all", "all")[0]
-        self.assertEqual(cpp.argv[-8:], ["-a", "states", "-n", "8", "-g", "all", "-s", "all"])
+        self.assertEqual(cpp.argv[-10:], ["-a", "states", "-n", "8", "-g", "all", "-s", "all", "-m", "all"])
+
+    def test_mode_reaches_every_package(self):
+        cubie = launch.commands("cubie", "performance", [8], "8", "all", "all", "fixed")
+        self.assertTrue(all(c.argv[-2:] == ["--mode", "fixed"] for c in cubie))
+        julia = launch.commands("julia", "work-precision", [8], "8", "all", "all", "adaptive")[0]
+        self.assertEqual(julia.argv[-2:], ["--mode", "adaptive"])
+        cpp = launch.commands("cpp", "performance", [8], "8", "all", "all", "adaptive")[0]
+        self.assertEqual(cpp.argv[-2:], ["-m", "adaptive"])
+        # An adaptive-only run has no pytorch wp legs and the cubie warm step names no mode when every mode runs.
+        self.assertEqual(launch.commands("pytorch", "work-precision", [8], "8", "all", "all", "adaptive"), [])
+        self.assertNotIn("--mode", launch.commands("cubie", "warm", [8], "8", "all", "all")[0].argv)
+        with self.assertRaises(ValueError):
+            launch.commands("cubie", "performance", [8], "8", "all", "all", "sideways")
 
     def test_ordering_and_store_names(self):
         self.assertEqual(launch.ordered(["jax", "cubie_mlir", "cubie"]), ["cubie", "cubie_mlir", "jax"])

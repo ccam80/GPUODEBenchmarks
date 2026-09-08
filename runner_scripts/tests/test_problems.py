@@ -55,20 +55,20 @@ class RegistryTests(unittest.TestCase):
 
     def test_bench_args_accept_an_n_list(self):
         from wp_common import N_WP, parse_bench_args
-        ns, analysis, _, _ = parse_bench_args(["32,8,128"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["32,8,128"], "cubie")
         self.assertEqual([8, 32, 128], ns)
         self.assertEqual("times", analysis)
-        ns, analysis, _, _ = parse_bench_args(["wp"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["wp"], "cubie")
         self.assertEqual("wp", analysis)
         self.assertEqual([N_WP], ns)
         from wp_common import STATES_GRID
-        ns, analysis, _, _ = parse_bench_args(["states"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["states"], "cubie")
         self.assertEqual("states", analysis)
         self.assertEqual(list(STATES_GRID), ns)
-        ns, analysis, _, _ = parse_bench_args(["warm:32,8"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["warm:32,8"], "cubie")
         self.assertEqual("warm", analysis)
         self.assertEqual([8, 32], ns)
-        ns, analysis, _, _ = parse_bench_args(["warm"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["warm"], "cubie")
         self.assertEqual("warm", analysis)
         self.assertEqual([], ns)
 

@@ -422,13 +422,13 @@ def main(argv=None):
     if not argv:
         raise SystemExit(
             "usage: bench_myokit_cuda.py <N|N,N,...>|wp "
-            "[algorithm|all] [--problem <name|all>]"
+            "[algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>]"
         )
-    cell_counts, analysis, algorithms, problems = parse_bench_args(
+    cell_counts, analysis, algorithms, problems, modes = parse_bench_args(
         argv, "myokit_cuda"
     )
-    if not algorithms:
-        print("Myokit CUDA supports forward Euler only; skipping.")
+    if not algorithms or "fixed" not in modes:
+        print("Myokit CUDA supports fixed-step forward Euler only; skipping.")
         return 0
     if not problems:
         print("Myokit CUDA runs none of the requested problems; skipping.")
