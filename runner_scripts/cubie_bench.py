@@ -8,7 +8,11 @@ import sys
 
 import numpy as np
 
-import cubie_adapter as adapter
+# The ne writers live beside the ne protocol module.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "numerical_equivalence"))
+
+import cubie_adapter as adapter  # noqa: E402
 from algorithms import supported_for, wp_supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import final_states, sweep_parameters
