@@ -131,11 +131,10 @@ def _write_ne(problem, opts, algorithm, mode, tier, finals):
 
 
 def _run_wp(problem, opts, system, grid):
-    """dt / tolerance sweep at N = N_WP; an ne member's legs also write the first N_NE rows of their finals as its ne files."""
+    """dt / tolerance sweep at N = N_WP timed on the resident inputs; an ne member's legs also write the first N_NE rows of their finals as its ne files."""
     from algorithms import NE_PACKAGES, get_algorithm, ne_member
     from protocol import N_NE
-    from wp_common import (N_WP, load_golden, ensemble_error, timed_min_ms,
-                           wp_settings)
+    from wp_common import N_WP, load_golden, ensemble_error, wp_settings
 
     duration = problem["duration"]
     golden = load_golden(problem)
@@ -144,17 +143,18 @@ def _run_wp(problem, opts, system, grid):
     def bench_solver(solver, repeats=REPEATS):
         """(best_ms, err, errored_percent, samples, finals); best_ms is None when a run breaches the watchdog."""
         initials_array, parameter_array = grid(solver, N_WP)
-
-        def run():
-            return adapter.solve(solver, initials_array, parameter_array,
+        # One untimed host solve places the inputs on the device and yields the finals; the timed leg is device only.
+        solution = adapter.solve(solver, initials_array, parameter_array,
                                  duration)
-        best_ms, solution, samples = timed_min_ms(run, repeats)
-        if best_ms is None:
-            return None, float("nan"), 100.0, samples, None
         view = final_states(system, solution, problem)
         err = ensemble_error(view, golden)
+        pct = errored_pct(view)
         # A copy: the view aliases the buffer the next solve reuses.
-        return best_ms, err, errored_pct(view), samples, np.array(view[:N_NE])
+        finals = np.array(view[:N_NE])
+        best_ms, samples = _device_leg(solver, duration, repeats)
+        if best_ms is None:
+            return None, float("nan"), 100.0, samples, None
+        return best_ms, err, pct, samples, finals
 
     def sweep(algorithm, mode, settings, tier="default", controller=None,
               ne=False):

@@ -266,8 +266,8 @@ The identity columns are `package, key, analysis, problem, algorithm, mode,
 setting_kind, setting, n, states, tier, transfers`; `analysis` is `times`,
 `wp` or `states`, `setting` the dt or tolerance the point ran at, `n` the
 ensemble size and `states` the state count. `transfers` is what the timed
-region copies: `both` (h2d and d2h), `none` (neither) or `d2h` (inputs already
-resident). The value columns are
+region copies: `both` (h2d and d2h) or `none` (neither); the N and states
+sweeps record both legs, work-precision the `none` leg alone. The value columns are
 `min_ms` (the recorded time), `samples_ms` (every attempt of the leg in ms,
 `;`-joined, the untimed warm-up first, so `min_ms` is the minimum over the
 attempts after it; a leg that breached the watchdog keeps the attempts it
@@ -1003,9 +1003,10 @@ Each framework's `wp` mode sweeps the controls it supports, once per
 supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
 dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
 adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
-usual timing protocol
-(untimed warm-up, repeated solves, best time) and computes the ensemble l2
-error of the final states against the golden reference. The grids are the
+usual timing protocol (untimed warm-up, repeated solves, best time) on the
+resident inputs with the result left on the device, so every package's wp row
+is a `transfers = none` leg, and computes the ensemble l2 error of the final
+states against the golden reference from one untimed solve. The grids are the
 `[fixed]` and `[adaptive]` tables of `runner_scripts/protocol.toml`.
 
 ```bash

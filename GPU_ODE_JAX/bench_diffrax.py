@@ -220,7 +220,7 @@ def run_wp(problem, parameterList):
 
         def on_breach():
             # The hard exit skips sweep()'s abandon path, so fill the leg here.
-            leg.nan_wp(remaining, transfers="none")
+            leg.nan_wp(remaining)
             print("WATCHDOG wp {0} setting={1:g}: run never returned"
                   .format(problem.name, setting))
 
@@ -241,8 +241,7 @@ def run_wp(problem, parameterList):
             t_ms, err = float("nan"), float("nan")
         print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}, "
               "errored={4:.1f}%".format(problem.name, setting, t_ms, err, pct))
-        leg.record_wp(setting, t_ms, err, pct, transfers="none",
-                      samples=samples)
+        leg.record_wp(setting, t_ms, err, pct, samples=samples)
         return not breached
 
     def sweep(mode, algorithm, settings, make):
@@ -258,7 +257,7 @@ def run_wp(problem, parameterList):
             if not bench(make(setting), setting, leg, settings[index:]):
                 print("WATCHDOG wp {0} setting={1:g}: run exceeded "
                       "the cap".format(problem.name, setting))
-                leg.nan_wp(settings[index + 1:], transfers="none")
+                leg.nan_wp(settings[index + 1:])
                 break
 
     for algorithm in ALGORITHMS:

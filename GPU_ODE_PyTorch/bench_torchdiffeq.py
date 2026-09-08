@@ -126,7 +126,7 @@ def run_wp(problem, parameters):
 
             def on_breach(rest=dts[index:], at=dt):
                 # The hard exit skips the abandon path, so fill it here.
-                leg.nan_wp(rest, transfers="none")
+                leg.nan_wp(rest)
                 print("WATCHDOG wp {0} fixed {1} dt={2:g}: run never "
                       "returned".format(problem.name, algorithm, at))
 
@@ -144,10 +144,9 @@ def run_wp(problem, parameters):
             print("wp {0} fixed {1} dt={2:g}: {3:.2f} ms, err={4:.3e}, "
                   "errored={5:.1f}%".format(problem.name, algorithm, dt,
                                             t_ms, err, pct))
-            leg.record_wp(dt, t_ms, err, pct, transfers="none",
-                          samples=samples)
+            leg.record_wp(dt, t_ms, err, pct, samples=samples)
             if breached:
-                leg.nan_wp(dts[index + 1:], transfers="none")
+                leg.nan_wp(dts[index + 1:])
                 break
 
 

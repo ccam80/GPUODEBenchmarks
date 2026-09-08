@@ -93,10 +93,11 @@ class RecordTests(StoreCase):
 
     def test_wp_rows_and_states_rows_carry_their_own_columns(self):
         wp = self.leg("wp", mode="adaptive")
-        wp.record_wp(1e-8, 3.0, 1e-4, 0.0, transfers="d2h")
+        wp.record_wp(1e-8, 3.0, 1e-4, 0.0)
         row = results.load(wp.path)[0]
+        # Work-precision times the resident solve alone in every package.
         self.assertEqual((row["n"], row["setting_kind"], row["transfers"]),
-                         (str(N_WP), "tol", "d2h"))
+                         (str(N_WP), "tol", "none"))
         self.assertEqual(float(row["setting"]), 1e-8)
         self.assertEqual(float(row["error"]), 1e-4)
         states = self.leg("states", problem="lorenz96")

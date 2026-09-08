@@ -308,14 +308,30 @@ class TestWorkPrecisionNe(SweepCase):
         super().tearDown()
 
     def run_wp(self, algorithms, fixed, adaptive):
-        cubie_bench.adapter.make_solver = (
-            lambda system, problem, algorithm, mode, setting=None, **kw: FakeSolver())
+        self.solvers = []
+
+        def make_solver(system, problem, algorithm, mode, setting=None, **kw):
+            self.solvers.append(FakeSolver())
+            return self.solvers[-1]
+
+        cubie_bench.adapter.make_solver = make_solver
         opts = dict(self.opts([131072]), algorithms=algorithms, fixed=(),
                     adaptive=(), wp_fixed=fixed, wp_adaptive=adaptive)
         cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
         import results
         return [row for row in results.load(results.store_path("cubie", "test_key"))
                 if row["analysis"] == "wp"]
+
+    def test_a_wp_point_is_timed_on_the_resident_inputs(self):
+        rows = self.run_wp(["euler"], ("euler",), ())
+        self.assertTrue(rows)
+        self.assertTrue(all(row["transfers"] == "none" for row in rows))
+        self.assertTrue(all(math.isfinite(float(row["min_ms"])) for row in rows))
+        for solver in self.solvers:
+            # One untimed host solve for the finals, then only device solves.
+            self.assertEqual([on_device for _, on_device in solver.calls][:2],
+                             [False, True])
+            self.assertTrue(all(on_device for _, on_device in solver.calls[1:]))
 
     def test_an_ne_leg_times_the_ne_grid_and_writes_its_finals(self):
         from protocol import N_NE
