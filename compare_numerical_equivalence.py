@@ -10,13 +10,14 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "runner_scripts"))
 sys.path.insert(0, os.path.join(_HERE, "runner_scripts", "numerical_equivalence"))
+from algorithms import ne_algorithms  # noqa: E402
 from bench_key import group_dir  # noqa: E402
 from problems import problem_names, resolve_problems  # noqa: E402
-from ne_common import (TOLS_NE, dts_ne, load_algorithms, load_golden_ne,
+from ne_common import (TOLS_NE, dts_ne, load_golden_ne,  # noqa: E402
                        ensemble_error_masked, julia_ne_file, cubie_ne_file,
                        julia_ne_adaptive_file, cubie_ne_adaptive_file,
                        read_ne_csv_masked, read_ne_adaptive_csv_masked,
-                       runs_fixed, CUBIE_NE_DIR)
+                       CUBIE_NE_DIR)
 
 # Windows consoles default to a legacy codepage (cp1252) that cannot encode
 # the glyphs printed below; force UTF-8 where supported.
@@ -272,7 +273,7 @@ def compare_problem(problem, algorithms, keys):
 
     for key in sorted(keys):
         results = [analyse_algorithm(row, key, golden_states, problem)
-                   for row in algorithms if runs_fixed(row)]
+                   for row in algorithms if row.runs_fixed_ne]
         adaptive_results = [
             res for res in (analyse_adaptive(row, key, golden_states, problem)
                             for row in algorithms)
@@ -304,7 +305,7 @@ def main():
     args = parser.parse_args()
 
     problems = resolve_problems(args.problem, "cubie")
-    algorithms = load_algorithms()
+    algorithms = ne_algorithms()
     keys = discover_keys()
     if not keys:
         print("No cubie ne outputs found in {0}; run "
