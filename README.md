@@ -351,9 +351,7 @@ count in `states`. `build_s` is the wall time from solver construction to
 the first completed solve; the sweep bypasses every compiled-kernel
 cache, making it a cold compile on every run. A size with no finite time in
 either mode cancels the pending and running larger sizes of that
-algorithm; cancelled rows are NaN. `BENCH_STATES_BUDGET` (seconds, unset
-disables) kills any process whose first kernel has not compiled within
-the budget.
+algorithm; cancelled rows are NaN.
 
 Every Julia analysis runs through `runner_scripts/gpu/julia_driver.py`:
 one process per leg — (problem, algorithm, mode) for performance and
@@ -592,12 +590,12 @@ timings can be generated through the following:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p julia -d gpu -m ode
+    $ bash ./run_benchmark.sh -p julia
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p julia -d gpu -m ode
+    > run_benchmark.bat -p julia
 ```
 
 It might take around 20 minutes to finish. The flag `-n N` can be used
@@ -609,21 +607,6 @@ Rows land in `data/Julia/<os>_<gpu>/results.csv` with `analysis = times`, two
 per (problem, algorithm, mode, N): `transfers = both` times h2d + solve + d2h,
 `transfers = none` the resident solve alone. See "Result store" above.
 
-Additionally, to benchmark ODE solvers for other backends:
-
-**On Linux/macOS:**
-```bash
-    $ N=$((2**24))
-    $ backend="Metal"
-    $ ./runner_scripts/gpu/run_ode_mult_device.sh $N $backend
-```
-
-**On Windows:**
-```cmd
-    > set N=16777216
-    > set backend=Metal
-    > runner_scripts\gpu\run_ode_mult_device.bat %N% %backend%
-```
 ### Benchmarking C++ (MPGOS) ODE solvers
 
 Benchmarking MPGOS ODE solvers requires the CUDA C++ compiler to be
@@ -649,12 +632,12 @@ programs can be run with the same script by changing the arguments as:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p cpp -d gpu -m ode
+    $ bash ./run_benchmark.sh -p cpp
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p cpp -d gpu -m ode
+    > run_benchmark.bat -p cpp
 ```
 
 Its rows land in `data/CPP/<os>_<gpu>/results.csv`.
@@ -679,12 +662,12 @@ For our purposes, we can benchmark the solvers by:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p jax -d gpu -m ode
+    $ bash ./run_benchmark.sh -p jax
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p jax -d gpu -m ode
+    > run_benchmark.bat -p jax
 ```
 
 #### A note on JIT ordering in JAX
@@ -712,12 +695,12 @@ Then run the benchmarks by:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p pytorch -d gpu -m ode
+    $ bash ./run_benchmark.sh -p pytorch
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p pytorch -d gpu -m ode
+    > run_benchmark.bat -p pytorch
 ```
 
 ### Benchmarking CUBIE ODE solvers
@@ -736,14 +719,14 @@ scripts (see [SETUP.md](SETUP.md)), then run:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p cubie -d gpu -m ode
-    $ bash ./run_benchmark.sh -p cubie_mlir -d gpu -m ode
+    $ bash ./run_benchmark.sh -p cubie
+    $ bash ./run_benchmark.sh -p cubie_mlir
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p cubie -d gpu -m ode
-    > run_benchmark.bat -p cubie_mlir -d gpu -m ode
+    > run_benchmark.bat -p cubie
+    > run_benchmark.bat -p cubie_mlir
 ```
 
 Results are written to `data/CUBIE/` and `data/CUBIE_MLIR/` respectively,
@@ -764,118 +747,24 @@ language spelling:
 
 **On Linux/macOS:**
 ```bash
-    $ bash ./run_benchmark.sh -p myokit_cuda -d gpu -m ode
-    $ bash ./run_benchmark.sh -p myokit-cuda -d gpu -m ode
+    $ bash ./run_benchmark.sh -p myokit_cuda
+    $ bash ./run_benchmark.sh -p myokit-cuda
 ```
 
 **On Windows:**
 ```cmd
-    > run_benchmark.bat -p myokit_cuda -d gpu -m ode
-    > run_benchmark.bat -p myokit-cuda -d gpu -m ode
+    > run_benchmark.bat -p myokit_cuda
+    > run_benchmark.bat -p myokit-cuda
 ```
 
 Results are written to `data/MYOKIT_CUDA/` with the `Myokit_cuda` filename
 prefix.
 
-## Comparing GPU acceleration of ODEs with CPUs
-
-The benchmark suite can also be used to test the GPU acceleration of ODE
-solvers in comparison with CPUs. The process for generating simulation
-times for GPUs can be done by following the GPU section mentioned earlier. The following script
-allows the generation of CPU simulation times for ODEs:
-
-**On Linux/macOS:**
-```bash
-    $ bash ./run_benchmark.sh -p julia -d cpu -m ode
-```
-
-**On Windows:**
-```cmd
-    > run_benchmark.bat -p julia -d cpu -m ode
-```
-
-The simulation times will be generated in `data/CPU`. Each of the
-workflow takes approximately 20 minutes to finish.
-
-## Benchmarking GPU acceleration of SDEs with CPUs
-
-The SDE solvers in Julia are benchmarked by comparing them to the
-CPU-accelerated simulation. This will benchmark the linear SDE with
-three states, as described in the \"Benchmarks and case studies\"
-section. To generate simulation times for GPU, do the following:
-
-**On Linux/macOS:**
-```bash
-    $ bash ./run_benchmark.sh -p julia -d gpu -m sde
-```
-
-**On Windows:**
-```cmd
-    > run_benchmark.bat -p julia -d gpu -m sde
-```
-
-We can generate the simulation times for CPU-accelerated codes through the following:
-
-**On Linux/macOS:**
-```bash
-    $ bash ./run_benchmark.sh -p julia -d cpu -m sde
-```
-
-**On Windows:**
-```cmd
-    > run_benchmark.bat -p julia -d cpu -m sde
-```
-
-The results will get generated in `data/SDE` and `data/CPU/SDE`, taking
-around 10 minutes to complete.
-
-## Composability with MPI
-
-Julia supports Message Passing Interface (MPI) to allow Single Program
-Multiple Data (SPMD) type parallel programming. The composability of the
-GPU ODE solvers enable seamless integration with MPI, enabling scaling
-the ODE solvers to clusters on multiple nodes.
-```julia
-    $ julia --project=./GPU_ODE_Julia
-    julia> using Pkg
-    # install MPI.jl
-    julia> Pkg.add("MPI")
-```
-An example script solving the Lorenz problem for approximately 1 billion
-parameters are available in the `MPI` folder. A SLURM-based script is
-shown below.
-```bash
-    #!/bin/bash
-    # Slurm Sbatch Options
-    # Reqeust no. of GPUs/node
-    #SBATCH --gres=gpu:volta:1
-    # 1 process per node 
-    #SBATCH -n 5 -N 5
-    #SBATCH --output="./mpi_scatter_test.log-%j"
-    # Loading the required module
-
-    # MPI.jl requires a memory pool to be disabled
-    export JULIA_CUDA_MEMORY_POOL=none
-    export JULIA_MPI_BINARY=system
-    # Use local CUDA toolkit installation
-    export JULIA_CUDA_USE_BINARYBUILDER=false
-
-    source $HOME/.bashrc
-    module load cuda mpi
-
-    srun hostname > hostfile
-    time mpiexec julia --project=./GPU_ODE_Julia\ 
-    ./MPI/gpu_ode_mpi.jl
-```
 ## Plotting Results
 
 The plotting scripts to visualize the simulation times. The scripts are
-located in the `runner_scripts/plot` folder. These scripts replicate the
-benchmark figures in the paper. The benchmark suite contains the
-simulation data generated by authors, which can be used to verify the
-plots. Various benchmarks can be plotted, which are described in the
-different sections. The plotting scripts are based on Julia. As a
-preliminary step:
+located in the `runner_scripts/plot` folder. The plotting scripts are
+based on Julia. As a preliminary step:
 ```julia
     $ cd GPUODEBenchmarks
     $ julia project=.
@@ -890,30 +779,6 @@ the paper can be generated by using the below command:
     /plot_ode_comp.jl
 ```
 The plot will get saved in the `plots` folder.
-
-Similarly, the other plots in the paper can be generated by running the
-different scripts in the folder `runner_scripts/plot`.
-```bash
-    plot performance of GPU ODE solvers 
-    with multiple backends
-    $ julia --project=. ./runner_scripts/plot\
-    /plot_mult_gpu.jl 
-    plot GPU ODE solvers comparsion with CPUs
-    $ julia --project=. ./runner_scripts/plot\
-    /plot_ode_comp.jl 
-    plot GPU SDE solvers comparsion with CPUs
-    $ julia --project=. ./runner_scripts/plot\
-    /plot_sde_comp.jl 
-    plot CRN Network sim comparison with CPUs
-    $ julia --project=. ./runner_scripts/plot\
-    /plot_sde_crn.jl 
-```
-To plot data generated by running the scripts, specify the location of
-the `data` as the argument to the mentioned command.
-```bash
-    $ julia --project=. ./runner_scripts/plot/\
-    plot_mult_gpu.jl /path/to/data/
-```
 
 ## Comparing Numerical Results
 
@@ -1013,16 +878,16 @@ reference. The grids are the `[fixed]` and `[adaptive]` tables of
 `runner_scripts/protocol.toml`.
 
 ```bash
-./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision
-./run_benchmark.sh -p cubie-mlir -d gpu -m ode -a work-precision
-./run_benchmark.sh -p myokit-cuda -d gpu -m ode -a work-precision  # float32 forward Euler only
-./run_benchmark.sh -p julia      -d gpu -m ode -a work-precision
-./run_benchmark.sh -p pytorch    -d gpu -m ode -a work-precision   # fixed-dt only: torch.vmap cannot trace adaptive solvers
-./run_benchmark.sh -p jax        -d gpu -m ode -a work-precision   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
-./run_benchmark.sh -p cpp        -d gpu -m ode -a work-precision   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=131072
+./run_benchmark.sh -p cubie      -a work-precision
+./run_benchmark.sh -p cubie-mlir -a work-precision
+./run_benchmark.sh -p myokit-cuda -a work-precision  # float32 forward Euler only
+./run_benchmark.sh -p julia      -a work-precision
+./run_benchmark.sh -p pytorch    -a work-precision   # fixed-dt only: torch.vmap cannot trace adaptive solvers
+./run_benchmark.sh -p jax        -a work-precision   # Linux/WSL2 only (no CUDA jaxlib on native Windows)
+./run_benchmark.sh -p cpp        -a work-precision   # MPGOS: rebuilds RK4 + RKCK45 once each at NT=131072
 ```
 
-(`run_benchmark.bat -p <package> -d gpu -m ode -a work-precision` on Windows.) To run every
+(`run_benchmark.bat -p <package> -a work-precision` on Windows.) To run every
 package's work-precision sweeps and the plot in one go:
 `./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 

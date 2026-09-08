@@ -306,8 +306,8 @@ function with_gpu_lock(f)
     end
 end
 
-# One system size per process; the driver enforces the compile budget and
-# backfills rows for processes that never wrote them.
+# One system size per process; the driver backfills rows for processes that
+# never wrote them.
 function run_states(nstates, n)
     # Runtime entry at every size, so build_s is a cold compile.
     entry = _lorenz96_entry(nstates)
@@ -334,8 +334,6 @@ function run_states(nstates, n)
                     mode, setting, row)[1]
                 # Uncapped: the first solve carries the kernel compile.
                 build = @elapsed device_solve()
-                marker = get(ENV, "BENCH_STATES_MARKER", "")
-                isempty(marker) || touch(marker)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
