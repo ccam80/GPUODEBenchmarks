@@ -342,15 +342,11 @@ class Run:
         results.clear(results.store_path(package, self.key),
                       **clear_identity(package, self.key, analysis, algorithm, problem, mode, nlist))
 
-    def max_n_reached(self, package, algorithm, problem):
-        """Largest N with a finite time in the package's times rows of the stage's algorithms and problems."""
+    def max_n_reached(self, package, algorithm, problem, mode, nlist):
+        """Largest N with a finite time among the rows the stage recorded."""
         import math
         import results
-        ident = {"package": package, "key": self.key, "analysis": "times"}
-        if algorithm != "all":
-            ident["algorithm"] = algorithm.split(",")
-        if problem != "all":
-            ident["problem"] = problem.split(",")
+        ident = clear_identity(package, self.key, "performance", algorithm, problem, mode, nlist)
         best = 0
         for row in results.rows_for(results.store_path(package, self.key), **ident):
             try:
@@ -380,7 +376,7 @@ class Run:
         finally:
             self.env = saved
         if analysis == "performance":
-            reached = self.max_n_reached(package, algorithm, problem)
+            reached = self.max_n_reached(package, algorithm, problem, mode, nlist)
             if worst == 0:
                 self.record(stage, "OK", "maxN={0}".format(reached), worst)
             elif reached > 0:
