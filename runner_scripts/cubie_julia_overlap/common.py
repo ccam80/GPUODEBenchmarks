@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from algorithms import overlap_algorithms  # noqa: E402 - path bootstrap above
 from ne_common import (  # noqa: E402 - path bootstrap above
-    read_ne_csv, read_ne_adaptive_csv,
+    load_golden_ne, ne_sweep, read_ne_csv, read_ne_adaptive_csv,
 )
 from protocol import (  # noqa: E402 - path bootstrap above
     N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP, TIMING_DT_K, TOLS, WP_K,
@@ -29,11 +29,9 @@ NE_DTS = fixed_dts(1.0, NE_K)
 CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
 
 
-def golden_ne(problem):
-    """Path of the ne golden reference for a problem row or name."""
-    name = problem["problem"] if isinstance(problem, dict) else problem
-    return REPO_ROOT / "data" / "numerical" / "golden_ne_{0}_{1}.csv".format(
-        name, N_NE)
+def golden_ne_states(problem):
+    """The (N_NE, states) Float64 golden of the ne ensemble."""
+    return load_golden_ne(problem)[1]
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")

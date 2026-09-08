@@ -15,6 +15,37 @@ sys.path.insert(0, ROOT)
 import ne_common  # noqa: E402
 
 
+class EnsembleGridTests(unittest.TestCase):
+    def setUp(self):
+        self.cwd = os.getcwd()
+        os.chdir(ROOT)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+
+    def test_ne_grid_is_the_wp_prefix(self):
+        import numpy as np
+        from problems import get_problem
+        from protocol import N_NE, N_WP, NE_LEGACY_GRID
+        for name in ("lorenz", "pollu"):
+            self.assertNotIn(name, NE_LEGACY_GRID)
+            problem = get_problem(name)
+            sweep, states = ne_common.load_golden_ne(problem)
+            self.assertTrue(np.array_equal(
+                np.float32(sweep), problem.sweep(N_WP, dtype=np.float32)[:N_NE]))
+            self.assertEqual(states.shape, (N_NE, problem["states"]))
+
+    def test_legacy_grid_comes_from_its_golden_file(self):
+        import numpy as np
+        from protocol import N_NE, NE_LEGACY_GRID
+        name = NE_LEGACY_GRID[0]
+        sweep, states = ne_common.load_golden_ne(name)
+        file_sweep = np.loadtxt(ne_common.golden_ne_path(name), delimiter=",",
+                                usecols=(0,))
+        self.assertTrue(np.array_equal(sweep, file_sweep))
+        self.assertEqual(len(sweep), N_NE)
+
+
 class CompareProblemListTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

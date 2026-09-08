@@ -117,20 +117,11 @@ failures = Tuple{String, String, Float64, String}[]
 function setup(problem)
     name = problem["problem"]
     nstates = problem["states"]
-    golden_path = joinpath(REPO_ROOT, "data", "numerical",
-        "golden_ne_$(name)_$(N_NE).csv")
-    isfile(golden_path) || error(
-        "$(golden_path) not found - generate it first with `julia -t auto " *
-        "--project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl " *
-        "--problem $(name)`")
-    golden = readdlm(golden_path, ',')
-    size(golden) == (N_NE, nstates + 1) || error(
-        "golden ne reference has size $(size(golden)), expected " *
-        "($(N_NE), $(nstates + 1))")
-    sweep32 = Float32.(golden[:, 1])
-    # The swept values are float32-rounded, so the cast back is exact.
-    all(Float64.(sweep32) .== golden[:, 1]) || error(
-        "golden parameter column is not exactly representable in Float32")
+    sweep32 = ne_sweep(problem)
+    golden_states = ne_golden_states(problem)
+    size(golden_states) == (N_NE, nstates) || error(
+        "golden ne reference has size $(size(golden_states)), expected " *
+        "($(N_NE), $(nstates))")
 
     system = julia_system(problem)
     duration = Float32(problem["duration"])
@@ -153,7 +144,7 @@ function setup(problem)
 
     outdir = data_dir(REPO_ROOT, joinpath("numerical_equivalence", "julia"),
         DATASET_KEY, name)
-    return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
+    return (name = name, nstates = nstates, golden_states = golden_states,
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
         dts = problem_dts_ne(problem),

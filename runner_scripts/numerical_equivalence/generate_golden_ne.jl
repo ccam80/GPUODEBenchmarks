@@ -1,4 +1,4 @@
-# Float64 ne golden references at N=1024, column 1 the Float32-rounded swept parameter, kept unless --force.
+# Float64 golden references on the standalone N_NE grid for the problems in protocol.toml's ne_legacy_grid, column 1 the Float32-rounded swept parameter, kept unless --force.
 #
 # Usage: julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl [--problem <name|all>] [--force]
 
@@ -73,5 +73,9 @@ function generate(problem)
 end
 
 for problem in resolve_problems(requested)
-    generate(problem)
+    if problem["problem"] in NE_LEGACY_GRID
+        generate(problem)
+    else
+        @info "$(problem["problem"]) uses the first $(N_NE) points of the wp golden; nothing to generate"
+    end
 end

@@ -8,6 +8,8 @@ n_min = 8
 n_step = 4
 nmax_default = 16777216
 states_grid = [4, 8, 16, 32, 64, 128]
+# The ne ensemble is the first n_ne points of the n_wp sweep, except for these problems, which keep golden_ne_<problem>_<n_ne>.csv as their grid.
+ne_legacy_grid = ["ring_modulator_index2", "nand_gate"]
 
 # Fixed steps are duration * 2^-k.
 [fixed]

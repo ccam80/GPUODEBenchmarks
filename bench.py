@@ -498,9 +498,8 @@ class Run:
         worst = 0
         if package in ("all", "julia"):
             worst = worst or self.step("ne: golden references", "numerical_equivalence.log",
-                                       self.julia(os.path.join("runner_scripts", "numerical_equivalence",
-                                                               "generate_golden_ne.jl"), "--problem", problem),
-                                       critical=False)
+                                       self.julia(os.path.join("runner_scripts", "golden", "generate_golden.jl"),
+                                                  "--problem", problem), critical=False)
             worst = worst or self.step("ne: DifferentialEquations.jl sweeps", "numerical_equivalence.log",
                                        self.julia(os.path.join("runner_scripts", "numerical_equivalence", "ne_diffeq.jl"),
                                                   "--controller", mode, "--algorithm", algorithm,

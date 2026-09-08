@@ -1132,12 +1132,15 @@ dominate the wall time (one kernel compile per algorithm/setting point,
 committed; the setup script builds the Julia environment, including the
 OrdinaryDiffEq solver sub-libraries this suite needs).
 
-The suite's four steps, each also runnable by hand (the two sweep runners
-take the same optional `fixed|adaptive|all` mode argument):
+The ne ensemble is the first 1024 points of the wp sweep, scored on the
+first 1024 rows of the wp golden; the problems under `ne_legacy_grid` in
+`runner_scripts/protocol.toml` keep `golden_ne_<problem>_1024.csv` as their
+grid and reference. The suite's steps, each also runnable by hand (the two
+sweep runners take the same optional `fixed|adaptive|all` mode argument):
 
 ```bash
-julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl
-#   -> data/numerical/golden_ne_<problem>_1024.csv  (Float64, machine independent)
+julia -t auto --project=. runner_scripts/golden/generate_golden.jl
+#   -> data/numerical/golden_<problem>_131072.csv  (Float64, machine independent)
 julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>.csv            (fixed sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
