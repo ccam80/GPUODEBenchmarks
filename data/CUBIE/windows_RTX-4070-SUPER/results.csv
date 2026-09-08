@@ -1,5 +1,0 @@
-package,key,analysis,problem,algorithm,mode,setting_kind,setting,n,states,tier,transfers,min_ms,median_ms,p05_ms,p95_ms,max_ms,samples,errored_pct,error,build_s,recorded_utc
-cubie,windows_RTX-4070-SUPER,times,lorenz,tsit5,fixed,dt,0.0009765625,32,3,default,both,1.148599898,1.17095001,1.154110162,1.469219895,1.781200059,20,0,nan,nan,2026-09-08T07:36:39Z
-cubie,windows_RTX-4070-SUPER,times,lorenz,tsit5,fixed,dt,0.0009765625,32,3,default,none,0.4369998351,0.4579001106,0.4382349551,0.8117700578,0.9860000573,20,0,nan,nan,2026-09-08T07:36:39Z
-cubie,windows_RTX-4070-SUPER,times,lorenz,tsit5,adaptive,tol,1e-05,32,3,default,both,1.1008,1.155050006,1.110964967,1.429544948,1.447500195,20,0,nan,nan,2026-09-08T07:36:39Z
-cubie,windows_RTX-4070-SUPER,times,lorenz,tsit5,adaptive,tol,1e-05,32,3,default,none,0.3633999731,0.3872499801,0.3652999876,0.5534351338,0.8314999286,20,0,nan,nan,2026-09-08T07:36:39Z

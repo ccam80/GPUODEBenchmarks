@@ -1,3 +1,0 @@
-package,key,problem,algorithm,mode,setting_kind,setting,states,n,label,best_ms,blocksize,resident_blocks,settings,recorded_utc
-cubie,windows_RTX-4070-SUPER,lorenz,tsit5,fixed,dt,0.0009765625,3,262144,other_small=full state=local @bs64,2.41808,64,,"{""blocksize"": 64, ""state_location"": ""local"", ""unroll_other_small"": ""FULL""}",2026-09-08T07:35:51Z
-cubie,windows_RTX-4070-SUPER,lorenz,tsit5,adaptive,tol,1e-05,3,262144,other_small=full state=shared @bs128,0.24176,128,,"{""blocksize"": 128, ""state_location"": ""shared"", ""unroll_other_small"": ""FULL""}",2026-09-08T07:35:59Z
