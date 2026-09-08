@@ -28,8 +28,7 @@ Usage:
   --cooldown      seconds between packages (default 15)
   --allow-unknown-gpu, --lock-clocks SM[,MEM], --no-lock-clocks, --clock-tolerance MHZ
 
-Without --keep a run first drops the store rows it is about to record: the selected
-packages, analyses, algorithms, problems, modes and Ns (or state counts), nothing else.
+Without --keep a run first drops only the store rows it is about to record.
 
 Exit code: 0 when every stage succeeded, 1 otherwise. Clock drift in a timed stage also fails the run.
 """

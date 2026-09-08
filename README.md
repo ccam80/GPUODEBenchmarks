@@ -484,8 +484,8 @@ and `reference_systems.jl` for the Float64 golden, a
 work-precision sweeps, numerical equivalence, the overlap comparison, plots and
 reports. Every axis (package, analysis, algorithm, problem, mode, N) takes a
 comma list and `--point` retakes single points; the `run_*.sh`/`.bat` scripts
-forward to it. Without `--keep` a run first drops exactly the store rows it is
-about to record, so a narrow run leaves every other row alone.
+forward to it. Without `--keep` a run first drops only the store rows it is
+about to record.
 
 ```bash
     $ python3 bench.py                           # everything, nmax = 2^24
@@ -641,11 +641,9 @@ to specify the upper bound of the trajectories to benchmark. By default
 $N = 2^{24}$, where the simulation runs for $n \in 8 \le n < N$, with
 the multiples of $4$.
 
-The rows land in `data/Julia/<os>_<gpu>/results.csv` with `analysis = times`,
-two per (problem, algorithm, mode, N): `transfers = both` is the end-to-end
-time (h2d + solve + d2h) and `transfers = none` the same solve with the
-inputs already resident and the results left on the device. Every
-framework's timing rows share this layout; see "Result store" above.
+Rows land in `data/Julia/<os>_<gpu>/results.csv` with `analysis = times`, two
+per (problem, algorithm, mode, N): `transfers = both` times h2d + solve + d2h,
+`transfers = none` the resident solve alone. See "Result store" above.
 
 Additionally, to benchmark ODE solvers for other backends:
 

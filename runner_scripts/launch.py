@@ -153,7 +153,7 @@ def _cpp_commands(analysis, nmax, algorithm, problem, mode):
 
 
 def commands(package, analysis, nlist, nmax, algorithm, problem, mode="all"):
-    """The commands one (package, analysis) stage runs for an algorithm token, a problem list and a mode token."""
+    """The commands one (package, analysis) stage runs."""
     if mode != "all" and mode not in MODES:
         raise ValueError("unknown mode '{0}'".format(mode))
     if package == "julia":
