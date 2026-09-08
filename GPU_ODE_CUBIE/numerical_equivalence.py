@@ -1,28 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""Numerical-equivalence (ne) sweeps for cubie.
-
-Two sweeps over every algorithm mutually supported by cubie and
-DifferentialEquations.jl (protocol and paths in
-runner_scripts/numerical_equivalence/ne_common.py):
-
-* fixed:    error-vs-dt convergence study (fixed step controller) — isolates
-  the tableau from the controller. erk-family rows are excluded.
-* adaptive: error-vs-tolerance study at atol = rtol over the mutual
-  adaptive set (the ``ne_adaptive`` column of algorithms.csv), run up to
-  twice per algorithm:
-    - "default" tier: cubie's shipped controller defaults — cubie's real
-      controller dynamics.
-    - "matched" tier: controller constants mirrored from the Julia run's
-      resolved defaults (data/numerical_equivalence/julia/<key>/<problem>/
-      controller_constants.csv, written by ne_diffeq.jl), so both stacks
-      run identical controller type, gains and tolerances, isolating
-      controller-caused error. When the matched settings equal the default
-      tier's, the default results are written for the matched file.
-
-Run from the repo root (inside the GPU_ODE_CUBIE venv):
-    python GPU_ODE_CUBIE/numerical_equivalence.py [--package cubie|cubie_mlir] [--controller fixed|adaptive|all]
-"""
+"""cubie numerical-equivalence sweeps: fixed error-vs-dt and adaptive error-vs-tolerance in default and Julia-matched controller tiers; `--package cubie|cubie_mlir --controller fixed|adaptive|all --algorithm --problem`."""
 
 import argparse
 import os

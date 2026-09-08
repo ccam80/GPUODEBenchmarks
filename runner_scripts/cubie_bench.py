@@ -356,8 +356,7 @@ def _run_optimize(opts, problems):
 
 
 def _warm_legs(opts, problems):
-    """Every (problem, mode, algorithm, setting) compile task, in a
-    deterministic order shared by the parent and its shard children."""
+    """Every (problem, mode, algorithm, setting) compile task, in the order the shard children share."""
     from wp_common import TOLS
 
     legs = []
@@ -382,9 +381,7 @@ WARM_RECYCLE = 32
 
 
 def _run_warm(opts, problems, argv):
-    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 stripes
-    the legs across that many shard children, recycled every WARM_RECYCLE
-    legs to cap their memory."""
+    """Compile each leg once at a tiny ensemble, striped across BENCH_WARM_JOBS shard children recycled every WARM_RECYCLE legs."""
     import subprocess
     from timeit import default_timer
 

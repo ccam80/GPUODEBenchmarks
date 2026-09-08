@@ -1,7 +1,4 @@
-"""Cubie adapter shared by both cubie suites, the overlap worker and the NE sweep: backend selection, system naming, the solver factory, controller mappings and the optimize store.
-
-CLI: `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows.
-"""
+"""Cubie backend, system naming, solver factory, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows."""
 
 import csv
 import json
@@ -135,12 +132,7 @@ def pi_tier_controller(order):
 
 
 def matched_controller(constants, order):
-    """Cubie settings reproducing Julia's resolved controller; (settings, None) or (None, reason).
-
-    Cubie's PI exponents are (I + P) / (2 (order + 1)) on the squared norm and
-    P / (2 (order + 1)) on its history; Julia's are beta1 and beta2 on the norm,
-    so I + P = beta1 (order + 1) and P = beta2 (order + 1).
-    """
+    """Cubie settings reproducing Julia's resolved controller, or (None, reason); cubie's PI exponent (I + P) / (2 (order + 1)) on the squared norm matches Julia's beta1 on the norm."""
     if constants is None:
         return None, "no julia controller constants"
     if constants["controller"] == "PIController":

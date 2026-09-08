@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Cubie GPU worker for the direct overlap suite.
-
-The worker owns no orchestration policy.  It executes the requested batch,
-flushes every successful point immediately, and converts exceptions into
-failure rows so one bad algorithm/setting cannot erase the rest of the run.
-"""
+"""Cubie GPU worker for the overlap suite: runs the requested batch, flushes each point as it lands, and records exceptions as failure rows."""
 
 from __future__ import annotations
 
