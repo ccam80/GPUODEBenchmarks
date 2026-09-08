@@ -1096,11 +1096,9 @@ comparison, and exit non-zero when any step fails.
 `run_all_benchmarks.sh -a numerical` appends the same suite to a full
 benchmark run.
 
-Reproducibility: the golden reference is a machine-independent Float64
-result. The DifferentialEquations.jl Float32 sweeps run on the CPU but are
-keyed by `<os>_<gpu>` under `data/numerical_equivalence/julia/<key>/<problem>/`
-like every other dataset, and the comparison reads the Julia and cubie files
-of the same key. The golden is regenerated only if its file is missing
+The golden reference is Float64 and unkeyed; the DifferentialEquations.jl
+sweeps are keyed by `<os>_<gpu>`, and the comparison pairs Julia and cubie
+files of the same key. The golden is regenerated only if its file is missing
 (~1 s of solve time); the Julia sweeps take ~1–3 minutes; the cubie sweeps
 dominate the wall time (one kernel compile per algorithm/setting point,
 ~20–25 minutes per mode on an RTX 4070 SUPER). On a fresh checkout run
@@ -1163,8 +1161,5 @@ trajectory counts. Errors use only the trajectories both stacks solved.
 Each package runs its own implementation and its own defaults; nothing is
 pinned on one stack to make it resemble the other.
 
-The golden file is machine independent and the DifferentialEquations.jl
-outputs are cheap to regenerate (seconds and ~1 minute respectively), so
-the suite is cheap to re-run against a fixed reference: with the golden and
-this machine's Julia reference CSVs on disk, run only the cubie sweep and
-the comparison.
+With the golden and this machine's Julia CSVs on disk, re-run only the cubie
+sweep and the comparison.

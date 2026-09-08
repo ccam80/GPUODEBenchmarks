@@ -22,10 +22,8 @@
 # asserted to still be Float32 — a Float64 anywhere means the solve silently
 # promoted and the point is recorded as failed.
 #
-# Outputs (CPU, keyed by <os>_<gpu> like every other dataset), rows are 0-based traj indices:
-#   data/numerical_equivalence/julia/<key>/<problem>/<alias>.csv            dt,traj,x,y,z
-#   data/numerical_equivalence/julia/<key>/<problem>/<alias>_adaptive.csv   tol,traj,x,y,z,naccept,nreject
-#   data/numerical_equivalence/julia/<key>/<problem>/controller_constants.csv
+# Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
+#   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
 #
 # Run from the repo root:
 #   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [fixed|adaptive|all]
