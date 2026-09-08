@@ -5,7 +5,6 @@ import os
 
 import numpy as np
 
-from algorithms import ne_algorithms
 from problems import DEFAULT_PROBLEM, get_problem
 from protocol import (DT0_FRACTION, DT_MAX_FRACTION,  # noqa: F401
                       DT_MIN_FRACTION, N_NE, TOLS as TOLS_NE)
@@ -36,16 +35,6 @@ def golden_ne_path(problem=DEFAULT_PROBLEM):
 
 JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
 CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
-
-
-def load_algorithms(name="all"):
-    """The ne rows of runner_scripts/algorithms.csv, narrowed by name."""
-    return ne_algorithms(name)
-
-
-def runs_fixed(row):
-    """Whether the algorithm runs the fixed-step dt sweep (non-erk families)."""
-    return row.runs_fixed_ne
 
 
 def cubie_default_controller(alias, family, order):
@@ -108,10 +97,6 @@ def controllers_equal(a, b, rel_tol=1e-9):
         if not np.isclose(va, vb, rtol=rel_tol, atol=0.0):
             return False
     return True
-
-
-def algorithm_names():
-    return ["all"] + [row["algorithm"] for row in load_algorithms()]
 
 
 def load_golden_ne(problem=DEFAULT_PROBLEM):

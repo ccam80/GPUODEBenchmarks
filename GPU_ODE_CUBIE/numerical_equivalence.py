@@ -39,19 +39,21 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts"))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts",
                                 "numerical_equivalence"))
+from algorithms import ne_algorithms
 from bench_key import dataset_key
 from cubie_systems import build_system, final_states, output_types
 from problems import problem_names, resolve_problems
-from ne_common import (TOLS_NE, N_NE, algorithm_names, dts_ne, dt_pins_ne,
-                       load_algorithms, load_golden_ne, ensemble_error,
+from ne_common import (TOLS_NE, N_NE, dts_ne, dt_pins_ne,
+                       load_golden_ne, ensemble_error,
                        load_controller_constants, cubie_ne_file,
                        cubie_ne_adaptive_file, write_ne_csv,
-                       write_ne_adaptive_csv, runs_fixed,
+                       write_ne_adaptive_csv,
                        cubie_default_controller, controllers_equal)
 
 _parser = argparse.ArgumentParser(description="cubie Float32 equivalence sweeps.")
 _parser.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
-_parser.add_argument("--algorithm", choices=algorithm_names(), default="all")
+_parser.add_argument("--algorithm", default="all",
+                     help="all | comma list of ne rows in runner_scripts/algorithms.csv")
 _parser.add_argument("--problem", default="all",
                      help="all | comma list of " + ", ".join(problem_names()))
 _args = _parser.parse_args()
@@ -123,9 +125,9 @@ def problem_context(problem):
 # Fixed-step error-vs-dt sweep
 # ---------------------------------------------------------------------------
 def run_fixed(ctx):
-    for row in load_algorithms(ALGORITHM):
+    for row in ne_algorithms(ALGORITHM):
         alias = row["algorithm"]
-        if not runs_fixed(row):
+        if not row.runs_fixed_ne:
             print("=== fixed {0}: skipped (no fixed sweep for erk) ==="
                   .format(alias))
             continue
@@ -202,7 +204,7 @@ def run_adaptive(ctx):
             }, None
         return None, "unmapped julia controller {0}".format(c["controller"])
 
-    for row in load_algorithms(ALGORITHM):
+    for row in ne_algorithms(ALGORITHM):
         alias = row["algorithm"]
         if not row["ne_adaptive"]:
             print("=== adaptive {0}: skipped (not in the mutual adaptive "
