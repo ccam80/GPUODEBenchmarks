@@ -1,6 +1,4 @@
-# Float64 golden references on the standalone N_NE grid for the problems in protocol.toml's ne_legacy_grid, column 1 the Float32-rounded swept parameter, kept unless --force.
-#
-# Usage: julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl [--problem <name|all>] [--force]
+# Float64 golden_ne references for protocol.toml's ne_legacy_grid problems; column 1 is the Float32-rounded sweep. Usage: julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl [--problem <name|all>] [--force]
 
 using OrdinaryDiffEq
 # The slim OrdinaryDiffEq v7 umbrella doesn't re-export the ensemble API.

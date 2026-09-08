@@ -1132,11 +1132,7 @@ dominate the wall time (one kernel compile per algorithm/setting point,
 committed; the setup script builds the Julia environment, including the
 OrdinaryDiffEq solver sub-libraries this suite needs).
 
-The ne ensemble is the first 1024 points of the wp sweep, scored on the
-first 1024 rows of the wp golden; the problems under `ne_legacy_grid` in
-`runner_scripts/protocol.toml` keep `golden_ne_<problem>_1024.csv` as their
-grid and reference. The suite's steps, each also runnable by hand (the two
-sweep runners take the same optional `fixed|adaptive|all` mode argument):
+The ne ensemble is the first 1024 points of the wp sweep and golden; `ne_legacy_grid` problems in `runner_scripts/protocol.toml` use `golden_ne_<problem>_1024.csv` instead. The steps, each runnable by hand with the optional `fixed|adaptive|all` mode:
 
 ```bash
 julia -t auto --project=. runner_scripts/golden/generate_golden.jl
