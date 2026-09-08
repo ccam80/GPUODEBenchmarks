@@ -9,7 +9,7 @@ runner_scripts/numerical_equivalence/ne_common.py):
 * fixed:    error-vs-dt convergence study (fixed step controller) — isolates
   the tableau from the controller. erk-family rows are excluded.
 * adaptive: error-vs-tolerance study at atol = rtol over the mutual
-  adaptive set (the ``adaptive`` column of algorithms.csv), run up to
+  adaptive set (the ``ne_adaptive`` column of algorithms.csv), run up to
   twice per algorithm:
     - "default" tier: cubie's shipped controller defaults — cubie's real
       controller dynamics.
@@ -124,7 +124,7 @@ def problem_context(problem):
 # ---------------------------------------------------------------------------
 def run_fixed(ctx):
     for row in load_algorithms(ALGORITHM):
-        alias = row["cubie_alias"]
+        alias = row["algorithm"]
         if not runs_fixed(row):
             print("=== fixed {0}: skipped (no fixed sweep for erk) ==="
                   .format(alias))
@@ -203,14 +203,14 @@ def run_adaptive(ctx):
         return None, "unmapped julia controller {0}".format(c["controller"])
 
     for row in load_algorithms(ALGORITHM):
-        alias = row["cubie_alias"]
-        if not row["adaptive"]:
+        alias = row["algorithm"]
+        if not row["ne_adaptive"]:
             print("=== adaptive {0}: skipped (not in the mutual adaptive "
                   "set) ===".format(alias))
             continue
         if not cubie_is_adaptive(alias):
             raise SystemExit(
-                "algorithms.csv marks {0} adaptive but cubie reports no "
+                "algorithms.csv marks {0} ne_adaptive but cubie reports no "
                 "embedded error estimate; fix the csv".format(alias))
         if alias not in constants:
             print("=== adaptive {0}: skipped (not adaptive in "

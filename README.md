@@ -158,12 +158,14 @@ timing and work-precision sweeps to the listed integration algorithms (see
 
 ### Algorithm-matched subsets
 
-`runner_scripts/algorithms.csv` is the algorithm registry: one row per
-integration algorithm, naming the frameworks that run it fixed-step and the
-frameworks that run it adaptively, in the cubie vocabulary. Both
-`algorithms.py` and `algorithms.jl` read that file, and every bench script
-takes its supported set from it. Each figure contains only packages running
-the same method:
+`runner_scripts/algorithms.csv` is the algorithm registry, one row per
+integration algorithm in the cubie vocabulary: `fixed` and `adaptive` name the
+frameworks that time it in each mode, `ne` and `ne_adaptive` place it in the
+numerical-equivalence sweeps, `julia_cpu` is its DifferentialEquations.jl
+constructor, and `julia_gpu` its DiffEqGPU constructor for the overlap suite.
+Both `algorithms.py` and `algorithms.jl` read that file, and every suite takes
+its set from it. Each timing figure contains only packages running the same
+method:
 
 | Subset | Mode | Algorithm | Members |
 |---|---|---|---|
@@ -1057,7 +1059,7 @@ numerical-equivalence (`ne`) suite instead compares error against *dt*, per
 algorithm, to answer a different question: **does each cubie algorithm
 actually calculate what its named method should?** Every implicit-family
 algorithm mutually supported by cubie and DifferentialEquations.jl (the
-mapping lives in `runner_scripts/numerical_equivalence/algorithms.csv`)
+`ne` rows of `runner_scripts/algorithms.csv`)
 integrates the same Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1])
 fixed-step at every dyadic dt from 1/2 to 1/8192 — **both stacks in
 Float32** — and the final states are compared against the Float64 golden
@@ -1122,7 +1124,7 @@ The fixed-step sweep deliberately removes the step-size controller to
 isolate each tableau; the adaptive sweep tests the opposite composite —
 embedded estimator + error norm + controller — under real controller
 dynamics. Every algorithm with an embedded error estimate on *both* sides
-(the `adaptive` column of `algorithms.csv`, cross-checked at runtime
+(the `ne_adaptive` column of `algorithms.csv`, cross-checked at runtime
 against cubie's `tableau.has_error_estimate` and OrdinaryDiffEq's
 `isadaptive`) integrates the ensemble at atol = rtol over 1e-2 .. 1e-8, in
 Float32, with pinned initial dt and dt bounds, and errors are compared

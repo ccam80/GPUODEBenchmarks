@@ -8,8 +8,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from algorithms import (  # noqa: E402
-    algorithm_names, get_algorithm, load_algorithms, resolve_algorithms,
-    supported_for,
+    FAMILIES, algorithm_names, get_algorithm, load_algorithms, ne_algorithms,
+    overlap_algorithms, resolve_algorithms, supported_for,
 )
 from wp_common import N_WP, parse_bench_args  # noqa: E402
 
@@ -19,9 +19,26 @@ class RegistryTests(unittest.TestCase):
         for row in load_algorithms():
             self.assertIsInstance(row["fixed"], tuple)
             self.assertIsInstance(row["adaptive"], tuple)
-            self.assertIn(row["family"], ("explicit", "implicit"))
-            self.assertTrue(row["fixed"] or row["adaptive"],
-                            "{0} runs in no mode".format(row["algorithm"]))
+            self.assertIn(row["family"], FAMILIES)
+            self.assertIsInstance(row["order"], int)
+            self.assertTrue(row["fixed"] or row["adaptive"] or row["ne"],
+                            "{0} is in no suite".format(row["algorithm"]))
+
+    def test_suite_memberships(self):
+        ne = [row["algorithm"] for row in ne_algorithms()]
+        self.assertEqual(len(ne), 21)
+        for row in ne_algorithms():
+            self.assertTrue(row["julia_cpu"], row["algorithm"])
+        self.assertEqual([row["algorithm"] for row in overlap_algorithms()],
+                         ["tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7",
+                          "kvaerno5"])
+        self.assertEqual([row["algorithm"] for row in ne_algorithms("tsit5,vern7")],
+                         ["tsit5", "vern7"])
+        with self.assertRaises(SystemExit):
+            ne_algorithms("nosuchalgorithm")
+        for row in load_algorithms():
+            if row["ne_adaptive"]:
+                self.assertTrue(row["ne"], row["algorithm"])
 
     def test_unknown_algorithm_exits(self):
         with self.assertRaises(SystemExit):
@@ -38,9 +55,9 @@ class RegistryTests(unittest.TestCase):
             union |= set(supported_for(framework, "adaptive"))
             self.assertEqual(union, set(supported_for(framework)))
 
-    def test_the_implicit_set_reaches_cubie_and_julia(self):
+    def test_the_timed_implicit_set_reaches_cubie(self):
         implicit = [row["algorithm"] for row in load_algorithms()
-                    if row["family"] == "implicit"]
+                    if row["family"] != "erk" and (row["fixed"] or row["adaptive"])]
         self.assertTrue(implicit)
         for name in implicit:
             self.assertIn(name, supported_for("cubie"))

@@ -15,9 +15,10 @@ import analyze  # noqa: E402
 class ProtocolTests(unittest.TestCase):
     def test_exact_overlap_inventory(self):
         rows = common.algorithms()
-        self.assertEqual([r["cubie_alias"] for r in rows], [
-            "tsit5", "vern7", "rosenbrock23_sciml", "kvaerno3", "kvaerno5"])
-        self.assertEqual([r["order"] for r in rows], [5, 7, 2, 3, 5])
+        self.assertEqual([r["algorithm"] for r in rows], [
+            "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"])
+        self.assertEqual([r["order"] for r in rows], [5, 2, 3, 7, 5])
+        self.assertTrue(all(r["julia_gpu"] for r in rows))
 
     def test_full_diffeqgpu_inventory(self):
         with (SUITE / "diffeqgpu_ode_inventory.csv").open(newline="") as handle:
@@ -57,7 +58,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(len(common.ANALYSES), len(common.PHASES))
 
     def test_pi_controller_constants(self):
-        settings = common.pi_controller(5, "ERK")
+        settings = common.pi_controller(5, "erk")
         self.assertEqual(settings["step_controller"], "pi")
         self.assertAlmostEqual(settings["min_gain"], 0.2)
         self.assertAlmostEqual(settings["max_gain"], 10.0)
@@ -65,7 +66,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_pi_controller_sets_no_deadband(self):
         """Cubie caches no Jacobian by step size, so it holds no dt deadband."""
-        for family in ("ESDIRK", "Rosenbrock-W", "ERK"):
+        for family in ("dirk", "rosenbrock", "erk"):
             settings = common.pi_controller(3, family)
             self.assertNotIn("deadband_min", settings)
             self.assertNotIn("deadband_max", settings)

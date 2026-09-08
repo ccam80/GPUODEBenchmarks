@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 # Numerical grids and adaptive pins are shared with the NE suite.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
+from algorithms import overlap_algorithms  # noqa: E402 - path bootstrap above
 from ne_common import (  # noqa: E402 - path bootstrap above
     controllers_equal, cubie_default_controller, read_ne_csv,
     read_ne_adaptive_csv,
@@ -53,9 +53,6 @@ WP_DTS = fixed_dts(1.0, WP_K)
 WP_TOLS = TOLS
 NE_TOLS = TOLS
 
-# Overlap family labels -> ne_common family keys.
-NE_FAMILY = {"ERK": "erk", "ESDIRK": "dirk", "Rosenbrock-W": "rosenbrock"}
-
 # "transfers": "both" includes h2d and d2h, "none" includes neither.
 # One row per timed point: the workers reduce their repeats before writing, so
 # the headline statistic (min, as in the performance suite) is fixed at the
@@ -71,19 +68,16 @@ FAILURE_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
 
 
 def algorithms(name="all"):
-    with ALGORITHMS_CSV.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    for row in rows:
-        row["order"] = int(row["order"])
-    if name != "all":
-        rows = [row for row in rows if row["cubie_alias"] == name]
-        if not rows:
-            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
+    """The overlap rows of runner_scripts/algorithms.csv, narrowed by name."""
+    rows = overlap_algorithms(name)
+    if not rows:
+        raise SystemExit("'{}' is not in the overlap set; see "
+                         "runner_scripts/algorithms.csv".format(name))
     return rows
 
 
 def algorithm_names():
-    return ["all"] + [row["cubie_alias"] for row in algorithms()]
+    return ["all"] + [row["algorithm"] for row in algorithms()]
 
 
 def protocol(nmax, from_n=0):

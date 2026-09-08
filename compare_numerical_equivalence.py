@@ -51,7 +51,7 @@ def _ratio(err_c, err_j):
 
 def analyse_algorithm(row, key, golden_states, problem):
     """Per-dt errors for one algorithm's fixed-step sweep."""
-    alias = row["cubie_alias"]
+    alias = row["algorithm"]
     jfile = julia_ne_file(alias, problem, key)
     cfile = cubie_ne_file(alias, key, problem)
     julia = read_ne_csv_masked(jfile) if os.path.isfile(jfile) else None
@@ -90,7 +90,7 @@ def analyse_algorithm(row, key, golden_states, problem):
 
 def analyse_adaptive(row, key, golden_states, problem):
     """Per-tolerance errors for one algorithm's adaptive tiers."""
-    alias = row["cubie_alias"]
+    alias = row["algorithm"]
     jfile = julia_ne_adaptive_file(alias, problem, key)
     julia = read_ne_adaptive_csv_masked(jfile) if os.path.isfile(jfile) else None
     tiers = {}
@@ -154,7 +154,7 @@ def write_fixed_csv(results, outfile):
             row = res["row"]
             for p in res["points"]:
                 writer.writerow([
-                    row["cubie_alias"], row["family"], row["order"], p["dt"],
+                    row["algorithm"], row["family"], row["order"], p["dt"],
                     p["err_cubie"], p["err_julia"], p["ratio"],
                     p["nonconv_cubie"], p["nonconv_julia"], p["mutual_n"]])
 
@@ -168,7 +168,7 @@ def write_adaptive_csv(results, outfile):
             row = res["row"]
             for p in res["points"]:
                 writer.writerow([
-                    row["cubie_alias"], row["family"], row["order"], p["tol"],
+                    row["algorithm"], row["family"], row["order"], p["tol"],
                     p["err_default"], p["err_matched"], p["err_julia"],
                     p["ratio_default"], p["ratio_matched"], p["julia_steps"],
                     p["nonconv_default"], p["nonconv_matched"],
@@ -205,7 +205,7 @@ def write_plot(key, results, scale, outfile, problem):
             ax.loglog(dts_j, errs_j, "x--", color="tab:red", label="DiffEq.jl")
         ax.axhline(FLOOR_REL * scale, color="gray", linewidth=0.5,
                    linestyle="-.")
-        ax.set_title(row["cubie_alias"], fontsize=9)
+        ax.set_title(row["algorithm"], fontsize=9)
         ax.grid(True, which="both", alpha=0.2)
         if idx == 0:
             ax.legend(fontsize=7)
@@ -247,7 +247,7 @@ def write_adaptive_plot(key, adaptive_results, scale, outfile, problem):
         ax.loglog(tols, tols, ":", color="gray", linewidth=1, label="err = tol")
         ax.axhline(FLOOR_REL * scale, color="gray", linewidth=0.5,
                    linestyle="-.")
-        ax.set_title(res["row"]["cubie_alias"], fontsize=9)
+        ax.set_title(res["row"]["algorithm"], fontsize=9)
         ax.grid(True, which="both", alpha=0.2)
         if idx == 0:
             ax.legend(fontsize=7)

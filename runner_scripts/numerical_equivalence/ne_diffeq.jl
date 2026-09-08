@@ -1,7 +1,7 @@
 # Numerical-equivalence (ne) sweeps for raw DifferentialEquations.jl in Float32.
 #
 # Two sweeps over every algorithm mutually supported by cubie and
-# DifferentialEquations.jl (runner_scripts/numerical_equivalence/algorithms.csv):
+# DifferentialEquations.jl (the ne rows of runner_scripts/algorithms.csv):
 #
 # * fixed:    error-vs-dt convergence study, fixed-step at every dt in the
 #             dyadic grid. Isolates the tableau from the controller.
@@ -107,10 +107,9 @@ function construct_fehlberg_45(::Type{T}) where {T}
 end
 
 
-const TABLE_ALL = collect(CSV.File(joinpath(@__DIR__, "algorithms.csv")))
-const TABLE = ALGORITHM == "all" ? TABLE_ALL :
-    filter(row -> String(row.cubie_alias) == ALGORITHM, TABLE_ALL)
-isempty(TABLE) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
+const TABLE = ne_algorithms(ALGORITHM)
+isempty(TABLE) && error("'$(ALGORITHM)' is not in the ne set; see runner_scripts/algorithms.csv")
 
 failures = Tuple{String, String, Float64, String}[]
 
@@ -201,13 +200,13 @@ state_header(nstates) = join(["s$(s)" for s in 1:nstates], ",")
 # ---------------------------------------------------------------------------
 function run_fixed(ctx)
     for row in TABLE
-        alias = String(row.cubie_alias)
-        expr = String(row.julia_expr)
-        if String(row.family) == "erk"
+        alias = row["algorithm"]
+        expr = row["julia_cpu"]
+        if !runs_fixed_ne(row)
             println("=== fixed $(alias): skipped (no fixed sweep for erk)")
             continue
         end
-        println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row.order)) ===")
+        println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row["order"])) ===")
         alg = try
             eval(Meta.parse(expr))
         catch err
@@ -267,10 +266,10 @@ function run_adaptive(ctx)
         "cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order")
 
     for row in TABLE
-        alias = String(row.cubie_alias)
-        expr = String(row.julia_expr)
+        alias = row["algorithm"]
+        expr = row["julia_cpu"]
         # Only the mutual adaptive set runs.
-        if lowercase(string(row.adaptive)) != "true"
+        if !row["ne_adaptive"]
             println("=== adaptive $(alias): skipped (not in the mutual " *
                     "adaptive set)")
             continue
@@ -289,7 +288,7 @@ function run_adaptive(ctx)
             continue
         end
         println("=== $(ctx.name) adaptive $(alias) -> $(expr) " *
-                "(order $(row.order), default controller) ===")
+                "(order $(row["order"]), default controller) ===")
 
         # Resolve and export the default controller constants so the cubie
         # runner can mirror them ("matched" tier).
@@ -303,7 +302,7 @@ function run_adaptive(ctx)
             b2 = hasproperty(ctrl, :beta2) ? string(ctrl.beta2) : ""
             println(const_io,
                 "$(alias),$(cname),$(b1),$(b2),$(basic.qmin),$(basic.qmax)," *
-                "$(basic.gamma),$(row.order)")
+                "$(basic.gamma),$(row["order"])")
             println("  controller: $(cname) beta1=$(b1) beta2=$(b2) " *
                     "qmin=$(basic.qmin) qmax=$(basic.qmax) " *
                     "gamma=$(basic.gamma)")

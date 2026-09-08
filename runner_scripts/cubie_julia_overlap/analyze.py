@@ -201,7 +201,7 @@ def plots(plots_dir, summaries, metrics, work_rows, boosts):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    names = [a["cubie_alias"] for a in algorithms()]
+    names = [a["algorithm"] for a in algorithms()]
     colors = {("julia", "fixed"): "black", ("julia", "julia"): "black",
               ("cubie", "fixed"): "tab:blue", ("cubie", "default"): "tab:orange",
               ("cubie", "pi"): "tab:green"}

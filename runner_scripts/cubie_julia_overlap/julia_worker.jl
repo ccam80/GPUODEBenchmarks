@@ -16,6 +16,7 @@ CUDA.allowscalar(false)
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
 # dt values are fractions of the duration.
@@ -230,18 +231,15 @@ end
 
 const POINT_FAILURE_COUNT = Ref(0)
 
-table = collect(CSV.File(joinpath(HERE, "algorithms.csv")))
-if ALGORITHM != "all"
-    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
-    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
-end
+table = overlap_algorithms(ALGORITHM)
+isempty(table) && error("'$(ALGORITHM)' is not in the overlap set; see runner_scripts/algorithms.csv")
 phases = ANALYSIS == "all" ? ("performance", "numerical", "work_precision") :
     (replace(ANALYSIS, "-" => "_"),)
 
 for row in table
-    alias = String(row.cubie_alias)
+    alias = row["algorithm"]
     alg = try
-        eval(Meta.parse(String(row.julia_constructor)))
+        eval(Meta.parse(row["julia_gpu"]))
     catch err
         for phase in phases
             record_failure(alias, phase, "all", "julia", 0, "constructor", NaN, err)
@@ -260,7 +258,7 @@ for row in table
             repeats = PROTOCOL.performance_repeats
         elseif phase == "numerical"
             # erk-family rows run no fixed numerical sweep.
-            if uppercase(String(row.family)) != "ERK"
+            if runs_fixed_ne(row)
                 append!(points, [("fixed", "dt", DURATION * dt, PROTOCOL.ne_n) for dt in PROTOCOL.ne_dts])
             end
             append!(points, [("adaptive", "tol", tol, PROTOCOL.ne_n) for tol in PROTOCOL.ne_tols])
