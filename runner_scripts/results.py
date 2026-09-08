@@ -255,7 +255,7 @@ def timing_setting(problem, mode):
 
 
 def wp_settings(problem, algorithm, mode, package):
-    """The settings a package's work-precision leg records: the ne dt grid for an ne member of NE_PACKAGES, else the wp dt grid; tolerances are one grid."""
+    """The settings a package's wp leg records: the ne dt grid for its ne members, else the wp grids."""
     if mode == "adaptive":
         return list(TOLS)
     row = problem if isinstance(problem, dict) else get_problem(problem)

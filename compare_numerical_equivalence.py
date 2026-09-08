@@ -256,7 +256,7 @@ def write_adaptive_plot(key, adaptive_results, scale, outfile, problem, package)
 
 
 def compare_problem(problem, algorithms, package, keys):
-    """Write the report and plots of one cubie package for one problem, once per dataset key."""
+    """The report and plots of one cubie package for one problem, per dataset key."""
     _, golden_states = load_golden_ne(problem)
     scale = float(np.sqrt(np.mean(golden_states ** 2)))
 

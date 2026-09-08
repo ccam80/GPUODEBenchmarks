@@ -144,7 +144,7 @@ def ensemble_error(final_states, golden):
 
 def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
                     dataset_key, problem=DEFAULT_PROBLEM, tier="default"):
-    """Path of the per-repeat timing log under data/<package>/<key>/<problem>; a controller tier other than default gets its own log."""
+    """Path of the per-repeat timing log; a non-default tier gets its own."""
     suffix = "" if tier == "default" else "_" + tier
     return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
                         "{0}_samples_{1}_{2}_{3}{4}.csv".format(

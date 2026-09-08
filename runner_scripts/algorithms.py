@@ -74,7 +74,7 @@ def supported_for(framework, mode=None):
 
 
 def resolve_algorithms(request, framework, wp=False):
-    """Resolve "all" or a comma list to the algorithms a framework times; with wp, to the ones its work-precision sweep runs."""
+    """Resolve "all" or a comma list to the algorithms a framework times, or with wp the ones its wp sweep runs."""
     supported = wp_supported_for(framework) if wp else supported_for(framework)
     if request in (None, "", "all"):
         return list(supported)
@@ -108,7 +108,7 @@ def ne_member(row, mode):
 
 
 def wp_supported_for(framework, mode=None):
-    """Algorithm names a framework's work-precision sweep runs, in the mode if given: the timed set, plus the ne set for NE_PACKAGES."""
+    """Algorithm names a framework's wp sweep runs, in the mode if given: its timed set plus, for NE_PACKAGES, the ne set."""
     modes = MODES if mode is None else (mode,)
     return tuple(row["algorithm"] for row in load_algorithms()
                  if any(row.supports(framework, m)
