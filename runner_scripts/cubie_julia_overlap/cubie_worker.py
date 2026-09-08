@@ -19,7 +19,8 @@ import cubie_adapter as adapter  # noqa: E402
 from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, CUBIE_NE_DATA, FAILURE_FIELDS, ANALYSES, METRIC_FIELDS,
     N_WP, TIMING_FIELDS, algorithms, append_csv, ensure_csv, finite_counts,
-    golden_ne, golden_wp, phases_for, point_slug, protocol as suite_protocol,
+    golden_ne_states, golden_wp, ne_sweep, phases_for, point_slug,
+    protocol as suite_protocol,
     read_ne_csv, read_ne_adaptive_csv, rmse, timing_stats, write_json,
 )
 from bench_key import dataset_key  # noqa: E402
@@ -53,6 +54,8 @@ def sweep_grid(problem, kind, n):
     """The ensemble parameter values for one phase."""
     if kind == "work_precision":
         return problem.sweep(N_WP, dtype=np.float32)[:n]
+    if kind == "numerical":
+        return ne_sweep(problem)[:n]
     return problem.sweep(n, dtype=np.float32)
 
 
@@ -106,9 +109,7 @@ def import_numerical_from_ne(output, alias, family, problem, metric_file,
                              failure):
     """Import the NE suite's cubie finals; erk rows import the adaptive default tier only."""
     key = dataset_key()
-    nstates = problem["states"]
-    golden = np.loadtxt(golden_ne(problem), delimiter=",",
-                        usecols=tuple(range(1, nstates + 1)))
+    golden = golden_ne_states(problem)
     ne_dir = CUBIE_NE_DATA / key / problem["problem"]
     sources = []
     if family != "erk":

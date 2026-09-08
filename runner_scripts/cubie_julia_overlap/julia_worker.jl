@@ -17,6 +17,7 @@ CUDA.allowscalar(false)
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_prob.jl"))
@@ -103,13 +104,12 @@ end
 
 const SYSTEM, PROB, _ = build_prob(PROBLEM)
 
-const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
+const golden_ne_states = ne_golden_states(PROBLEM)
 const golden_wp_all = readdlm(golden_path(PROBLEM), ',', Float64)
 
 function sweep_grid(kind, n)
     if kind == "numerical"
-        return Float32.(golden_ne_all[1:n, 1])
+        return ne_sweep(PROBLEM)[1:n]
     elseif kind == "work_precision"
         return Float32.(problem_sweep(PROBLEM, N_WP))[1:n]
     end
@@ -262,7 +262,7 @@ for row in table
                         setting, finals)
                     append_row(METRIC_FILE, "julia", alias, phase, mode, tier, n,
                         setting_kind, setting,
-                        golden_rmse(finals, golden_ne_all[1:n, 2:(1 + NSTATES)]),
+                        golden_rmse(finals, golden_ne_states[1:n, :]),
                         finite, failed, finals_path)
                     println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
                     continue

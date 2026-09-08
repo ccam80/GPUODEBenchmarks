@@ -14,19 +14,15 @@
 #             constants are exported (controller_constants.csv) so the cubie
 #             runner can mirror them exactly for its "matched" tier.
 #
-# The protocol mirrors ne_common.py; keep the two in sync.
+# Grids, tolerances and pins come from runner_scripts/protocol.toml through protocol.jl.
 #
-# Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
-# all Float32 (the rho grid is read from the golden file, whose values are
-# exactly representable in Float32), and every trajectory's final state is
-# asserted to still be Float32 — a Float64 anywhere means the solve silently
-# promoted and the point is recorded as failed.
+# Everything the solve sees is Float32; a Float64 final state fails the point.
 #
 # Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
 #   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
 #
 # Run from the repo root:
-#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [fixed|adaptive|all]
+#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [--controller fixed|adaptive|all] [--algorithm <all|list>] [--problem <all|list>]
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK
@@ -59,6 +55,7 @@ MODE in ("fixed", "adaptive", "all") ||
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
@@ -117,20 +114,11 @@ failures = Tuple{String, String, Float64, String}[]
 function setup(problem)
     name = problem["problem"]
     nstates = problem["states"]
-    golden_path = joinpath(REPO_ROOT, "data", "numerical",
-        "golden_ne_$(name)_$(N_NE).csv")
-    isfile(golden_path) || error(
-        "$(golden_path) not found - generate it first with `julia -t auto " *
-        "--project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl " *
-        "--problem $(name)`")
-    golden = readdlm(golden_path, ',')
-    size(golden) == (N_NE, nstates + 1) || error(
-        "golden ne reference has size $(size(golden)), expected " *
-        "($(N_NE), $(nstates + 1))")
-    sweep32 = Float32.(golden[:, 1])
-    # The swept values are float32-rounded, so the cast back is exact.
-    all(Float64.(sweep32) .== golden[:, 1]) || error(
-        "golden parameter column is not exactly representable in Float32")
+    sweep32 = ne_sweep(problem)
+    golden_states = ne_golden_states(problem)
+    size(golden_states) == (N_NE, nstates) || error(
+        "golden ne reference has size $(size(golden_states)), expected " *
+        "($(N_NE), $(nstates))")
 
     system = julia_system(problem)
     duration = Float32(problem["duration"])
@@ -153,7 +141,7 @@ function setup(problem)
 
     outdir = data_dir(REPO_ROOT, joinpath("numerical_equivalence", "julia"),
         DATASET_KEY, name)
-    return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
+    return (name = name, nstates = nstates, golden_states = golden_states,
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
         dts = problem_dts_ne(problem),
