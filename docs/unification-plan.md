@@ -237,25 +237,24 @@ wins under floor; the CLI accepts a list in `samples_ms`.
 
 ### P3 data conversion
 Depends on: P2.
-Add: `runner_scripts/convert_legacy.py` and one data commit. Mapping: every
-`data/<PKG>/<key>/results.csv` row to the new schema with `analysis` dropped and
-`julia` renamed `julia_gpu`; wp rows with `transfers != none` dropped; overlap
-`*_timings.csv` rows to package rows (`fixed` tier to `default`, `pi` kept,
-`work_precision` phase at n = 131072 on the prefix grid, `golden_rmse` to
-`error`, no samples); overlap `finals/` and NE `julia/` trees to finals files at
-n = 1024 (julia NE finals under `julia_cpu`, overlap julia finals under
-`julia_gpu`, each with a row carrying `reason = "untimed"` when no timing row
-exists); NE `controller_constants.csv` to `controllers/<problem>.csv`;
-`data/numerical/<key>/<problem>/` 32768 files attached as finals to the matching
-times row (cubie `_unadaptive` = classical-rk4 fixed, `_adaptive` = tsit5
-adaptive, `jax.csv` = tsit5 fixed, `pytorch.csv` = classical-rk4 fixed,
-`myokit_cuda.csv` = euler fixed). Old trees deleted; goldens untouched.
-Dropped, not converted, on both keys: every `cpp` row and `mpgos*.csv`; every
-wp row with `transfers != none`; every jax `kvaerno3` row; the
-`julia_fixed.csv` and `julia_adaptive.csv` finals; the overlap `numerical`
-phase metrics and finals. The script prints the dropped counts per rule.
-Done: a DuckDB count per (key, package) equals the converted input counts
-printed by the script; the PR body carries the table.
+Add: `runner_scripts/convert_legacy.py` and one data commit, both keys.
+Convert:
+- `data/<PKG>/<key>/results.csv` rows: `analysis` dropped, `julia` renamed
+  `julia_gpu`.
+- overlap `*_timings.csv` rows: tier `fixed` to `default`, `pi` kept,
+  `work_precision` at n = 131072 on the prefix grid, `golden_rmse` to `error`,
+  no samples.
+- NE `julia/` trees: `julia_cpu` finals at n = 1024, row `reason = "untimed"`.
+- NE `controller_constants.csv`: `controllers/<problem>.csv`.
+- `data/numerical/<key>/<problem>/` files: finals on the n = 32768 times row;
+  cubie `_unadaptive` = classical-rk4 fixed, `_adaptive` = tsit5 adaptive,
+  `jax.csv` = tsit5 fixed, `pytorch.csv` = classical-rk4 fixed,
+  `myokit_cuda.csv` = euler fixed.
+Drop: every `cpp` row and `mpgos*.csv`; wp rows with `transfers != none`; jax
+`kvaerno3` rows; `julia_fixed.csv` and `julia_adaptive.csv`; overlap
+`numerical` phase metrics and finals. Old trees deleted; goldens untouched.
+Done: DuckDB counts per (key, package) equal the script's converted counts;
+the PR body carries the converted and dropped counts per rule.
 Review: no row invented; dropped inputs listed; `.gitignore` no longer ignores
 anything under the new layout.
 
