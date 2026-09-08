@@ -140,11 +140,13 @@ Every runner, in every language:
    leg, and re-invokes the runner with the trials that still have no row. On any
    other non-zero exit the driver records the summary line and moves to the next
    package.
-6. `warm` trials compile only: cubie `Solver.compile(...)`, jax
-   `lower().compile()`, MPGOS nvcc into the build cache, Myokit the NVRTC module
-   build, julia_gpu one compile per leg at n = 8 off the GPU lock, pytorch
-   nothing. States legs are never warmed; their cold `build_s` is the
-   measurement.
+6. `warm` trials compile without solving wherever the stack has a compile
+   entry: cubie `Solver.compile(...)`, jax `jit(f).lower(args).compile()` at the
+   trial's n into the persistent cache, MPGOS nvcc into the build cache, Myokit
+   `load_model` (the `RawModule` build). julia_gpu has no separable compile and
+   no cross-process kernel cache, so its warm is one solve at n = 8 inside the
+   leg's process, off the GPU lock, never recorded. pytorch is eager and has no
+   warm. States legs are never warmed; their cold `build_s` is the measurement.
 7. Records `package_version` and `suite_rev` on every row.
 
 States legs follow the same abandon rule as every other leg; there is no
@@ -250,8 +252,9 @@ exists); NE `controller_constants.csv` to `controllers/<problem>.csv`;
 times row (cubie `_unadaptive` = classical-rk4 fixed, `_adaptive` = tsit5
 adaptive, `jax.csv` = tsit5 fixed, `pytorch.csv` = classical-rk4 fixed,
 `myokit_cuda.csv` = euler fixed, `julia_fixed`/`julia_adaptive` = tsit5;
-`mpgos.csv` and `mpgos_internalsave.csv` dropped). Old trees deleted; goldens
-untouched.
+`mpgos.csv` = cash-karp-54 adaptive when that key's RKCK45 row at n = 32768 is
+finite, else classical-rk4 fixed; `mpgos_internalsave.csv` dropped). Old trees
+deleted; goldens untouched.
 Done: a DuckDB count per (key, package) equals the converted input counts
 printed by the script; the PR body carries the table.
 Review: no row invented; dropped inputs listed; `.gitignore` no longer ignores
