@@ -1,7 +1,4 @@
-# The result store for the Julia writers: rows serialise with JSON.jl and land through
-# `store.py` (the only writer of the parquet tree under data/key=<os>_<gpu>/package=<pkg>/).
-# The CSV functions below the shim serve bench_ode_gpu.jl, resume.jl and the plot scripts
-# until their packets port them.
+# The result store for the Julia writers: the store_* shim serialises rows with JSON.jl and calls store.py; the result_* CSV functions serve bench_ode_gpu.jl, resume.jl and the plot scripts.
 
 using Dates
 using JSON

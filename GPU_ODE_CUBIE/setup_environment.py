@@ -110,8 +110,7 @@ def main():
         print("Failed to install cubie")
         return 1
 
-    # This venv is also the suite interpreter: the result store writes parquet
-    # through pyarrow and reads the tree through DuckDB.
+    # The suite interpreter: the result store needs pyarrow and DuckDB.
     print("Installing the result-store dependencies (pyarrow, duckdb)...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         "pyarrow", "duckdb"]):

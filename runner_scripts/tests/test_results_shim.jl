@@ -1,6 +1,4 @@
-# Round trip through the results.jl shim: rows and finals written from Julia land in the
-# parquet store and read back through store.py. Run with
-# `julia --project=. runner_scripts/tests/test_results_shim.jl [suite python]`.
+# Round trip through the results.jl shim; run with `julia --project=. runner_scripts/tests/test_results_shim.jl [suite python]`.
 
 using Test
 

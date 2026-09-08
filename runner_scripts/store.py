@@ -1,15 +1,4 @@
-"""The result store: one parquet file per leg under data/key=<os>_<gpu>/package=<pkg>/results/, finals beside it, DuckDB over the whole tree. The only writer, and the Python reader.
-
-    Store(root="data").record(row, floor=False)            # one row, atomic leg-file swap under a mkdir lock
-    Store.record_finals(identity, finals, converged) -> relative path
-    Store.status(identity) -> "absent" | "nan" | "finite"
-    Store.rows(sql_where="", **eq_filters) -> list[dict]     # DuckDB over the whole tree
-    python store.py [--root DIR] record  <rows.json | ->      # JSON array of rows; samples_ms as a list
-    python store.py [--root DIR] finals  <identity.json> <finals.csv>
-    python store.py [--root DIR] status  <identity.json>
-    python store.py [--root DIR] query   "<sql over results>"
-    python store.py [--root DIR] clear   <filter.json>
-"""
+"""The result store: one parquet file per leg under data/key=<os>_<gpu>/package=<pkg>/results/, finals beside it, DuckDB over the tree. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <identity.json> <finals.csv> | status <identity.json> | query "<sql over results>" | clear <filter.json>."""
 
 import argparse
 import csv
@@ -225,7 +214,7 @@ class _Lock:
 
 
 def _replace(scratch, path):
-    # Windows refuses the swap while a reader still holds the old file.
+    # Retry the swap while a reader holds the old file.
     for attempt in range(20):
         try:
             os.replace(scratch, path)
@@ -486,7 +475,7 @@ def _cli(argv):
         return 0
     if args.command == "query":
         table = store.query(args.sql)
-        # Text-mode stdout would turn the line terminator into CRLF on Windows.
+        # Keep the LF terminator on Windows.
         sys.stdout.reconfigure(newline="")
         writer = csv.writer(sys.stdout, lineterminator="\n")
         writer.writerow(table.column_names)
