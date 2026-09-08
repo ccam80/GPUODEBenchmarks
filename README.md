@@ -480,13 +480,10 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`bench.py` is the entry point for every run: the cubie tuning and cache
-stages, the timing sweeps, the states sweep, the work-precision sweeps, the
-numerical-equivalence suite, the per-algorithm cubie vs. DiffEqGPU overlap
-comparison, and the plots and comparison reports. Every axis takes a comma
-list, and `--point` retakes single points. `run_full_dataset.sh`/`.bat`,
-`run_all_benchmarks.sh`/`.bat`, `run_benchmark.sh`/`.bat` and
-`run_numerical_equivalence.sh`/`.bat` forward to it.
+`bench.py` runs every stage: cubie optimize and warm, the timing, states and
+work-precision sweeps, numerical equivalence, the overlap comparison, plots and
+reports. Every axis takes a comma list and `--point` retakes single points;
+the `run_*.sh`/`.bat` scripts forward to it.
 
 ```bash
     $ python3 bench.py                           # everything, nmax = 2^24
@@ -509,10 +506,9 @@ list, and `--point` retakes single points. `run_full_dataset.sh`/`.bat`,
 ```
 
 A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
-state count>]`. A run of points replaces only those identities' rows, then
-redraws the plots; a package whose bench script takes no mode (the Python
-ones) re-measures both modes of that algorithm at that N. `JULIA` names the
-julia launcher (`JULIA="julia +1.13"` selects a juliaup channel).
+state count>]`; a run of points replaces only those rows and redraws the plots,
+and the Python packages re-measure both modes at that N. `JULIA` names the
+julia launcher, e.g. `JULIA="julia +1.13"`.
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in the result store and deletes nothing; NaN rows count as recorded.

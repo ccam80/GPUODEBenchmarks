@@ -1,7 +1,4 @@
-"""GPU clock guard for timed runs: pin the clocks, sample them at 1 Hz, and judge each timed step against its slice of the log.
-
-Locking needs an elevated shell (Administrator, or passwordless sudo); sampling, checking and reporting do not.
-"""
+"""GPU clock guard: pin the clocks (elevated shell), sample them at 1 Hz, and judge each timed step against its slice of the log."""
 
 import os
 import platform
