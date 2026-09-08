@@ -1,0 +1,5 @@
+framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
+julia,tsit5,numerical,fixed,fixed,1024,dt,0.5,ErrorException,non-finite result: 35/1024 trajectories valid
+julia,tsit5,numerical,fixed,fixed,1024,dt,0.25,ErrorException,non-finite result: 289/1024 trajectories valid
+julia,vern7,numerical,fixed,fixed,1024,dt,0.5,ErrorException,non-finite result: 9/1024 trajectories valid
+julia,vern7,numerical,fixed,fixed,1024,dt,0.25,ErrorException,non-finite result: 708/1024 trajectories valid
