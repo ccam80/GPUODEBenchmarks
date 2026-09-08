@@ -265,58 +265,18 @@ MPGOS launcher and binary) and `runner_scripts/results.jl` (Julia writers).
 The identity columns are `package, key, analysis, problem, algorithm, mode,
 setting_kind, setting, n, states, tier, transfers`; `analysis` is `times`,
 `wp` or `states`, `setting` the dt or tolerance the point ran at, `n` the
-ensemble size and `states` the state count. The value columns are `min_ms`
-(the recorded time), `median_ms, p05_ms, p95_ms, max_ms, samples` over the
-timed repeats, `errored_pct`, `error` (wp rows) and `build_s` (states rows).
-A row with the same identity replaces the recorded one; under `--floor` the
-row with the lower `min_ms` stays. `python runner_scripts/results.py` offers
-`record`, `nan`, `status`, `clear` and `import-legacy` (converts the earlier
-per-file layout in place).
-
-### Per-repeat timing log
-
-Every timed point is a minimum over its repeats, and each of those runs is
-also written to
-`<problem>/<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv`
-under the same key directory, one row per attempt:
-
-`analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms`
-
-* `repeat` is 0 for the warm-up, which carries the first-call compile, and
-  1..k for the runs the minimum is taken over.
-* `transfers` is what the timed region copies: `both` (h2d and d2h), `none`
-  (neither) or `d2h` (inputs already resident). Each timed leg of a point
-  writes its own rows.
-* `setting_kind`/`setting` carry the wp sweep's `dt` or `tol`, and are
-  `none`/`nan` elsewhere.
-* A run that breaches the watchdog is logged before its leg is abandoned.
-
-The wp and states sweeps rewrite their log each run, the N sweep appends, and
-a `--floor` re-run always appends a fresh block headed by repeat 0, which
-`collect_samples.py` separates as a new series. Filtering to `repeat > 0` and
-taking the minimum per (leg, point) reproduces the store's `min_ms`. The
-writers are `append_samples` in `runner_scripts/wp_common.py`,
-`runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
-
-#### Master run-times table
-
-`runner_scripts/collect_samples.py` gathers every log under `data/` into one
-table, replacing `data/master_run_times.csv` whole each run:
-
-```bash
-python3 runner_scripts/collect_samples.py            # --data-root/--out to override
-```
-
-Rows keep their log's columns and gain the four its path and shape carry:
-`package`, `key` (the `<os>_<gpu>` directory), `prefix` (the writer, so `Cubie`
-and `Cubie_mlir` stay apart) and `series`. A `series` is one block of rows
-headed by `repeat` 0, counted from 0 within its file: one timed leg of one run.
-The N sweep appends, so a re-run or a resumed run leaves a second block for a
-leg it repeats - same point and transfers, later series - and a minimum belongs
-inside one series, never across two. Rows sort by leg, then series and repeat;
-a log being appended to while the collector runs can end in a torn line, which
-is dropped and named on stderr. Only the standard library is imported, so it
-runs under a bare `python3` on any machine holding a copy of `data/`.
+ensemble size and `states` the state count. `transfers` is what the timed
+region copies: `both` (h2d and d2h), `none` (neither) or `d2h` (inputs already
+resident). The value columns are
+`min_ms` (the recorded time), `samples_ms` (every attempt of the leg in ms,
+`;`-joined, the untimed warm-up first, so `min_ms` is the minimum over the
+attempts after it; a leg that breached the watchdog keeps the attempts it
+made), `errored_pct`, `error` (wp rows) and `build_s` (states rows). Spread
+statistics are computed from `samples_ms` by whatever reads the store;
+`results.samples_of` and `result_samples` parse the column. A row with the
+same identity replaces the recorded one; under `--floor` the row with the
+lower `min_ms` stays. `python runner_scripts/results.py` offers `record`,
+`nan`, `status` and `clear`.
 
 ### Problems
 

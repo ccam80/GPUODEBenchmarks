@@ -137,53 +137,6 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
-// Per-repeat timing log, as in runner_scripts/wp_common.py.
-static const char* SampleHeader =
-	"analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms";
-
-// The identity of one timed point, shared by its timed legs.
-struct SamplePoint
-{
-	std::string Analysis;
-	std::string Algorithm;
-	std::string Mode;
-	std::string SettingKind;
-	double Setting;
-	int N;
-	int States;
-};
-
-// Drop a leg's log, for the sweeps whose reduced file is rewritten.
-static void ResetSamples(const std::string& Path)
-{
-	remove(Path.c_str());
-}
-
-// Append one row per attempt of one timed leg, warm-up as repeat 0.
-static void AppendSamples(const std::string& Path, const SamplePoint& Point,
-                          const std::string& Transfers,
-                          const std::vector<double>& Samples)
-{
-	std::ifstream Probe(Path.c_str());
-	bool Header = !Probe.good();
-	Probe.close();
-
-	char SettingText[32];
-	snprintf(SettingText, sizeof(SettingText), "%.10g", Point.Setting);
-
-	std::ofstream Out(Path.c_str(), std::ios::app);
-	if (Header) Out << SampleHeader << "\n";
-	for (size_t r = 0; r < Samples.size(); ++r)
-	{
-		char MsText[32];
-		snprintf(MsText, sizeof(MsText), "%.6f", Samples[r]);
-		Out << Point.Analysis << "," << PROBLEM_NAME << "," << Point.Algorithm
-		    << "," << Point.Mode << "," << Transfers << "," << Point.SettingKind
-		    << "," << SettingText << "," << Point.N << "," << Point.States
-		    << "," << r << "," << MsText << "\n";
-	}
-}
-
 // Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
 static double WatchdogSeconds()
 {
@@ -244,7 +197,7 @@ static std::string Fmt(double Value)
 	return Text;
 }
 
-// One store row through runner_scripts/results.py; BENCH_FLOOR is honoured there.
+// One store row through runner_scripts/results.py, Samples as every attempt in ms (warm-up first); BENCH_FLOOR is honoured there.
 static void RecordResult(const std::string& Analysis, const std::string& Mode,
                          const std::string& Algorithm, const std::string& SettingKind,
                          double Setting, int N, int States, const std::string& Transfers,
@@ -430,11 +383,6 @@ int main(int argc, char *argv[])
 		// The store carries the cubie-vocabulary algorithm name.
 		string Mode = ModeName;
 		string Algorithm = AlgorithmName;
-		const std::string WpDir = DataDir("CPP");
-		const std::string WpSamplesPath = WpDir + "MPGOS_samples_wp_" + Mode
-			+ "_" + Algorithm + ".csv";
-		// --floor re-runs gain a fresh series in the log instead.
-		if (!std::getenv("BENCH_FLOOR")) ResetSamples(WpSamplesPath);
 		const std::string SettingKind = FixedMode ? "dt" : "tol";
 		// NaN rows for the settings from si on, for a breach or a hard exit.
 		auto NanFrom = [&](size_t si) {
@@ -498,11 +446,6 @@ int main(int argc, char *argv[])
 				if (r == 1) RepeatBounds(WpTimed[0], Repeats, WpFloor, WpCeiling);
 				if (RepeatsDone(WpTimed, WpFloor, WpCeiling)) break;
 			}
-			// The h2d is outside the timed region; the ActualState d2h is inside.
-			SamplePoint WpPoint = {"wp", Algorithm, Mode, SettingKind, Setting,
-				NT, SD};
-			AppendSamples(WpSamplesPath, WpPoint, "d2h", WpSamples);
-
 			if (Breached)
 			{
 				NanFrom(si);
@@ -539,11 +482,6 @@ int main(int argc, char *argv[])
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";
 	const std::string TimesMode = ModeName;
 	const std::string TimesAlgorithm = AlgorithmName;
-	const std::string TimesDir = DataDir("CPP");
-	const std::string TimesSamplesPath = TimesDir + "MPGOS_samples_" +
-		TimesAnalysis + "_" + TimesMode + "_" + TimesAlgorithm + ".csv";
-	SamplePoint TimesPoint = {TimesAnalysis, TimesAlgorithm, TimesMode,
-		"none", std::nan(""), NT, SD};
 	const std::string TimesSettingKind = (SOLVER == RK4) ? "dt" : "tol";
 	const double TimesSetting = (SOLVER == RK4) ? (double)TIMING_DT
 	                                            : (double)PROTOCOL_TIMING_TOL;
@@ -586,7 +524,6 @@ int main(int argc, char *argv[])
 			DeviceCeiling);
 		if (RepeatsDone(DeviceTimed, DeviceFloor, DeviceCeiling)) break;
 	}
-	AppendSamples(TimesSamplesPath, TimesPoint, "none", DeviceSamples);
 
 	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
@@ -618,7 +555,6 @@ int main(int argc, char *argv[])
 			EndToEndFloor, EndToEndCeiling);
 		if (RepeatsDone(EndToEndTimed, EndToEndFloor, EndToEndCeiling)) break;
 	}
-	AppendSamples(TimesSamplesPath, TimesPoint, "both", EndToEndSamples);
 
 	if (TimesBreached)
 	{

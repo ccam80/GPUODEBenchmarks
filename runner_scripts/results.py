@@ -2,13 +2,12 @@
 
 CLI: `results.py record <package> <key> <analysis> <problem> <algorithm> <mode> <setting_kind> <setting> <n> <states> <tier> <transfers> [field=value ...] [samples=a;b;c]`,
 `results.py nan <package> <key> <analysis> <problem> <algorithm> <mode> <N|states> [build_s]`, `results.py status <package> <key> <analysis> <problem> <algorithm> <mode> <n> <states>`,
-`results.py clear <package> <key> [analysis] [algorithm] [problem]`, `results.py import-legacy [data_root] [--remove]`.
+`results.py clear <package> <key> [analysis] [algorithm] [problem]`.
 """
 
 import csv
 import math
 import os
-import statistics
 import sys
 import time
 from datetime import datetime, timezone
@@ -19,23 +18,15 @@ from protocol import N_WP, STATES_N, TIMING_TOL, TOLS
 
 IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
             "setting_kind", "setting", "n", "states", "tier", "transfers")
-VALUES = ("min_ms", "median_ms", "p05_ms", "p95_ms", "max_ms", "samples",
-          "errored_pct", "error", "build_s", "recorded_utc")
+# samples_ms is every attempt of the leg in ms, warm-up first, ';'-joined; min_ms is the minimum over the attempts after the warm-up.
+VALUES = ("min_ms", "samples_ms", "errored_pct", "error", "build_s",
+          "recorded_utc")
 FIELDS = IDENTITY + VALUES
 
-# CLI package name -> data directory; the reverse map serves the importer.
+# CLI package name -> data directory.
 PACKAGE_DIRS = {"cubie": "CUBIE", "cubie_mlir": "CUBIE_MLIR", "julia": "Julia",
                 "cpp": "CPP", "jax": "JAX", "pytorch": "PYTORCH",
                 "myokit_cuda": "MYOKIT_CUDA"}
-DIR_PACKAGES = {d: p for p, d in PACKAGE_DIRS.items()}
-
-# Legacy reduced-file prefixes and each writer's wp timed region, for the importer.
-PREFIXES = {"CUBIE": "Cubie", "CUBIE_MLIR": "Cubie_mlir", "Julia": "Julia",
-            "CPP": "MPGOS", "JAX": "Jax", "PYTORCH": "Torch",
-            "MYOKIT_CUDA": "Myokit_cuda"}
-WP_TRANSFERS = {"cubie": "both", "cubie_mlir": "both", "julia": "d2h",
-                "cpp": "d2h", "jax": "none", "pytorch": "none",
-                "myokit_cuda": "both"}
 
 NAN = float("nan")
 LOCK_TIMEOUT_S = 120.0
@@ -69,6 +60,11 @@ def _fmt(value):
     if isinstance(value, float):
         return "nan" if math.isnan(value) else "{0:.10g}".format(value)
     return str(value)
+
+
+def samples_of(row):
+    """The attempts of a row in ms, warm-up first; empty when none were recorded."""
+    return [float(v) for v in row.get("samples_ms", "").split(";") if v]
 
 
 def setting_matches(a, b):
@@ -172,37 +168,17 @@ def make_row(package, key, analysis, problem, algorithm, mode, setting_kind,
              setting, n, states, tier="default", transfers="both",
              min_ms=NAN, samples=None, errored_pct=NAN, error=NAN,
              build_s=NAN):
-    """One store row; `samples` (attempts in ms, warm-up first) fills the spread columns."""
-    timed = list(samples[1:]) if samples else []
-    stats = {"median_ms": NAN, "p05_ms": NAN, "p95_ms": NAN, "max_ms": NAN,
-             "samples": len(timed)}
-    if timed:
-        ordered = sorted(timed)
-        stats.update(median_ms=statistics.median(ordered),
-                     p05_ms=_percentile(ordered, 5.0),
-                     p95_ms=_percentile(ordered, 95.0), max_ms=ordered[-1])
+    """One store row; `samples` is every attempt in ms, warm-up first."""
     return {"package": package, "key": key, "analysis": analysis,
             "problem": problem, "algorithm": algorithm, "mode": mode,
             "setting_kind": setting_kind, "setting": _fmt(float(setting)),
             "n": str(int(n)), "states": str(int(states)), "tier": tier,
             "transfers": transfers, "min_ms": _fmt(float(min_ms)),
-            "median_ms": _fmt(stats["median_ms"]),
-            "p05_ms": _fmt(stats["p05_ms"]), "p95_ms": _fmt(stats["p95_ms"]),
-            "max_ms": _fmt(stats["max_ms"]), "samples": str(stats["samples"]),
+            "samples_ms": ";".join(_fmt(float(s)) for s in (samples or [])),
             "errored_pct": _fmt(float(errored_pct)),
             "error": _fmt(float(error)), "build_s": _fmt(float(build_s)),
             "recorded_utc": datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ")}
-
-
-def _percentile(ordered, pct):
-    """Linear-interpolation percentile, as numpy's default."""
-    if len(ordered) == 1:
-        return ordered[0]
-    position = (len(ordered) - 1) * pct / 100.0
-    low = int(math.floor(position))
-    high = min(low + 1, len(ordered) - 1)
-    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
 
 
 def record(path, row, floor=None):
@@ -333,109 +309,6 @@ class Leg:
             self.record_wp(setting, NAN, NAN, 100.0, transfers=transfers)
 
 
-# ---------------------------------------------------------------- importer
-
-def _legacy_stats(samples_path, analysis, transfers, n, states, setting):
-    """Attempts of the last series for one point in a legacy samples log."""
-    if not os.path.isfile(samples_path):
-        return None
-    series = []
-    with open(samples_path, newline="") as handle:
-        for row in csv.DictReader(handle):
-            if (row["transfers"] != transfers or row["analysis"] != analysis
-                    or _float(row["n"]) != n or _float(row["states"]) != states
-                    or not setting_matches(row["setting"], setting)):
-                continue
-            if row["repeat"] == "0":
-                series.append([])
-            if series:
-                series[-1].append(_float(row["ms"]))
-    return series[-1] if series else None
-
-
-def _legacy_rows(package_dir, key, problem_dir, name):
-    """Store rows for one legacy reduced file."""
-    prefix = PREFIXES[package_dir]
-    stem = name[len(prefix) + 1:-4]
-    analysis, mode, algorithm = stem.split("_", 2)
-    package = DIR_PACKAGES[package_dir]
-    problem = get_problem(os.path.basename(problem_dir))
-    samples_path = os.path.join(problem_dir, "{0}_samples_{1}_{2}_{3}.csv"
-                                .format(prefix, analysis, mode, algorithm))
-    rows = []
-    with open(os.path.join(problem_dir, name)) as handle:
-        lines = [line.split() for line in handle if line.split()]
-    for fields in lines:
-        values = [_float(v) for v in fields]
-        if analysis == "wp":
-            setting, t_ms, err = values[0], values[1], values[2]
-            pct = values[3] if len(values) > 3 else NAN
-            kind = "dt" if mode == "fixed" else "tol"
-            transfers = WP_TRANSFERS[package]
-            samples = _legacy_stats(samples_path, "wp", transfers, N_WP,
-                                    problem["states"], setting)
-            rows.append(make_row(package, key, "wp", problem.name, algorithm,
-                                 mode, kind, setting, N_WP, problem["states"],
-                                 transfers=transfers, min_ms=t_ms,
-                                 samples=samples, errored_pct=pct, error=err))
-            continue
-        kind, setting = timing_setting(problem, mode)
-        if analysis == "states":
-            states, n = int(values[0]), STATES_N
-            t_both, t_none = values[1], values[2]
-            build_s = values[3] if len(values) > 3 else NAN
-            pct = values[4] if len(values) > 4 else NAN
-        else:
-            n, states = int(values[0]), problem["states"]
-            t_both, t_none = values[1], values[2]
-            build_s = NAN
-            pct = values[3] if len(values) > 3 else NAN
-        for transfers, t_ms in (("both", t_both), ("none", t_none)):
-            samples = _legacy_stats(samples_path, analysis, transfers, n,
-                                    states, NAN)
-            rows.append(make_row(package, key, analysis, problem.name,
-                                 algorithm, mode, kind, setting, n, states,
-                                 transfers=transfers, min_ms=t_ms,
-                                 samples=samples, errored_pct=pct,
-                                 build_s=build_s))
-    return rows
-
-
-def import_legacy(root=None, remove=False):
-    """Convert every legacy reduced file under data/ into the stores; returns the files converted."""
-    root = root or data_root()
-    converted = []
-    for package_dir, prefix in PREFIXES.items():
-        package_root = os.path.join(root, package_dir)
-        if not os.path.isdir(package_root):
-            continue
-        for key in sorted(os.listdir(package_root)):
-            key_dir = os.path.join(package_root, key)
-            if not os.path.isdir(key_dir):
-                continue
-            path = store_path(DIR_PACKAGES[package_dir], key, root)
-            rows = load(path)
-            for problem in sorted(os.listdir(key_dir)):
-                problem_dir = os.path.join(key_dir, problem)
-                if not os.path.isdir(problem_dir):
-                    continue
-                for name in sorted(os.listdir(problem_dir)):
-                    if not (name.startswith(prefix + "_")
-                            and name.endswith(".txt")
-                            and "_samples_" not in name):
-                        continue
-                    for row in _legacy_rows(package_dir, key, problem_dir,
-                                            name):
-                        rows = [r for r in rows if not same_point(r, row)]
-                        rows.append(row)
-                    converted.append(os.path.join(problem_dir, name))
-                    if remove:
-                        os.remove(os.path.join(problem_dir, name))
-            if rows:
-                _save(path, rows)
-    return converted
-
-
 def _cli(argv):
     if len(argv) >= 13 and argv[0] == "record":
         (package, key, analysis, problem, algorithm, mode, kind, setting, n,
@@ -476,12 +349,6 @@ def _cli(argv):
                 ident[name] = value
         print(clear(store_path(package, key), package=package, key=key,
                     **ident))
-        return 0
-    if argv and argv[0] == "import-legacy":
-        remove = "--remove" in argv
-        root = next((a for a in argv[1:] if not a.startswith("--")), None)
-        for path in import_legacy(root, remove=remove):
-            print(path)
         return 0
     print(__doc__)
     return 1

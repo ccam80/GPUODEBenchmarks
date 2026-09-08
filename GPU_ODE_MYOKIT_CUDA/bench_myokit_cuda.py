@@ -4,7 +4,6 @@
 
 import os
 import sys
-import timeit
 from pathlib import Path
 
 import numpy as np
@@ -18,27 +17,15 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 from bench_key import data_dir, dataset_key  # noqa: E402
 from protocol import TIMING_DT_K  # noqa: E402
 from results import Leg  # noqa: E402
-from resume import (  # noqa: E402
-    active as resume_active,
-    floor_enabled,
-    skip_point,
-    skip_wp_leg,
-)
+from resume import skip_point, skip_wp_leg  # noqa: E402
 from wp_common import (  # noqa: E402
     REPEAT_CAP,
-    WATCHDOG_SECONDS,
-    errored_pct,
-    append_samples,
-    run_watchdogged,
     dts_for,
     ensemble_error,
+    errored_pct,
     load_golden,
     parse_bench_args,
-    repeat_bounds,
-    repeats_done,
-    reset_samples,
-    sample_point,
-    samples_outfile,
+    timed_min_ms,
 )
 
 
@@ -61,36 +48,9 @@ MODELS = {
 }
 
 
-def _capped_min_ms(run, repeats, setup=None, on_breach=None):
-    """(ms, first_result, samples) after one warm-up; ms None on breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged."""
-    first = None
-    samples = []
-    timed = []
-    floor = ceiling = None
-    while True:
-        if setup is not None and samples:
-            setup()
-        started = timeit.default_timer()
-        result = (run() if on_breach is None
-                  else run_watchdogged(run, on_breach))
-        elapsed = timeit.default_timer() - started
-        if not samples:
-            first = result
-        samples.append(elapsed * 1000.0)
-        if elapsed > WATCHDOG_SECONDS:
-            return None, first, samples
-        if len(samples) == 1:
-            continue                     # the warm-up carries the compile
-        timed.append(elapsed)
-        if floor is None:
-            floor, ceiling = repeat_bounds(timed[0], repeats)
-        if repeats_done(timed, floor, ceiling):
-            return min(timed) * 1000.0, first, samples
-
-
 def timed_solve(model, cell_count, rho, dt, step_count, repeats,
-                samples_file, point, on_breach=None):
-    """(with_transfers_ms, device_only_ms, finals); NaN times on a breach. Each timed leg's attempts go to samples_file. on_breach fills the leg before a watchdog hard-exit."""
+                on_breach=None):
+    """(with_transfers_ms, device_only_ms, finals, samples_both, samples_none); NaN times on a breach. on_breach fills the leg before a watchdog hard-exit."""
     initial_states = model.initial_states(cell_count)
 
     def run():
@@ -101,11 +61,9 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
             diffusion_values=rho,
         )
 
-    elapsed_ms, finals, samples = _capped_min_ms(run, repeats,
-                                                 on_breach=on_breach)
-    append_samples(samples_file, point, "both", samples)
+    elapsed_ms, finals, samples_both = timed_min_ms(run, repeats, on_breach)
     if elapsed_ms is None:
-        return float("nan"), float("nan"), finals
+        return float("nan"), float("nan"), finals, samples_both, None
 
     device_states, device_diffusion = model.to_device(initial_states, rho)
     pristine = device_states.copy()
@@ -119,25 +77,17 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
         # Untimed: reset the integrated-in-place state between timed runs.
         device_states[...] = pristine
 
-    elapsed_dev_ms, _, samples = _capped_min_ms(run_on_device, repeats,
-                                                setup=restore,
-                                                on_breach=on_breach)
-    append_samples(samples_file, point, "none", samples)
+    elapsed_dev_ms, _, samples_none = timed_min_ms(
+        run_on_device, repeats, on_breach, setup=restore)
     if elapsed_dev_ms is None:
-        return elapsed_ms, float("nan"), finals
-    return elapsed_ms, elapsed_dev_ms, finals
+        return elapsed_ms, float("nan"), finals, samples_both, samples_none
+    return elapsed_ms, elapsed_dev_ms, finals, samples_both, samples_none
 
 
 def run_work_precision(model, problem, cell_count, leg):
     """Record the fixed-step Myokit-CUDA work-precision sweep."""
     golden = load_golden(problem)
     sweep = problem.sweep(cell_count, dtype=np.float32)
-    samples_file = samples_outfile(
-        "MYOKIT_CUDA", "Myokit_cuda", "wp", "fixed", ALGORITHM, DATASET_KEY,
-        problem)
-    # --floor merges the new times in; the log gains a fresh series.
-    if not floor_enabled():
-        reset_samples(samples_file)
     # Later settings are slower, so a breach abandons the leg.
     dts = list(dts_for(ALGORITHM, problem))
     for index, dt in enumerate(dts):
@@ -149,16 +99,13 @@ def run_work_precision(model, problem, cell_count, leg):
             print("WATCHDOG wp fixed dt={0:g}: run never returned"
                   .format(at))
 
-        elapsed_ms, _, finals = timed_solve(
+        elapsed_ms, _, finals, samples, _ = timed_solve(
             model,
             cell_count,
             sweep,
             dt,
             step_count,
             repeats=REPEATS,
-            samples_file=samples_file,
-            point=sample_point("wp", problem.name, ALGORITHM, "fixed",
-                               cell_count, problem["states"], "dt", dt),
             on_breach=on_breach,
         )
         breached = np.isnan(elapsed_ms)
@@ -173,7 +120,7 @@ def run_work_precision(model, problem, cell_count, leg):
             "wp fixed dt={0:g}: {1:.2f} ms, err={2:.3e}, errored={3:.1f}%"
             .format(dt, elapsed_ms, error, pct)
         )
-        leg.record_wp(dt, elapsed_ms, error, pct)
+        leg.record_wp(dt, elapsed_ms, error, pct, samples=samples)
         if breached:
             leg.nan_wp(dts[index + 1:])
             break
@@ -250,29 +197,25 @@ def run_problem(problem, cell_counts, wp_mode):
             problem.name, ALGORITHM,
             ",".join(str(n) for n in run_counts)))
     model = load_model(problem)
-    samples_file = samples_outfile(
-        "MYOKIT_CUDA", "Myokit_cuda", "times", "fixed", ALGORITHM,
-        DATASET_KEY, problem)
     for index, cell_count in enumerate(run_counts):
         sweep = problem.sweep(cell_count, dtype=np.float32)
-        elapsed_ms, elapsed_dev_ms, finals = timed_solve(
-            model,
-            cell_count,
-            sweep,
-            problem.timing_dt,
-            STANDARD_STEPS,
-            repeats=REPEATS,
-            samples_file=samples_file,
-            point=sample_point("times", problem.name, ALGORITHM, "fixed",
-                               cell_count, problem["states"]),
-        )
+        elapsed_ms, elapsed_dev_ms, finals, samples_both, samples_none = (
+            timed_solve(
+                model,
+                cell_count,
+                sweep,
+                problem.timing_dt,
+                STANDARD_STEPS,
+                repeats=REPEATS,
+            ))
         print(
             "{0} {1} solves with Myokit-CUDA Euler completed in "
             "{2:.1f} ms ({3:.1f} ms without transfers)"
             .format(cell_count, problem.name, elapsed_ms, elapsed_dev_ms)
         )
         pct = 100.0 if finals is None else errored_pct(finals)
-        leg.record_times(cell_count, elapsed_ms, elapsed_dev_ms, pct)
+        leg.record_times(cell_count, elapsed_ms, elapsed_dev_ms, pct,
+                         samples_both, samples_none)
 
         # The pairwise numerical cross-check reads this fixed CSV name.
         if cell_count == 32768 and np.isfinite(elapsed_ms):
@@ -361,17 +304,11 @@ def run_states(grid):
         print("-- resume: skipping states fixed {0} (already covered)"
               .format(ALGORITHM))
         return
-    samples_file = samples_outfile(
-        "MYOKIT_CUDA", "Myokit_cuda", "states", "fixed", ALGORITHM,
-        DATASET_KEY, STATES_PROBLEM)
-    # A resumed or --floor leg appends to what earlier runs recorded.
-    if not (resume_active() or floor_enabled()):
-        reset_samples(samples_file)
     for index, nstates in enumerate(run_grid):
         row = states_row(nstates)
         sweep = row.sweep(cell_count, dtype=np.float32)
         elapsed_ms = elapsed_dev_ms = build_s = float("nan")
-        finals = None
+        finals = samples_both = samples_none = None
         try:
             started = timeit.default_timer()
             model = MyokitCudaModel(
@@ -385,17 +322,15 @@ def run_states(grid):
                 diffusion_values=sweep,
             )
             build_s = timeit.default_timer() - started
-            elapsed_ms, elapsed_dev_ms, finals = timed_solve(
-                model,
-                cell_count,
-                sweep,
-                row.timing_dt,
-                STANDARD_STEPS,
-                repeats=REPEATS,
-                samples_file=samples_file,
-                point=sample_point("states", STATES_PROBLEM, ALGORITHM,
-                                   "fixed", cell_count, nstates),
-            )
+            elapsed_ms, elapsed_dev_ms, finals, samples_both, samples_none = (
+                timed_solve(
+                    model,
+                    cell_count,
+                    sweep,
+                    row.timing_dt,
+                    STANDARD_STEPS,
+                    repeats=REPEATS,
+                ))
             print(
                 "{0} lorenz96 states={1} solves with Myokit-CUDA Euler "
                 "completed in {2:.1f} ms ({3:.1f} ms without transfers)"
@@ -406,7 +341,8 @@ def run_states(grid):
                   .format(nstates, ALGORITHM, cell_count, exc))
         pct = 100.0 if finals is None else errored_pct(finals)
         leg.record_times(cell_count, elapsed_ms, elapsed_dev_ms, pct,
-                         build_s=build_s, states=nstates)
+                         samples_both, samples_none, build_s=build_s,
+                         states=nstates)
         if not np.isfinite(elapsed_ms) and np.isfinite(build_s):
             # Larger systems are slower, so the sweep is abandoned.
             print("WATCHDOG lorenz96 states={0} fixed {1} N={2}: run "

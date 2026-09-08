@@ -16,11 +16,8 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
 from results import Leg
-from resume import (active as resume_active, floor_enabled, skip_point,
-                    skip_wp_leg)
-from wp_common import (REPEAT_CAP, append_samples, errored_pct,
-                       parse_bench_args, reset_samples, sample_point,
-                       samples_outfile)
+from resume import skip_point, skip_wp_leg
+from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
 
 DATASET_KEY = dataset_key()
 
@@ -105,8 +102,7 @@ def make_solve(problem, algorithm, dt=None):
 
 def run_wp(problem, parameters):
     """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, N_WP, load_golden, ensemble_error,
-                           timed_min_ms)
+    from wp_common import dts_for, load_golden, ensemble_error, timed_min_ms
 
     golden = load_golden(problem)
 
@@ -119,11 +115,6 @@ def run_wp(problem, parameters):
             print("-- resume: skipping wp {0} fixed {1} (already covered)"
                   .format(problem.name, algorithm))
             continue
-        samples_file = samples_outfile("PYTORCH", "Torch", "wp", "fixed",
-                                       algorithm, DATASET_KEY, problem)
-        # --floor merges the new times in; the log gains a fresh series.
-        if not floor_enabled():
-            reset_samples(samples_file)
         # Later settings are slower, so a breach abandons the leg.
         for index, dt in enumerate(dts):
             solve_dt = make_solve(problem, algorithm, dt)
@@ -141,9 +132,6 @@ def run_wp(problem, parameters):
 
             # Parameters are already resident and results stay on device.
             t_ms, traj, samples = timed_min_ms(run, REPEATS, on_breach)
-            append_samples(samples_file, sample_point(
-                "wp", problem.name, algorithm, "fixed", N_WP,
-                problem["states"], "dt", dt), "none", samples)
             finals = traj[:, -1, :].cpu().numpy()
             pct = errored_pct(finals)
             breached = t_ms is None
@@ -182,8 +170,6 @@ def run_times(problem):
                 problem.name, algorithm,
                 ",".join(str(n) for n in run_ns)))
         solve = make_solve(problem, algorithm)
-        samples_file = samples_outfile("PYTORCH", "Torch", "times", "fixed",
-                                       algorithm, DATASET_KEY, problem)
         for index, n in enumerate(run_ns):
             parameters_host = problem.sweep(n, dtype=np.float32)
             parameters = None
@@ -201,8 +187,6 @@ def run_times(problem):
                 torch.cuda.synchronize()
                 return out
 
-            point = sample_point("times", problem.name, algorithm,
-                                 "fixed", n, problem["states"])
             # An exhausted card ends the leg the way a breach does.
             exhausted = False
             best_time = None
@@ -213,11 +197,9 @@ def run_times(problem):
                 parameters = torch.from_numpy(parameters_host).cuda()
                 best_time, out, samples_both = timed_min_ms(with_transfers,
                                                             REPEATS)
-                append_samples(samples_file, point, "both", samples_both)
                 if best_time is not None:
                     best_time_dev, _, samples_none = timed_min_ms(
                         device_only, REPEATS)
-                    append_samples(samples_file, point, "none", samples_none)
             except torch.OutOfMemoryError as err:
                 exhausted = True
                 parameters = None
@@ -279,11 +261,6 @@ def run_states():
             print("-- resume: skipping states fixed {0} (already covered)"
                   .format(algorithm))
             continue
-        samples_file = samples_outfile("PYTORCH", "Torch", "states", "fixed",
-                                       algorithm, DATASET_KEY, STATES_PROBLEM)
-        # A resumed or --floor leg appends to what earlier runs recorded.
-        if not (resume_active() or floor_enabled()):
-            reset_samples(samples_file)
         for index, nstates in enumerate(run_grid):
             row = states_row(nstates)
             solve = make_solve(row, algorithm)
@@ -310,16 +287,12 @@ def run_states():
                 device_only()
                 build_s = timeit.default_timer() - started
 
-                point = sample_point("states", STATES_PROBLEM, algorithm,
-                                     "fixed", n, nstates)
                 best, out, samples_both = timed_min_ms(with_transfers,
                                                        REPEATS)
-                append_samples(samples_file, point, "both", samples_both)
                 best_dev = None
                 if best is not None:
                     best_dev, _, samples_none = timed_min_ms(device_only,
                                                              REPEATS)
-                    append_samples(samples_file, point, "none", samples_none)
                 breached = best is None or best_dev is None
                 if not breached:
                     t_ms, t_dev = best, best_dev

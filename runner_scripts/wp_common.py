@@ -1,4 +1,4 @@
-"""Work-precision sweep helpers: setting, time and error rows under data/<package>/<key>/<problem>/; constants come from protocol.toml."""
+"""Timing, watchdog, golden-reference and CLI helpers shared by the Python bench scripts; constants come from protocol.toml."""
 
 import os
 import sys
@@ -8,7 +8,6 @@ import numpy as np
 
 from algorithms import (get_algorithm, ne_member, resolve_algorithms,
                         resolve_modes)
-from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
                       REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
@@ -58,11 +57,6 @@ def errored_pct(finals):
     return 100.0 * float(bad.sum()) / float(bad.size)
 
 
-# Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
-SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
-                 "setting_kind", "setting", "n", "states", "repeat", "ms")
-
-
 def repeat_bounds(first_s, cap):
     """(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."""
     for limit, floor, ceiling in REPEAT_SCHEDULE:
@@ -80,13 +74,15 @@ def repeats_done(timed_s, floor, ceiling):
     return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
 
 
-def timed_min_ms(run, repeats, on_breach=None):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged."""
+def timed_min_ms(run, repeats, on_breach=None, setup=None):
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged. setup() runs untimed before every attempt after the first."""
     import timeit
     samples = []
     timed = []
     floor = ceiling = None
     while True:
+        if setup is not None and samples:
+            setup()
         elapsed = timeit.default_timer()
         result = (run() if on_breach is None
                   else run_watchdogged(run, on_breach))
@@ -140,42 +136,6 @@ def ensemble_error(final_states, golden):
     """l2-at-final error over the ensemble, computed in float64."""
     diff = np.asarray(final_states, dtype=np.float64) - golden
     return float(np.sqrt(np.mean(diff ** 2)))
-
-
-def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
-                    dataset_key, problem=DEFAULT_PROBLEM, tier="default"):
-    """Path of the per-repeat timing log; a non-default tier gets its own."""
-    suffix = "" if tier == "default" else "_" + tier
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_samples_{1}_{2}_{3}{4}.csv".format(
-                            prefix, analysis, mode, algorithm, suffix))
-
-
-def sample_point(analysis, problem, algorithm, mode, n, states,
-                 setting_kind="none", setting=float("nan")):
-    """The identity of one timed point, shared by its timed legs."""
-    return {"analysis": analysis, "problem": problem, "algorithm": algorithm,
-            "mode": mode, "setting_kind": setting_kind, "setting": setting,
-            "n": n, "states": states}
-
-
-def reset_samples(path):
-    """Drop a leg's log, for the sweeps whose reduced file is rewritten."""
-    if os.path.exists(path):
-        os.remove(path)
-
-
-def append_samples(path, point, transfers, samples):
-    """Append one row per attempt of one timed leg, warm-up as repeat 0."""
-    header = not os.path.exists(path)
-    with open(path, "a") as handle:
-        if header:
-            handle.write(",".join(SAMPLE_FIELDS) + "\n")
-        head = "{analysis},{problem},{algorithm},{mode}".format(**point)
-        tail = "{setting_kind},{setting:.10g},{n},{states}".format(**point)
-        for repeat, ms in enumerate(samples):
-            handle.write("{0},{1},{2},{3},{4:.6f}\n".format(
-                head, transfers, tail, repeat, ms))
 
 
 def parse_bench_args(argv, framework):

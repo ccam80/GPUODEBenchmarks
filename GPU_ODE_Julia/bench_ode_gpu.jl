@@ -22,7 +22,6 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "errored.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "results.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
 # Precompiled entries take precedence over runtime-built ones.
@@ -136,16 +135,8 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
         println("-- resume: skipping wp $(label) (already covered)")
         return
     end
-    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
-        "wp", mode, algorithm, problem)
-    setting_kind = mode == "fixed" ? "dt" : "tol"
-    # --floor merges the new times in; the log gains a fresh series instead.
-    floor_enabled() || reset_samples(samples_file)
     compiled = false
     for (index, setting) in enumerate(settings)
-        point = sample_point("wp", problem["problem"], algorithm, mode,
-            N_WP, problem["states"]; setting_kind = setting_kind,
-            setting = setting)
         on_breach = () -> begin
             nan_wp_rows(problem, algorithm, mode, settings[index:end])
             println("WATCHDOG $(label) setting=$(setting): run never returned")
@@ -165,10 +156,9 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
                 else
                     e = ensemble_error(system, sol[2], golden)
                     p = errored_pct(@view sol[2][end, :])
+                    # The ensemble is resident, so only the d2h is timed.
                     t, samples, _ = watchdogged_min_ms(
                         () -> solve_once(setting), on_breach, REPEATS)
-                    # The ensemble is resident, so only the d2h is timed.
-                    append_samples(samples_file, point, "d2h", samples)
                     (t, isnan(t) ? NaN : e, p)
                 end
             end
@@ -213,8 +203,6 @@ end
 function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     solver = gpu_solver(algorithm)
     _, setting = timing_setting(problem, mode)
-    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
-        "times", mode, algorithm, problem)
     compiled = false
 
     run_ns = [n for n in NS
@@ -258,17 +246,13 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
                 run_watchdogged(device_solve, on_breach)
                 compiled = true
             end
-            point = sample_point("times", problem["problem"], algorithm, mode,
-                n, problem["states"])
             t_dev, t, pct = with_gpu_lock() do
                 td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
                     on_breach, REPEATS)
-                append_samples(samples_file, point, "none", samples_none)
                 isnan(td) && return (td, NaN, 100.0)
                 p = errored_pct(@view dev_sol[2][end, :])
                 tt, samples_both, _ = watchdogged_min_ms(full_solve, on_breach,
                     REPEATS)
-                append_samples(samples_file, point, "both", samples_both)
                 (td, tt, p)
             end
             (t, t_dev, pct, isnan(t))
@@ -340,8 +324,6 @@ function run_states(nstates, n)
                         "$(algorithm) (already covered)")
                 continue
             end
-            samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
-                "Julia", "states", mode, algorithm, row)
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
             samples_none = samples_both = nothing
             t_ms, t_dev_ms, build_s, pct = try
@@ -357,17 +339,13 @@ function run_states(nstates, n)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
-                point = sample_point("states", row["problem"], algorithm,
-                    mode, n, nstates)
                 t_dev, t, pct = with_gpu_lock() do
                     td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
                         on_breach, REPEATS)
-                    append_samples(samples_file, point, "none", samples_none)
                     isnan(td) && return (td, NaN, 100.0)
                     p = errored_pct(@view dev_sol[2][end, :])
                     tt, samples_both, _ = watchdogged_min_ms(full_solve,
                         on_breach, REPEATS)
-                    append_samples(samples_file, point, "both", samples_both)
                     (td, tt, p)
                 end
                 isnan(t) &&
