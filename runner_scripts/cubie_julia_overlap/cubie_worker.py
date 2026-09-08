@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, CUBIE_NE_DATA, FAILURE_FIELDS, ANALYSES, METRIC_FIELDS,
-    NE_FAMILY, N_WP, TIMING_FIELDS, algorithms, append_csv, controllers_equal,
+    N_WP, TIMING_FIELDS, algorithms, append_csv, controllers_equal,
     cubie_default_controller, ensure_csv, finite_counts, golden_ne, golden_wp,
     phases_for, pi_controller, point_slug, protocol as suite_protocol,
     read_ne_csv, read_ne_adaptive_csv, rmse, scaled_dts, timing_stats,
@@ -142,7 +142,7 @@ def import_numerical_from_ne(output, alias, family, problem, metric_file,
                         usecols=tuple(range(1, nstates + 1)))
     ne_dir = CUBIE_NE_DATA / key / problem["problem"]
     sources = []
-    if NE_FAMILY.get(family, family) != "erk":
+    if family != "erk":
         sources.append(("fixed", "fixed", "dt",
                         ne_dir / "{}.csv".format(alias)))
     sources.append(("adaptive", "default", "tol",
@@ -226,12 +226,11 @@ def main():
         print("FAILED cubie {} {} {} {}={}: {}".format(algorithm, phase, mode, setting_kind, setting, message), flush=True)
 
     for row in algorithms(args.algorithm):
-        alias, order, family = row["cubie_alias"], row["order"], row["family"]
+        alias, order, family = row["algorithm"], row["order"], row["family"]
         # Skip the pi tier when it resolves to cubie's shipped defaults.
         pi_resolved = {key: (value(order) if callable(value) else value)
                        for key, value in pi_controller(order, family).items()}
-        shipped = cubie_default_controller(alias, NE_FAMILY.get(family, family),
-                                           order)
+        shipped = cubie_default_controller(alias, family, order)
         if controllers_equal(pi_resolved, shipped):
             adaptive_tiers = ("default",)
             print("cubie {}: pi tier equals the shipped defaults; skipped"

@@ -16,6 +16,7 @@ the analyzer runs after the selected workers finish.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent
 SUITE = ROOT / "runner_scripts" / "cubie_julia_overlap"
 sys.path.insert(0, str(ROOT / "runner_scripts"))
 sys.path.insert(0, str(SUITE))
+from algorithms import overlap_algorithms  # noqa: E402 - repository helper bootstrap
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
@@ -123,7 +125,11 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
 
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SUITE / "diffeqgpu_ode_inventory.csv", output / "diffeqgpu_ode_inventory.csv")
-    shutil.copy2(SUITE / "algorithms.csv", output / "overlap_algorithms.csv")
+    with (output / "overlap_algorithms.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["algorithm", "julia_gpu", "order", "family"])
+        for row in overlap_algorithms():
+            writer.writerow([row["algorithm"], row["julia_gpu"], row["order"], row["family"]])
 
     # Clear the rows this run replaces; the workers only append.
     for framework in packages:
