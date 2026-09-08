@@ -65,11 +65,12 @@ def parser():
                    help="Sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.")
     p.add_argument("--from-n", type=int, default=0,
                    help="Continue the performance analysis at this N; rows below it are kept.")
-    p.add_argument("--algorithm", choices=algorithm_names(), default="all",
-                   help="Run one algorithm; the others keep their existing rows.")
-    p.add_argument("-s", "--problem", choices=["all"] + problem_names(),
-                   default="all",
-                   help="Run one problem; each gets its own output directory.")
+    p.add_argument("--algorithm", default="all",
+                   help="all | comma list of " + ", ".join(algorithm_names()[1:])
+                   + "; the others keep their existing rows.")
+    p.add_argument("-s", "--problem", default="all",
+                   help="all | comma list of " + ", ".join(problem_names())
+                   + "; each gets its own output directory.")
     return p
 
 
@@ -85,6 +86,8 @@ def main():
     if args.from_n and args.analysis != "performance":
         parser().error("--from-n continues the performance analysis; pass -a performance")
     key = dataset_key()
+    if not overlap_algorithms(args.algorithm):
+        parser().error("no requested algorithm is in the overlap suite")
     problems = resolve_problems(args.problem, "cubie")
     if not problems:
         parser().error("no requested problem is in the overlap suite")
@@ -142,10 +145,11 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
             if dropped:
                 print("Replacing {} row(s) in {}_{}.csv".format(dropped, framework, kind))
         if "numerical" in phases:
-            stale = output / "finals" / framework
-            if args.algorithm != "all":
-                stale = stale / args.algorithm
-            shutil.rmtree(stale, ignore_errors=True)
+            stale = [output / "finals" / framework] if args.algorithm == "all" else [
+                output / "finals" / framework / name
+                for name in args.algorithm.split(",") if name]
+            for path in stale:
+                shutil.rmtree(path, ignore_errors=True)
 
     manifest = {
         "dataset_key": key, "problem": problem["problem"],

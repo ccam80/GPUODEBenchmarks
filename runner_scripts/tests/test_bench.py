@@ -38,6 +38,12 @@ class ResolveTests(unittest.TestCase):
         self.assertTrue(self.plan("-a", "plots")["plot_all"])
         self.assertEqual(self.plan("-a", "optimize,warm")["analyses"], ["optimize", "warm"])
 
+    def test_ne_and_overlap_take_either_cubie_package(self):
+        self.assertEqual(bench.ne_package(["julia", "cubie_mlir"]), "all")
+        self.assertEqual(bench.ne_package(["cubie_mlir"]), "cubie")
+        self.assertEqual(bench.ne_package(["pytorch"]), "")
+        self.assertEqual(bench.cubie_packages(["cubie", "julia", "cubie_mlir"]), ["cubie", "cubie_mlir"])
+
     def test_exact_counts_and_bad_values(self):
         self.assertEqual(self.plan("-n", "32768,8")["nlist"], [8, 32768])
         with self.assertRaises(SystemExit):

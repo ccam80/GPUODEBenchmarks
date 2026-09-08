@@ -118,7 +118,7 @@ def ensure_csv(path, fields):
 
 def regenerated(row, phases, from_n=0, algorithm="all", ns=None):
     """True when a run over `phases` will produce this row again."""
-    if algorithm != "all" and row.get("algorithm") != algorithm:
+    if algorithm != "all" and row.get("algorithm") not in algorithm.split(","):
         return False
     if row.get("phase") not in phases:
         return False

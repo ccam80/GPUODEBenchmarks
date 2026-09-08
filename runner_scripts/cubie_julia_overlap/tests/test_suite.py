@@ -92,6 +92,11 @@ class PruneTests(unittest.TestCase):
         self.assertEqual(dropped, 5)
         self.assertEqual(kept, [])
 
+    def test_algorithm_list_drops_every_named_algorithm(self):
+        dropped, kept = self.prune(("performance",), algorithm="tsit5,vern7")
+        self.assertEqual(dropped, 3)
+        self.assertEqual([r["phase"] for r in kept], ["numerical", "work_precision"])
+
     def test_from_n_keeps_the_smaller_n(self):
         dropped, kept = self.prune(("performance",), from_n=2048)
         self.assertEqual(dropped, 2)

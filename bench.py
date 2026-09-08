@@ -195,7 +195,8 @@ def resolve(args):
 
 def ne_package(packages):
     """The -p token the NE and overlap suites take: both, one, or none."""
-    has_julia, has_cubie = "julia" in packages, "cubie" in packages
+    has_julia = "julia" in packages
+    has_cubie = any(p in launch.CUBIE_PACKAGES for p in packages)
     if has_julia and has_cubie:
         return "all"
     if has_julia:
@@ -203,6 +204,11 @@ def ne_package(packages):
     if has_cubie:
         return "cubie"
     return ""
+
+
+def cubie_packages(packages):
+    """The cubie packages requested, in run order."""
+    return [p for p in packages if p in launch.CUBIE_PACKAGES]
 
 
 def bench_env(args):
@@ -470,14 +476,14 @@ class Run:
                 self.replot("plot_ode_wp.jl")
                 self.cooldown()
         if "numerical" in analyses:
-            self.numerical(ne_package(packages), algorithm, problem)
+            self.numerical(ne_package(packages), cubie_packages(packages), algorithm, problem)
         if "overlap" in analyses:
-            self.overlap(ne_package(packages), nlist)
+            self.overlap(ne_package(packages), cubie_packages(packages), nlist, algorithm, problem)
         if "plots" in analyses:
             self.plots(ne_package(packages), plan["plot_all"])
 
-    def numerical(self, package, algorithm, problem):
-        """Golden NE references, the Float32 DifferentialEquations.jl sweep, the cubie sweep and the comparison."""
+    def numerical(self, package, cubie_pkgs, algorithm, problem):
+        """Golden NE references, the Float32 DifferentialEquations.jl sweep, one cubie sweep per cubie package, and the comparison."""
         if not package:
             self.record("ne", "SKIPPED", "no requested package is in the ne suite", "-")
             return
@@ -491,11 +497,13 @@ class Run:
                                        self.julia(os.path.join("runner_scripts", "numerical_equivalence", "ne_diffeq.jl"),
                                                   "--controller", self.args.controller, "--algorithm", algorithm,
                                                   "--problem", problem), critical=False)
-        if package in ("all", "cubie") and worst == 0:
-            worst = self.step("ne: cubie sweeps", "numerical_equivalence.log", launch.Command(
-                "cubie", [launch.cubie_python(), os.path.join(ROOT, "GPU_ODE_CUBIE", "numerical_equivalence.py"),
-                          "--package", "cubie", "--controller", self.args.controller,
-                          "--algorithm", algorithm, "--problem", problem]), critical=False)
+        for cubie_pkg in cubie_pkgs:
+            if worst != 0:
+                break
+            worst = self.step("ne: {0} sweeps".format(cubie_pkg), "numerical_equivalence.log", launch.Command(
+                cubie_pkg, [launch.cubie_python(), os.path.join(ROOT, "GPU_ODE_CUBIE", "numerical_equivalence.py"),
+                            "--package", cubie_pkg, "--controller", self.args.controller,
+                            "--algorithm", algorithm, "--problem", problem]), critical=False)
         if worst != 0:
             self.record("ne", "FAILED", "-", worst)
             return
@@ -509,15 +517,24 @@ class Run:
         else:
             self.record("ne", "FAILED", "-", status)
 
-    def overlap(self, package, nlist):
+    def overlap(self, package, cubie_pkgs, nlist, algorithm, problem):
+        """The overlap suite once per requested cubie backend; julia alone runs once."""
         if not package:
             self.record("overlap", "SKIPPED", "no requested package is in the overlap suite", "-")
             return
-        status = self.step("Cubie vs DiffEqGPU overlap", "cubie_julia_overlap.log", launch.Command(
-            "overlap", [launch.cubie_python(), os.path.join(ROOT, "run_cubie_julia_overlap.py"),
-                        "-a", "all", "-p", package, "-n", ",".join(str(n) for n in nlist)]))
-        self.record("overlap", "OK" if status == 0 else "PARTIAL",
-                    "-" if status == 0 else "a worker failed; see manifest.json", status)
+        backends = cubie_pkgs or [None]
+        for backend in backends:
+            argv = [launch.cubie_python(), os.path.join(ROOT, "run_cubie_julia_overlap.py"),
+                    "-a", "all", "-p", package, "-n", ",".join(str(n) for n in nlist),
+                    "--algorithm", algorithm, "-s", problem]
+            label = "overlap"
+            if backend:
+                argv += ["--backend", backend]
+                label = "overlap:" + backend
+            status = self.step("Cubie vs DiffEqGPU overlap", "cubie_julia_overlap.log",
+                               launch.Command(label, argv))
+            self.record(label, "OK" if status == 0 else "PARTIAL",
+                        "-" if status == 0 else "a worker failed; see manifest.json", status)
 
     def plots(self, package, plot_all):
         analyses = self.plan["analyses"]
