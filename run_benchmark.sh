@@ -61,8 +61,8 @@ PACKAGE=${PACKAGE//-/_}
 
 [ -n "$PACKAGE" ] || { echo "-p/--package is required" >&2; usage 1; }
 case "$ANALYSIS" in
-    performance|work-precision|states|warm) ;;
-    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|states|warm)" >&2; exit 1;;
+    performance|work-precision|states|warm|optimize) ;;
+    *) echo "Unknown analysis '$ANALYSIS' (performance|work-precision|states|warm|optimize)" >&2; exit 1;;
 esac
 # -g: "all" or a comma list; charset-check before the unquoted split.
 case "$ALGORITHM" in
@@ -133,8 +133,13 @@ STATUS=0
 for ALG in $ALG_LIST; do
     echo "Benchmarking ${PACKAGE} ${DEVICE} ensemble ${MODEL} solvers (${ANALYSIS}, ${ALG}, ${PROBLEM})..."
 
-    # Clear this machine's store rows for the analysis, algorithm and problems being run.
-    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP && [ "$ANALYSIS" != "warm" ]; then
+    # Clear this machine's optimize rows, or store rows, for the algorithm and problems being run.
+    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP && [ "$ANALYSIS" == "optimize" ]; then
+        for P in ${PROBLEM//,/ }; do
+            python3 ./runner_scripts/cubie_adapter.py clear "$PACKAGE" "$DATASET_KEY" "$ALG" "$P" > /dev/null
+        done
+    fi
+    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP && [ "$ANALYSIS" != "warm" ] && [ "$ANALYSIS" != "optimize" ]; then
         case "$ANALYSIS" in
             work-precision) STORE_ANALYSIS=wp;;
             states) STORE_ANALYSIS=states;;

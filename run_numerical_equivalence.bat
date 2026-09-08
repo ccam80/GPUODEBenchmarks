@@ -101,8 +101,8 @@ if errorlevel 1 (
 :cubie_sweeps
 if /i "%PACKAGE%"=="julia" goto compare
 
-echo --- cubie Float32 sweeps ^(GPU, keyed per machine^) ---
-call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py --controller %CONTROLLER% --algorithm %ALGORITHM% --problem "%PROBLEM%"
+echo --- cubie Float32 sweeps ^(GPU, keyed per machine, numba-cuda backend^) ---
+call "GPU_ODE_CUBIE\venv\Scripts\python.exe" GPU_ODE_CUBIE\numerical_equivalence.py --package cubie --controller %CONTROLLER% --algorithm %ALGORITHM% --problem "%PROBLEM%"
 if errorlevel 1 (
     echo cubie sweeps failed
     popd

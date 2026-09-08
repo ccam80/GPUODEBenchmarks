@@ -57,19 +57,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(common.phases_for("all"), common.PHASES)
         self.assertEqual(len(common.ANALYSES), len(common.PHASES))
 
-    def test_pi_controller_constants(self):
-        settings = common.pi_controller(5, "erk")
-        self.assertEqual(settings["step_controller"], "pi")
-        self.assertAlmostEqual(settings["min_gain"], 0.2)
-        self.assertAlmostEqual(settings["max_gain"], 10.0)
-        self.assertAlmostEqual(settings["safety"], 0.9)
-
-    def test_pi_controller_sets_no_deadband(self):
-        """Cubie caches no Jacobian by step size, so it holds no dt deadband."""
-        for family in ("dirk", "rosenbrock", "erk"):
-            settings = common.pi_controller(3, family)
-            self.assertNotIn("deadband_min", settings)
-            self.assertNotIn("deadband_max", settings)
 
 
 class PruneTests(unittest.TestCase):

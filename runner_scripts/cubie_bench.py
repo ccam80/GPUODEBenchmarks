@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Cubie ensemble benchmark shared by the CUBIE and CUBIE_MLIR suites; the backend comes from CUBIE_CUDA_BACKEND."""
+"""Cubie ensemble benchmark shared by the CUBIE and CUBIE_MLIR suites; solvers, backend and optimize rows come from cubie_adapter."""
 
 import gc
 import os
@@ -8,46 +8,25 @@ import sys
 
 import numpy as np
 
+import cubie_adapter as adapter
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
-from cubie_systems import (build_system, final_states, output_types,
-                           sweep_parameters)
-from results import Leg
+from cubie_systems import final_states, sweep_parameters
+from results import PACKAGE_DIRS, PREFIXES, Leg
 from resume import (active as resume_active, floor_enabled, skip_point,
                     skip_wp_leg)
-from wp_common import (REPEAT_CAP, TIMING_TOL, errored_pct, parse_bench_args)
+from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
 
 REPEATS = REPEAT_CAP
 
 PRECISION = np.float32
 
 
-def _make_fixed_solver(system, problem, algorithm, dt=None):
-    import cubie as qb
-    return qb.Solver(
-        system,
-        algorithm=algorithm,
-        dt=problem.timing_dt if dt is None else dt,
-        save_every=problem["duration"],
-        step_controller='fixed',
-        output_types=output_types(system),
-        time_logging_level=None,
-    )
-
-
-def _make_adaptive_solver(system, problem, algorithm, tol=TIMING_TOL):
-    """No step controller passed: cubie runs its shipped defaults."""
-    import cubie as qb
-    return qb.Solver(
-        system,
-        algorithm=algorithm,
-        atol=tol,
-        rtol=tol,
-        dt=problem.timing_dt,
-        save_every=problem["duration"],
-        output_types=output_types(system),
-        time_logging_level=None,
-    )
+def _make_solver(opts, system, problem, algorithm, mode, setting=None,
+                 states=None):
+    return adapter.make_solver(system, problem, algorithm, mode, setting,
+                               package=opts["framework"],
+                               key=opts["dataset_key"], states=states)
 
 
 def _release(solver):
@@ -74,8 +53,8 @@ def _grid_builder(problem, initial_conditions):
 
 def _run_problem(problem, opts):
     """Every requested algorithm for one problem."""
-    system, initial_conditions = build_system(
-        problem, PRECISION, name_suffix=opts["name_suffix"])
+    system, initial_conditions = adapter.build_system(
+        problem, opts["framework"], PRECISION)
     grid = _grid_builder(problem, initial_conditions)
 
     if opts["analysis"] == "wp":
@@ -99,16 +78,9 @@ def _device_leg(solver, duration, repeats):
     d_initials = solver.device_initial_values
     d_parameters = solver.device_parameters
 
-    def device_only(blocksize=64):
-        result = solver.solve(
-            initial_values=d_initials,
-            parameters=d_parameters,
-            blocksize=blocksize,
-            duration=duration,
-            on_device=True,
-        )
-        # on_device solves return before the stream drains.
-        result.stream.synchronize()
+    def device_only():
+        adapter.solve(solver, d_initials, d_parameters, duration,
+                      on_device=True)
 
     best, _, samples = timed_min_ms(device_only, repeats)
     return best, samples
@@ -128,12 +100,8 @@ def _run_wp(problem, opts, system, grid):
         initials_array, parameter_array = grid(solver, N_WP)
 
         def run():
-            return solver.solve(
-                initial_values=initials_array,
-                parameters=parameter_array,
-                blocksize=64,
-                duration=duration,
-            )
+            return adapter.solve(solver, initials_array, parameter_array,
+                                 duration)
         best_ms, solution, samples = timed_min_ms(run, repeats)
         if best_ms is None:
             return None, float("nan"), 100.0, samples
@@ -141,7 +109,7 @@ def _run_wp(problem, opts, system, grid):
         err = ensemble_error(view, golden)
         return best_ms, err, errored_pct(view), samples
 
-    def sweep(mode, make_solver, settings):
+    def sweep(mode, settings):
         leg = Leg(opts["framework"], opts["dataset_key"], "wp", problem,
                   algorithm, mode)
         settings = list(settings)
@@ -164,7 +132,8 @@ def _run_wp(problem, opts, system, grid):
             solver = None
             if not breached:
                 try:
-                    solver = make_solver(setting)
+                    solver = _make_solver(opts, system, problem, algorithm,
+                                          mode, setting)
                     t_ms, err, pct, samples = bench_solver(solver)
                     append_samples(samples_file, sample_point(
                         "wp", problem.name, algorithm, mode, N_WP,
@@ -192,15 +161,9 @@ def _run_wp(problem, opts, system, grid):
         if not problem.supports(opts["framework"]):
             continue
         if algorithm in opts["fixed"]:
-            sweep("fixed",
-                  lambda dt: _make_fixed_solver(system, problem, algorithm,
-                                                dt),
-                  dts_for(algorithm, problem))
+            sweep("fixed", dts_for(algorithm, problem))
         if algorithm in opts["adaptive"]:
-            sweep("adaptive",
-                  lambda tol: _make_adaptive_solver(system, problem,
-                                                    algorithm, tol),
-                  TOLS)
+            sweep("adaptive", TOLS)
 
 
 def _run_times(problem, opts, system, grid):
@@ -219,13 +182,9 @@ def _run_times(problem, opts, system, grid):
         """(best_ms, finals, errored_percent, samples) through host arrays; best_ms is None on a breach, finals a copy or None."""
         initials_array, parameter_array = grid(solver, n)
 
-        def with_transfers(blocksize=64):
-            return solver.solve(
-                initial_values=initials_array,
-                parameters=parameter_array,
-                blocksize=blocksize,
-                duration=duration
-            )
+        def with_transfers():
+            return adapter.solve(solver, initials_array, parameter_array,
+                                 duration)
 
         best, solution, samples = timed_min_ms(with_transfers, REPEATS)
         finals = None
@@ -265,10 +224,7 @@ def _run_times(problem, opts, system, grid):
                       f"runs N={','.join(str(n) for n in run_ns)}")
             solver = None
             try:
-                solver = (_make_fixed_solver(system, problem, algorithm)
-                          if mode == "fixed"
-                          else _make_adaptive_solver(system, problem,
-                                                     algorithm))
+                solver = _make_solver(opts, system, problem, algorithm, mode)
             except Exception as exc:
                 _failed(exc, f"{problem.name} {mode} {algorithm}")
                 leg.nan_times(run_ns)
@@ -330,9 +286,77 @@ def _run_times(problem, opts, system, grid):
             _release(solver)
 
 
+def _leg_settings(problem, algorithm, mode):
+    """The settings a leg is optimised at: the timing setting, plus every wp setting for per-point families."""
+    from wp_common import TOLS, dts_for
+    settings = [adapter.timing_setting(problem, mode)[1]]
+    if adapter.per_point(algorithm):
+        settings += (dts_for(algorithm, problem) if mode == "fixed"
+                     else list(TOLS))
+    return settings
+
+
+def _optimize_legs(opts, problems):
+    """Every (problem, mode, algorithm, setting) to optimise, in sweep order."""
+    legs = []
+    for problem in problems:
+        for algorithm in opts["algorithms"]:
+            if not problem.supports(opts["framework"]):
+                continue
+            for mode in ("fixed", "adaptive"):
+                if algorithm not in opts[mode]:
+                    continue
+                for setting in _leg_settings(problem, algorithm, mode):
+                    legs.append((problem, mode, algorithm, setting))
+    return legs
+
+
+def _run_optimize(opts, problems):
+    """Solver.optimize on every leg that has no recorded row; the winner is recorded for the sweeps."""
+    from timeit import default_timer
+    from protocol import OPTIMIZE_N
+
+    package, key = opts["framework"], opts["dataset_key"]
+    systems = {}
+
+    def system_for(problem):
+        if problem.name not in systems:
+            systems[problem.name] = adapter.build_system(problem, package,
+                                                         PRECISION)
+        return systems[problem.name]
+
+    status = 0
+    for problem, mode, algorithm, setting in _optimize_legs(opts, problems):
+        label = (f"{problem.name} {mode} {algorithm} "
+                 f"{'dt' if mode == 'fixed' else 'tol'}={setting:g}")
+        if adapter.load_optimized(package, key, problem, algorithm, mode,
+                                  setting) is not None:
+            print(f"-- optimize: {label} recorded; skipping")
+            continue
+        solver = None
+        started = default_timer()
+        try:
+            system, conditions = system_for(problem)
+            solver = adapter.make_solver(system, problem, algorithm, mode,
+                                         setting, optimized=False)
+            initials, params = solver.build_grid(
+                initial_values=conditions,
+                parameters=sweep_parameters(problem, OPTIMIZE_N, PRECISION))
+            row = adapter.optimize_point(solver, problem, initials, params,
+                                         package, key, algorithm, mode,
+                                         setting)
+            print("optimized {0}: {1} in {2:.1f}s".format(
+                label, row["label"], default_timer() - started), flush=True)
+        except Exception as exc:
+            _failed(exc, "optimize {0}".format(label))
+            status = 1
+        if solver is not None:
+            _release(solver)
+    return status
+
+
 def _warm_legs(opts, problems):
-    """Every (problem, mode, algorithm, setting) compile task, in a
-    deterministic order shared by the parent and its shard children."""
+    """Every (problem, mode, algorithm, setting) compile task, in the order the shard children share."""
     from wp_common import TOLS
 
     legs = []
@@ -357,9 +381,7 @@ WARM_RECYCLE = 32
 
 
 def _run_warm(opts, problems, argv):
-    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 stripes
-    the legs across that many shard children, recycled every WARM_RECYCLE
-    legs to cap their memory."""
+    """Compile each leg once at a tiny ensemble, striped across BENCH_WARM_JOBS shard children recycled every WARM_RECYCLE legs."""
     import subprocess
     from timeit import default_timer
 
@@ -395,8 +417,8 @@ def _run_warm(opts, problems, argv):
 
     def system_for(name):
         if name not in systems:
-            systems[name] = build_system(
-                rows[name], PRECISION, name_suffix=opts["name_suffix"])
+            systems[name] = adapter.build_system(rows[name],
+                                                 opts["framework"], PRECISION)
         return systems[name]
 
     for name, mode, algorithm, setting in legs:
@@ -409,21 +431,11 @@ def _run_warm(opts, problems, argv):
         started = default_timer()
         try:
             system, conditions = system_for(name)
-            if mode == "fixed":
-                solver = (_make_fixed_solver(system, row, algorithm)
-                          if setting is None else
-                          _make_fixed_solver(system, row, algorithm,
-                                             setting))
-            else:
-                solver = (_make_adaptive_solver(system, row, algorithm)
-                          if setting is None else
-                          _make_adaptive_solver(system, row, algorithm,
-                                                setting))
+            solver = _make_solver(opts, system, row, algorithm, mode, setting)
             initials, params = solver.build_grid(
                 initial_values=conditions,
                 parameters=sweep_parameters(row, 64, PRECISION))
-            solver.solve(initial_values=initials, parameters=params,
-                         blocksize=64, duration=row["duration"])
+            adapter.solve(solver, initials, params, row["duration"])
             print("warmed {0} in {1:.1f}s".format(
                 label, default_timer() - started), flush=True)
         except Exception as exc:
@@ -433,8 +445,7 @@ def _run_warm(opts, problems, argv):
 
 
 def _run_states(opts):
-    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, timed at
-    one fixed ensemble size."""
+    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, built cold, optimised, then timed at one ensemble size."""
     import tempfile
     from timeit import default_timer
 
@@ -448,13 +459,13 @@ def _run_states(opts):
 
     n = STATES_N
     grid = opts["ns"]
+    package, key = opts["framework"], opts["dataset_key"]
     systems = {}
 
     def system_for(nstates):
         if nstates not in systems:
-            systems[nstates] = build_system(
-                states_row(nstates), PRECISION,
-                name_suffix="{0}_s{1}".format(opts["name_suffix"], nstates))
+            systems[nstates] = adapter.build_system(
+                STATES_PROBLEM, package, PRECISION, states=nstates)
         return systems[nstates]
 
     for algorithm in opts["algorithms"]:
@@ -493,24 +504,36 @@ def _run_states(opts):
                 try:
                     started = default_timer()
                     system, initial_conditions = system_for(nstates)
-                    solver = (_make_fixed_solver(system, row, algorithm)
-                              if mode == "fixed"
-                              else _make_adaptive_solver(system, row,
-                                                         algorithm))
+                    solver = adapter.make_solver(system, row, algorithm, mode,
+                                                 states=nstates,
+                                                 optimized=False)
                     initials_array, parameter_array = solver.build_grid(
                         initial_values=initial_conditions,
                         parameters=sweep_parameters(row, n, PRECISION))
 
-                    def with_transfers(blocksize=64):
-                        return solver.solve(
-                            initial_values=initials_array,
-                            parameters=parameter_array,
-                            blocksize=blocksize,
-                            duration=duration,
-                        )
+                    def with_transfers():
+                        return adapter.solve(solver, initials_array,
+                                             parameter_array, duration)
 
                     with_transfers()
                     build_s = default_timer() - started
+                    # The cold build is timed above; the sweep times the optimised kernel.
+                    setting = adapter.timing_setting(row, mode)[1]
+                    if adapter.load_optimized(package, key, row, algorithm,
+                                              mode, setting,
+                                              states=nstates) is None:
+                        adapter.optimize_point(
+                            solver, row, initials_array, parameter_array,
+                            package, key, algorithm, mode, setting,
+                            states=nstates)
+                    else:
+                        _release(solver)
+                        solver = adapter.make_solver(
+                            system, row, algorithm, mode, package=package,
+                            key=key, states=nstates)
+                        initials_array, parameter_array = solver.build_grid(
+                            initial_values=initial_conditions,
+                            parameters=sweep_parameters(row, n, PRECISION))
                     best, solution, samples_both = timed_min_ms(
                         with_transfers, REPEATS)
                     append_samples(samples_file, point, "both", samples_both)
@@ -555,9 +578,9 @@ def _run_states(opts):
                     break
 
 
-def run(argv, framework, framework_dir, prefix, numerical_tag,
-        name_suffix=""):
-    """Entry point: parse the CLI and run every requested problem."""
+def run(argv, package):
+    """Entry point: select the backend, parse the CLI and run every requested problem."""
+    adapter.select_backend(package)
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
 
@@ -568,25 +591,26 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         warm_shard = tuple(int(t) for t in argv[position + 1].split("/"))
         del argv[position:position + 2]
 
-    ns, analysis, algorithms, problems = parse_bench_args(argv, framework)
+    ns, analysis, algorithms, problems = parse_bench_args(argv, package)
     if not problems:
         print("{0} runs none of the requested problems; skipping."
-              .format(framework))
+              .format(package))
         return 0
     opts = {
         "ns": ns,
         "analysis": analysis,
-        "framework": framework,
+        "framework": package,
         "algorithms": algorithms,
-        "framework_dir": framework_dir,
-        "prefix": prefix,
-        "numerical_tag": numerical_tag,
-        "name_suffix": name_suffix,
-        "fixed": supported_for(framework, "fixed"),
-        "adaptive": supported_for(framework, "adaptive"),
+        "framework_dir": PACKAGE_DIRS[package],
+        "prefix": PREFIXES[PACKAGE_DIRS[package]],
+        "numerical_tag": package,
+        "fixed": supported_for(package, "fixed"),
+        "adaptive": supported_for(package, "adaptive"),
         "dataset_key": dataset_key(),
         "warm_shard": warm_shard,
     }
+    if analysis == "optimize":
+        return _run_optimize(opts, problems)
     if analysis == "warm":
         _run_warm(opts, problems, argv)
         return 0
@@ -594,7 +618,7 @@ def run(argv, framework, framework_dir, prefix, numerical_tag,
         from problems import STATES_PROBLEM
         if not any(p.name == STATES_PROBLEM for p in problems):
             print("{0} does not run {1}; skipping the states sweep."
-                  .format(framework, STATES_PROBLEM))
+                  .format(package, STATES_PROBLEM))
             return 0
         _run_states(opts)
         return 0

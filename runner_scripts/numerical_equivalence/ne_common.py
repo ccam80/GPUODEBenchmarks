@@ -6,8 +6,7 @@ import os
 import numpy as np
 
 from problems import DEFAULT_PROBLEM, get_problem
-from protocol import (DT0_FRACTION, DT_MAX_FRACTION,  # noqa: F401
-                      DT_MIN_FRACTION, N_NE, TOLS as TOLS_NE)
+from protocol import N_NE, TOLS as TOLS_NE
 
 
 def _row(problem):
@@ -20,13 +19,6 @@ def dts_ne(problem=DEFAULT_PROBLEM):
     return _row(problem).ne_dts()
 
 
-def dt_pins_ne(problem=DEFAULT_PROBLEM):
-    """Initial dt and the dt clamps for a problem's adaptive ne sweep."""
-    duration = _row(problem)["duration"]
-    return (duration * DT0_FRACTION, duration * DT_MIN_FRACTION,
-            duration * DT_MAX_FRACTION)
-
-
 def golden_ne_path(problem=DEFAULT_PROBLEM):
     """Path of the ne golden reference for a problem."""
     return os.path.join(
@@ -35,68 +27,6 @@ def golden_ne_path(problem=DEFAULT_PROBLEM):
 
 JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
 CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
-
-
-def cubie_default_controller(alias, family, order):
-    """Cubie's resolved controller settings for a default-tier solve.
-
-    Family table, then config class defaults, gain keys filtered to the
-    controller type; None when the family has no adaptive table.
-    """
-    from cubie.integrators.algorithms import (generic_dirk, generic_erk,
-                                              generic_firk,
-                                              generic_rosenbrock_w,
-                                              crank_nicolson)
-    tables = {
-        "dirk": generic_dirk.DIRK_ADAPTIVE_DEFAULTS,
-        "erk": generic_erk.ERK_ADAPTIVE_DEFAULTS,
-        "firk": generic_firk.FIRK_ADAPTIVE_DEFAULTS,
-        "rosenbrock": generic_rosenbrock_w.ROSENBROCK_ADAPTIVE_DEFAULTS,
-    }
-    if alias == "crank_nicolson":
-        table = crank_nicolson.CN_DEFAULTS
-    elif family in tables:
-        table = tables[family]
-    else:
-        return None
-    resolved = {
-        # PI config class defaults (adaptive_PI_controller.py /
-        # adaptive_step_controller.py) for keys the family table omits.
-        "step_controller": "pi", "kp": 0.7, "ki": -0.4, "safety": 0.9,
-        "min_gain": 0.2, "max_gain": 10.0,
-    }
-    for key, value in dict(table.step_controller).items():
-        if callable(value):
-            value = value(order)
-        resolved[key] = value
-    gain_keys = {"i": {"kp"}, "pi": {"kp", "ki"}, "pid": {"kp", "ki", "kd"}}
-    allowed = gain_keys.get(resolved["step_controller"], set())
-    for key in ("kp", "ki", "kd"):
-        if key not in allowed:
-            resolved.pop(key, None)
-    resolved.pop("deadband_min", None)
-    resolved.pop("deadband_max", None)
-    return resolved
-
-
-def controllers_equal(a, b, rel_tol=1e-9):
-    """Whether two controller-settings dicts request the same controller.
-
-    Controller names compare exactly, numeric keys to ``rel_tol``; a key
-    present on one side only makes the dicts unequal.
-    """
-    if a is None or b is None:
-        return False
-    if a.get("step_controller") != b.get("step_controller"):
-        return False
-    keys = (set(a) | set(b)) - {"step_controller"}
-    for key in keys:
-        if key not in a or key not in b:
-            return False
-        va, vb = float(a[key]), float(b[key])
-        if not np.isclose(va, vb, rtol=rel_tol, atol=0.0):
-            return False
-    return True
 
 
 def load_golden_ne(problem=DEFAULT_PROBLEM):

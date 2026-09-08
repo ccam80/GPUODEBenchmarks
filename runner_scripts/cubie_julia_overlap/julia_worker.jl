@@ -19,9 +19,9 @@ include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
-# dt values are fractions of the duration.
+# The fixed step is a fraction of the duration and also the adaptive start step.
 const FIXED_DT = 2.0^-TIMING_DT_K
-const DT0 = DT0_FRACTION
+const DT0 = FIXED_DT
 const ADAPTIVE_TOL = OVERLAP_TOL
 const PERFORMANCE_REPEATS = REPEAT_CAP
 const WORK_REPEATS = REPEAT_CAP
@@ -138,6 +138,7 @@ function run_solve(probs, prob, alg, mode, setting)
     else
         return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = DURATION,
             save_everystep = false, dt = DURATION * Float32(DT0),
+            dtmin = DURATION * Float32(DT_MIN_FRACTION),
             abstol = Float32(setting), reltol = Float32(setting))
     end
 end

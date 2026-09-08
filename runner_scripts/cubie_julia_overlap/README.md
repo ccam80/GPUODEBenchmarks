@@ -18,6 +18,7 @@ the rest:
 
 - `-a, --analysis` selects the analysis: `performance`, `numerical`, `work-precision`, `all`.
 - `-p, --package` selects the package: `cubie`, `julia`, `all`.
+- `--backend` names the cubie package the worker runs as, `cubie` (numba-cuda, default) or `cubie_mlir`; the worker shares that package's kernel cache and `optimize.csv` rows.
 - `-n, --nmax` is a sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.
 - `--from-n` restarts the performance analysis at that N; lower-N rows stay.
 - `--algorithm` runs one overlap row of `runner_scripts/algorithms.csv`; other rows stay.

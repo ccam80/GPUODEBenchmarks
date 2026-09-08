@@ -176,12 +176,14 @@ def append_samples(path, point, transfers, samples):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states|warm[:N,N,...] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
+    """Parse <N|N,N,...>|wp|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...] "
+        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...]|optimize "
                          "[algorithm|all] [--problem <name|all>]")
     if argv[0] == "wp":
         analysis, ns = "wp", [N_WP]
+    elif argv[0] == "optimize":
+        analysis, ns = "optimize", [N_WP]
     elif argv[0] == "states":
         # In states mode ns is the state-count grid; the ensemble is STATES_N.
         analysis, ns = "states", list(STATES_GRID)

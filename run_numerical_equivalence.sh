@@ -55,11 +55,8 @@ if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "julia" ]; then
 fi
 
 if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "cubie" ]; then
-    echo "--- cubie Float32 sweeps (GPU, keyed per machine) ---"
-    # The venv carries both CUDA backends; the committed dataset is the numba-cuda one.
-    export CUBIE_CUDA_BACKEND="${CUBIE_CUDA_BACKEND:-numba-cuda}"
-    echo "    (cubie backend: $CUBIE_CUDA_BACKEND)"
-    "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py --controller "$CONTROLLER" --algorithm "$ALGORITHM" --problem "$PROBLEM" || {
+    echo "--- cubie Float32 sweeps (GPU, keyed per machine, numba-cuda backend) ---"
+    "$PYTHON" ./GPU_ODE_CUBIE/numerical_equivalence.py --package cubie --controller "$CONTROLLER" --algorithm "$ALGORITHM" --problem "$PROBLEM" || {
         echo "cubie sweeps failed" >&2; exit 1; }
 fi
 
