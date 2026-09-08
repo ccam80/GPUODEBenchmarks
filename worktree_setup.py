@@ -1,24 +1,9 @@
-"""Prepare a fresh git worktree of GPUODEBenchmarks for agent work.
+"""Link the main checkout's suite venvs and caches into a worktree.
 
-Orca runs this from the new worktree after ``worktree create`` (see
-``orca.yaml``); it also runs by hand from any worktree::
-
-    python worktree_setup.py
-
-The suite environments are built once per machine by
-``setup_all_environments.py`` and install nothing editable from this
-repo, so every worktree links to the main checkout's copies instead of
-rebuilding them: the ``GPU_ODE_*/venv`` directories, the MPGOS build
-cache, and the cubie codegen cache under ``generated``. Julia uses the
-tracked ``Project.toml`` against the shared depot and needs nothing.
-Run logs stay per worktree.
-
-Environment:
-
-``ORCA_WORKTREE_PATH``
-    The worktree to prepare (default: this file's directory).
-``ORCA_ROOT_PATH``
-    The main checkout (default: the owner of the shared ``.git``).
+Links ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
+``generated``; copies ``.claude/settings.local.json``. Env:
+``ORCA_WORKTREE_PATH`` (default: this directory), ``ORCA_ROOT_PATH``
+(default: the main checkout).
 """
 
 import os
@@ -86,7 +71,7 @@ def share_directories(root, worktree):
 
 
 def copy_local_files(root, worktree):
-    """Gitignored per-repo Claude settings travel with the worktree."""
+    """Copy the gitignored Claude settings into the worktree."""
     for relative in LOCAL_FILES:
         source = root / relative
         target = worktree / relative
