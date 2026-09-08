@@ -59,13 +59,13 @@ class ControllerConstantsTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_reads_per_problem_file(self):
-        path = ne_common.controller_constants_csv("pollu")
-        self.assertIn(os.path.join("julia", "pollu"), path)
+        path = ne_common.controller_constants_csv("pollu", "test_key")
+        self.assertIn(os.path.join("julia", "test_key", "pollu"), path)
         with open(path, "w", newline="") as f:
             f.write("cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order\n"
                     "tsit5,PIController,0.23333333,0.13333334,0.2,10.0,0.9,5\n"
                     "radau_iia_5,PredictiveController,,,0.2,8.0,0.9,5\n")
-        out = ne_common.load_controller_constants("pollu")
+        out = ne_common.load_controller_constants("pollu", "test_key")
         self.assertEqual(set(out), {"tsit5", "radau_iia_5"})
         self.assertAlmostEqual(out["tsit5"]["beta1"], 0.23333333)
         self.assertIsNone(out["radau_iia_5"]["beta1"])
@@ -74,7 +74,12 @@ class ControllerConstantsTests(unittest.TestCase):
 
     def test_missing_file_raises(self):
         with self.assertRaises(FileNotFoundError):
-            ne_common.load_controller_constants("pollu")
+            ne_common.load_controller_constants("pollu", "test_key")
+
+    def test_default_key_is_this_machine(self):
+        from bench_key import dataset_key
+        path = ne_common.julia_ne_dir("pollu")
+        self.assertIn(os.path.join("julia", dataset_key(), "pollu"), path)
 
 
 if __name__ == "__main__":

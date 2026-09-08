@@ -262,9 +262,12 @@ def read_ne_adaptive_csv_masked(path):
     return out
 
 
-def julia_ne_dir(problem=DEFAULT_PROBLEM):
-    """Directory of the machine-independent Julia outputs for a problem."""
-    d = os.path.join(JULIA_NE_DIR, _row(problem)["problem"])
+def julia_ne_dir(problem=DEFAULT_PROBLEM, dataset_key=None):
+    """Directory of one machine's Julia outputs for a problem; None keys the current machine."""
+    if dataset_key is None:
+        from bench_key import dataset_key as current_key
+        dataset_key = current_key()
+    d = os.path.join(JULIA_NE_DIR, dataset_key, _row(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -276,9 +279,10 @@ def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM):
     return d
 
 
-def julia_ne_file(alias, problem=DEFAULT_PROBLEM):
-    """Path of the machine-independent DifferentialEquations.jl output."""
-    return os.path.join(julia_ne_dir(problem), "{0}.csv".format(alias))
+def julia_ne_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
+    """Path of the per-machine DifferentialEquations.jl fixed-sweep output."""
+    return os.path.join(julia_ne_dir(problem, dataset_key),
+                        "{0}.csv".format(alias))
 
 
 def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM):
@@ -287,9 +291,9 @@ def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM):
                         "{0}.csv".format(alias))
 
 
-def julia_ne_adaptive_file(alias, problem=DEFAULT_PROBLEM):
+def julia_ne_adaptive_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
     """Julia adaptive-sweep output (rows tol,traj,states...,naccept,nreject)."""
-    return os.path.join(julia_ne_dir(problem),
+    return os.path.join(julia_ne_dir(problem, dataset_key),
                         "{0}_adaptive.csv".format(alias))
 
 
@@ -300,14 +304,15 @@ def cubie_ne_adaptive_file(alias, tier, dataset_key,
                         "{0}_adaptive_{1}.csv".format(alias, tier))
 
 
-def controller_constants_csv(problem=DEFAULT_PROBLEM):
+def controller_constants_csv(problem=DEFAULT_PROBLEM, dataset_key=None):
     """Path of a problem's resolved default-controller constants."""
-    return os.path.join(julia_ne_dir(problem), "controller_constants.csv")
+    return os.path.join(julia_ne_dir(problem, dataset_key),
+                        "controller_constants.csv")
 
 
-def load_controller_constants(problem=DEFAULT_PROBLEM):
+def load_controller_constants(problem=DEFAULT_PROBLEM, dataset_key=None):
     """One problem's default-controller constants keyed by cubie alias; missing numeric fields are None."""
-    path = controller_constants_csv(problem)
+    path = controller_constants_csv(problem, dataset_key)
     if not os.path.isfile(path):
         raise FileNotFoundError(
             "{0} not found - run the Julia adaptive sweep first "

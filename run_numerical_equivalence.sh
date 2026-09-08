@@ -49,7 +49,7 @@ if [ "$PACKAGE" == "all" ] || [ "$PACKAGE" == "julia" ]; then
     echo "--- Golden references (Float64, machine independent) ---"
     julia -t auto --project=. ./runner_scripts/numerical_equivalence/generate_golden_ne.jl --problem "$PROBLEM" || {
         echo "golden generation failed" >&2; exit 1; }
-    echo "--- DifferentialEquations.jl Float32 sweeps (CPU, machine independent) ---"
+    echo "--- DifferentialEquations.jl Float32 sweeps (CPU, keyed per machine) ---"
     julia -t auto --project=. ./runner_scripts/numerical_equivalence/ne_diffeq.jl --controller "$CONTROLLER" --algorithm "$ALGORITHM" --problem "$PROBLEM" || {
         echo "DifferentialEquations.jl sweeps failed" >&2; exit 1; }
 fi

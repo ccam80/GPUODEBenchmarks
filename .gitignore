@@ -38,7 +38,6 @@ GPU_ODE_MYOKIT_CUDA/generated/
 /data/master_run_times.csv
 
 # Local benchmark result sets
-/data/cubie_julia_overlap/
 /data/numerical_equivalence/cubie_pre626_jul16/
 
 # Orchestrator run logs
