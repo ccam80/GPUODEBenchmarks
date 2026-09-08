@@ -25,6 +25,11 @@ from resume import (  # noqa: E402
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
 
+
+def julia_command():
+    """The julia launcher as argv; JULIA may name a channel such as `julia +1.13`."""
+    return shlex.split(os.environ.get("JULIA", "julia")) + ["--project=."]
+
 # Result store root; tests point it at a scratch directory.
 DATA_ROOT = None
 
@@ -93,8 +98,8 @@ def _run_pool(jobs_args, jobs):
             label, args = pending.pop(0)
             print(f"spawning {label}")
             env = dict(os.environ, BENCH_GPU_LOCK=lock_path)
-            proc = subprocess.Popen(["julia", "--project=."] + args,
-                                    cwd=REPO_ROOT, env=env)
+            proc = subprocess.Popen(julia_command() + args, cwd=REPO_ROOT,
+                                    env=env)
             running[proc] = label
         time.sleep(2)
         for proc in list(running):
@@ -267,8 +272,8 @@ def run_states(argv):
             env = dict(os.environ, BENCH_GPU_LOCK=lock_path,
                        BENCH_STATES_MARKER=marker)
             proc = subprocess.Popen(
-                ["julia", "--project=.", BENCH,
-                 f"states:{nstates}:{ensemble}", algorithm],
+                julia_command() + [BENCH, f"states:{nstates}:{ensemble}",
+                                   algorithm],
                 cwd=REPO_ROOT, env=env)
             running[proc] = (nstates, algorithm, time.monotonic(), marker)
         time.sleep(2)

@@ -480,26 +480,39 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`run_full_dataset.sh` drives every suite in one set-and-forget run — the
-timing sweeps, the work-precision sweeps, the numerical-equivalence suite, the
-per-algorithm cubie vs. DiffEqGPU overlap comparison, and finally the plots
-and comparison reports:
+`bench.py` is the entry point for every run: the cubie tuning and cache
+stages, the timing sweeps, the states sweep, the work-precision sweeps, the
+numerical-equivalence suite, the per-algorithm cubie vs. DiffEqGPU overlap
+comparison, and the plots and comparison reports. Every axis takes a comma
+list, and `--point` retakes single points. `run_full_dataset.sh`/`.bat`,
+`run_all_benchmarks.sh`/`.bat`, `run_benchmark.sh`/`.bat` and
+`run_numerical_equivalence.sh`/`.bat` forward to it.
 
 ```bash
-    $ ./run_full_dataset.sh                     # everything, nmax = 2^24
-    $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
-    $ ./run_full_dataset.sh -n $((2**23)),$((2**27))  # exact trajectory counts only
-    $ ./run_full_dataset.sh -a performance      # one analysis
-    $ ./run_full_dataset.sh -p cpp              # one package
-    $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
-    $ ./run_full_dataset.sh --resume                # skip every point already on disk
-    $ ./run_full_dataset.sh --no-overwrite          # keep finite results, retry NaN and absent points
-    $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
-    $ ./run_full_dataset.sh --resume \
+    $ python3 bench.py                           # everything, nmax = 2^24
+    $ python3 bench.py -n $((2**25))             # larger ceiling
+    $ python3 bench.py -n $((2**23)),$((2**27))  # exact trajectory counts only
+    $ python3 bench.py -a performance            # one analysis
+    $ python3 bench.py -a optimize,warm -p cubie # tune and fill the cubie caches only
+    $ python3 bench.py -p cpp                    # one package
+    $ python3 bench.py -p cubie,julia -g euler,tsit5   # subsets of both
+    $ python3 bench.py --resume                  # skip every point already on disk
+    $ python3 bench.py --no-overwrite            # keep finite results, retry NaN and absent points
+    $ python3 bench.py --resume-from jax         # restart the perf sweep at a package
+    $ python3 bench.py --resume \
         --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
-                                                    # ...or at an exact (problem, algorithm, mode, N)
-    $ ./run_full_dataset.sh --floor -s lorenz       # re-run and keep the lower time per point
+                                                 # ...or at an exact (problem, algorithm, mode, N)
+    $ python3 bench.py --floor -s lorenz         # re-run and keep the lower time per point
+    $ python3 bench.py --point times:cubie:lorenz:tsit5:fixed:32768 \
+                       --point wp:julia:pollu:kvaerno3 --point states:cpp:lorenz96:classical-rk4:16
+    $ python3 bench.py --points-file retakes.txt # one point per line
 ```
+
+A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
+state count>]`. A run of points replaces only those identities' rows, then
+redraws the plots; a package whose bench script takes no mode (the Python
+ones) re-measures both modes of that algorithm at that N. `JULIA` names the
+julia launcher (`JULIA="julia +1.13"` selects a juliaup channel).
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in the result store and deletes nothing; NaN rows count as recorded.
@@ -523,11 +536,10 @@ the problem:
         --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 ```
 
-**On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper
-for `run_full_dataset.ps1`:
+**On Windows** the same flags apply:
 
 ```cmd
-    > run_full_dataset.bat -n 16777216 -a performance,work-precision
+    > python bench.py -n 16777216 -a performance,work-precision
 ```
 
 At high trajectory counts some frameworks will exhaust GPU memory. Each
