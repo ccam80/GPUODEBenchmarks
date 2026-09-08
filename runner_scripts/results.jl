@@ -205,12 +205,12 @@ function result_record_times(store, package, key, analysis, problem, algorithm,
     end
 end
 
-"Record one work-precision point."
+"Record one work-precision point; every package times the resident solve alone."
 function result_record_wp(store, package, key, problem, algorithm, mode, setting,
-        t_ms, error, errored_pct; transfers = "both", samples = nothing)
+        t_ms, error, errored_pct; samples = nothing)
     kind = mode == "fixed" ? "dt" : "tol"
     result_record(store, result_row(package, key, "wp", problem["problem"],
         algorithm, mode, kind, setting, N_WP, problem["states"];
-        transfers = transfers, min_ms = t_ms, samples = samples,
+        transfers = "none", min_ms = t_ms, samples = samples,
         errored_pct = errored_pct, error = error))
 end

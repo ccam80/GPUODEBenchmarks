@@ -48,6 +48,26 @@ MODELS = {
 }
 
 
+def device_leg(model, initial_states, rho, dt, step_count, repeats,
+               on_breach=None):
+    """(device_only_ms, samples) on resident inputs with the result left on the device; ms is None on a breach."""
+    device_states, device_diffusion = model.to_device(initial_states, rho)
+    pristine = device_states.copy()
+
+    def run_on_device():
+        return model.solve_on_device(
+            dt, step_count, device_states, device_diffusion
+        )
+
+    def restore():
+        # Untimed: reset the integrated-in-place state between timed runs.
+        device_states[...] = pristine
+
+    elapsed_dev_ms, _, samples = timed_min_ms(run_on_device, repeats,
+                                              on_breach, setup=restore)
+    return elapsed_dev_ms, samples
+
+
 def timed_solve(model, cell_count, rho, dt, step_count, repeats,
                 on_breach=None):
     """(with_transfers_ms, device_only_ms, finals, samples_both, samples_none); NaN times on a breach. on_breach fills the leg before a watchdog hard-exit."""
@@ -64,30 +84,18 @@ def timed_solve(model, cell_count, rho, dt, step_count, repeats,
     elapsed_ms, finals, samples_both = timed_min_ms(run, repeats, on_breach)
     if elapsed_ms is None:
         return float("nan"), float("nan"), finals, samples_both, None
-
-    device_states, device_diffusion = model.to_device(initial_states, rho)
-    pristine = device_states.copy()
-
-    def run_on_device():
-        return model.solve_on_device(
-            dt, step_count, device_states, device_diffusion
-        )
-
-    def restore():
-        # Untimed: reset the integrated-in-place state between timed runs.
-        device_states[...] = pristine
-
-    elapsed_dev_ms, _, samples_none = timed_min_ms(
-        run_on_device, repeats, on_breach, setup=restore)
+    elapsed_dev_ms, samples_none = device_leg(model, initial_states, rho, dt,
+                                              step_count, repeats, on_breach)
     if elapsed_dev_ms is None:
         return elapsed_ms, float("nan"), finals, samples_both, samples_none
     return elapsed_ms, elapsed_dev_ms, finals, samples_both, samples_none
 
 
 def run_work_precision(model, problem, cell_count, leg):
-    """Record the fixed-step Myokit-CUDA work-precision sweep."""
+    """Record the fixed-step Myokit-CUDA work-precision sweep, timed on the resident inputs."""
     golden = load_golden(problem)
     sweep = problem.sweep(cell_count, dtype=np.float32)
+    initial_states = model.initial_states(cell_count)
     # Later settings are slower, so a breach abandons the leg.
     dts = list(dts_for(ALGORITHM, problem))
     for index, dt in enumerate(dts):
@@ -99,15 +107,13 @@ def run_work_precision(model, problem, cell_count, leg):
             print("WATCHDOG wp fixed dt={0:g}: run never returned"
                   .format(at))
 
-        elapsed_ms, _, finals, samples, _ = timed_solve(
-            model,
-            cell_count,
-            sweep,
-            dt,
-            step_count,
-            repeats=REPEATS,
-            on_breach=on_breach,
-        )
+        # One untimed host solve for the finals; the timed leg is device only.
+        finals = model.solve(dt=dt, step_count=step_count,
+                             initial_states=initial_states,
+                             diffusion_values=sweep)
+        elapsed_ms, samples = device_leg(model, initial_states, sweep, dt,
+                                         step_count, REPEATS, on_breach)
+        elapsed_ms = float("nan") if elapsed_ms is None else elapsed_ms
         breached = np.isnan(elapsed_ms)
         if breached:
             print("WATCHDOG wp fixed dt={0:g}: run exceeded the cap"

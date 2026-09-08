@@ -39,6 +39,8 @@ function collect_series(base_path)
     meta = Dict{NTuple{5, String}, Tuple{String, String}}()
     for row in result_rows_under(base_path)
         row["analysis"] == "wp" || continue
+        # Work-precision compares resident solves; rows timed with transfers predate that protocol.
+        row["transfers"] == "none" || continue
         err = _result_float(row["error"])
         # Drop non-positive errors (log axis) and rows past the errored bar.
         (isfinite(err) && err > 0) || continue

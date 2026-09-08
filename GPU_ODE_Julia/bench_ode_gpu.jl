@@ -115,7 +115,7 @@ end
 function nan_wp_rows(problem, algorithm, mode, settings)
     for setting in settings
         result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
-            setting, NaN, NaN, 100.0; transfers = "d2h")
+            setting, NaN, NaN, 100.0)
     end
 end
 
@@ -156,7 +156,7 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
                 else
                     e = ensemble_error(system, sol[2], golden)
                     p = errored_pct(@view sol[2][end, :])
-                    # The ensemble is resident, so only the d2h is timed.
+                    # The ensemble is resident and the result stays on the device.
                     t, samples, _ = watchdogged_min_ms(
                         () -> solve_once(setting), on_breach, REPEATS)
                     (t, isnan(t) ? NaN : e, p)
@@ -166,7 +166,7 @@ function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
             (failed("wp $(label) setting=$(setting)", err), NaN, 100.0)
         end
         result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
-            setting, t_ms, err, pct; transfers = "d2h", samples = samples)
+            setting, t_ms, err, pct; samples = samples)
         println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err), " *
                 "errored=$(round(pct, digits = 1))%")
         if isnan(t_ms)
@@ -190,10 +190,10 @@ function run_wp(problem)
         settings = Dict("fixed" => collect(problem_dts(problem, algorithm)),
             "adaptive" => TOLS)
         for mode in algorithm_modes(algorithm)
-            # The ensemble is resident; each solve is timed with its d2h.
+            # The ensemble is resident; the timed solve leaves its result on the device.
             wp_sweep(system, problem, algorithm, mode, settings[mode], golden,
                 "$(label) $(mode)") do setting
-                gpu_solve_d2h(probs, prob, solver, mode, setting, problem)[1]
+                gpu_solve_device(probs, prob, solver, mode, setting, problem)
             end
         end
     end

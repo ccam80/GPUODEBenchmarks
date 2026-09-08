@@ -388,7 +388,7 @@ int main(int argc, char *argv[])
 		auto NanFrom = [&](size_t si) {
 			for (size_t sj = si; sj < Settings.size(); sj++)
 				RecordResult("wp", Mode, Algorithm, SettingKind, Settings[sj], NT, SD,
-					"d2h", std::nan(""), NULL, 100.0, std::nan(""), std::nan(""));
+					"none", std::nan(""), NULL, 100.0, std::nan(""), std::nan(""));
 		};
 
 		// Repeat ceiling; the count follows the first timed run's duration.
@@ -418,16 +418,18 @@ int main(int argc, char *argv[])
 				Scan.SynchroniseFromHostToDevice(All);
 
 				// Later settings are slower, so a hard exit abandons the sweep as NaN rows.
+				// Device only: the h2d above and the ActualState d2h below are untimed.
 				ArmWatchdog([&, si]() { NanFrom(si); });
 				auto T0 = std::chrono::steady_clock::now();
 				Scan.Solve();
 				Scan.InsertSynchronisationPoint();
 				Scan.SynchroniseSolver();
-				// ActualState only: All would also copy the NDO dense-output registers.
-				Scan.SynchroniseFromDeviceToHost(ActualState);
 				Scan.SynchroniseDevice();
 				auto T1 = std::chrono::steady_clock::now();
 				DisarmWatchdog();
+				// ActualState only: All would also copy the NDO dense-output registers.
+				Scan.SynchroniseFromDeviceToHost(ActualState);
+				Scan.SynchroniseDevice();
 
 				cudaError_t WpErr = cudaGetLastError();
 				if (WpErr != cudaSuccess)
@@ -465,7 +467,7 @@ int main(int argc, char *argv[])
 			double Err = sqrt(Sum2 / (NT * (double)SD));
 			const double WpErroredPct = ErroredPct(Scan, NT, SD);
 
-			RecordResult("wp", Mode, Algorithm, SettingKind, Setting, NT, SD, "d2h",
+			RecordResult("wp", Mode, Algorithm, SettingKind, Setting, NT, SD, "none",
 				BestMs, &WpSamples, WpErroredPct, Err, std::nan(""));
 			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
 			     << " ms, err=" << scientific << Err << fixed

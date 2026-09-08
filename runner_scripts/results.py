@@ -290,9 +290,10 @@ class Leg:
                     samples=samples_none, errored_pct=errored_pct,
                     build_s=build_s)
 
-    def record_wp(self, setting, t_ms, error, errored_pct, transfers="both",
-                  samples=None, tier="default"):
-        self.record(N_WP, transfers, setting=setting, tier=tier, min_ms=t_ms,
+    def record_wp(self, setting, t_ms, error, errored_pct, samples=None,
+                  tier="default"):
+        """One work-precision point; every package times the resident solve alone."""
+        self.record(N_WP, "none", setting=setting, tier=tier, min_ms=t_ms,
                     error=error, errored_pct=errored_pct, samples=samples)
 
     def nan_times(self, ns):
@@ -304,9 +305,9 @@ class Leg:
             self.record_times(STATES_N, NAN, NAN, 100.0, build_s=build_s,
                               states=nstates)
 
-    def nan_wp(self, settings, transfers="both"):
+    def nan_wp(self, settings):
         for setting in settings:
-            self.record_wp(setting, NAN, NAN, 100.0, transfers=transfers)
+            self.record_wp(setting, NAN, NAN, 100.0)
 
 
 def _cli(argv):
