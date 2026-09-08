@@ -215,22 +215,15 @@ the 1e-8 `TIMING_TOL` ask for more than the working precision resolves.
 
 ### Implicit stage solves
 
-The `[newton]` table of `runner_scripts/protocol.toml` sets the scale of the
-fixed-step Newton termination test in every stack that exposes it:
-OrdinaryDiffEq's `abstol`/`reltol` with `adaptive = false` (the
-DifferentialEquations.jl NE sweep), diffrax's `VeryChord(rtol, atol, norm =
-rms_norm)` root finder, and cubie's `newton_atol`/`newton_rtol`. All three
-stop when `eta * ||dz|| < 0.01` with `||dz||` the rms of the update scaled by
-`atol + rtol * |u|`, so the table means the same thing in each. Adaptive solves
-scale that norm by the step tolerance instead: OrdinaryDiffEq and diffrax by
-construction, cubie because the bench passes `newton_atol = newton_rtol = tol`
-(its own default is the controller tolerance divided by ten; it warns
-`newton_rtol is at or above the step controller rtol` when told otherwise and
-floors `newton_rtol` at `4 eps(Float32)`, so the 1e-7 and 1e-8 points run
-their Newton at 4.8e-7 relative).
-DiffEqGPU's kernels expose neither: their Newton stops at an unscaled residual
-rms below `100 eps(Float32)`. The comment above the table records the
-iteration caps and linear solvers each library keeps.
+The `[newton]` table of `runner_scripts/protocol.toml` scales the fixed-step
+Newton termination test, `eta * rms(dz / (atol + rtol |u|)) < 0.01`, in
+OrdinaryDiffEq (`abstol`/`reltol` with `adaptive = false`), diffrax
+(`VeryChord(rtol, atol, norm = rms_norm)`) and cubie
+(`newton_atol`/`newton_rtol`). Adaptive solves scale it by the step tolerance
+in all three; cubie warns `newton_rtol is at or above the step controller
+rtol` at every implicit solver build and floors `newton_rtol` at
+`4 eps(Float32)`. DiffEqGPU's kernels stop at an unscaled residual rms below
+`100 eps(Float32)` and take no tolerance.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
@@ -279,18 +272,15 @@ MPGOS launcher and binary) and `runner_scripts/results.jl` (Julia writers).
 The identity columns are `package, key, analysis, problem, algorithm, mode,
 setting_kind, setting, n, states, tier, transfers`; `analysis` is `times`,
 `wp` or `states`, `setting` the dt or tolerance the point ran at, `n` the
-ensemble size and `states` the state count. `transfers` is what the timed
-region copies: `both` (h2d and d2h) or `none` (neither); the N and states
-sweeps record both legs, work-precision the `none` leg alone. The value columns are
-`min_ms` (the recorded time), `samples_ms` (every attempt of the leg in ms,
-`;`-joined, the untimed warm-up first, so `min_ms` is the minimum over the
-attempts after it; a leg that breached the watchdog keeps the attempts it
-made), `errored_pct`, `error` (wp rows) and `build_s` (states rows). Spread
-statistics are computed from `samples_ms` by whatever reads the store;
-`results.samples_of` and `result_samples` parse the column. A row with the
-same identity replaces the recorded one; under `--floor` the row with the
-lower `min_ms` stays. `python runner_scripts/results.py` offers `record`,
-`nan`, `status` and `clear`.
+ensemble size and `states` the state count. `transfers` is `both` (h2d and
+d2h) or `none`; the N and states sweeps record both legs, work-precision
+`none` only. The value columns are `min_ms`, `samples_ms` (every attempt in
+ms, `;`-joined, warm-up first; `min_ms` is the minimum after the warm-up),
+`errored_pct`, `error` (wp rows) and `build_s` (states rows). Readers compute
+spread from `samples_ms` (`results.samples_of`, `result_samples`). A row with
+the same identity replaces the recorded one; under `--floor` the lower
+`min_ms` stays. `python runner_scripts/results.py` offers `record`, `nan`,
+`status` and `clear`.
 
 ### Problems
 
@@ -1016,12 +1006,11 @@ artifact.
 Each framework's `wp` mode sweeps the controls it supports, once per
 supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
 dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
-adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
-usual timing protocol (untimed warm-up, repeated solves, best time) on the
-resident inputs with the result left on the device, so every package's wp row
-is a `transfers = none` leg, and computes the ensemble l2 error of the final
-states against the golden reference from one untimed solve. The grids are the
-`[fixed]` and `[adaptive]` tables of `runner_scripts/protocol.toml`.
+adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting times the
+resident solve (untimed warm-up, repeated solves, best time; a `transfers =
+none` row) and scores one untimed solve's final states against the golden
+reference. The grids are the `[fixed]` and `[adaptive]` tables of
+`runner_scripts/protocol.toml`.
 
 ```bash
 ./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision
@@ -1075,13 +1064,9 @@ Float32** — and the final states are compared against the Float64 golden
 reference and against each other. erk-family algorithms run only the
 adaptive sweep. The small-dt end of the grid resolves the fp-precision tail.
 
-The Julia ne outputs are keyed by machine like every other result; a keyed
-tree generated on an earlier grid scores against the wrong golden rows, so
-only trees on the current grid are kept. Float32 discipline on the Julia side
-is enforced, not assumed: u0, tspan, dt and the parameter vector are
-constructed as Float32 (the sweep grid is the Float32 wp grid) and every
-trajectory's final state is asserted to still be Float32, so a silent
-promotion to Float64 aborts the run.
+On the Julia side u0, tspan, dt and the parameter vector are constructed as
+Float32 (the sweep grid is the Float32 wp grid) and every trajectory's final
+state is asserted to still be Float32; a promotion to Float64 aborts the run.
 
 ### Running the suite
 

@@ -8,7 +8,7 @@ import numpy as np
 
 from algorithms import (get_algorithm, ne_member, resolve_algorithms,
                         resolve_modes)
-from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
+from problems import DEFAULT_PROBLEM, as_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
                       REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
@@ -99,26 +99,16 @@ def timed_min_ms(run, repeats, on_breach=None, setup=None):
             return min(timed) * 1000.0, result, samples
 
 
-def _row(problem):
-    """Accept a problem row or a problem name."""
-    return problem if isinstance(problem, dict) else get_problem(problem)
-
-
-def dts_for(algorithm, problem=DEFAULT_PROBLEM):
-    """The fixed-step dt grid appropriate to the algorithm and problem."""
-    return _row(problem).dts(algorithm)
-
-
 def golden_path(problem=DEFAULT_PROBLEM):
     """Path of the Float64 reference final states for a problem."""
     return os.path.join(
         "data", "numerical",
-        "golden_{0}_{1}.csv".format(_row(problem)["problem"], N_WP))
+        "golden_{0}_{1}.csv".format(as_problem(problem)["problem"], N_WP))
 
 
 def load_golden(problem=DEFAULT_PROBLEM):
     """Load the Float64 golden final states, shape (N_WP, states)."""
-    row = _row(problem)
+    row = as_problem(problem)
     path = golden_path(row)
     if not os.path.isfile(path):
         raise FileNotFoundError(

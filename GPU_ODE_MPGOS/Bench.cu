@@ -197,7 +197,7 @@ static std::string Fmt(double Value)
 	return Text;
 }
 
-// One store row through runner_scripts/results.py, Samples as every attempt in ms (warm-up first); BENCH_FLOOR is honoured there.
+// One store row through runner_scripts/results.py; Samples is every attempt in ms, warm-up first.
 static void RecordResult(const std::string& Analysis, const std::string& Mode,
                          const std::string& Algorithm, const std::string& SettingKind,
                          double Setting, int N, int States, const std::string& Transfers,
@@ -417,8 +417,7 @@ int main(int argc, char *argv[])
 				FillSolverObject(Scan, Parameters_R_Values, NT);
 				Scan.SynchroniseFromHostToDevice(All);
 
-				// Later settings are slower, so a hard exit abandons the sweep as NaN rows.
-				// Device only: the h2d above and the ActualState d2h below are untimed.
+				// Kernel only is timed; a hard exit NaN-fills this and every later setting.
 				ArmWatchdog([&, si]() { NanFrom(si); });
 				auto T0 = std::chrono::steady_clock::now();
 				Scan.Solve();

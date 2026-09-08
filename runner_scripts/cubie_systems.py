@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from problems import get_problem
+from problems import as_problem
 
 # Ring modulator constants (Test Set for IVP Solvers, problem II-3).
 RING_CONSTANTS = {
@@ -383,7 +383,7 @@ def build_system(problem, precision=np.float32, name_suffix=""):
 
     ``name_suffix`` separates one caller's generated-code cache from
     another's for the same equations."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     key = row["problem"]
     if key not in _BUILDERS:
         raise SystemExit("no cubie definition for problem '{0}'".format(key))
@@ -393,7 +393,7 @@ def build_system(problem, precision=np.float32, name_suffix=""):
 
 def variable_order(problem):
     """The problem's own variables, in golden-reference order; a resized lorenz96 row lists its own state count."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     if row["problem"] in ("lorenz96", "lorenz96_20"):
         return tuple("x{0}".format(i) for i in range(1, row["states"] + 1))
     return _ORDER[row["problem"]]
@@ -441,5 +441,5 @@ def final_states(system, solution, problem):
 
 def sweep_parameters(problem, n, precision=np.float32):
     """The ensemble parameter dict: the swept scalar over the problem range."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     return {row["sweep_parameter"]: row.sweep(n, dtype=precision)}

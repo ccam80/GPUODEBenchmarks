@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from bench_key import data_dir, group_dir  # noqa: E402
 from problems import (  # noqa: E402
-    DEFAULT_PROBLEM, get_problem, load_problems, problem_names,
+    DEFAULT_PROBLEM, as_problem, get_problem, load_problems, problem_names,
     resolve_problems,
 )
-from wp_common import dts_for, golden_path  # noqa: E402
+from wp_common import golden_path  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -35,6 +35,13 @@ class RegistryTests(unittest.TestCase):
     def test_unknown_problem_exits(self):
         with self.assertRaises(SystemExit):
             get_problem("nosuchproblem")
+
+    def test_as_problem_takes_a_row_or_a_name(self):
+        row = get_problem(DEFAULT_PROBLEM)
+        self.assertIs(as_problem(row), row)
+        self.assertEqual(as_problem(DEFAULT_PROBLEM), row)
+        with self.assertRaises(SystemExit):
+            as_problem("nosuchproblem")
 
     def test_resolve_filters_by_framework(self):
         row = get_problem(DEFAULT_PROBLEM)
@@ -108,8 +115,8 @@ class GridTests(unittest.TestCase):
             self.assertEqual(0, int(ratio) & (int(ratio) - 1))
 
     def test_euler_grid_is_finer(self):
-        self.assertLess(dts_for("euler", self.problem)[-1],
-                        dts_for("tsit5", self.problem)[-1])
+        self.assertLess(self.problem.dts("euler")[-1],
+                        self.problem.dts("tsit5")[-1])
 
     def test_timing_dt_is_a_dyadic_fraction_of_the_duration(self):
         self.assertEqual(self.problem["duration"] * 2.0 ** -10,

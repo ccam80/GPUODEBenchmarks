@@ -102,14 +102,14 @@ def make_solve(problem, algorithm, dt=None):
 
 def run_wp(problem, parameters):
     """dt sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import dts_for, load_golden, ensemble_error, timed_min_ms
+    from wp_common import load_golden, ensemble_error, timed_min_ms
 
     golden = load_golden(problem)
 
     for algorithm in ALGORITHMS:
         if not problem.supports("pytorch"):
             continue
-        dts = list(dts_for(algorithm, problem))
+        dts = list(problem.dts(algorithm))
         leg = Leg("pytorch", DATASET_KEY, "wp", problem, algorithm, "fixed")
         if skip_wp_leg(leg, dts):
             print("-- resume: skipping wp {0} fixed {1} (already covered)"

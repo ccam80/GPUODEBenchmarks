@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.join(_HERE, "runner_scripts", "numerical_equivalence"
 from algorithms import NE_PACKAGES, ne_algorithms  # noqa: E402
 from bench_key import group_dir  # noqa: E402
 from problems import problem_names, resolve_problems  # noqa: E402
-from ne_common import (TOLS_NE, dts_ne, load_golden_ne,  # noqa: E402
+from protocol import TOLS  # noqa: E402
+from ne_common import (dts_ne, load_golden_ne,  # noqa: E402
                        ensemble_error_masked, julia_ne_file, cubie_ne_file,
                        julia_ne_adaptive_file, cubie_ne_adaptive_file,
                        read_ne_csv_masked, read_ne_adaptive_csv_masked,
@@ -92,7 +93,7 @@ def analyse_adaptive(row, key, golden_states, problem, package):
         return None
 
     points = []
-    for tol in TOLS_NE:
+    for tol in TOLS:
         j = julia.get(tol) if julia else None
         dflt = tiers["default"].get(tol) if tiers["default"] else None
         mtch = tiers["matched"].get(tol) if tiers["matched"] else None
