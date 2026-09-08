@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from algorithms import get_algorithm
 from problems import get_problem
-from protocol import (DT_MIN_FRACTION, OPTIMIZE_N,
+from protocol import (DT_MIN_FRACTION, NEWTON_ATOL, NEWTON_RTOL, OPTIMIZE_N,
                       OPTIMIZE_PER_POINT_FAMILIES, TIMING_TOL)
 from results import PACKAGE_DIRS, _Lock
 
@@ -173,7 +173,7 @@ def controllers_equal(a, b, rel_tol=1e-9):
 
 def make_solver(system, problem, algorithm, mode, setting=None, package=None,
                 key=None, controller=None, states=None, optimized=True):
-    """A Solver for one point; a recorded optimize row is applied when package and key are given."""
+    """A Solver for one point; a recorded optimize row is applied when package and key are given. The Newton norm scales by the [newton] table at a fixed step and by the step tolerance when adaptive, as in OrdinaryDiffEq and diffrax; explicit algorithms ignore the keys."""
     import cubie as qb
     from cubie_systems import output_types
     row = _row(problem)
@@ -182,10 +182,12 @@ def make_solver(system, problem, algorithm, mode, setting=None, package=None,
     kwargs = dict(algorithm=algorithm, save_every=row["duration"],
                   output_types=output_types(system), time_logging_level=None)
     if mode == "fixed":
-        kwargs.update(dt=setting, step_controller="fixed")
+        kwargs.update(dt=setting, step_controller="fixed",
+                      newton_atol=NEWTON_ATOL, newton_rtol=NEWTON_RTOL)
     else:
         dt0, dt_min = pins(row)
-        kwargs.update(atol=setting, rtol=setting, dt=dt0, dt_min=dt_min)
+        kwargs.update(atol=setting, rtol=setting, dt=dt0, dt_min=dt_min,
+                      newton_atol=setting, newton_rtol=setting)
         if controller:
             kwargs["step_controller"] = controller["step_controller"]
     tuned = None

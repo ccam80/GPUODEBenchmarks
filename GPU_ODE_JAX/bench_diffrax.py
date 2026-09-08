@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
+from protocol import NEWTON_ATOL, NEWTON_RTOL
 from results import Leg
 from resume import skip_point, skip_wp_leg
 from wp_common import (REPEAT_CAP, TIMING_TOL, errored_pct, parse_bench_args,
@@ -86,12 +87,8 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
-# Newton convergence target for the fixed-step implicit stage solve.
-ROOT_FINDER_TOL = 1.0e-2
-
-
-def make_solver(algorithm, fixed_tol=None):
-    """Diffrax solver; a fixed step size leaves nothing for an implicit solver to take its root-finder tolerances from, so fixed_tol supplies them."""
+def make_solver(algorithm, fixed=False):
+    """Diffrax solver; an adaptive implicit solver scales its Newton norm by the step controller's tolerances, a fixed-step one by the protocol's [newton] table."""
     if algorithm == "euler":
         return diffrax.Euler()
     if algorithm == "classical-rk4":
@@ -99,10 +96,10 @@ def make_solver(algorithm, fixed_tol=None):
     if algorithm == "tsit5":
         return diffrax.Tsit5()
     if algorithm == "kvaerno3":
-        if fixed_tol is None:
+        if not fixed:
             return diffrax.Kvaerno3()
         return diffrax.Kvaerno3(root_finder=diffrax.VeryChord(
-            rtol=fixed_tol, atol=fixed_tol, norm=optx.rms_norm))
+            rtol=NEWTON_RTOL, atol=NEWTON_ATOL, norm=optx.rms_norm))
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
@@ -166,7 +163,7 @@ def best_times_ms(solve, args, label, n):
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm, fixed_tol=ROOT_FINDER_TOL)
+    solver = make_solver(algorithm, fixed=True)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0

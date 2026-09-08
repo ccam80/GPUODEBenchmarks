@@ -208,13 +208,10 @@ function run_fixed(ctx)
         wrote_any = false
         for dt in ctx.dts
             try
-                # abstol/reltol are pinned to the OrdinaryDiffEq defaults
-                # rather than left implicit: with adaptive=false they only
-                # control the implicit solvers' Newton termination, and the
-                # cubie runner's inner-tolerance pin is derived from them.
+                # With adaptive = false, abstol/reltol only scale the Newton termination; the [newton] table pins them.
                 sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, dt = Float32(dt), adaptive = false,
-                    abstol = 1.0f-6, reltol = 1.0f-3,
+                    abstol = Float32(NEWTON_ATOL), reltol = Float32(NEWTON_RTOL),
                     save_everystep = false, save_start = false, dense = false)
                 finals, _, _, n_bad, converged = collect_finals(sim, ctx)
                 err = ensemble_err(finals, ctx.golden_states)
