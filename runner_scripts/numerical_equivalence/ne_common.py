@@ -6,7 +6,7 @@ import os
 import numpy as np
 
 from problems import DEFAULT_PROBLEM, get_problem
-from protocol import N_NE, N_WP, NE_LEGACY_GRID, TOLS as TOLS_NE
+from protocol import N_NE, N_WP, TOLS as TOLS_NE
 
 
 def _row(problem):
@@ -19,25 +19,9 @@ def dts_ne(problem=DEFAULT_PROBLEM):
     return _row(problem).ne_dts()
 
 
-def golden_ne_path(problem=DEFAULT_PROBLEM):
-    """Path of a legacy-grid problem's ne golden file."""
-    return os.path.join(
-        "data", "numerical",
-        "golden_ne_{0}_{1}.csv".format(_row(problem)["problem"], N_NE))
-
-
-def ne_legacy_grid(problem=DEFAULT_PROBLEM):
-    """Whether the problem's ne ensemble is the standalone golden_ne grid."""
-    return _row(problem)["problem"] in NE_LEGACY_GRID
-
-
 def ne_sweep(problem=DEFAULT_PROBLEM):
-    """The Float32 ne ensemble grid: golden_ne's column for a legacy problem, else the first N_NE points of the N_WP sweep."""
-    row = _row(problem)
-    if ne_legacy_grid(row):
-        return np.float32(np.loadtxt(golden_ne_path(row), delimiter=",",
-                                     usecols=(0,)))
-    return row.sweep(N_WP, dtype=np.float32)[:N_NE]
+    """The Float32 ne ensemble grid: the first N_NE points of the N_WP sweep."""
+    return _row(problem).sweep(N_WP, dtype=np.float32)[:N_NE]
 
 NE_DIR = os.path.join("data", "numerical_equivalence")
 JULIA_NE_DIR = os.path.join(NE_DIR, "julia")
@@ -53,21 +37,9 @@ def ne_keys(package):
 
 
 def load_golden_ne(problem=DEFAULT_PROBLEM):
-    """(sweep, golden states) of the ne ensemble as float64 arrays; the states come from golden_ne for a legacy problem, else from the first N_NE rows of the wp golden."""
-    row = _row(problem)
-    if ne_legacy_grid(row):
-        path = golden_ne_path(row)
-        if not os.path.isfile(path):
-            raise FileNotFoundError(
-                "{0} not found; it defines the legacy ne grid of {1}"
-                .format(path, row["problem"]))
-        data = np.loadtxt(path, delimiter=",")
-        expected = (N_NE, row["states"] + 1)
-        if data.shape != expected:
-            raise ValueError("golden ne reference has shape {0}, expected {1}"
-                             .format(data.shape, expected))
-        return data[:, 0], data[:, 1:]
+    """(sweep, golden states) of the ne ensemble as float64 arrays: the first N_NE rows of the wp golden."""
     from wp_common import load_golden
+    row = _row(problem)
     return np.float64(ne_sweep(row)), load_golden(row)[:N_NE]
 
 

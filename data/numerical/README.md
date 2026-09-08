@@ -8,10 +8,8 @@ Float64 references per problem (`golden_algorithm` at `golden_tol` from
 - `golden_<problem>_131072.csv` — wp ensemble final states, one row per
   trajectory, no header; `runner_scripts/golden/generate_golden.jl`, kept
   unless `--force`. The ne ensemble is its first 1024 rows.
-- `golden_ne_<problem>_1024.csv` — `<sweep>,<states...>` grid and reference of
-  the `ne_legacy_grid` problems in `runner_scripts/protocol.toml`;
-  `runner_scripts/numerical_equivalence/generate_golden_ne.jl`.
-- `golden*_retcodes.csv` — unconverged golden rows as `row,retcode` (1-based).
+- `golden_<problem>_131072_retcodes.csv` — unconverged golden rows as
+  `row,retcode` (1-based).
 
 ## Per-machine finals
 
