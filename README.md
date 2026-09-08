@@ -474,8 +474,8 @@ about to record.
 
 A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
 state count>]`; a run of points replaces only those rows and redraws the plots,
-and a point without a mode re-measures both modes. `JULIA` names the
-julia launcher, e.g. `JULIA="julia +1.13"`.
+and a point without a mode re-measures both modes. The julia launcher is
+`julia +1.13`; `JULIA` overrides it.
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
 already in the result store and deletes nothing; NaN rows count as recorded.

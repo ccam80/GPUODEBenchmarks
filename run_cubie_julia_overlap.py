@@ -19,6 +19,7 @@ import argparse
 import csv
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -92,7 +93,7 @@ def main():
     if not problems:
         parser().error("no requested problem is in the overlap suite")
     cubie_python = existing_python()
-    julia = os.environ.get("JULIA", "julia")
+    julia = shlex.split(os.environ.get("JULIA", "julia +1.13"))
     phases = phases_for(args.analysis)
     packages = ("julia", "cubie") if args.package == "all" else (args.package,)
     status = 0
@@ -112,7 +113,7 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
               "--problem", problem["problem"]]
     commands = []
     if "julia" in packages:
-        commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
+        commands.append(("julia", julia + ["--startup-file=no", "-t", "auto",
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
     if "cubie" in packages:
         commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")]

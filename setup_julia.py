@@ -53,9 +53,12 @@ def run_command(cmd, shell=False, check=True, cwd=None):
         return False
 
 
+JULIA = ["julia", "+1.13"]
+
+
 def julia(code):
     """Run one snippet in the repo's Julia project."""
-    return run_command(["julia", "--project=.", "-e", code])
+    return run_command(JULIA + ["--project=.", "-e", code])
 
 
 def add_packages(names):
@@ -116,7 +119,7 @@ def main():
             return 1
 
     print("Julia version:")
-    if not run_command(["julia", "--version"]):
+    if not run_command(JULIA + ["--version"]):
         return 1
 
     manifest = script_dir / "Manifest.toml"
@@ -138,7 +141,7 @@ def main():
 
     print("\nJulia environment setup complete!")
     print("To test the installation, run:")
-    print("  julia --project=. -e 'using DiffEqGPU, CUDA'")
+    print("  julia +1.13 --project=. -e 'using DiffEqGPU, CUDA'")
 
     return 0
 
