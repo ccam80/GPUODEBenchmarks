@@ -63,8 +63,7 @@ verifies that the MLIR backend activates. Run the CUBIE setup first; if the
 shared venv is missing this script builds it on demand.
 
 `runner_scripts/cubie_adapter.py` sets the backend from the package name
-before cubie is imported, so no manual switching is required and a value
-already in the shell is overridden:
+before cubie is imported, overriding any value in the shell:
 
 | Package | Backend |
 |---|---|
