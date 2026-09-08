@@ -10,10 +10,10 @@ from algorithms import get_algorithm
 from problems import get_problem
 from protocol import (DT_MIN_FRACTION, OPTIMIZE_N,
                       OPTIMIZE_PER_POINT_FAMILIES, TIMING_TOL)
+from results import PACKAGE_DIRS, _Lock
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
 SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
-DATA_DIRS = {"cubie": "CUBIE", "cubie_mlir": "CUBIE_MLIR"}
 PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "algorithm", "mode",
@@ -217,7 +217,7 @@ def solve(solver, initial_values, parameters, duration, on_device=False):
 # ------------------------------------------------------------------ optimize
 
 def optimize_path(package, key, root=None):
-    directory = os.path.join(root or "data", DATA_DIRS[package], key)
+    directory = os.path.join(root or "data", PACKAGE_DIRS[package], key)
     os.makedirs(directory, exist_ok=True)
     return os.path.join(directory, "optimize.csv")
 
@@ -284,7 +284,6 @@ def _decode(text):
 def load_optimized(package, key, problem, algorithm, mode, setting,
                    states=None, root=None):
     """{'settings', 'resident_blocks'} recorded for a point, or None."""
-    from results import _Lock
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states)
     with _Lock(path):
@@ -300,7 +299,6 @@ def load_optimized(package, key, problem, algorithm, mode, setting,
 def record_optimized(package, key, problem, algorithm, mode, setting, result,
                      states=None, n=OPTIMIZE_N, root=None):
     """Replace the optimize row for a point with the result's best launch."""
-    from results import _Lock
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states)
     best = result.best
@@ -335,7 +333,6 @@ def optimize_point(solver, problem, initial_values, parameters, package, key,
 
 def clear_optimized(package, key, algorithm=None, problem=None, root=None):
     """Drop the optimize rows of an algorithm and problem; returns the count dropped."""
-    from results import _Lock
     path = optimize_path(package, key, root)
     ident = {"package": package, "key": key}
     if algorithm and algorithm != "all":

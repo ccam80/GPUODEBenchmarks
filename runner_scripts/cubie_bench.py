@@ -12,7 +12,7 @@ import cubie_adapter as adapter
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import final_states, sweep_parameters
-from results import Leg
+from results import PACKAGE_DIRS, PREFIXES, Leg
 from resume import (active as resume_active, floor_enabled, skip_point,
                     skip_wp_leg)
 from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
@@ -601,8 +601,8 @@ def run(argv, package):
         "analysis": analysis,
         "framework": package,
         "algorithms": algorithms,
-        "framework_dir": adapter.DATA_DIRS[package],
-        "prefix": {"cubie": "Cubie", "cubie_mlir": "Cubie_mlir"}[package],
+        "framework_dir": PACKAGE_DIRS[package],
+        "prefix": PREFIXES[PACKAGE_DIRS[package]],
         "numerical_tag": package,
         "fixed": supported_for(package, "fixed"),
         "adaptive": supported_for(package, "adaptive"),

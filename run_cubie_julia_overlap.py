@@ -122,10 +122,9 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
     for label, command in commands:
         print("{}: {}".format(label, subprocess.list2cmdline(command)))
 
-    # Cubie resolves its CUDA backend at import time from this variable.
-    worker_env = dict(os.environ)
-    worker_env["CUBIE_CUDA_BACKEND"] = BACKENDS[args.backend]
-    print("Cubie backend: {}".format(worker_env["CUBIE_CUDA_BACKEND"]))
+    # The cubie worker selects its backend from --package through cubie_adapter.
+    backend = BACKENDS[args.backend]
+    print("Cubie backend: {}".format(backend))
 
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SUITE / "diffeqgpu_ode_inventory.csv", output / "diffeqgpu_ode_inventory.csv")
@@ -151,7 +150,7 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
     manifest = {
         "dataset_key": key, "problem": problem["problem"],
         "analysis": args.analysis, "package": args.package,
-        "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
+        "cubie_backend": backend,
         "nmax": args.nmax, "performance_ns": ns, "from_n": args.from_n,
         "algorithm": args.algorithm,
         "commands": [c for _, c in commands],
@@ -162,8 +161,7 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
     for label, command in commands:
         print("\n=== {} ===".format(label), flush=True)
         try:
-            completed = subprocess.run(command, cwd=str(ROOT), check=False,
-                                       env=worker_env)
+            completed = subprocess.run(command, cwd=str(ROOT), check=False)
             code = completed.returncode
         except OSError as exc:
             code = 127
