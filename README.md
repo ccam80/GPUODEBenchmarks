@@ -772,20 +772,6 @@ language spelling:
 Results are written to `data/MYOKIT_CUDA/` with the `Myokit_cuda` filename
 prefix.
 
-For the Fabbri-Linder CellML comparison against CuBIE, run the dedicated
-two-environment harness with the Myokit-CUDA Python executable and point it
-at an installed CuBIE environment:
-
-```text
-GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe runner_scripts/cubie_myokit_fabbri/compare_fabbri.py --cellml <cubie>/tests/fixtures/cellml/Fabbri_Linder.cellml --cubie-python <cubie>/.venv/Scripts/python.exe --trajectory-counts 512 2048 8192 32768 131072
-```
-
-It compares synchronized float32 forward-Euler solves, checks all 35 final
-states, and writes per-count details plus an aggregate scaling table under
-`data/Fabbri_Myokit_CUDA/`. See
-[`runner_scripts/cubie_myokit_fabbri/README.md`](runner_scripts/cubie_myokit_fabbri/README.md)
-for the CellML compatibility normalization and timing protocol.
-
 ## Comparing GPU acceleration of ODEs with CPUs
 
 The benchmark suite can also be used to test the GPU acceleration of ODE
