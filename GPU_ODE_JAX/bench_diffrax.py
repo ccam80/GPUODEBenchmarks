@@ -205,7 +205,7 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL,
 
 def run_wp(problem, parameterList):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import dts_for, TOLS, load_golden, ensemble_error
+    from wp_common import TOLS, load_golden, ensemble_error
 
     golden = load_golden(problem)
 
@@ -262,7 +262,7 @@ def run_wp(problem, parameterList):
             continue
         if algorithm in FIXED_ALGORITHMS:
             # max_steps covers the finest euler dt (2^17 steps).
-            sweep("fixed", algorithm, dts_for(algorithm, problem),
+            sweep("fixed", algorithm, problem.dts(algorithm),
                   lambda dt: make_fixed(problem, algorithm, dt,
                                         max_steps=262144))
         if algorithm in ADAPTIVE_ALGORITHMS:
@@ -376,7 +376,7 @@ def run_warm():
     """Compile every timing and wp-setting kernel without running them."""
     import timeit
 
-    from wp_common import N_WP, TOLS, dts_for
+    from wp_common import N_WP, TOLS
 
     counts = NS or [8]
 
@@ -400,7 +400,7 @@ def run_warm():
                              jnp.asarray(problem.sweep(n)),
                              f"{problem.name} fixed {algorithm} N={n}")
                 wp_args = jnp.asarray(problem.sweep(N_WP))
-                for dt in dts_for(algorithm, problem):
+                for dt in problem.dts(algorithm):
                     warm_one(lambda: make_fixed(problem, algorithm, dt,
                                                 max_steps=262144),
                              wp_args,

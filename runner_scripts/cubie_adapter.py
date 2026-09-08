@@ -7,10 +7,10 @@ import sys
 from datetime import datetime, timezone
 
 from algorithms import get_algorithm
-from problems import get_problem
+from problems import as_problem
 from protocol import (DT_MIN_FRACTION, NEWTON_ATOL, NEWTON_RTOL, OPTIMIZE_N,
-                      OPTIMIZE_PER_POINT_FAMILIES, TIMING_TOL)
-from results import PACKAGE_DIRS, _Lock
+                      OPTIMIZE_PER_POINT_FAMILIES)
+from results import PACKAGE_DIRS, _Lock, timing_setting
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
 SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
@@ -25,10 +25,6 @@ OPTIMIZE_FIELDS = ("package", "key", "problem", "algorithm", "mode",
 CONTROLLER_KEYS = ("step_controller", "integral_gain", "proportional_gain",
                    "derivative_gain", "safety", "min_step_shrink",
                    "max_step_growth")
-
-
-def _row(problem):
-    return problem if isinstance(problem, dict) else get_problem(problem)
 
 
 # ------------------------------------------------------------------ backend
@@ -57,7 +53,7 @@ def build_system(problem, package, precision=None, states=None):
     import numpy as np
     from cubie_systems import build_system as build
     from problems import states_row
-    row = states_row(states) if states is not None else _row(problem)
+    row = states_row(states) if states is not None else as_problem(problem)
     suffix = SYSTEM_SUFFIX[package]
     if states is not None:
         suffix = "{0}_s{1}".format(suffix, states)
@@ -69,15 +65,8 @@ def build_system(problem, package, precision=None, states=None):
 
 def pins(problem):
     """(dt0, dt_min) for adaptive solves: the timing step and duration * dt_min_fraction."""
-    row = _row(problem)
+    row = as_problem(problem)
     return row.timing_dt, row["duration"] * DT_MIN_FRACTION
-
-
-def timing_setting(problem, mode):
-    """(setting_kind, setting) of the N and states sweeps."""
-    if mode == "fixed":
-        return "dt", _row(problem).timing_dt
-    return "tol", TIMING_TOL
 
 
 # -------------------------------------------------------------- controllers
@@ -176,7 +165,7 @@ def make_solver(system, problem, algorithm, mode, setting=None, package=None,
     """A Solver for one point; a recorded optimize row is applied when package and key are given. The Newton norm scales by the [newton] table at a fixed step and by the step tolerance when adaptive, as in OrdinaryDiffEq and diffrax; explicit algorithms ignore the keys."""
     import cubie as qb
     from cubie_systems import output_types
-    row = _row(problem)
+    row = as_problem(problem)
     if setting is None:
         setting = timing_setting(row, mode)[1]
     kwargs = dict(algorithm=algorithm, save_every=row["duration"],
@@ -230,7 +219,7 @@ def per_point(algorithm):
 
 
 def _ident(package, key, problem, algorithm, mode, setting, states):
-    row = _row(problem)
+    row = as_problem(problem)
     kind = "dt" if mode == "fixed" else "tol"
     if not per_point(algorithm):
         setting = timing_setting(row, mode)[1]
@@ -322,7 +311,7 @@ def record_optimized(package, key, problem, algorithm, mode, setting, result,
 def optimize_point(solver, problem, initial_values, parameters, package, key,
                    algorithm, mode, setting, states=None, verbose=True):
     """Run Solver.optimize on the point's batch, apply the winner to the solver and record it."""
-    row = _row(problem)
+    row = as_problem(problem)
     result = solver.optimize(initial_values, parameters,
                              duration=row["duration"], verbose=verbose)
     if result.best is None:
@@ -340,7 +329,7 @@ def clear_optimized(package, key, algorithm=None, problem=None, root=None):
     if algorithm and algorithm != "all":
         ident["algorithm"] = algorithm
     if problem and problem != "all":
-        ident["problem"] = _row(problem).name
+        ident["problem"] = as_problem(problem).name
     with _Lock(path):
         rows = _load(path)
         kept = [r for r in rows if not _same(r, ident)]

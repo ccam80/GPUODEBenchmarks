@@ -3,7 +3,7 @@
 import equinox as eqx
 import jax.numpy as jnp
 
-from problems import get_problem
+from problems import as_problem
 
 
 class _Lorenz(eqx.Module):
@@ -200,7 +200,7 @@ _BUILDERS = {
 
 def build_problem(problem):
     """Return ``(vector_field, y0)`` for a problem row or name."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     key = row["problem"]
     if key not in _BUILDERS:
         raise SystemExit("no diffrax definition for problem '{0}'".format(key))

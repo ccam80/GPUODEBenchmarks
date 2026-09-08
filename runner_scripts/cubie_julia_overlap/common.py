@@ -44,8 +44,6 @@ ADAPTIVE_TOL = OVERLAP_TOL
 PERFORMANCE_REPEATS = REPEAT_CAP
 WORK_REPEATS = REPEAT_CAP
 WP_DTS = fixed_dts(1.0, WP_K)
-WP_TOLS = TOLS
-NE_TOLS = TOLS
 
 # "transfers": "both" includes h2d and d2h, "none" includes neither.
 # One row per timed point: the workers reduce their repeats before writing, so
@@ -80,10 +78,10 @@ def protocol(nmax, from_n=0):
         "performance_repeats": PERFORMANCE_REPEATS,
         "ne_n": N_NE,
         "ne_dts": NE_DTS,
-        "ne_tols": NE_TOLS,
+        "ne_tols": TOLS,
         "wp_n": N_WP,
         "wp_dts": WP_DTS,
-        "wp_tols": WP_TOLS,
+        "wp_tols": TOLS,
         "work_repeats": WORK_REPEATS,
     }
 

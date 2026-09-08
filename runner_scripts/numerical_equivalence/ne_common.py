@@ -5,23 +5,18 @@ import os
 
 import numpy as np
 
-from problems import DEFAULT_PROBLEM, get_problem
-from protocol import N_NE, N_WP, TOLS as TOLS_NE
-
-
-def _row(problem):
-    """Accept a problem row or a problem name."""
-    return problem if isinstance(problem, dict) else get_problem(problem)
+from problems import DEFAULT_PROBLEM, as_problem
+from protocol import N_NE, N_WP
 
 
 def dts_ne(problem=DEFAULT_PROBLEM):
     """The fixed-step dt grid for a problem's ne sweep."""
-    return _row(problem).ne_dts()
+    return as_problem(problem).ne_dts()
 
 
 def ne_sweep(problem=DEFAULT_PROBLEM):
     """The Float32 ne ensemble grid: the first N_NE points of the N_WP sweep."""
-    return _row(problem).sweep(N_WP, dtype=np.float32)[:N_NE]
+    return as_problem(problem).sweep(N_WP, dtype=np.float32)[:N_NE]
 
 NE_DIR = os.path.join("data", "numerical_equivalence")
 JULIA_NE_DIR = os.path.join(NE_DIR, "julia")
@@ -39,34 +34,18 @@ def ne_keys(package):
 def load_golden_ne(problem=DEFAULT_PROBLEM):
     """(sweep, golden states) of the ne ensemble as float64 arrays: the first N_NE rows of the wp golden."""
     from wp_common import load_golden
-    row = _row(problem)
+    row = as_problem(problem)
     return np.float64(ne_sweep(row)), load_golden(row)[:N_NE]
 
 
-def ensemble_error(final_states, golden_states):
-    """l2-at-final error over the ensemble, computed in float64.
-
-    Same metric as the wp sweeps: sqrt(mean((final - golden)**2)) over the
-    (N_NE, 3) array.
-    """
-    diff = np.asarray(final_states, dtype=np.float64) - golden_states
-    return float(np.sqrt(np.mean(diff ** 2)))
-
-
 def ensemble_error_masked(final_states, golden_states, mask):
-    """l2-at-final error over a masked subset of the ensemble, in float64.
-
-    ``mask`` is a boolean (N_NE,) array selecting the trajectories to include
-    (e.g. the trajectories both stacks converged on). Returns NaN when the
-    mask selects nothing, so a fully non-converged point drops out of the
-    comparison rather than contaminating it.
-    """
+    """The wp sweeps' l2-at-final error over the trajectories mask selects (both stacks converged); NaN when it selects none, so a fully non-converged point drops out of the comparison."""
+    from wp_common import ensemble_error
     mask = np.asarray(mask, dtype=bool)
     if not mask.any():
         return float("nan")
-    diff = (np.asarray(final_states, dtype=np.float64)[mask]
-            - np.asarray(golden_states, dtype=np.float64)[mask])
-    return float(np.sqrt(np.mean(diff ** 2)))
+    return ensemble_error(np.asarray(final_states)[mask],
+                          np.asarray(golden_states, dtype=np.float64)[mask])
 
 
 # Columns that are not part of the final state.
@@ -153,14 +132,14 @@ def julia_ne_dir(problem=DEFAULT_PROBLEM, dataset_key=None):
     if dataset_key is None:
         from bench_key import dataset_key as current_key
         dataset_key = current_key()
-    d = os.path.join(JULIA_NE_DIR, dataset_key, _row(problem)["problem"])
+    d = os.path.join(JULIA_NE_DIR, dataset_key, as_problem(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 
 
 def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM, package="cubie"):
     """Directory of one machine's outputs of a cubie package for a problem; creates it."""
-    d = os.path.join(NE_DIR, package, dataset_key, _row(problem)["problem"])
+    d = os.path.join(NE_DIR, package, dataset_key, as_problem(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 

@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 
 from algorithms import NE_PACKAGES, get_algorithm, ne_member
-from problems import get_problem
+from problems import as_problem
 from protocol import N_WP, STATES_N, TIMING_TOL, TOLS
 
 IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
@@ -234,7 +234,7 @@ def wp_settings(problem, algorithm, mode, package):
     """The settings a package's wp leg records: the ne dt grid for its ne members, else the wp grids."""
     if mode == "adaptive":
         return list(TOLS)
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     if package in NE_PACKAGES and ne_member(get_algorithm(algorithm), "fixed"):
         return row.ne_dts()
     return row.dts(algorithm)
@@ -246,8 +246,7 @@ class Leg:
     def __init__(self, package, key, analysis, problem, algorithm, mode,
                  root=None):
         self.package, self.key, self.analysis = package, key, analysis
-        self.problem = (problem if isinstance(problem, dict)
-                        else get_problem(problem))
+        self.problem = as_problem(problem)
         self.algorithm, self.mode = algorithm, mode
         self.path = store_path(package, key, root)
         self.setting_kind, self.setting = timing_setting(self.problem, mode)

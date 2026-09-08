@@ -20,7 +20,6 @@ from results import Leg  # noqa: E402
 from resume import skip_point, skip_wp_leg  # noqa: E402
 from wp_common import (  # noqa: E402
     REPEAT_CAP,
-    dts_for,
     ensemble_error,
     errored_pct,
     load_golden,
@@ -97,7 +96,7 @@ def run_work_precision(model, problem, cell_count, leg):
     sweep = problem.sweep(cell_count, dtype=np.float32)
     initial_states = model.initial_states(cell_count)
     # Later settings are slower, so a breach abandons the leg.
-    dts = list(dts_for(ALGORITHM, problem))
+    dts = list(problem.dts(ALGORITHM))
     for index, dt in enumerate(dts):
         step_count = int(round(problem["duration"] / dt))
 
@@ -183,7 +182,7 @@ def run_problem(problem, cell_counts, wp_mode):
     if wp_mode:
         leg = Leg("myokit_cuda", DATASET_KEY, "wp", problem, ALGORITHM,
                   "fixed")
-        if skip_wp_leg(leg, dts_for(ALGORITHM, problem)):
+        if skip_wp_leg(leg, problem.dts(ALGORITHM)):
             print("-- resume: skipping wp {0} fixed {1} (already covered)"
                   .format(problem.name, ALGORITHM))
             return

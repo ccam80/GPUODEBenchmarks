@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from problems import get_problem
+from problems import as_problem
 
 
 class _LorenzODE(torch.nn.Module):
@@ -210,7 +210,7 @@ _BUILDERS = {
 
 def build_problem(problem):
     """Return ``(module_factory, u0)`` for a problem row or name."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     key = row["problem"]
     if key not in _BUILDERS:
         raise SystemExit(

@@ -92,6 +92,11 @@ def get_problem(name):
         name, ", ".join(problem_names())))
 
 
+def as_problem(problem):
+    """The problem row for a row or a name."""
+    return problem if isinstance(problem, dict) else get_problem(problem)
+
+
 def resolve_problems(request, framework=None):
     """Resolve "all" or a comma list to the problems a framework runs."""
     if request in (None, "", "all"):

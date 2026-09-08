@@ -59,7 +59,6 @@ include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
-const TOLS_NE = TOLS
 
 const PROBLEM = get(NE_OPT, "problem", "all")
 const PROBLEMS = resolve_problems(PROBLEM, "julia")
@@ -144,12 +143,10 @@ function setup(problem)
     return (name = name, nstates = nstates, golden_states = golden_states,
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
-        dts = problem_dts_ne(problem),
+        dts = problem_ne_dts(problem),
         dt0 = Float32(problem_timing_dt(problem)),
         dtmin = duration * Float32(DT_MIN_FRACTION))
 end
-
-problem_dts_ne(problem) = problem_ne_dts(problem)
 
 "Final states in golden order, step counts and retcodes of one ensemble solve."
 function collect_finals(sim, ctx)
@@ -300,7 +297,7 @@ function run_adaptive(ctx)
         println(io,
             "tol,traj,$(state_header(ctx.nstates)),naccept,nreject,converged")
         wrote_any = false
-        for tol in TOLS_NE
+        for tol in TOLS
             try
                 sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, adaptive = true, dt = ctx.dt0,
