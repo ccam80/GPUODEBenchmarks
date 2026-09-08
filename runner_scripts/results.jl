@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "protocol.jl"))
 
 const RESULT_IDENTITY = ("package", "key", "analysis", "problem", "algorithm",
     "mode", "setting_kind", "setting", "n", "states", "tier", "transfers")
-# samples_ms is every attempt in ms, warm-up first, ';'-joined; min_ms is the minimum over the attempts after the warm-up.
+# samples_ms: every attempt in ms, warm-up first, ';'-joined; min_ms is the minimum after the warm-up.
 const RESULT_VALUES = ("min_ms", "samples_ms", "errored_pct", "error", "build_s",
     "recorded_utc")
 const RESULT_FIELDS = (RESULT_IDENTITY..., RESULT_VALUES...)

@@ -1,9 +1,4 @@
-"""The result store: one long-form results.csv per package and machine key, one row per timed point and transfer leg, mirrored by results.jl.
-
-CLI: `results.py record <package> <key> <analysis> <problem> <algorithm> <mode> <setting_kind> <setting> <n> <states> <tier> <transfers> [field=value ...] [samples=a;b;c]`,
-`results.py nan <package> <key> <analysis> <problem> <algorithm> <mode> <N|states> [build_s]`, `results.py status <package> <key> <analysis> <problem> <algorithm> <mode> <n> <states>`,
-`results.py clear <package> <key> [analysis] [algorithm] [problem]`.
-"""
+"""The result store: one results.csv per package and machine key, one row per timed point and transfer leg, mirrored by results.jl."""
 
 import csv
 import math
@@ -18,7 +13,7 @@ from protocol import N_WP, STATES_N, TIMING_TOL, TOLS
 
 IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
             "setting_kind", "setting", "n", "states", "tier", "transfers")
-# samples_ms is every attempt of the leg in ms, warm-up first, ';'-joined; min_ms is the minimum over the attempts after the warm-up.
+# samples_ms: every attempt in ms, warm-up first, ';'-joined; min_ms is the minimum after the warm-up.
 VALUES = ("min_ms", "samples_ms", "errored_pct", "error", "build_s",
           "recorded_utc")
 FIELDS = IDENTITY + VALUES
@@ -27,6 +22,12 @@ FIELDS = IDENTITY + VALUES
 PACKAGE_DIRS = {"cubie": "CUBIE", "cubie_mlir": "CUBIE_MLIR", "julia": "Julia",
                 "cpp": "CPP", "jax": "JAX", "pytorch": "PYTORCH",
                 "myokit_cuda": "MYOKIT_CUDA"}
+
+USAGE = "\n".join((
+    "results.py record <package> <key> <analysis> <problem> <algorithm> <mode> <setting_kind> <setting> <n> <states> <tier> <transfers> [field=value ...] [samples=a;b;c]",
+    "results.py nan <package> <key> <analysis> <problem> <algorithm> <mode> <N|states> [build_s]",
+    "results.py status <package> <key> <analysis> <problem> <algorithm> <mode> <n> <states>",
+    "results.py clear <package> <key> [analysis] [algorithm] [problem]"))
 
 NAN = float("nan")
 LOCK_TIMEOUT_S = 120.0
@@ -350,7 +351,7 @@ def _cli(argv):
         print(clear(store_path(package, key), package=package, key=key,
                     **ident))
         return 0
-    print(__doc__)
+    print(USAGE)
     return 1
 
 
