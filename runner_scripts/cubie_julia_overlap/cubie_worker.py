@@ -17,9 +17,10 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 import cubie_adapter as adapter  # noqa: E402
 from common import (  # noqa: E402 - suite-local bootstrap above
-    ADAPTIVE_TOL, CUBIE_NE_DATA, FAILURE_FIELDS, ANALYSES, METRIC_FIELDS,
-    N_WP, TIMING_FIELDS, algorithms, append_csv, ensure_csv, finite_counts,
-    golden_ne_states, golden_wp, ne_sweep, phases_for, point_slug,
+    ADAPTIVE_TOL, FAILURE_FIELDS, ANALYSES, METRIC_FIELDS, N_WP,
+    TIMING_FIELDS, algorithms, append_csv, cubie_ne_adaptive_file,
+    cubie_ne_file, ensure_csv, finite_counts, golden_ne_states, golden_wp,
+    ne_sweep, phases_for, point_slug,
     protocol as suite_protocol,
     read_ne_csv, read_ne_adaptive_csv, rmse, timing_stats, write_json,
 )
@@ -106,23 +107,23 @@ def time_device_leg(solver, duration, repeats):
 
 
 def import_numerical_from_ne(output, alias, family, problem, metric_file,
-                             failure):
-    """Import the NE suite's cubie finals; erk rows import the adaptive default tier only."""
+                             failure, package):
+    """Import the package's ne finals; erk rows import the adaptive default tier only."""
     key = dataset_key()
     golden = golden_ne_states(problem)
-    ne_dir = CUBIE_NE_DATA / key / problem["problem"]
     sources = []
     if family != "erk":
         sources.append(("fixed", "fixed", "dt",
-                        ne_dir / "{}.csv".format(alias)))
+                        Path(cubie_ne_file(alias, key, problem, package))))
     sources.append(("adaptive", "default", "tol",
-                    ne_dir / "{}_adaptive_default.csv".format(alias)))
+                    Path(cubie_ne_adaptive_file(alias, "default", key, problem,
+                                                package))))
     for mode, tier, setting_kind, path in sources:
         if not path.is_file():
             failure(alias, "numerical", mode, tier, 0, setting_kind, "",
                     FileNotFoundError(
-                        "{} not found - run run_numerical_equivalence "
-                        "first".format(path)))
+                        "{} not found - run `bench.py -a numerical -p {}` "
+                        "first".format(path, package)))
             continue
         blocks = (read_ne_csv(path) if mode == "fixed"
                   else {tol: data[0]
@@ -215,7 +216,7 @@ def main():
             if phase == "numerical":
                 # The cubie side comes from the NE suite's outputs.
                 import_numerical_from_ne(args.output, alias, family, problem,
-                                         metric_file, failure)
+                                         metric_file, failure, args.package)
                 continue
             if phase == "performance":
                 points = []

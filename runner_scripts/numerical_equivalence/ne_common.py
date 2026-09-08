@@ -39,8 +39,17 @@ def ne_sweep(problem=DEFAULT_PROBLEM):
                                      usecols=(0,)))
     return row.sweep(N_WP, dtype=np.float32)[:N_NE]
 
-JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
-CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
+NE_DIR = os.path.join("data", "numerical_equivalence")
+JULIA_NE_DIR = os.path.join(NE_DIR, "julia")
+
+
+def ne_keys(package):
+    """Dataset keys with ne outputs of a package (julia, cubie or cubie_mlir)."""
+    root = os.path.join(NE_DIR, package)
+    if not os.path.isdir(root):
+        return set()
+    return {name for name in os.listdir(root)
+            if os.path.isdir(os.path.join(root, name))}
 
 
 def load_golden_ne(problem=DEFAULT_PROBLEM):
@@ -177,9 +186,9 @@ def julia_ne_dir(problem=DEFAULT_PROBLEM, dataset_key=None):
     return d
 
 
-def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM):
-    """Directory of one machine's cubie outputs for a problem."""
-    d = os.path.join(CUBIE_NE_DIR, dataset_key, _row(problem)["problem"])
+def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM, package="cubie"):
+    """Directory of one machine's outputs of a cubie package for a problem; creates it."""
+    d = os.path.join(NE_DIR, package, dataset_key, _row(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -190,9 +199,10 @@ def julia_ne_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
                         "{0}.csv".format(alias))
 
 
-def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-machine cubie output under a key dir; creates it."""
-    return os.path.join(cubie_ne_dir(dataset_key, problem),
+def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM,
+                  package="cubie"):
+    """Path of a cubie package's fixed-sweep output for one machine."""
+    return os.path.join(cubie_ne_dir(dataset_key, problem, package),
                         "{0}.csv".format(alias))
 
 
@@ -203,9 +213,9 @@ def julia_ne_adaptive_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
 
 
 def cubie_ne_adaptive_file(alias, tier, dataset_key,
-                           problem=DEFAULT_PROBLEM):
-    """Cubie adaptive-sweep output per controller tier: "default" or "matched"."""
-    return os.path.join(cubie_ne_dir(dataset_key, problem),
+                           problem=DEFAULT_PROBLEM, package="cubie"):
+    """A cubie package's adaptive-sweep output per controller tier: "default" or "matched"."""
+    return os.path.join(cubie_ne_dir(dataset_key, problem, package),
                         "{0}_adaptive_{1}.csv".format(alias, tier))
 
 

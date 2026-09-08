@@ -6,14 +6,14 @@ import threading
 
 import numpy as np
 
-from algorithms import (NE_PACKAGES, get_algorithm, ne_member,
-                        resolve_algorithms, resolve_modes,
-                        resolve_wp_algorithms)
+from algorithms import (get_algorithm, ne_member, resolve_algorithms,
+                        resolve_modes)
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
                       REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
+from results import wp_settings  # noqa: F401
 
 
 def run_watchdogged(run, on_breach):
@@ -113,16 +113,6 @@ def dts_for(algorithm, problem=DEFAULT_PROBLEM):
     return _row(problem).dts(algorithm)
 
 
-def wp_settings(problem, algorithm, mode, framework):
-    """The settings a framework's work-precision leg sweeps: the ne dt grid for an ne member of NE_PACKAGES, else the wp dt grid; tolerances are one grid."""
-    if mode == "adaptive":
-        return list(TOLS)
-    row = _row(problem)
-    if framework in NE_PACKAGES and ne_member(get_algorithm(algorithm), "fixed"):
-        return row.ne_dts()
-    return row.dts(algorithm)
-
-
 def golden_path(problem=DEFAULT_PROBLEM):
     """Path of the Float64 reference final states for a problem."""
     return os.path.join(
@@ -153,11 +143,12 @@ def ensemble_error(final_states, golden):
 
 
 def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
-                    dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-repeat timing log under data/<package>/<key>/<problem>."""
+                    dataset_key, problem=DEFAULT_PROBLEM, tier="default"):
+    """Path of the per-repeat timing log under data/<package>/<key>/<problem>; a controller tier other than default gets its own log."""
+    suffix = "" if tier == "default" else "_" + tier
     return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_samples_{1}_{2}_{3}.csv".format(
-                            prefix, analysis, mode, algorithm))
+                        "{0}_samples_{1}_{2}_{3}{4}.csv".format(
+                            prefix, analysis, mode, algorithm, suffix))
 
 
 def sample_point(analysis, problem, algorithm, mode, n, states,
@@ -227,10 +218,8 @@ def parse_bench_args(argv, framework):
             mode_request = tok.split("=", 1)[1]
         else:
             request = tok
-    if analysis in ("wp", "ne", "warm", "optimize"):
-        algorithms = resolve_wp_algorithms(request, framework)
-    else:
-        algorithms = resolve_algorithms(request, framework)
+    algorithms = resolve_algorithms(request, framework,
+                                    wp=analysis in ("wp", "ne", "warm", "optimize"))
     if analysis == "ne":
         algorithms = [name for name in algorithms
                       if any(ne_member(get_algorithm(name), mode)

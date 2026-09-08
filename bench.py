@@ -508,6 +508,9 @@ class Run:
         for cubie_pkg in cubie_pkgs:
             if worst != 0:
                 break
+            if "work-precision" in self.plan["analyses"]:
+                self.record("ne:" + cubie_pkg, "SKIPPED", "the work-precision stage ran the ne legs", "-")
+                continue
             saved_keep = self.args.keep
             self.args.keep = True
             try:
@@ -521,13 +524,9 @@ class Run:
             return
         status = self.step("ne: comparison", "numerical_equivalence.log", launch.Command(
             "compare", [launch.cubie_python(), os.path.join(ROOT, "compare_numerical_equivalence.py"),
-                        "--problem", problem], ok=(0, 2)), critical=False)
-        if status == 0:
-            self.record("ne", "OK", "all equivalent", status)
-        elif status == 2:
-            self.record("ne", "MISMATCH", "see plots/<key>/<problem>/numerical_equivalence_*.csv", status)
-        else:
-            self.record("ne", "FAILED", "-", status)
+                        "--problem", problem]), critical=False)
+        self.record("ne", "OK" if status == 0 else "FAILED",
+                    "see plots/<key>/<problem>/numerical_equivalence_*" if status == 0 else "-", status)
 
     def overlap(self, package, cubie_pkgs, nlist, algorithm, problem):
         """The overlap suite once per requested cubie backend; julia alone runs once."""

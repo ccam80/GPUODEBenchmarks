@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from algorithms import (  # noqa: E402
     FAMILIES, MODES, algorithm_names, get_algorithm, load_algorithms,
     ne_algorithms, overlap_algorithms, resolve_algorithms, resolve_modes,
-    resolve_wp_algorithms, supported_for, wp_supported_for,
+    supported_for, wp_supported_for,
 )
 from problems import get_problem  # noqa: E402
 from wp_common import N_WP, parse_bench_args, wp_settings  # noqa: E402
@@ -30,14 +30,17 @@ class WorkPrecisionMembershipTests(unittest.TestCase):
                          supported_for("julia", "fixed"))
 
     def test_wp_resolution_and_the_ne_token(self):
-        self.assertEqual(resolve_wp_algorithms("radau_iia_9,euler", "cubie"),
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie", wp=True),
                          ["radau_iia_9", "euler"])
-        self.assertEqual(resolve_wp_algorithms("radau_iia_9", "pytorch"), [])
-        _, analysis, algorithms, _ = parse_bench_args(["ne"], "cubie")
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie"), ["euler"])
+        self.assertEqual(resolve_algorithms("radau_iia_9", "pytorch", wp=True), [])
+        self.assertEqual(set(wp_supported_for("cubie")),
+                         set(wp_supported_for("cubie", "fixed")) | set(wp_supported_for("cubie", "adaptive")))
+        _, analysis, algorithms, _, _ = parse_bench_args(["ne"], "cubie")
         self.assertEqual(analysis, "ne")
         self.assertNotIn("euler", algorithms)
         self.assertIn("radau_iia_9", algorithms)
-        _, _, algorithms, _ = parse_bench_args(["wp"], "cubie")
+        _, _, algorithms, _, _ = parse_bench_args(["wp"], "cubie")
         self.assertIn("euler", algorithms)
         self.assertIn("radau_iia_9", algorithms)
 

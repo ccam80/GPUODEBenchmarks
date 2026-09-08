@@ -172,5 +172,4 @@ def commands(package, analysis, nlist, nmax, algorithm, problem, mode="all"):
 
 def store_analysis(analysis):
     """The result-store analysis name a bench analysis writes."""
-    return {"work-precision": "wp", "numerical": "wp",
-            "states": "states"}.get(analysis, "times")
+    return {"work-precision": "wp", "states": "states"}.get(analysis, "times")

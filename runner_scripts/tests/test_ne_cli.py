@@ -46,6 +46,29 @@ class EnsembleGridTests(unittest.TestCase):
         self.assertEqual(len(sweep), N_NE)
 
 
+class PackageDirectoryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_each_cubie_package_has_its_own_tree(self):
+        numba = ne_common.cubie_ne_file("kvaerno3", "k", "lorenz")
+        mlir = ne_common.cubie_ne_file("kvaerno3", "k", "lorenz", "cubie_mlir")
+        self.assertNotEqual(numba, mlir)
+        self.assertIn(os.path.join("cubie", "k", "lorenz"), numba)
+        self.assertIn(os.path.join("cubie_mlir", "k", "lorenz"), mlir)
+        self.assertTrue(ne_common.cubie_ne_adaptive_file(
+            "kvaerno3", "matched", "k", "lorenz", "cubie_mlir").endswith("kvaerno3_adaptive_matched.csv"))
+        self.assertEqual(ne_common.ne_keys("cubie"), {"k"})
+        self.assertEqual(ne_common.ne_keys("cubie_mlir"), {"k"})
+        self.assertEqual(ne_common.ne_keys("julia"), set())
+
+
 class CompareProblemListTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

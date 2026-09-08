@@ -1140,14 +1140,15 @@ julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>.csv            (fixed sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/controller_constants.csv   (resolved defaults)
-GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/bench_cubie.py ne
+GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/bench_cubie.py ne        # bench_cubie_mlir.py for the MLIR backend
 #   timed wp legs of the ne algorithms; the first 1024 rows of each solve's finals land in
-#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>.csv
-#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
+#   -> data/numerical_equivalence/<cubie|cubie_mlir>/<os>_<gpu>/<problem>/<algorithm>.csv
+#   -> data/numerical_equivalence/<cubie|cubie_mlir>/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
-#   -> plots/<os>_<gpu>/numerical_equivalence_fixed.csv
-#   -> plots/<os>_<gpu>/numerical_equivalence_adaptive.csv
-#   -> plots/<os>_<gpu>/numerical_equivalence.png (+ _adaptive variant)
+#   one set per cubie package with outputs:
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>_fixed.csv
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>_adaptive.csv
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>.png (+ _adaptive variant)
 ```
 
 ### Adaptive sweeps

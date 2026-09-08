@@ -13,8 +13,9 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from algorithms import NE_PACKAGES, get_algorithm, ne_member
 from problems import get_problem
-from protocol import N_WP, STATES_N, TIMING_TOL
+from protocol import N_WP, STATES_N, TIMING_TOL, TOLS
 
 IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
             "setting_kind", "setting", "n", "states", "tier", "transfers")
@@ -251,6 +252,16 @@ def timing_setting(problem, mode):
     if mode == "fixed":
         return "dt", problem.timing_dt
     return "tol", TIMING_TOL
+
+
+def wp_settings(problem, algorithm, mode, package):
+    """The settings a package's work-precision leg records: the ne dt grid for an ne member of NE_PACKAGES, else the wp dt grid; tolerances are one grid."""
+    if mode == "adaptive":
+        return list(TOLS)
+    row = problem if isinstance(problem, dict) else get_problem(problem)
+    if package in NE_PACKAGES and ne_member(get_algorithm(algorithm), "fixed"):
+        return row.ne_dts()
+    return row.dts(algorithm)
 
 
 class Leg:

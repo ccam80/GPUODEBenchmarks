@@ -73,9 +73,9 @@ def supported_for(framework, mode=None):
                  if row.supports(framework, mode))
 
 
-def resolve_algorithms(request, framework):
-    """Resolve "all" or a comma list to the algorithms a framework times."""
-    supported = supported_for(framework)
+def resolve_algorithms(request, framework, wp=False):
+    """Resolve "all" or a comma list to the algorithms a framework times; with wp, to the ones its work-precision sweep runs."""
+    supported = wp_supported_for(framework) if wp else supported_for(framework)
     if request in (None, "", "all"):
         return list(supported)
     names = [name for name in request.split(",") if name]
@@ -107,24 +107,13 @@ def ne_member(row, mode):
     return row["ne_adaptive"]
 
 
-def wp_supported_for(framework, mode):
-    """Algorithm names a framework's work-precision sweep runs in a mode: the timed set, plus the ne set for NE_PACKAGES."""
+def wp_supported_for(framework, mode=None):
+    """Algorithm names a framework's work-precision sweep runs, in the mode if given: the timed set, plus the ne set for NE_PACKAGES."""
+    modes = MODES if mode is None else (mode,)
     return tuple(row["algorithm"] for row in load_algorithms()
-                 if row.supports(framework, mode)
-                 or (framework in NE_PACKAGES and ne_member(row, mode)))
-
-
-def resolve_wp_algorithms(request, framework):
-    """Resolve "all" or a comma list to the algorithms a framework's work-precision sweep runs."""
-    supported = tuple(dict.fromkeys(wp_supported_for(framework, "fixed")
-                                    + wp_supported_for(framework, "adaptive")))
-    ordered = [name for name in algorithm_names() if name in supported]
-    if request in (None, "", "all"):
-        return ordered
-    names = [name for name in request.split(",") if name]
-    for name in names:
-        get_algorithm(name)
-    return [name for name in names if name in supported]
+                 if any(row.supports(framework, m)
+                        or (framework in NE_PACKAGES and ne_member(row, m))
+                        for m in modes))
 
 
 def _select(rows, request):

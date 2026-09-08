@@ -165,7 +165,6 @@ class LaunchTests(unittest.TestCase):
     def test_ordering_and_store_names(self):
         self.assertEqual(launch.ordered(["jax", "cubie_mlir", "cubie"]), ["cubie", "cubie_mlir", "jax"])
         self.assertEqual(launch.store_analysis("work-precision"), "wp")
-        self.assertEqual(launch.store_analysis("numerical"), "wp")
         self.assertEqual(launch.store_analysis("performance"), "times")
 
     def test_numerical_is_the_cubie_ne_legs(self):

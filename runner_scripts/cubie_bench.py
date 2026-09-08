@@ -120,12 +120,12 @@ def _write_ne(problem, opts, algorithm, mode, tier, finals):
     """The ne file of one leg: the first N_NE rows of every setting's finals."""
     from ne_common import (cubie_ne_adaptive_file, cubie_ne_file,
                            write_ne_adaptive_csv, write_ne_csv)
-    key = opts["dataset_key"]
+    key, package = opts["dataset_key"], opts["framework"]
     if mode == "fixed":
-        outfile = cubie_ne_file(algorithm, key, problem)
+        outfile = cubie_ne_file(algorithm, key, problem, package)
         write_ne_csv(outfile, [(dt, view) for dt, view in finals])
     else:
-        outfile = cubie_ne_adaptive_file(algorithm, tier, key, problem)
+        outfile = cubie_ne_adaptive_file(algorithm, tier, key, problem, package)
         write_ne_adaptive_csv(outfile, [(tol, view, None, None)
                                         for tol, view in finals])
     print("  wrote {0}".format(outfile))
@@ -169,10 +169,10 @@ def _run_wp(problem, opts, system, grid):
             return
         samples_file = samples_outfile(opts["framework_dir"], opts["prefix"],
                                        "wp", mode, algorithm,
-                                       opts["dataset_key"], problem)
+                                       opts["dataset_key"], problem, tier)
         setting_kind = "dt" if mode == "fixed" else "tol"
         # --floor merges the new times in; the log gains a fresh series.
-        if not floor_enabled() and tier == "default":
+        if not floor_enabled():
             reset_samples(samples_file)
         breached = False
         ne_finals = []

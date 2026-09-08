@@ -329,6 +329,16 @@ class TestWorkPrecisionNe(SweepCase):
         self.assertTrue(all(row["tier"] == "default" for row in rows))
         path = os.path.join("data", "numerical_equivalence", "cubie", "test_key",
                             "lorenz", "backwards_euler.csv")
+        self.assertTrue(os.path.isfile(path))
+        # The MLIR package writes beside, never over, the numba-cuda files.
+        opts = dict(self.opts([131072]), algorithms=["backwards_euler"], fixed=(),
+                    adaptive=(), wp_fixed=("backwards_euler",), wp_adaptive=(),
+                    framework="cubie_mlir", framework_dir="CUBIE_MLIR",
+                    prefix="Cubie_mlir")
+        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
+        self.assertTrue(os.path.isfile(os.path.join(
+            "data", "numerical_equivalence", "cubie_mlir", "test_key", "lorenz",
+            "backwards_euler.csv")))
         with open(path) as handle:
             lines = handle.read().splitlines()
         self.assertEqual(lines[0], "dt,traj,s1,s2,s3")
