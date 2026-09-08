@@ -1067,18 +1067,22 @@ numerical-equivalence (`ne`) suite instead compares error against *dt*, per
 algorithm, to answer a different question: **does each cubie algorithm
 actually calculate what its named method should?** Every implicit-family
 algorithm mutually supported by cubie and DifferentialEquations.jl (the
-`ne` rows of `runner_scripts/algorithms.csv`)
-integrates the same Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1])
-fixed-step at every dyadic dt from 1/2 to 1/8192 — **both stacks in
+`ne` rows of `runner_scripts/algorithms.csv`) integrates each problem's ne
+ensemble, the first `ensemble.n_ne` (1024) points of its work-precision sweep
+scored on the same rows of the wp golden, fixed-step at every dyadic
+`duration * 2^-k` for `k` in `fixed.ne_k` (1 to 13) — **both stacks in
 Float32** — and the final states are compared against the Float64 golden
-reference and against each other. erk-family algorithms run only the
-adaptive sweep. The small-dt end of the grid resolves the fp-precision
-tail.
+reference and against each other. The `ensemble.ne_legacy_grid` problems
+(`ring_modulator_index2`, `nand_gate`) keep their own `golden_ne_<problem>_1024.csv`
+grid until their Julia sweeps are rerun. erk-family algorithms run only the
+adaptive sweep. The small-dt end of the grid resolves the fp-precision tail.
 
-Float32 discipline on the Julia side is enforced, not assumed: u0, tspan, dt
-and the parameter vector are constructed as Float32 (the rho grid is read
-from the golden file, whose values are exactly representable in Float32) and
-every trajectory's final state is asserted to still be Float32, so a silent
+The Julia ne outputs are keyed by machine like every other result; a keyed
+tree generated on an earlier grid scores against the wrong golden rows, so
+only trees on the current grid are kept. Float32 discipline on the Julia side
+is enforced, not assumed: u0, tspan, dt and the parameter vector are
+constructed as Float32 (the sweep grid is the Float32 wp grid) and every
+trajectory's final state is asserted to still be Float32, so a silent
 promotion to Float64 aborts the run.
 
 ### Running the suite
