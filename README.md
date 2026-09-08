@@ -64,31 +64,6 @@ DiffEqGPU.jl-related code.
     julia> Pkg.add("oneAPI") #Intel GPUs
     julia> Pkg.add("Metal") #Apple M series GPUs
 ```
-### Testing DiffEqGPU.jl
-
-DiffEqGPU.jl is a test suite that regularly checks functionality by
-testing features like multiple backend support, event handling, and
-automatic differentiation. To test the functionality, one can follow the
-below instructions. The user needs to specify the \"backend\" for
-example \"CUDA\" for NVIDIA, \"AMDGPU\" for AMD, \"oneAPI\" for Intel
-, and \"Metal\" for Apple GPUs. The estimated time of completion is 20
-minutes.
-```julia
-    $ julia --project=.
-    julia> using Pkg
-    julia> Pkg.instantiate()
-    julia> Pkg.precompile()
-```
-Finally, test the package with this command
-```bash
-    $ backend="CUDA"
-    $ julia --project=. test_DiffEqGPU.jl $backend
-```
-Additionally, the GitHub discussion
-[`https://github.com/SciML/DiffEqGPU.jl/issues/224#issuecomment-1453769679`](https://github.com/SciML/DiffEqGPU.jl/issues/224#issuecomment-1453769679)
-highlights the use of textured memory with ODE solvers, accelerates the
-code by $2\times$ over CPU.
-
 ### Continuous Integration and Development
 
 DiffEqGPU.jl is a fully featured library with regression testing, semver
