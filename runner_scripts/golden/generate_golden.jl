@@ -34,8 +34,8 @@ let i = 1
 end
 
 function generate(problem)
-    outdir = joinpath(dirname(dirname(@__DIR__)), "data", "numerical")
-    outfile = joinpath(outdir, "golden_$(problem["problem"])_$(N).csv")
+    outfile = golden_path(problem)
+    outdir = dirname(outfile)
     if isfile(outfile) && !force
         @info "Keeping $(outfile)"
         return

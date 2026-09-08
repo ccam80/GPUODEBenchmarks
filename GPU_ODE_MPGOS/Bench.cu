@@ -381,8 +381,8 @@ static void AppendMissingRows(const std::string& Path,
 	}
 }
 
-// Breach exit code; the runner NaN-fills the leg's remaining sizes.
-static const int WatchdogExitCode = 42;
+// Breach exit code from the protocol; the runner NaN-fills the leg's remaining sizes.
+static const int WatchdogExitCode = PROTOCOL_WATCHDOG_EXIT_CODE;
 
 // Mode and algorithm names for filenames and watchdog messages.
 static const char* ModeName      = (SOLVER == RK4) ? "fixed" : "adaptive";

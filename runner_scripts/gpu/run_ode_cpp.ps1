@@ -115,6 +115,7 @@ function Invoke-ResumePrune {
 if ($LASTEXITCODE -ne 0) { Write-Error "protocol header generation failed" }
 $NWp = [long](& python runner_scripts\protocol.py get ensemble.n_wp)
 $NStates = [long](& python runner_scripts\protocol.py get ensemble.n_states)
+$WatchdogExit = [int](& python runner_scripts\protocol.py get watchdog.exit_code)
 $SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
     (Resolve-Path "GPU_ODE_MPGOS\protocol.h").Path,
     (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
@@ -156,7 +157,7 @@ function Build-Project {
     }
 }
 
-# Set by Invoke-Point: exit 42 is a watchdog breach, any other non-zero exit a failed point.
+# Set by Invoke-Point: the protocol's watchdog exit is a breach, any other non-zero exit a failed point.
 $script:PointBreached = $false
 $script:PointFailed = $false
 
@@ -168,8 +169,8 @@ function Invoke-Point {
     } else {
         & "GPU_ODE_MPGOS\Bench.exe"
     }
-    $script:PointBreached = ($LASTEXITCODE -eq 42)
-    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 42)
+    $script:PointBreached = ($LASTEXITCODE -eq $WatchdogExit)
+    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $WatchdogExit)
     if ($script:PointFailed) {
         $what = if ($Wp) { "wp" } else { "N=$Nt" }
         Write-Host "FAILED $ProblemName $(Get-SolverMode $Solver) $(Get-SolverAlgorithm $Solver) ${what}: Bench.exe exit $LASTEXITCODE"
@@ -286,7 +287,7 @@ if ($Analysis -eq 'states') {
                 continue
             }
             & "GPU_ODE_MPGOS\Bench.exe" states $BuildS
-            if ($LASTEXITCODE -eq 42) {
+            if ($LASTEXITCODE -eq $WatchdogExit) {
                 $breached = $true
             } elseif ($LASTEXITCODE -ne 0) {
                 # A failed point is a NaN row with its build time; the grid goes on.

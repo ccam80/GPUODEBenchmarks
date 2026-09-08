@@ -189,9 +189,7 @@ end
 
 # Sweeps fixed dt and adaptive tolerance at N=N_WP; grids mirror runner_scripts/wp_common.py.
 function run_wp(problem)
-    golden = readdlm(
-        joinpath(REPO_ROOT, "data", "numerical",
-            "golden_$(problem["problem"])_$(N_WP).csv"), ',', Float64)
+    golden = readdlm(golden_path(problem), ',', Float64)
     system, prob, duration = build_prob(problem)
     probs_host, probs = build_ensemble(system, prob, problem, N_WP)
     outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)

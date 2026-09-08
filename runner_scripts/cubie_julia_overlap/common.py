@@ -23,6 +23,7 @@ from protocol import (  # noqa: E402 - path bootstrap above
     DT_MIN_FRACTION as DT_MIN, N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP,
     TIMING_DT_K, TOLS, WP_K, fixed_dts, parse_ns, performance_ns,
 )
+from wp_common import golden_path as golden_wp  # noqa: E402, F401 - path bootstrap above
 
 # dt grids as duration fractions; the workers scale by the duration.
 NE_DTS = fixed_dts(1.0, NE_K)
@@ -35,13 +36,6 @@ def golden_ne(problem):
     name = problem["problem"] if isinstance(problem, dict) else problem
     return REPO_ROOT / "data" / "numerical" / "golden_ne_{0}_{1}.csv".format(
         name, N_NE)
-
-
-def golden_wp(problem):
-    """Path of the wp golden reference for a problem row or name."""
-    name = problem["problem"] if isinstance(problem, dict) else problem
-    return REPO_ROOT / "data" / "numerical" / "golden_{0}_{1}.csv".format(
-        name, N_WP)
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")

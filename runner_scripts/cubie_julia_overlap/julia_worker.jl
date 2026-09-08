@@ -108,8 +108,7 @@ const TSPAN = (0.0f0, DURATION)
 
 const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
     "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
-const golden_wp_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_$(PROBLEM["problem"])_$(N_WP).csv"), ',', Float64)
+const golden_wp_all = readdlm(golden_path(PROBLEM), ',', Float64)
 
 function sweep_grid(kind, n)
     if kind == "numerical"

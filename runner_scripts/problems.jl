@@ -70,6 +70,10 @@ end
 problem_ne_dts(problem) = [problem["duration"] * 2.0^-k
                            for k in NE_K[1]:NE_K[2]]
 
+"Path of the Float64 golden final states of the work-precision ensemble, as wp_common.golden_path."
+golden_path(problem) = joinpath(dirname(@__DIR__), "data", "numerical",
+    "golden_$(problem["problem"])_$(N_WP).csv")
+
 "The ensemble parameter grid: n values over the sweep range."
 function problem_sweep(problem, n)
     lo, hi = problem["sweep_min"], problem["sweep_max"]

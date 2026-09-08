@@ -106,7 +106,7 @@ def resolve_problems(request, framework=None):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--states-grid":
-        from wp_common import STATES_GRID
+        from protocol import STATES_GRID
         print(" ".join(str(n) for n in STATES_GRID))
     elif len(sys.argv) > 1:
         # <framework> [request]: the resolved problem names, one per line.
