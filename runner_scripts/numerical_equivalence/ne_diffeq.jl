@@ -16,11 +16,7 @@
 #
 # Grids, tolerances and pins come from runner_scripts/protocol.toml through protocol.jl.
 #
-# Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
-# all Float32 (the ne grid is the Float32-rounded prefix of the wp sweep, or
-# the golden_ne column of an ne_legacy_grid problem), and every trajectory's
-# final state is asserted to still be Float32 — a Float64 anywhere means the
-# solve silently promoted and the point is recorded as failed.
+# Everything the solve sees is Float32; a Float64 final state fails the point.
 #
 # Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
 #   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
