@@ -21,7 +21,7 @@ sys.modules["cubie.cache_root"] = cubie.cache_root
 
 import cubie_bench  # noqa: E402
 import cubie_worker  # noqa: E402
-from problems import STATES_PROBLEM, get_problem  # noqa: E402
+from problems import get_problem  # noqa: E402
 
 
 class FakeDeviceArray:
@@ -112,13 +112,27 @@ def grid(solver, n):
     return np.zeros((3, n), np.float32), np.zeros((1, n), np.float32)
 
 
-def read_rows(path):
+def read_rows(analysis):
+    """{n or states: [t_both, t_none, (build_s,) errored_pct]} from the CUBIE test store."""
+    import results
     rows = {}
-    with open(path) as handle:
-        for line in handle:
-            fields = line.split()
-            rows[int(float(fields[0]))] = [float(v) for v in fields[1:]]
-    return rows
+    for row in results.load(results.store_path("cubie", "test_key")):
+        if row["analysis"] != analysis:
+            continue
+        key = int(row["states"] if analysis == "states" else row["n"])
+        entry = rows.setdefault(key, {})
+        entry[row["transfers"]] = float(row["min_ms"])
+        entry["build_s"] = float(row["build_s"])
+        entry["errored_pct"] = float(row["errored_pct"])
+    out = {}
+    for key, entry in rows.items():
+        values = [entry.get("both", float("nan")),
+                  entry.get("none", float("nan"))]
+        if analysis == "states":
+            values.append(entry["build_s"])
+        values.append(entry["errored_pct"])
+        out[key] = values
+    return out
 
 
 def sample_legs(path):
@@ -161,8 +175,7 @@ class SweepCase(unittest.TestCase):
         problem = get_problem("lorenz")
         cubie_bench._run_times(problem, self.opts(ns), object(), grid)
         base = os.path.join("data", "CUBIE", "test_key", "lorenz")
-        return (read_rows(os.path.join(
-                    base, "Cubie_times_fixed_classical-rk4.txt")),
+        return (read_rows("times"),
                 sample_legs(os.path.join(
                     base, "Cubie_samples_times_fixed_classical-rk4.csv")))
 
@@ -252,9 +265,7 @@ class TestStatesLegIsolation(SweepCase):
                         for i in range(1, row["states"] + 1)}))
         opts = self.opts([4, 8])
         cubie_bench._run_states(opts)
-        path = os.path.join("data", "CUBIE", "test_key", STATES_PROBLEM,
-                            "Cubie_states_fixed_classical-rk4.txt")
-        rows = read_rows(path)
+        rows = read_rows("states")
         for nstates in (4, 8):
             t_ms, t_dev, build_s, pct = rows[nstates]
             self.assertTrue(math.isfinite(t_ms))
@@ -276,9 +287,7 @@ class TestStatesLegIsolation(SweepCase):
             (object(), {"x{0}".format(i): 8.0
                         for i in range(1, row["states"] + 1)}))
         cubie_bench._run_states(self.opts([4, 8]))
-        path = os.path.join("data", "CUBIE", "test_key", STATES_PROBLEM,
-                            "Cubie_states_fixed_classical-rk4.txt")
-        rows = read_rows(path)
+        rows = read_rows("states")
         for nstates in (4, 8):
             self.assertTrue(all(math.isfinite(v) for v in rows[nstates]))
             self.assertTrue(any(on_device

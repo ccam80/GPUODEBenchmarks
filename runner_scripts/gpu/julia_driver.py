@@ -2,7 +2,6 @@
 
 """Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm]. One process per (problem, algorithm, mode) leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
 
-import math
 import os
 import subprocess
 import sys
@@ -15,22 +14,24 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 
 from algorithms import resolve_algorithms, supported_for  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
-from problems import resolve_problems  # noqa: E402
+from problems import STATES_PROBLEM, get_problem, resolve_problems  # noqa: E402
+from protocol import STATES_GRID, STATES_N, TOLS  # noqa: E402
+from results import Leg  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
-    floor_enabled,
     skip_point,
     skip_wp_leg,
 )
-from wp_common import (  # noqa: E402
-    STATES_GRID,
-    STATES_N,
-    states_outfile,
-    times_outfile,
-    wp_outfile,
-)
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
+
+# Result store root; tests point it at a scratch directory.
+DATA_ROOT = None
+
+
+def _leg(analysis, problem, algorithm, mode):
+    return Leg("julia", dataset_key(), analysis, problem, algorithm, mode,
+               root=DATA_ROOT)
 
 
 def _lock_env():
@@ -153,13 +154,10 @@ def run_performance(argv):
     request = argv[1] if len(argv) > 1 else "all"
     problem_request = argv[2] if len(argv) > 2 else "all"
     ns = sorted(int(tok) for tok in nlist.split(","))
-    key = dataset_key()
 
     def pending(problem, algorithm, mode):
-        outfile = times_outfile("Julia", "Julia", mode, algorithm, key,
-                                problem)
-        return any(not skip_point(problem, algorithm, mode, n, outfile)
-                   for n in ns)
+        leg = _leg("times", problem, algorithm, mode)
+        return any(not skip_point(leg, n) for n in ns)
 
     legs = _prune_covered(_mode_legs(request, problem_request), pending)
     if not legs:
@@ -181,12 +179,12 @@ def run_performance(argv):
 def run_wp(argv):
     request = argv[0] if argv else "all"
     problem_request = argv[1] if len(argv) > 1 else "all"
-    key = dataset_key()
 
     def pending(problem, algorithm, mode):
-        outfile = wp_outfile("Julia", "Julia", mode, algorithm, key,
-                             problem)
-        return not skip_wp_leg(problem, algorithm, mode, outfile)
+        leg = _leg("wp", problem, algorithm, mode)
+        settings = (get_problem(problem).dts(algorithm) if mode == "fixed"
+                    else TOLS)
+        return not skip_wp_leg(leg, settings)
 
     legs = _prune_covered(_mode_legs(request, problem_request), pending)
     if not legs:
@@ -205,21 +203,10 @@ def run_wp(argv):
     return status
 
 
-def _states_succeeded(outfiles, algorithm, nstates):
+def _states_succeeded(legs, algorithm, nstates):
     """True when any mode recorded a finite time for this size."""
-    for (mode, alg), path in outfiles.items():
-        if alg != algorithm:
-            continue
-        try:
-            with open(path) as handle:
-                for line in handle:
-                    fields = line.split()
-                    if (len(fields) >= 2 and fields[0] == str(nstates)
-                            and not math.isnan(float(fields[1]))):
-                        return True
-        except (OSError, ValueError):
-            continue
-    return False
+    return any(leg.status(STATES_N, nstates) == "finite"
+               for (mode, alg), leg in legs.items() if alg == algorithm)
 
 
 def run_states(argv):
@@ -234,17 +221,11 @@ def run_states(argv):
 
     jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
     budget = float(os.environ.get("BENCH_STATES_BUDGET", "0"))
-    key = dataset_key()
     modes = {"fixed": supported_for("julia", "fixed"),
              "adaptive": supported_for("julia", "adaptive")}
-    legs = [(mode, algorithm) for algorithm in algorithms
-            for mode, supported in modes.items() if algorithm in supported]
-    outfiles = {leg: states_outfile("Julia", "Julia", leg[0], leg[1], key)
-                for leg in legs}
-    for path in outfiles.values():
-        # A resumed or --floor run keeps the recorded rows.
-        open(path, "a" if resume_active() or floor_enabled()
-             else "w").close()
+    legs = {(mode, algorithm): _leg("states", STATES_PROBLEM, algorithm, mode)
+            for algorithm in algorithms
+            for mode, supported in modes.items() if algorithm in supported}
 
     lock_path = _lock_env()
     marker_dir = tempfile.mkdtemp(prefix="gpuode_states_")
@@ -252,8 +233,7 @@ def run_states(argv):
                for algorithm in algorithms]
     if resume_active():
         def covered(nstates, algorithm):
-            return all(skip_point("lorenz96", algorithm, mode, nstates,
-                                  outfiles[(mode, algorithm)])
+            return all(skip_point(legs[(mode, algorithm)], ensemble, nstates)
                        for mode in _modes_for(algorithm))
         for nstates, algorithm in [pair for pair in pending
                                    if covered(*pair)]:
@@ -302,7 +282,7 @@ def run_states(argv):
             if code is not None:
                 del running[proc]
                 print(f"states={nstates} {algorithm}: exit {code}")
-                if not _states_succeeded(outfiles, algorithm, nstates):
+                if not _states_succeeded(legs, algorithm, nstates):
                     cancel_larger(algorithm, nstates,
                                   f"states={nstates} produced no result")
             elif (budget > 0 and time.monotonic() - started > budget
@@ -314,23 +294,10 @@ def run_states(argv):
                       f"within {budget:.0f}s, killed")
                 cancel_larger(algorithm, nstates, "compile budget breached")
 
-    # Rows a killed or crashed process never wrote become NaN, sorted by size.
-    for (mode, algorithm), path in outfiles.items():
-        rows = {}
-        with open(path) as handle:
-            for line in handle:
-                # Keep only complete `states t_ms t_dev_ms build_s [errored]` rows.
-                fields = line.split()
-                if len(fields) < 4:
-                    continue
-                try:
-                    rows[int(fields[0])] = line.rstrip("\n")
-                except ValueError:
-                    continue
-        with open(path, "w") as handle:
-            for nstates in grid:
-                handle.write(rows.get(nstates,
-                                      f"{nstates} nan nan nan 100.0") + "\n")
+    # Rows a killed or crashed process never wrote become NaN.
+    for leg in legs.values():
+        leg.nan_states([nstates for nstates in grid
+                        if leg.status(ensemble, nstates) == "absent"])
     return 0
 
 

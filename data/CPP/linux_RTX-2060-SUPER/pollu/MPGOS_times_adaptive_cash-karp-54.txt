@@ -1,9 +1,0 @@
-8	nan	nan
-32	nan	nan
-128	nan	nan
-512	nan	nan
-2048	nan	nan
-8192	nan	nan
-32768	nan	nan
-131072	nan	nan
-524288	nan	nan

@@ -133,31 +133,15 @@ STATUS=0
 for ALG in $ALG_LIST; do
     echo "Benchmarking ${PACKAGE} ${DEVICE} ensemble ${MODEL} solvers (${ANALYSIS}, ${ALG}, ${PROBLEM})..."
 
-    # Clear this machine's appended files for the analysis, algorithm and problems being run.
-    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP; then
-        if [ "$ALG" == "all" ]; then
-            ALG_GLOB="*"
-        else
-            ALG_GLOB="*_${ALG}"
-        fi
-        if [ "$PROBLEM" == "all" ]; then
-            PROBLEM_DIRS=("./data/${DATA_DIR}/${DATASET_KEY}"/*/)
-        else
-            PROBLEM_DIRS=()
-            for P in ${PROBLEM//,/ }; do
-                PROBLEM_DIRS+=("./data/${DATA_DIR}/${DATASET_KEY}/${P}")
-            done
-        fi
-        for PDIR in "${PROBLEM_DIRS[@]}"; do
-            if [ "$ANALYSIS" == "work-precision" ]; then
-                rm -f "${PDIR%/}"/*_wp_${ALG_GLOB}.txt
-            elif [ "$ANALYSIS" == "states" ]; then
-                rm -f "${PDIR%/}"/*_states_${ALG_GLOB}.txt
-            elif [ "$ANALYSIS" == "warm" ]; then
-                :
-            else
-                rm -f "${PDIR%/}"/*_times_${ALG_GLOB}.txt
-            fi
+    # Clear this machine's store rows for the analysis, algorithm and problems being run.
+    if [ "$DEVICE" == "gpu" ] && [ "$MODEL" == "ode" ] && ! $KEEP && [ "$ANALYSIS" != "warm" ]; then
+        case "$ANALYSIS" in
+            work-precision) STORE_ANALYSIS=wp;;
+            states) STORE_ANALYSIS=states;;
+            *) STORE_ANALYSIS=times;;
+        esac
+        for P in ${PROBLEM//,/ }; do
+            python3 ./runner_scripts/results.py clear "$PACKAGE" "$DATASET_KEY" "$STORE_ANALYSIS" "$ALG" "$P" > /dev/null
         done
     fi
 

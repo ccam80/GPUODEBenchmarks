@@ -86,29 +86,18 @@ function Get-SolverAlgorithm { param([string]$Solver)
     if ($Solver -eq 'RK4') { return 'classical-rk4' } else { return 'cash-karp-54' }
 }
 
-# Test-ResumeSkip <times|states|wp> <problem> <solver> [N]: true when covered.
+# Test-ResumeSkip <times|states|wp> <problem> <solver> [N|states]: true when the store covers the point.
 function Test-ResumeSkip {
     param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N = '')
     if (-not $ResumeActive) { return $false }
     $mode = Get-SolverMode $Solver
     $alg = Get-SolverAlgorithm $Solver
-    $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
     if ($Kind -eq 'wp') {
-        $verdict = (& python runner_scripts\resume.py leg $ProblemName $alg $mode $outfile)
+        $verdict = (& python runner_scripts\resume.py leg cpp $DatasetKey $ProblemName $alg $mode)
     } else {
-        $verdict = (& python runner_scripts\resume.py point $ProblemName $alg $mode $N $outfile)
+        $verdict = (& python runner_scripts\resume.py point cpp $DatasetKey $Kind $ProblemName $alg $mode $N)
     }
     return ("$verdict".Trim() -eq 'skip')
-}
-
-# Drop a retried point's stale rows.
-function Invoke-ResumePrune {
-    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N)
-    if (-not $ResumeActive) { return }
-    $mode = Get-SolverMode $Solver
-    $alg = Get-SolverAlgorithm $Solver
-    $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
-    & python runner_scripts\resume.py prune $N $outfile
 }
 # The protocol header is generated before the build and hashed with the sources.
 & python runner_scripts\protocol.py --cxx-header GPU_ODE_MPGOS\protocol.h
@@ -177,19 +166,13 @@ function Invoke-Point {
     }
 }
 
-# Append one NaN row (errored 100%), merging under --floor; creates the problem directory.
+# Record one NaN point (errored 100%) in the store; --floor leaves a recorded time alone.
 function Add-NanRow {
-    param([string]$File, [string]$Key, [string]$Extra = '')
-    New-Item -ItemType Directory -Force (Split-Path $File) | Out-Null
-    if ($FloorActive) {
-        if ($Extra) { & python runner_scripts\resume.py merge $File tab $Key nan nan $Extra 100 }
-        else { & python runner_scripts\resume.py merge $File tab $Key nan nan 100 }
-    } else {
-        $row = "$Key`tnan`tnan"
-        if ($Extra) { $row += "`t$Extra" }
-        $row += "`t100"
-        Add-Content -Path $File -Value $row
-    }
+    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$Key, [string]$BuildS = '')
+    $mode = Get-SolverMode $Solver
+    $alg = Get-SolverAlgorithm $Solver
+    if ($BuildS) { & python runner_scripts\results.py nan cpp $DatasetKey $Kind $ProblemName $alg $mode $Key $BuildS }
+    else { & python runner_scripts\results.py nan cpp $DatasetKey $Kind $ProblemName $alg $mode $Key }
 }
 
 Enter-VsEnvironment
@@ -260,21 +243,15 @@ if ($Analysis -eq 'performance') {
 if ($Analysis -eq 'states') {
     $StatesN = $NStates
     $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-    # A resumed or --floor run appends to what earlier runs recorded.
-    if (-not $ResumeActive -and -not $FloorActive) {
-        Remove-Item "data\CPP\$DatasetKey\lorenz96\MPGOS_states_*.txt" -Force -ErrorAction SilentlyContinue
-    }
     foreach ($solver in $Solvers) {
         $breached = $false
         $mode = Get-SolverMode $solver
         $alg = Get-SolverAlgorithm $solver
-        $statesFile = "data\CPP\$DatasetKey\lorenz96\MPGOS_states_${mode}_${alg}.txt"
         foreach ($n in $Grid) {
             if (Test-ResumeSkip 'states' 'lorenz96' $solver "$n") {
                 Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
                 continue
             }
-            Invoke-ResumePrune 'states' 'lorenz96' $solver "$n"
             Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
             $Watch = [System.Diagnostics.Stopwatch]::StartNew()
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
@@ -282,7 +259,7 @@ if ($Analysis -eq 'states') {
                 "{0:F3}", $Watch.Elapsed.TotalSeconds)
             # After a breach: keep the build time, NaN the solve.
             if ($breached) {
-                Add-NanRow $statesFile "$n" $BuildS
+                Add-NanRow 'states' 'lorenz96' $solver "$n" $BuildS
                 Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
                 continue
             }
@@ -292,7 +269,7 @@ if ($Analysis -eq 'states') {
             } elseif ($LASTEXITCODE -ne 0) {
                 # A failed point is a NaN row with its build time; the grid goes on.
                 Write-Host "FAILED lorenz96 states=$n $mode ${alg}: Bench.exe exit $LASTEXITCODE"
-                Add-NanRow $statesFile "$n" $BuildS
+                Add-NanRow 'states' 'lorenz96' $solver "$n" $BuildS
             }
         }
     }
@@ -316,16 +293,14 @@ foreach ($problemName in $Problems) {
         $breached = $false
         $mode = Get-SolverMode $solver
         $alg = Get-SolverAlgorithm $solver
-        $timesFile = "data\CPP\$DatasetKey\$problemName\MPGOS_times_${mode}_${alg}.txt"
         foreach ($a in $NValues) {
             if (Test-ResumeSkip 'times' $problemName $solver "$a") {
                 Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
                 continue
             }
-            Invoke-ResumePrune 'times' $problemName $solver "$a"
             # A breached leg's larger sizes are recorded as NaN without running.
             if ($breached) {
-                Add-NanRow $timesFile "$a"
+                Add-NanRow 'times' $problemName $solver "$a"
                 Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
                 continue
             }
@@ -335,7 +310,7 @@ foreach ($problemName in $Problems) {
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
             if ($script:PointBreached) { $breached = $true }
             # A failed point (OOM, launch error) is a NaN row; the sweep goes on.
-            if ($script:PointFailed) { Add-NanRow $timesFile "$a" }
+            if ($script:PointFailed) { Add-NanRow 'times' $problemName $solver "$a" }
         }
     }
 }

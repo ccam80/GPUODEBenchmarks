@@ -1,0 +1,473 @@
+"""The result store: one long-form results.csv per package and machine key, one row per timed point and transfer leg, mirrored by results.jl.
+
+CLI: `results.py record <package> <key> <analysis> <problem> <algorithm> <mode> <setting_kind> <setting> <n> <states> <tier> <transfers> [field=value ...] [samples=a;b;c]`,
+`results.py nan <package> <key> <analysis> <problem> <algorithm> <mode> <N|states> [build_s]`, `results.py status <package> <key> <analysis> <problem> <algorithm> <mode> <n> <states>`,
+`results.py clear <package> <key> [analysis] [algorithm] [problem]`, `results.py import-legacy [data_root] [--remove]`.
+"""
+
+import csv
+import math
+import os
+import statistics
+import sys
+import time
+from datetime import datetime, timezone
+
+from problems import get_problem
+from protocol import N_WP, STATES_N, TIMING_TOL
+
+IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
+            "setting_kind", "setting", "n", "states", "tier", "transfers")
+VALUES = ("min_ms", "median_ms", "p05_ms", "p95_ms", "max_ms", "samples",
+          "errored_pct", "error", "build_s", "recorded_utc")
+FIELDS = IDENTITY + VALUES
+
+# CLI package name -> data directory; the reverse map serves the importer.
+PACKAGE_DIRS = {"cubie": "CUBIE", "cubie_mlir": "CUBIE_MLIR", "julia": "Julia",
+                "cpp": "CPP", "jax": "JAX", "pytorch": "PYTORCH",
+                "myokit_cuda": "MYOKIT_CUDA"}
+DIR_PACKAGES = {d: p for p, d in PACKAGE_DIRS.items()}
+
+# Legacy reduced-file prefixes and each writer's wp timed region, for the importer.
+PREFIXES = {"CUBIE": "Cubie", "CUBIE_MLIR": "Cubie_mlir", "Julia": "Julia",
+            "CPP": "MPGOS", "JAX": "Jax", "PYTORCH": "Torch",
+            "MYOKIT_CUDA": "Myokit_cuda"}
+WP_TRANSFERS = {"cubie": "both", "cubie_mlir": "both", "julia": "d2h",
+                "cpp": "d2h", "jax": "none", "pytorch": "none",
+                "myokit_cuda": "both"}
+
+NAN = float("nan")
+LOCK_TIMEOUT_S = 120.0
+LOCK_STALE_S = 300.0
+
+
+def data_root():
+    """The data directory under the working directory, as bench_key.data_dir resolves it."""
+    return "data"
+
+
+def store_path(package, key, root=None):
+    """data/<PACKAGE_DIR>/<key>/results.csv; the directory is created."""
+    directory = os.path.join(root or data_root(), PACKAGE_DIRS[package], key)
+    os.makedirs(directory, exist_ok=True)
+    return os.path.join(directory, "results.csv")
+
+
+def floor_enabled():
+    return os.environ.get("BENCH_FLOOR", "") not in ("", "0")
+
+
+def _float(text):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return NAN
+
+
+def _fmt(value):
+    if isinstance(value, float):
+        return "nan" if math.isnan(value) else "{0:.10g}".format(value)
+    return str(value)
+
+
+def setting_matches(a, b):
+    """Two settings name the same point within a relative 1e-8."""
+    a, b = _float(a), _float(b)
+    if math.isnan(a) and math.isnan(b):
+        return True
+    return math.isclose(a, b, rel_tol=1e-8, abs_tol=0.0)
+
+
+def same_point(row, ident):
+    """True when a row carries the identity columns of ident."""
+    for field in IDENTITY:
+        if field not in ident:
+            continue
+        if field == "setting":
+            if not setting_matches(row[field], ident[field]):
+                return False
+        elif str(row[field]) != str(ident[field]):
+            return False
+    return True
+
+
+class _Lock:
+    """A mkdir lock beside the store; a stale directory is taken over."""
+
+    def __init__(self, path):
+        self.path = path + ".lock"
+
+    def __enter__(self):
+        deadline = time.monotonic() + LOCK_TIMEOUT_S
+        while True:
+            try:
+                os.mkdir(self.path)
+                return self
+            except FileExistsError:
+                try:
+                    age = time.time() - os.stat(self.path).st_mtime
+                except OSError:
+                    age = 0.0
+                if age > LOCK_STALE_S:
+                    try:
+                        os.rmdir(self.path)
+                    except OSError:
+                        pass
+                    continue
+                if time.monotonic() > deadline:
+                    raise TimeoutError("result store locked: " + self.path)
+                time.sleep(0.05)
+
+    def __exit__(self, *_):
+        try:
+            os.rmdir(self.path)
+        except OSError:
+            pass
+
+
+def load(path):
+    """Every row of a store as dicts of strings; a missing file is empty."""
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows = [row for row in reader if row.get("package")]
+    return rows
+
+
+def _save(path, rows):
+    scratch = path + ".partial"
+    with open(scratch, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n",
+                                extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in FIELDS})
+    # Windows refuses the swap while a reader still holds the old file.
+    for attempt in range(20):
+        try:
+            os.replace(scratch, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
+
+
+def _lower_wins(recorded, new):
+    """True when the new row's time beats the recorded one; NaN loses."""
+    old, fresh = _float(recorded.get("min_ms")), _float(new.get("min_ms"))
+    if math.isnan(old):
+        return True
+    if math.isnan(fresh):
+        return False
+    return fresh < old
+
+
+def make_row(package, key, analysis, problem, algorithm, mode, setting_kind,
+             setting, n, states, tier="default", transfers="both",
+             min_ms=NAN, samples=None, errored_pct=NAN, error=NAN,
+             build_s=NAN):
+    """One store row; `samples` (attempts in ms, warm-up first) fills the spread columns."""
+    timed = list(samples[1:]) if samples else []
+    stats = {"median_ms": NAN, "p05_ms": NAN, "p95_ms": NAN, "max_ms": NAN,
+             "samples": len(timed)}
+    if timed:
+        ordered = sorted(timed)
+        stats.update(median_ms=statistics.median(ordered),
+                     p05_ms=_percentile(ordered, 5.0),
+                     p95_ms=_percentile(ordered, 95.0), max_ms=ordered[-1])
+    return {"package": package, "key": key, "analysis": analysis,
+            "problem": problem, "algorithm": algorithm, "mode": mode,
+            "setting_kind": setting_kind, "setting": _fmt(float(setting)),
+            "n": str(int(n)), "states": str(int(states)), "tier": tier,
+            "transfers": transfers, "min_ms": _fmt(float(min_ms)),
+            "median_ms": _fmt(stats["median_ms"]),
+            "p05_ms": _fmt(stats["p05_ms"]), "p95_ms": _fmt(stats["p95_ms"]),
+            "max_ms": _fmt(stats["max_ms"]), "samples": str(stats["samples"]),
+            "errored_pct": _fmt(float(errored_pct)),
+            "error": _fmt(float(error)), "build_s": _fmt(float(build_s)),
+            "recorded_utc": datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ")}
+
+
+def _percentile(ordered, pct):
+    """Linear-interpolation percentile, as numpy's default."""
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * pct / 100.0
+    low = int(math.floor(position))
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def record(path, row, floor=None):
+    """Replace the row with this identity, or under --floor keep whichever has the lower time."""
+    floor = floor_enabled() if floor is None else floor
+    with _Lock(path):
+        rows = load(path)
+        replaced = False
+        for index, existing in enumerate(rows):
+            if same_point(existing, row):
+                if not floor or _lower_wins(existing, row):
+                    rows[index] = row
+                replaced = True
+                break
+        if not replaced:
+            rows.append(row)
+        _save(path, rows)
+
+
+def rows_for(path, **ident):
+    """Rows matching the given identity columns."""
+    return [row for row in load(path) if same_point(row, ident)]
+
+
+def point_status(path, **ident):
+    """'absent', 'nan' or 'finite' for the rows matching ident."""
+    matched = rows_for(path, **ident)
+    if not matched:
+        return "absent"
+    if any(math.isfinite(_float(row["min_ms"])) for row in matched):
+        return "finite"
+    return "nan"
+
+
+def clear(path, **ident):
+    """Drop every row matching ident; returns the count dropped."""
+    with _Lock(path):
+        rows = load(path)
+        kept = [row for row in rows if not same_point(row, ident)]
+        if len(kept) != len(rows):
+            _save(path, kept)
+        return len(rows) - len(kept)
+
+
+def timing_setting(problem, mode):
+    """(setting_kind, setting) of the N and states sweeps for a problem row."""
+    if mode == "fixed":
+        return "dt", problem.timing_dt
+    return "tol", TIMING_TOL
+
+
+class Leg:
+    """One (package, key, analysis, problem, algorithm, mode) writer with the resume checks."""
+
+    def __init__(self, package, key, analysis, problem, algorithm, mode,
+                 root=None):
+        self.package, self.key, self.analysis = package, key, analysis
+        self.problem = (problem if isinstance(problem, dict)
+                        else get_problem(problem))
+        self.algorithm, self.mode = algorithm, mode
+        self.path = store_path(package, key, root)
+        self.setting_kind, self.setting = timing_setting(self.problem, mode)
+
+    def _ident(self, n, states, setting=None):
+        return dict(package=self.package, key=self.key,
+                    analysis=self.analysis, problem=self.problem.name,
+                    algorithm=self.algorithm, mode=self.mode,
+                    setting_kind=self.setting_kind,
+                    setting=_fmt(float(self.setting if setting is None
+                                       else setting)),
+                    n=str(int(n)), states=str(int(states)))
+
+    def status(self, n, states=None, setting=None):
+        return point_status(self.path, **self._ident(
+            n, self.problem["states"] if states is None else states,
+            setting))
+
+    def record(self, n, transfers, states=None, setting=None, tier="default",
+               **values):
+        states = self.problem["states"] if states is None else states
+        row = make_row(self.package, self.key, self.analysis,
+                       self.problem.name, self.algorithm, self.mode,
+                       self.setting_kind,
+                       self.setting if setting is None else setting, n,
+                       states, tier=tier, transfers=transfers, **values)
+        record(self.path, row)
+
+    def record_times(self, n, t_both, t_none, errored_pct, samples_both=None,
+                     samples_none=None, build_s=NAN, states=None):
+        """The two transfer legs of one N or states point."""
+        self.record(n, "both", states=states, min_ms=t_both,
+                    samples=samples_both, errored_pct=errored_pct,
+                    build_s=build_s)
+        self.record(n, "none", states=states, min_ms=t_none,
+                    samples=samples_none, errored_pct=errored_pct,
+                    build_s=build_s)
+
+    def record_wp(self, setting, t_ms, error, errored_pct, transfers="both",
+                  samples=None):
+        self.record(N_WP, transfers, setting=setting, min_ms=t_ms,
+                    error=error, errored_pct=errored_pct, samples=samples)
+
+    def nan_times(self, ns):
+        for n in ns:
+            self.record_times(n, NAN, NAN, 100.0)
+
+    def nan_states(self, sizes, build_s=NAN):
+        for nstates in sizes:
+            self.record_times(STATES_N, NAN, NAN, 100.0, build_s=build_s,
+                              states=nstates)
+
+    def nan_wp(self, settings, transfers="both"):
+        for setting in settings:
+            self.record_wp(setting, NAN, NAN, 100.0, transfers=transfers)
+
+
+# ---------------------------------------------------------------- importer
+
+def _legacy_stats(samples_path, analysis, transfers, n, states, setting):
+    """Attempts of the last series for one point in a legacy samples log."""
+    if not os.path.isfile(samples_path):
+        return None
+    series = []
+    with open(samples_path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            if (row["transfers"] != transfers or row["analysis"] != analysis
+                    or _float(row["n"]) != n or _float(row["states"]) != states
+                    or not setting_matches(row["setting"], setting)):
+                continue
+            if row["repeat"] == "0":
+                series.append([])
+            if series:
+                series[-1].append(_float(row["ms"]))
+    return series[-1] if series else None
+
+
+def _legacy_rows(package_dir, key, problem_dir, name):
+    """Store rows for one legacy reduced file."""
+    prefix = PREFIXES[package_dir]
+    stem = name[len(prefix) + 1:-4]
+    analysis, mode, algorithm = stem.split("_", 2)
+    package = DIR_PACKAGES[package_dir]
+    problem = get_problem(os.path.basename(problem_dir))
+    samples_path = os.path.join(problem_dir, "{0}_samples_{1}_{2}_{3}.csv"
+                                .format(prefix, analysis, mode, algorithm))
+    rows = []
+    with open(os.path.join(problem_dir, name)) as handle:
+        lines = [line.split() for line in handle if line.split()]
+    for fields in lines:
+        values = [_float(v) for v in fields]
+        if analysis == "wp":
+            setting, t_ms, err = values[0], values[1], values[2]
+            pct = values[3] if len(values) > 3 else NAN
+            kind = "dt" if mode == "fixed" else "tol"
+            transfers = WP_TRANSFERS[package]
+            samples = _legacy_stats(samples_path, "wp", transfers, N_WP,
+                                    problem["states"], setting)
+            rows.append(make_row(package, key, "wp", problem.name, algorithm,
+                                 mode, kind, setting, N_WP, problem["states"],
+                                 transfers=transfers, min_ms=t_ms,
+                                 samples=samples, errored_pct=pct, error=err))
+            continue
+        kind, setting = timing_setting(problem, mode)
+        if analysis == "states":
+            states, n = int(values[0]), STATES_N
+            t_both, t_none = values[1], values[2]
+            build_s = values[3] if len(values) > 3 else NAN
+            pct = values[4] if len(values) > 4 else NAN
+        else:
+            n, states = int(values[0]), problem["states"]
+            t_both, t_none = values[1], values[2]
+            build_s = NAN
+            pct = values[3] if len(values) > 3 else NAN
+        for transfers, t_ms in (("both", t_both), ("none", t_none)):
+            samples = _legacy_stats(samples_path, analysis, transfers, n,
+                                    states, NAN)
+            rows.append(make_row(package, key, analysis, problem.name,
+                                 algorithm, mode, kind, setting, n, states,
+                                 transfers=transfers, min_ms=t_ms,
+                                 samples=samples, errored_pct=pct,
+                                 build_s=build_s))
+    return rows
+
+
+def import_legacy(root=None, remove=False):
+    """Convert every legacy reduced file under data/ into the stores; returns the files converted."""
+    root = root or data_root()
+    converted = []
+    for package_dir, prefix in PREFIXES.items():
+        package_root = os.path.join(root, package_dir)
+        if not os.path.isdir(package_root):
+            continue
+        for key in sorted(os.listdir(package_root)):
+            key_dir = os.path.join(package_root, key)
+            if not os.path.isdir(key_dir):
+                continue
+            path = store_path(DIR_PACKAGES[package_dir], key, root)
+            rows = load(path)
+            for problem in sorted(os.listdir(key_dir)):
+                problem_dir = os.path.join(key_dir, problem)
+                if not os.path.isdir(problem_dir):
+                    continue
+                for name in sorted(os.listdir(problem_dir)):
+                    if not (name.startswith(prefix + "_")
+                            and name.endswith(".txt")
+                            and "_samples_" not in name):
+                        continue
+                    for row in _legacy_rows(package_dir, key, problem_dir,
+                                            name):
+                        rows = [r for r in rows if not same_point(r, row)]
+                        rows.append(row)
+                    converted.append(os.path.join(problem_dir, name))
+                    if remove:
+                        os.remove(os.path.join(problem_dir, name))
+            if rows:
+                _save(path, rows)
+    return converted
+
+
+def _cli(argv):
+    if len(argv) >= 13 and argv[0] == "record":
+        (package, key, analysis, problem, algorithm, mode, kind, setting, n,
+         states, tier, transfers) = argv[1:13]
+        values = {}
+        for item in argv[13:]:
+            name, _, value = item.partition("=")
+            if name == "samples":
+                values[name] = [_float(v) for v in value.split(";") if v]
+            else:
+                values[name] = _float(value)
+        row = make_row(package, key, analysis, problem, algorithm, mode, kind,
+                       _float(setting), int(n), int(states), tier=tier,
+                       transfers=transfers, **values)
+        record(store_path(package, key), row)
+        return 0
+    if len(argv) in (8, 9) and argv[0] == "nan":
+        package, key, analysis, problem, algorithm, mode, value = argv[1:8]
+        build_s = _float(argv[8]) if len(argv) == 9 else NAN
+        leg = Leg(package, key, analysis, problem, algorithm, mode)
+        if analysis == "states":
+            leg.nan_states([int(value)], build_s=build_s)
+        else:
+            leg.nan_times([int(value)])
+        return 0
+    if len(argv) == 9 and argv[0] == "status":
+        package, key, analysis, problem, algorithm, mode, n, states = argv[1:]
+        print(point_status(store_path(package, key), package=package, key=key,
+                           analysis=analysis, problem=problem,
+                           algorithm=algorithm, mode=mode, n=n,
+                           states=states))
+        return 0
+    if len(argv) >= 3 and argv[0] == "clear":
+        package, key = argv[1], argv[2]
+        ident = {}
+        for name, value in zip(("analysis", "algorithm", "problem"), argv[3:]):
+            if value and value != "all":
+                ident[name] = value
+        print(clear(store_path(package, key), package=package, key=key,
+                    **ident))
+        return 0
+    if argv and argv[0] == "import-legacy":
+        remove = "--remove" in argv
+        root = next((a for a in argv[1:] if not a.startswith("--")), None)
+        for path in import_legacy(root, remove=remove):
+            print(path)
+        return 0
+    print(__doc__)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(_cli(sys.argv[1:]))

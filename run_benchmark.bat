@@ -197,24 +197,12 @@ set benchmark_exit=0
 for %%g in (!ALG_LIST!) do (
     echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %%g, %PROBLEM%^)...
 
-    REM Clear this machine's appended files for the analysis, algorithm and problems being run.
-    if "%%g"=="all" (
-        set "ALG_GLOB=*"
-    ) else (
-        set "ALG_GLOB=*_%%g"
-    )
-    if /i "%PROBLEM%"=="all" (
-        set "PROBLEM_DIRS=*"
-    ) else (
-        set "PROBLEM_DIRS=!PROBLEM:,= !"
-    )
-    REM A bare * would expand to file names, so all-problems walks the key directory.
-    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" (
-        if /i "%PROBLEM%"=="all" (
-            for /d %%d in ("data\%DATA_DIR%\!DATASET_KEY!\*") do call :clear_dir "%%d" "!ALG_GLOB!"
-        ) else (
-            for %%d in (!PROBLEM_DIRS!) do call :clear_dir "data\%DATA_DIR%\!DATASET_KEY!\%%d" "!ALG_GLOB!"
-        )
+    REM Clear this machine's store rows for the analysis, algorithm and problems being run.
+    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" if /i not "%ANALYSIS%"=="warm" (
+        set "STORE_ANALYSIS=times"
+        if /i "%ANALYSIS%"=="work-precision" set "STORE_ANALYSIS=wp"
+        if /i "%ANALYSIS%"=="states" set "STORE_ANALYSIS=states"
+        for %%d in (!PROBLEM:,= !) do python runner_scripts\results.py clear %PACKAGE% !DATASET_KEY! !STORE_ANALYSIS! %%g %%d >nul
     )
 
     call "%RUNNER%" -a %ANALYSIS% -n "%NMAX%" -g %%g -s "%PROBLEM%"
@@ -222,16 +210,3 @@ for %%g in (!ALG_LIST!) do (
 )
 popd
 endlocal & exit /b %benchmark_exit%
-
-REM Delete one problem directory's files for the analysis being run.
-:clear_dir
-if /i "%ANALYSIS%"=="work-precision" (
-    del /q "%~1\*_wp_%~2.txt" 2>nul
-) else if /i "%ANALYSIS%"=="states" (
-    del /q "%~1\*_states_%~2.txt" 2>nul
-) else if /i "%ANALYSIS%"=="warm" (
-    rem warm deletes nothing
-) else (
-    del /q "%~1\*_times_%~2.txt" 2>nul
-)
-exit /b 0
