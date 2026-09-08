@@ -73,9 +73,9 @@ def supported_for(framework, mode=None):
                  if row.supports(framework, mode))
 
 
-def resolve_algorithms(request, framework):
-    """Resolve "all" or a comma list to the algorithms a framework times."""
-    supported = supported_for(framework)
+def resolve_algorithms(request, framework, wp=False):
+    """Resolve "all" or a comma list to the algorithms a framework times, or with wp the ones its wp sweep runs."""
+    supported = wp_supported_for(framework) if wp else supported_for(framework)
     if request in (None, "", "all"):
         return list(supported)
     names = [name for name in request.split(",") if name]
@@ -94,6 +94,26 @@ def resolve_modes(request):
             raise SystemExit("unknown mode '{0}' (expected one of: all, {1})"
                              .format(name, ", ".join(MODES)))
     return tuple(mode for mode in MODES if mode in names)
+
+
+# The packages whose work-precision sweep also carries the numerical-equivalence set.
+NE_PACKAGES = ("cubie", "cubie_mlir")
+
+
+def ne_member(row, mode):
+    """Whether an algorithm row is in the ne sweep for a mode."""
+    if mode == "fixed":
+        return row.in_ne and row.runs_fixed_ne
+    return row["ne_adaptive"]
+
+
+def wp_supported_for(framework, mode=None):
+    """Algorithm names a framework's wp sweep runs, in the mode if given: its timed set plus, for NE_PACKAGES, the ne set."""
+    modes = MODES if mode is None else (mode,)
+    return tuple(row["algorithm"] for row in load_algorithms()
+                 if any(row.supports(framework, m)
+                        or (framework in NE_PACKAGES and ne_member(row, m))
+                        for m in modes))
 
 
 def _select(rows, request):

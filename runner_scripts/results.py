@@ -13,8 +13,9 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from algorithms import NE_PACKAGES, get_algorithm, ne_member
 from problems import get_problem
-from protocol import N_WP, STATES_N, TIMING_TOL
+from protocol import N_WP, STATES_N, TIMING_TOL, TOLS
 
 IDENTITY = ("package", "key", "analysis", "problem", "algorithm", "mode",
             "setting_kind", "setting", "n", "states", "tier", "transfers")
@@ -253,6 +254,16 @@ def timing_setting(problem, mode):
     return "tol", TIMING_TOL
 
 
+def wp_settings(problem, algorithm, mode, package):
+    """The settings a package's wp leg records: the ne dt grid for its ne members, else the wp grids."""
+    if mode == "adaptive":
+        return list(TOLS)
+    row = problem if isinstance(problem, dict) else get_problem(problem)
+    if package in NE_PACKAGES and ne_member(get_algorithm(algorithm), "fixed"):
+        return row.ne_dts()
+    return row.dts(algorithm)
+
+
 class Leg:
     """One (package, key, analysis, problem, algorithm, mode) writer with the resume checks."""
 
@@ -265,19 +276,23 @@ class Leg:
         self.path = store_path(package, key, root)
         self.setting_kind, self.setting = timing_setting(self.problem, mode)
 
-    def _ident(self, n, states, setting=None):
-        return dict(package=self.package, key=self.key,
-                    analysis=self.analysis, problem=self.problem.name,
-                    algorithm=self.algorithm, mode=self.mode,
-                    setting_kind=self.setting_kind,
-                    setting=_fmt(float(self.setting if setting is None
-                                       else setting)),
-                    n=str(int(n)), states=str(int(states)))
+    def _ident(self, n, states, setting=None, tier=None):
+        ident = dict(package=self.package, key=self.key,
+                     analysis=self.analysis, problem=self.problem.name,
+                     algorithm=self.algorithm, mode=self.mode,
+                     setting_kind=self.setting_kind,
+                     setting=_fmt(float(self.setting if setting is None
+                                        else setting)),
+                     n=str(int(n)), states=str(int(states)))
+        if tier is not None:
+            ident["tier"] = tier
+        return ident
 
-    def status(self, n, states=None, setting=None):
+    def status(self, n, states=None, setting=None, tier=None):
+        """'absent', 'nan' or 'finite' for the point; tier None matches any tier."""
         return point_status(self.path, **self._ident(
             n, self.problem["states"] if states is None else states,
-            setting))
+            setting, tier))
 
     def record(self, n, transfers, states=None, setting=None, tier="default",
                **values):
@@ -300,8 +315,8 @@ class Leg:
                     build_s=build_s)
 
     def record_wp(self, setting, t_ms, error, errored_pct, transfers="both",
-                  samples=None):
-        self.record(N_WP, transfers, setting=setting, min_ms=t_ms,
+                  samples=None, tier="default"):
+        self.record(N_WP, transfers, setting=setting, tier=tier, min_ms=t_ms,
                     error=error, errored_pct=errored_pct, samples=samples)
 
     def nan_times(self, ns):

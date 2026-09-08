@@ -221,6 +221,18 @@ class WpLegTests(EnvCase):
         leg.record_wp(TOLS[0], 1.0, 0.1, 0.0)
         self.assertEqual(leg.status(N_WP, setting=TOLS[0]), "finite")
 
+    def test_a_recorded_default_tier_does_not_cover_the_matched_tier(self):
+        leg = self.wp()
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        os.environ["BENCH_RESUME"] = "1"
+        self.assertTrue(resume.skip_wp_leg(leg, TOLS))
+        self.assertFalse(resume.skip_wp_leg(leg, TOLS, tier="matched"))
+        leg.record_wp(TOLS[0], 2.0, 0.1, 0.0, tier="matched")
+        self.assertEqual(leg.status(N_WP, setting=TOLS[0], tier="matched"), "finite")
+        from results import load
+        self.assertEqual(len(load(leg.path)), len(TOLS) + 1)
+
 
 class CliTests(EnvCase):
     def run_cli(self, argv):

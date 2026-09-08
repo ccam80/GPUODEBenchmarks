@@ -10,9 +10,49 @@ sys.path.insert(0, os.path.dirname(HERE))
 from algorithms import (  # noqa: E402
     FAMILIES, MODES, algorithm_names, get_algorithm, load_algorithms,
     ne_algorithms, overlap_algorithms, resolve_algorithms, resolve_modes,
-    supported_for,
+    supported_for, wp_supported_for,
 )
-from wp_common import N_WP, parse_bench_args  # noqa: E402
+from problems import get_problem  # noqa: E402
+from wp_common import N_WP, parse_bench_args, wp_settings  # noqa: E402
+
+
+class WorkPrecisionMembershipTests(unittest.TestCase):
+    def test_cubie_wp_carries_the_ne_set(self):
+        fixed = wp_supported_for("cubie", "fixed")
+        self.assertIn("classical-rk4", fixed)
+        self.assertIn("backwards_euler", fixed)
+        self.assertNotIn("tsit5", supported_for("cubie", "fixed")[:0] + ("bogacki-shampine-32",))
+        adaptive = wp_supported_for("cubie_mlir", "adaptive")
+        self.assertIn("cash-karp-54", adaptive)
+        self.assertIn("radau_iia_9", adaptive)
+        self.assertNotIn("backwards_euler", adaptive)
+        self.assertEqual(wp_supported_for("julia", "fixed"),
+                         supported_for("julia", "fixed"))
+
+    def test_wp_resolution_and_the_ne_token(self):
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie", wp=True),
+                         ["radau_iia_9", "euler"])
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie"), ["euler"])
+        self.assertEqual(resolve_algorithms("radau_iia_9", "pytorch", wp=True), [])
+        self.assertEqual(set(wp_supported_for("cubie")),
+                         set(wp_supported_for("cubie", "fixed")) | set(wp_supported_for("cubie", "adaptive")))
+        _, analysis, algorithms, _, _ = parse_bench_args(["ne"], "cubie")
+        self.assertEqual(analysis, "ne")
+        self.assertNotIn("euler", algorithms)
+        self.assertIn("radau_iia_9", algorithms)
+        _, _, algorithms, _, _ = parse_bench_args(["wp"], "cubie")
+        self.assertIn("euler", algorithms)
+        self.assertIn("radau_iia_9", algorithms)
+
+    def test_wp_settings_follow_the_membership(self):
+        lorenz = get_problem("lorenz")
+        self.assertEqual(wp_settings(lorenz, "backwards_euler", "fixed", "cubie"),
+                         lorenz.ne_dts())
+        self.assertEqual(wp_settings(lorenz, "euler", "fixed", "cubie"),
+                         lorenz.dts("euler"))
+        self.assertEqual(wp_settings(lorenz, "tsit5", "fixed", "julia"),
+                         lorenz.dts("tsit5"))
+        self.assertEqual(len(wp_settings(lorenz, "tsit5", "adaptive", "cubie")), 7)
 
 
 class RegistryTests(unittest.TestCase):

@@ -14,8 +14,8 @@ import os
 
 from algorithms import MODES, algorithm_names, get_algorithm
 from problems import get_problem, problem_names
-from protocol import N_WP, STATES_N, TOLS
-from results import floor_enabled  # noqa: F401
+from protocol import N_WP, STATES_N
+from results import floor_enabled, wp_settings  # noqa: F401
 
 _CURSOR_CACHE = []          # [] = unparsed, [None] or [dict] once parsed
 
@@ -114,13 +114,13 @@ def skip_point(leg, n, states=None):
     return _status_skips(leg.status(n, states))
 
 
-def skip_wp_leg(leg, settings):
-    """True when every setting of a work-precision results.Leg is covered."""
+def skip_wp_leg(leg, settings, tier="default"):
+    """True when every setting of a work-precision results.Leg is covered in the tier."""
     if cursor_skips(leg.problem.name, leg.algorithm, leg.mode):
         return True
     if not (resume_enabled() or no_overwrite_enabled()):
         return False
-    return all(_status_skips(leg.status(N_WP, setting=setting))
+    return all(_status_skips(leg.status(N_WP, setting=setting, tier=tier))
                for setting in settings)
 
 
@@ -140,8 +140,7 @@ def _cli(argv):
     elif len(argv) == 6 and argv[0] == "leg":
         package, key, problem, algorithm, mode = argv[1:]
         leg = Leg(package, key, "wp", problem, algorithm, mode)
-        settings = (leg.problem.dts(algorithm) if mode == "fixed" else TOLS)
-        skip = skip_wp_leg(leg, settings)
+        skip = skip_wp_leg(leg, wp_settings(leg.problem, algorithm, mode, package))
     else:
         raise SystemExit(usage)
     print("skip" if skip else "run")

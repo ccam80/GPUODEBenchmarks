@@ -15,9 +15,9 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 
 from algorithms import resolve_algorithms, resolve_modes, supported_for  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
-from problems import STATES_PROBLEM, get_problem, resolve_problems  # noqa: E402
-from protocol import STATES_GRID, STATES_N, TOLS  # noqa: E402
-from results import Leg  # noqa: E402
+from problems import STATES_PROBLEM, resolve_problems  # noqa: E402
+from protocol import STATES_GRID, STATES_N  # noqa: E402
+from results import Leg, wp_settings  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
     skip_point,
@@ -187,9 +187,7 @@ def run_wp(argv):
 
     def pending(problem, algorithm, mode):
         leg = _leg("wp", problem, algorithm, mode)
-        settings = (get_problem(problem).dts(algorithm) if mode == "fixed"
-                    else TOLS)
-        return not skip_wp_leg(leg, settings)
+        return not skip_wp_leg(leg, wp_settings(problem, algorithm, mode, "julia"))
 
     legs = _prune_covered(_mode_legs(request, problem_request, modes), pending)
     if not legs:

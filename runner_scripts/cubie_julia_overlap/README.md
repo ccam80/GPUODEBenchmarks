@@ -28,8 +28,8 @@ come from `runner_scripts/protocol.toml`. The CSVs record the analysis
 in a `phase` column, where `work-precision` is written `work_precision`.
 
 The `numerical` phase's cubie side is imported from
-`data/numerical_equivalence/cubie/<dataset-key>/` — run
-`run_numerical_equivalence` first. The DiffEqGPU side solves untimed, one
+`data/numerical_equivalence/<cubie|cubie_mlir>/<dataset-key>/` for the
+`--backend` package — run `bench.py -a numerical -p <package>` first. The DiffEqGPU side solves untimed, one
 pass per point. erk-family rows run no fixed numerical sweep. The `pi`
 comparison tier is skipped where it equals cubie's shipped defaults.
 

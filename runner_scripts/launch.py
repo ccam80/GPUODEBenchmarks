@@ -103,6 +103,11 @@ def _python_commands(package, analysis, nlist, algorithm, problem, mode):
         return [Command("warm", bench("warm:" + csv, algorithm, "--problem", problem), env)]
     if analysis == "states":
         return [Command("states", bench("states", algorithm), env)]
+    if analysis == "numerical":
+        if package not in CUBIE_PACKAGES:
+            return []
+        return [Command("optimize", bench("optimize", algorithm, "--problem", problem), env),
+                Command("ne", bench("ne", algorithm, "--problem", problem), env)]
     if analysis == "work-precision":
         commands = []
         if package in CUBIE_PACKAGES:
@@ -156,6 +161,8 @@ def commands(package, analysis, nlist, nmax, algorithm, problem, mode="all"):
     """The commands one (package, analysis) stage runs."""
     if mode != "all" and mode not in MODES:
         raise ValueError("unknown mode '{0}'".format(mode))
+    if analysis == "numerical" and package not in CUBIE_PACKAGES:
+        return []
     if package == "julia":
         return _julia_commands(analysis, nlist, algorithm, problem, mode)
     if package == "cpp":

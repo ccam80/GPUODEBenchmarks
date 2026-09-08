@@ -6,12 +6,14 @@ import threading
 
 import numpy as np
 
-from algorithms import resolve_algorithms, resolve_modes
+from algorithms import (get_algorithm, ne_member, resolve_algorithms,
+                        resolve_modes)
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
                       REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
+from results import wp_settings  # noqa: F401
 
 
 def run_watchdogged(run, on_breach):
@@ -141,11 +143,12 @@ def ensemble_error(final_states, golden):
 
 
 def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
-                    dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-repeat timing log under data/<package>/<key>/<problem>."""
+                    dataset_key, problem=DEFAULT_PROBLEM, tier="default"):
+    """Path of the per-repeat timing log; a non-default tier gets its own."""
+    suffix = "" if tier == "default" else "_" + tier
     return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_samples_{1}_{2}_{3}.csv".format(
-                            prefix, analysis, mode, algorithm))
+                        "{0}_samples_{1}_{2}_{3}{4}.csv".format(
+                            prefix, analysis, mode, algorithm, suffix))
 
 
 def sample_point(analysis, problem, algorithm, mode, n, states,
@@ -176,13 +179,13 @@ def append_samples(path, point, transfers, samples):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes)."""
+    """Parse <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes); wp and ne resolve against the work-precision membership."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...]|optimize "
+        raise SystemExit("usage: <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize "
                          "[algorithm|all] [--problem <name|all>] "
                          "[--mode <fixed|adaptive|all>]")
-    if argv[0] == "wp":
-        analysis, ns = "wp", [N_WP]
+    if argv[0] in ("wp", "ne"):
+        analysis, ns = argv[0], [N_WP]
     elif argv[0] == "optimize":
         analysis, ns = "optimize", [N_WP]
     elif argv[0] == "states":
@@ -215,6 +218,11 @@ def parse_bench_args(argv, framework):
             mode_request = tok.split("=", 1)[1]
         else:
             request = tok
-    algorithms = resolve_algorithms(request, framework)
+    algorithms = resolve_algorithms(request, framework,
+                                    wp=analysis in ("wp", "ne", "warm", "optimize"))
+    if analysis == "ne":
+        algorithms = [name for name in algorithms
+                      if any(ne_member(get_algorithm(name), mode)
+                             for mode in ("fixed", "adaptive"))]
     problems = resolve_problems(problem_request, framework)
     return ns, analysis, algorithms, problems, resolve_modes(mode_request)

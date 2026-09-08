@@ -504,25 +504,29 @@ class Run:
                                        self.julia(os.path.join("runner_scripts", "numerical_equivalence", "ne_diffeq.jl"),
                                                   "--controller", mode, "--algorithm", algorithm,
                                                   "--problem", problem), critical=False)
+        # The cubie ne finals are the first N_NE rows of the work-precision solves, so the ne sweep is that leg set; its rows replace by identity.
         for cubie_pkg in cubie_pkgs:
             if worst != 0:
                 break
-            worst = self.step("ne: {0} sweeps".format(cubie_pkg), "numerical_equivalence.log", launch.Command(
-                cubie_pkg, [launch.cubie_python(), os.path.join(ROOT, "GPU_ODE_CUBIE", "numerical_equivalence.py"),
-                            "--package", cubie_pkg, "--controller", mode,
-                            "--algorithm", algorithm, "--problem", problem]), critical=False)
+            if "work-precision" in self.plan["analyses"]:
+                self.record("ne:" + cubie_pkg, "SKIPPED", "the work-precision stage ran the ne legs", "-")
+                continue
+            saved_keep = self.args.keep
+            self.args.keep = True
+            try:
+                status = self.package_stage("numerical", cubie_pkg, self.plan["nlist"], algorithm, problem, mode,
+                                            label="ne:" + cubie_pkg, logfile="numerical_equivalence.log")
+            finally:
+                self.args.keep = saved_keep
+            worst = 0 if status in ("OK", "SKIPPED") else 1
         if worst != 0:
             self.record("ne", "FAILED", "-", worst)
             return
         status = self.step("ne: comparison", "numerical_equivalence.log", launch.Command(
             "compare", [launch.cubie_python(), os.path.join(ROOT, "compare_numerical_equivalence.py"),
-                        "--problem", problem], ok=(0, 2)), critical=False)
-        if status == 0:
-            self.record("ne", "OK", "all equivalent", status)
-        elif status == 2:
-            self.record("ne", "MISMATCH", "see plots/<key>/<problem>/numerical_equivalence_*.csv", status)
-        else:
-            self.record("ne", "FAILED", "-", status)
+                        "--problem", problem]), critical=False)
+        self.record("ne", "OK" if status == 0 else "FAILED",
+                    "see plots/<key>/<problem>/numerical_equivalence_*" if status == 0 else "-", status)
 
     def overlap(self, package, cubie_pkgs, nlist, algorithm, problem):
         """The overlap suite once per requested cubie backend; julia alone runs once."""

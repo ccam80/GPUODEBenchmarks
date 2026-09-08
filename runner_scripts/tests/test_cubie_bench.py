@@ -298,6 +298,58 @@ class TestStatesLegIsolation(SweepCase):
                                 for _, on_device in solvers[nstates].calls))
 
 
+class TestWorkPrecisionNe(SweepCase):
+    def setUp(self):
+        super().setUp()
+        import wp_common
+        self.saved_golden = wp_common.load_golden
+        wp_common.load_golden = lambda problem: np.zeros((131072, 3))
+
+    def tearDown(self):
+        import wp_common
+        wp_common.load_golden = self.saved_golden
+        super().tearDown()
+
+    def run_wp(self, algorithms, fixed, adaptive):
+        cubie_bench.adapter.make_solver = (
+            lambda system, problem, algorithm, mode, setting=None, **kw: FakeSolver())
+        opts = dict(self.opts([131072]), algorithms=algorithms, fixed=(),
+                    adaptive=(), wp_fixed=fixed, wp_adaptive=adaptive)
+        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
+        import results
+        return [row for row in results.load(results.store_path("cubie", "test_key"))
+                if row["analysis"] == "wp"]
+
+    def test_an_ne_leg_times_the_ne_grid_and_writes_its_finals(self):
+        from protocol import N_NE
+        from problems import get_problem as problem_row
+        rows = self.run_wp(["backwards_euler"], ("backwards_euler",), ())
+        dts = problem_row("lorenz").ne_dts()
+        self.assertEqual(len(rows), len(dts))
+        self.assertTrue(all(row["tier"] == "default" for row in rows))
+        path = os.path.join("data", "numerical_equivalence", "cubie", "test_key",
+                            "lorenz", "backwards_euler.csv")
+        self.assertTrue(os.path.isfile(path))
+        # The MLIR package writes beside, never over, the numba-cuda files.
+        opts = dict(self.opts([131072]), algorithms=["backwards_euler"], fixed=(),
+                    adaptive=(), wp_fixed=("backwards_euler",), wp_adaptive=(),
+                    framework="cubie_mlir", framework_dir="CUBIE_MLIR",
+                    prefix="Cubie_mlir")
+        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
+        self.assertTrue(os.path.isfile(os.path.join(
+            "data", "numerical_equivalence", "cubie_mlir", "test_key", "lorenz",
+            "backwards_euler.csv")))
+        with open(path) as handle:
+            lines = handle.read().splitlines()
+        self.assertEqual(lines[0], "dt,traj,s1,s2,s3")
+        self.assertEqual(len(lines) - 1, N_NE * len(dts))
+
+    def test_a_timed_only_leg_writes_no_ne_file(self):
+        rows = self.run_wp(["euler"], ("euler",), ())
+        self.assertEqual(len(rows), 10)
+        self.assertFalse(os.path.exists(os.path.join("data", "numerical_equivalence")))
+
+
 class TestWorkerDeviceLeg(unittest.TestCase):
     def test_samples_reuse_the_resident_inputs(self):
         solver = FakeSolver()

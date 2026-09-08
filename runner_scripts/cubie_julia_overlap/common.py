@@ -14,8 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from algorithms import overlap_algorithms  # noqa: E402 - path bootstrap above
-from ne_common import (  # noqa: E402 - path bootstrap above
-    load_golden_ne, ne_sweep, read_ne_csv, read_ne_adaptive_csv,
+from ne_common import (  # noqa: E402, F401 - path bootstrap above
+    cubie_ne_adaptive_file, cubie_ne_file, load_golden_ne, ne_sweep,
+    read_ne_csv, read_ne_adaptive_csv,
 )
 from protocol import (  # noqa: E402 - path bootstrap above
     N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP, TIMING_DT_K, TOLS, WP_K,
@@ -25,9 +26,6 @@ from wp_common import golden_path as golden_wp  # noqa: E402, F401 - path bootst
 
 # dt grids as duration fractions; the workers scale by the duration.
 NE_DTS = fixed_dts(1.0, NE_K)
-
-CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
-
 
 def golden_ne_states(problem):
     """The (N_NE, states) Float64 golden of the ne ensemble."""
