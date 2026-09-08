@@ -132,6 +132,20 @@ class UpsertTests(StoreCase):
         self.store.record(identity(n=32, min_ms=NAN))
         self.assertEqual(self.store.status(identity(n=32)), "nan")
 
+    def test_record_batch_replaces_by_identity_across_legs_in_one_pass(self):
+        self.store.record(identity(min_ms=1.5))
+        count = self.store.record_batch([
+            identity(min_ms=2.5), identity(n=32, min_ms=4.0),
+            identity(problem="pollu", states=20, min_ms=9.0),
+            identity(n=32, min_ms=3.0)])
+        self.assertEqual(count, 4)
+        rows = {r["n"]: r["min_ms"] for r in pq.read_table(self.leg_file()).to_pylist()}
+        self.assertEqual(rows, {8: 2.5, 32: 3.0})
+        self.assertEqual(self.store.status(identity(problem="pollu", states=20)), "finite")
+        self.store.record_batch([identity(min_ms=NAN, reason="error: x")], floor=True)
+        self.assertEqual(pq.read_table(self.leg_file()).to_pylist()[0]["min_ms"], 2.5)
+        self.assertFalse(os.path.exists(self.leg_file() + ".lock"))
+
     def test_status_matches_the_identity_columns_given(self):
         self.assertEqual(self.store.status(identity()), "absent")
         self.store.record(identity(min_ms=NAN, reason="error: boom"))

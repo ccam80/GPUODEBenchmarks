@@ -294,6 +294,28 @@ class Store:
             self._write_leg(path, rows)
         return standing
 
+    def record_batch(self, rows, floor=False):
+        """Record many rows with one lock and one rewrite per leg; the replace and floor rules are those of record(). Returns the count recorded."""
+        by_leg = {}
+        for row in rows:
+            row = make_row(**row)
+            by_leg.setdefault(self._leg_of(row), []).append(row)
+        recorded = 0
+        for path, batch in by_leg.items():
+            with _Lock(path):
+                standing = self._read_leg(path)
+                for row in batch:
+                    for index, existing in enumerate(standing):
+                        if same_identity(existing, row):
+                            if not (floor and not _lower_finite_wins(existing, row)):
+                                standing[index] = row
+                            break
+                    else:
+                        standing.append(row)
+                    recorded += 1
+                self._write_leg(path, standing)
+        return recorded
+
     def record_finals(self, identity, finals, converged):
         """Write the finals file of a trial; returns its path relative to the package dir."""
         ident = {f: identity[f] for f in FINALS_IDENTITY if f in identity}
