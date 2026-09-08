@@ -22,7 +22,6 @@ STATES_N = int(_ensemble["n_states"])
 N_MIN = int(_ensemble["n_min"])
 N_STEP = int(_ensemble["n_step"])
 NMAX_DEFAULT = int(_ensemble["nmax_default"])
-NE_LEGACY_GRID = tuple(str(name) for name in _ensemble.get("ne_legacy_grid", []))
 
 # BENCH_STATES_GRID (comma list) overrides the states sweep sizes.
 _STATES_ENV = os.environ.get("BENCH_STATES_GRID", "")

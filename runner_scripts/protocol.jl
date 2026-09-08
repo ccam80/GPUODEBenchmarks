@@ -11,7 +11,6 @@ if !isdefined(@__MODULE__, :PROTOCOL)
     const N_MIN = Int(PROTOCOL["ensemble"]["n_min"])
     const N_STEP = Int(PROTOCOL["ensemble"]["n_step"])
     const NMAX_DEFAULT = Int(PROTOCOL["ensemble"]["nmax_default"])
-    const NE_LEGACY_GRID = Tuple(String.(get(PROTOCOL["ensemble"], "ne_legacy_grid", String[])))
 
     const TIMING_DT_K = Int(PROTOCOL["fixed"]["timing_k"])
     const WP_K = Tuple(Int.(PROTOCOL["fixed"]["wp_k"]))

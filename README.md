@@ -1072,9 +1072,7 @@ ensemble, the first `ensemble.n_ne` (1024) points of its work-precision sweep
 scored on the same rows of the wp golden, fixed-step at every dyadic
 `duration * 2^-k` for `k` in `fixed.ne_k` (1 to 13) — **both stacks in
 Float32** — and the final states are compared against the Float64 golden
-reference and against each other. The `ensemble.ne_legacy_grid` problems
-(`ring_modulator_index2`, `nand_gate`) keep their own `golden_ne_<problem>_1024.csv`
-grid until their Julia sweeps are rerun. erk-family algorithms run only the
+reference and against each other. erk-family algorithms run only the
 adaptive sweep. The small-dt end of the grid resolves the fp-precision tail.
 
 The Julia ne outputs are keyed by machine like every other result; a keyed
@@ -1110,7 +1108,7 @@ dominate the wall time (one kernel compile per algorithm/setting point,
 committed; the setup script builds the Julia environment, including the
 OrdinaryDiffEq solver sub-libraries this suite needs).
 
-The ne ensemble is the first 1024 points of the wp sweep and golden; `ne_legacy_grid` problems in `runner_scripts/protocol.toml` use `golden_ne_<problem>_1024.csv` instead. The steps, each runnable by hand with the optional `fixed|adaptive|all` mode:
+The ne ensemble is the first 1024 points of the wp sweep and golden for every problem. The steps, each runnable by hand with the optional `fixed|adaptive|all` mode:
 
 ```bash
 julia -t auto --project=. runner_scripts/golden/generate_golden.jl
