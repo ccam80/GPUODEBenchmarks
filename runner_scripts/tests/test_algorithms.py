@@ -8,10 +8,51 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from algorithms import (  # noqa: E402
-    algorithm_names, get_algorithm, load_algorithms, resolve_algorithms,
-    supported_for,
+    FAMILIES, MODES, algorithm_names, get_algorithm, load_algorithms,
+    ne_algorithms, overlap_algorithms, resolve_algorithms, resolve_modes,
+    supported_for, wp_supported_for,
 )
-from wp_common import N_WP, parse_bench_args  # noqa: E402
+from problems import get_problem  # noqa: E402
+from wp_common import N_WP, parse_bench_args, wp_settings  # noqa: E402
+
+
+class WorkPrecisionMembershipTests(unittest.TestCase):
+    def test_cubie_wp_carries_the_ne_set(self):
+        fixed = wp_supported_for("cubie", "fixed")
+        self.assertIn("classical-rk4", fixed)
+        self.assertIn("backwards_euler", fixed)
+        self.assertNotIn("tsit5", supported_for("cubie", "fixed")[:0] + ("bogacki-shampine-32",))
+        adaptive = wp_supported_for("cubie_mlir", "adaptive")
+        self.assertIn("cash-karp-54", adaptive)
+        self.assertIn("radau_iia_9", adaptive)
+        self.assertNotIn("backwards_euler", adaptive)
+        self.assertEqual(wp_supported_for("julia", "fixed"),
+                         supported_for("julia", "fixed"))
+
+    def test_wp_resolution_and_the_ne_token(self):
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie", wp=True),
+                         ["radau_iia_9", "euler"])
+        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie"), ["euler"])
+        self.assertEqual(resolve_algorithms("radau_iia_9", "pytorch", wp=True), [])
+        self.assertEqual(set(wp_supported_for("cubie")),
+                         set(wp_supported_for("cubie", "fixed")) | set(wp_supported_for("cubie", "adaptive")))
+        _, analysis, algorithms, _, _ = parse_bench_args(["ne"], "cubie")
+        self.assertEqual(analysis, "ne")
+        self.assertNotIn("euler", algorithms)
+        self.assertIn("radau_iia_9", algorithms)
+        _, _, algorithms, _, _ = parse_bench_args(["wp"], "cubie")
+        self.assertIn("euler", algorithms)
+        self.assertIn("radau_iia_9", algorithms)
+
+    def test_wp_settings_follow_the_membership(self):
+        lorenz = get_problem("lorenz")
+        self.assertEqual(wp_settings(lorenz, "backwards_euler", "fixed", "cubie"),
+                         lorenz.ne_dts())
+        self.assertEqual(wp_settings(lorenz, "euler", "fixed", "cubie"),
+                         lorenz.dts("euler"))
+        self.assertEqual(wp_settings(lorenz, "tsit5", "fixed", "julia"),
+                         lorenz.dts("tsit5"))
+        self.assertEqual(len(wp_settings(lorenz, "tsit5", "adaptive", "cubie")), 7)
 
 
 class RegistryTests(unittest.TestCase):
@@ -19,9 +60,26 @@ class RegistryTests(unittest.TestCase):
         for row in load_algorithms():
             self.assertIsInstance(row["fixed"], tuple)
             self.assertIsInstance(row["adaptive"], tuple)
-            self.assertIn(row["family"], ("explicit", "implicit"))
-            self.assertTrue(row["fixed"] or row["adaptive"],
-                            "{0} runs in no mode".format(row["algorithm"]))
+            self.assertIn(row["family"], FAMILIES)
+            self.assertIsInstance(row["order"], int)
+            self.assertTrue(row["fixed"] or row["adaptive"] or row["ne"],
+                            "{0} is in no suite".format(row["algorithm"]))
+
+    def test_suite_memberships(self):
+        ne = [row["algorithm"] for row in ne_algorithms()]
+        self.assertEqual(len(ne), 21)
+        for row in ne_algorithms():
+            self.assertTrue(row["julia_cpu"], row["algorithm"])
+        self.assertEqual([row["algorithm"] for row in overlap_algorithms()],
+                         ["tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7",
+                          "kvaerno5"])
+        self.assertEqual([row["algorithm"] for row in ne_algorithms("tsit5,vern7")],
+                         ["tsit5", "vern7"])
+        with self.assertRaises(SystemExit):
+            ne_algorithms("nosuchalgorithm")
+        for row in load_algorithms():
+            if row["ne_adaptive"]:
+                self.assertTrue(row["ne"], row["algorithm"])
 
     def test_unknown_algorithm_exits(self):
         with self.assertRaises(SystemExit):
@@ -38,9 +96,9 @@ class RegistryTests(unittest.TestCase):
             union |= set(supported_for(framework, "adaptive"))
             self.assertEqual(union, set(supported_for(framework)))
 
-    def test_the_implicit_set_reaches_cubie_and_julia(self):
+    def test_the_timed_implicit_set_reaches_cubie(self):
         implicit = [row["algorithm"] for row in load_algorithms()
-                    if row["family"] == "implicit"]
+                    if row["family"] != "erk" and (row["fixed"] or row["adaptive"])]
         self.assertTrue(implicit)
         for name in implicit:
             self.assertIn(name, supported_for("cubie"))
@@ -56,21 +114,31 @@ class RegistryTests(unittest.TestCase):
 
 
 class ParseTests(unittest.TestCase):
-    def test_bench_args_resolve_both_axes(self):
-        ns, analysis, algorithms, problems = parse_bench_args(
+    def test_bench_args_resolve_every_axis(self):
+        ns, analysis, algorithms, problems, modes = parse_bench_args(
             ["wp", "kvaerno3", "--problem", "lorenz"], "cubie")
         self.assertEqual([N_WP], ns)
         self.assertEqual("wp", analysis)
         self.assertEqual(["kvaerno3"], algorithms)
         self.assertEqual(["lorenz"], [p.name for p in problems])
+        self.assertEqual(MODES, modes)
+
+    def test_mode_narrows_and_rejects_unknown_names(self):
+        self.assertEqual(parse_bench_args(["wp", "--mode", "adaptive"], "cubie")[4], ("adaptive",))
+        self.assertEqual(parse_bench_args(["wp", "--mode=fixed,adaptive"], "cubie")[4], MODES)
+        self.assertEqual(resolve_modes("adaptive,fixed"), MODES)
+        with self.assertRaises(SystemExit):
+            parse_bench_args(["wp", "--mode", "sideways"], "cubie")
+        with self.assertRaises(SystemExit):
+            parse_bench_args(["wp", "--mode"], "cubie")
 
     def test_a_timing_count_parses_without_wp(self):
-        ns, analysis, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
         self.assertEqual([1024], ns)
         self.assertEqual("times", analysis)
 
     def test_an_algorithm_the_framework_lacks_yields_an_empty_list(self):
-        _, _, algorithms, _ = parse_bench_args(
+        _, _, algorithms, _, _ = parse_bench_args(
             ["1024", "radau_iia_5"], "pytorch")
         self.assertEqual([], algorithms)
 

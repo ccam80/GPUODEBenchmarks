@@ -18,26 +18,27 @@ the rest:
 
 - `-a, --analysis` selects the analysis: `performance`, `numerical`, `work-precision`, `all`.
 - `-p, --package` selects the package: `cubie`, `julia`, `all`.
+- `--backend` names the cubie package the worker runs as, `cubie` (numba-cuda, default) or `cubie_mlir`; the worker shares that package's kernel cache and `optimize.csv` rows.
 - `-n, --nmax` is a sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.
 - `--from-n` restarts the performance analysis at that N; lower-N rows stay.
-- `--algorithm` runs one row of `algorithms.csv`; other rows stay.
+- `--algorithm` runs one overlap row of `runner_scripts/algorithms.csv`; other rows stay.
 
-`manifest.json` records the commands of the last run. Protocol settings live in
-`common.py` (numerical grids and adaptive pins shared with the NE suite's
-`ne_common.py`), mirrored in `julia_worker.jl`. The CSVs record the analysis
+`manifest.json` records the commands of the last run. Grids, pins and repeats
+come from `runner_scripts/protocol.toml`. The CSVs record the analysis
 in a `phase` column, where `work-precision` is written `work_precision`.
 
 The `numerical` phase's cubie side is imported from
-`data/numerical_equivalence/cubie/<dataset-key>/` — run
-`run_numerical_equivalence` first. The DiffEqGPU side solves untimed, one
+`data/numerical_equivalence/<cubie|cubie_mlir>/<dataset-key>/` for the
+`--backend` package — run `bench.py -a numerical -p <package>` first. The DiffEqGPU side solves untimed, one
 pass per point. erk-family rows run no fixed numerical sweep. The `pi`
 comparison tier is skipped where it equals cubie's shipped defaults.
 
-The executable overlap table is `algorithms.csv`. The complete eight-method
+The overlap set is every row of `runner_scripts/algorithms.csv` with a
+`julia_gpu` constructor. The complete eight-method
 DiffEqGPU ODE inventory, including the three exclusions, is
 `diffeqgpu_ode_inventory.csv`; `GPUEM` and `GPUSIEA` are SDE-only and outside
-this suite. The Julia worker requires the root Julia project to be
-instantiated already and never runs package setup.
+this suite. The Julia worker solves through `runner_scripts/julia_prob.jl`
+with `GPU_ODE_JuliaKernels` loaded and requires an instantiated root project.
 
 A worker records individual point failures, continues through the remaining
 sweep, then exits nonzero so the launcher marks the run incomplete. Every

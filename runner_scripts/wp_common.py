@@ -1,4 +1,4 @@
-"""Work-precision sweep helpers: setting, time and error rows under data/<package>/<key>/<problem>/; constants come from protocol.toml."""
+"""Timing, watchdog, golden-reference and CLI helpers shared by the Python bench scripts; constants come from protocol.toml."""
 
 import os
 import sys
@@ -6,12 +6,13 @@ import threading
 
 import numpy as np
 
-from algorithms import resolve_algorithms
-from bench_key import data_dir
-from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
+from algorithms import (get_algorithm, ne_member, resolve_algorithms,
+                        resolve_modes)
+from problems import DEFAULT_PROBLEM, as_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
                       REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
+from results import wp_settings  # noqa: F401
 
 
 def run_watchdogged(run, on_breach):
@@ -56,11 +57,6 @@ def errored_pct(finals):
     return 100.0 * float(bad.sum()) / float(bad.size)
 
 
-# Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
-SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
-                 "setting_kind", "setting", "n", "states", "repeat", "ms")
-
-
 def repeat_bounds(first_s, cap):
     """(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."""
     for limit, floor, ceiling in REPEAT_SCHEDULE:
@@ -78,13 +74,15 @@ def repeats_done(timed_s, floor, ceiling):
     return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
 
 
-def timed_min_ms(run, repeats, on_breach=None):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged."""
+def timed_min_ms(run, repeats, on_breach=None, setup=None):
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged. setup() runs untimed before every attempt after the first."""
     import timeit
     samples = []
     timed = []
     floor = ceiling = None
     while True:
+        if setup is not None and samples:
+            setup()
         elapsed = timeit.default_timer()
         result = (run() if on_breach is None
                   else run_watchdogged(run, on_breach))
@@ -101,26 +99,16 @@ def timed_min_ms(run, repeats, on_breach=None):
             return min(timed) * 1000.0, result, samples
 
 
-def _row(problem):
-    """Accept a problem row or a problem name."""
-    return problem if isinstance(problem, dict) else get_problem(problem)
-
-
-def dts_for(algorithm, problem=DEFAULT_PROBLEM):
-    """The fixed-step dt grid appropriate to the algorithm and problem."""
-    return _row(problem).dts(algorithm)
-
-
 def golden_path(problem=DEFAULT_PROBLEM):
     """Path of the Float64 reference final states for a problem."""
     return os.path.join(
         "data", "numerical",
-        "golden_{0}_{1}.csv".format(_row(problem)["problem"], N_WP))
+        "golden_{0}_{1}.csv".format(as_problem(problem)["problem"], N_WP))
 
 
 def load_golden(problem=DEFAULT_PROBLEM):
     """Load the Float64 golden final states, shape (N_WP, states)."""
-    row = _row(problem)
+    row = as_problem(problem)
     path = golden_path(row)
     if not os.path.isfile(path):
         raise FileNotFoundError(
@@ -140,70 +128,16 @@ def ensemble_error(final_states, golden):
     return float(np.sqrt(np.mean(diff ** 2)))
 
 
-def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
-               problem=DEFAULT_PROBLEM):
-    """Path of the wp output file under data/<package>/<key>/<problem>."""
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_wp_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
-def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
-                  problem=DEFAULT_PROBLEM):
-    """Path of the N-sweep timing file under data/<package>/<key>/<problem>."""
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
-def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the states-sweep timing file under the lorenz96 problem dir."""
-    from problems import STATES_PROBLEM
-    return os.path.join(
-        data_dir(framework_dir, dataset_key, problem=STATES_PROBLEM),
-        "{0}_states_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
-def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
-                    dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-repeat timing log beside its reduced output file."""
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_samples_{1}_{2}_{3}.csv".format(
-                            prefix, analysis, mode, algorithm))
-
-
-def sample_point(analysis, problem, algorithm, mode, n, states,
-                 setting_kind="none", setting=float("nan")):
-    """The identity of one timed point, shared by its timed legs."""
-    return {"analysis": analysis, "problem": problem, "algorithm": algorithm,
-            "mode": mode, "setting_kind": setting_kind, "setting": setting,
-            "n": n, "states": states}
-
-
-def reset_samples(path):
-    """Drop a leg's log, for the sweeps whose reduced file is rewritten."""
-    if os.path.exists(path):
-        os.remove(path)
-
-
-def append_samples(path, point, transfers, samples):
-    """Append one row per attempt of one timed leg, warm-up as repeat 0."""
-    header = not os.path.exists(path)
-    with open(path, "a") as handle:
-        if header:
-            handle.write(",".join(SAMPLE_FIELDS) + "\n")
-        head = "{analysis},{problem},{algorithm},{mode}".format(**point)
-        tail = "{setting_kind},{setting:.10g},{n},{states}".format(**point)
-        for repeat, ms in enumerate(samples):
-            handle.write("{0},{1},{2},{3},{4:.6f}\n".format(
-                head, transfers, tail, repeat, ms))
-
-
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states|warm[:N,N,...] [algorithm|all] [--problem <name|all>] into (ns, analysis, algorithms, problems)."""
+    """Parse <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes); wp and ne resolve against the work-precision membership."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...] "
-                         "[algorithm|all] [--problem <name|all>]")
-    if argv[0] == "wp":
-        analysis, ns = "wp", [N_WP]
+        raise SystemExit("usage: <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize "
+                         "[algorithm|all] [--problem <name|all>] "
+                         "[--mode <fixed|adaptive|all>]")
+    if argv[0] in ("wp", "ne"):
+        analysis, ns = argv[0], [N_WP]
+    elif argv[0] == "optimize":
+        analysis, ns = "optimize", [N_WP]
     elif argv[0] == "states":
         # In states mode ns is the state-count grid; the ensemble is STATES_N.
         analysis, ns = "states", list(STATES_GRID)
@@ -217,17 +151,28 @@ def parse_bench_args(argv, framework):
         ns = sorted(int(tok) for tok in argv[0].split(","))
     request = "all"
     problem_request = "all"
+    mode_request = "all"
     rest = list(argv[1:])
     while rest:
         tok = rest.pop(0)
-        if tok in ("--problem", "-s"):
+        if tok in ("--problem", "-s", "--mode"):
             if not rest:
-                raise SystemExit("--problem requires a value")
-            problem_request = rest.pop(0)
+                raise SystemExit("{0} requires a value".format(tok))
+            if tok == "--mode":
+                mode_request = rest.pop(0)
+            else:
+                problem_request = rest.pop(0)
         elif tok.startswith("--problem="):
             problem_request = tok.split("=", 1)[1]
+        elif tok.startswith("--mode="):
+            mode_request = tok.split("=", 1)[1]
         else:
             request = tok
-    algorithms = resolve_algorithms(request, framework)
+    algorithms = resolve_algorithms(request, framework,
+                                    wp=analysis in ("wp", "ne", "warm", "optimize"))
+    if analysis == "ne":
+        algorithms = [name for name in algorithms
+                      if any(ne_member(get_algorithm(name), mode)
+                             for mode in ("fixed", "adaptive"))]
     problems = resolve_problems(problem_request, framework)
-    return ns, analysis, algorithms, problems
+    return ns, analysis, algorithms, problems, resolve_modes(mode_request)

@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from bench_key import data_dir, group_dir  # noqa: E402
 from problems import (  # noqa: E402
-    DEFAULT_PROBLEM, get_problem, load_problems, problem_names,
+    DEFAULT_PROBLEM, as_problem, get_problem, load_problems, problem_names,
     resolve_problems,
 )
-from wp_common import dts_for, golden_path, times_outfile, wp_outfile  # noqa: E402
+from wp_common import golden_path  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -36,6 +36,13 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             get_problem("nosuchproblem")
 
+    def test_as_problem_takes_a_row_or_a_name(self):
+        row = get_problem(DEFAULT_PROBLEM)
+        self.assertIs(as_problem(row), row)
+        self.assertEqual(as_problem(DEFAULT_PROBLEM), row)
+        with self.assertRaises(SystemExit):
+            as_problem("nosuchproblem")
+
     def test_resolve_filters_by_framework(self):
         row = get_problem(DEFAULT_PROBLEM)
         framework = row["frameworks"][0]
@@ -54,21 +61,21 @@ class RegistryTests(unittest.TestCase):
         self.assertFalse(row.supports("nosuchframework"))
 
     def test_bench_args_accept_an_n_list(self):
-        from wp_common import N_WP, STATES_N, parse_bench_args
-        ns, analysis, _, _ = parse_bench_args(["32,8,128"], "cubie")
+        from wp_common import N_WP, parse_bench_args
+        ns, analysis, _, _, _ = parse_bench_args(["32,8,128"], "cubie")
         self.assertEqual([8, 32, 128], ns)
         self.assertEqual("times", analysis)
-        ns, analysis, _, _ = parse_bench_args(["wp"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["wp"], "cubie")
         self.assertEqual("wp", analysis)
         self.assertEqual([N_WP], ns)
         from wp_common import STATES_GRID
-        ns, analysis, _, _ = parse_bench_args(["states"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["states"], "cubie")
         self.assertEqual("states", analysis)
         self.assertEqual(list(STATES_GRID), ns)
-        ns, analysis, _, _ = parse_bench_args(["warm:32,8"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["warm:32,8"], "cubie")
         self.assertEqual("warm", analysis)
         self.assertEqual([8, 32], ns)
-        ns, analysis, _, _ = parse_bench_args(["warm"], "cubie")
+        ns, analysis, _, _, _ = parse_bench_args(["warm"], "cubie")
         self.assertEqual("warm", analysis)
         self.assertEqual([], ns)
 
@@ -108,8 +115,8 @@ class GridTests(unittest.TestCase):
             self.assertEqual(0, int(ratio) & (int(ratio) - 1))
 
     def test_euler_grid_is_finer(self):
-        self.assertLess(dts_for("euler", self.problem)[-1],
-                        dts_for("tsit5", self.problem)[-1])
+        self.assertLess(self.problem.dts("euler")[-1],
+                        self.problem.dts("tsit5")[-1])
 
     def test_timing_dt_is_a_dyadic_fraction_of_the_duration(self):
         self.assertEqual(self.problem["duration"] * 2.0 ** -10,
@@ -149,13 +156,6 @@ class PathTests(unittest.TestCase):
     def tearDown(self):
         os.chdir(self._cwd)
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def test_output_paths_carry_the_problem(self):
-        for path in (times_outfile("CUBIE", "Cubie", "fixed", "euler", "k",
-                                   self.problem),
-                     wp_outfile("CUBIE", "Cubie", "fixed", "euler", "k",
-                                self.problem)):
-            self.assertIn(os.path.join("k", self.problem.name), path)
 
     def test_golden_path_names_the_problem(self):
         self.assertIn(self.problem.name, golden_path(self.problem))

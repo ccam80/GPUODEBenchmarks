@@ -23,19 +23,20 @@ sys.path.insert(0, os.path.join(
 from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
-from resume import (active as resume_active, floor_enabled, prune_reruns,
-                    skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (REPEAT_CAP, TIMING_TOL, append_samples, errored_pct,
-                       parse_bench_args, reset_samples, sample_point,
-                       samples_outfile, timed_min_ms, times_outfile)
+from protocol import NEWTON_ATOL, NEWTON_RTOL
+from results import Leg
+from resume import skip_point, skip_wp_leg
+from wp_common import (REPEAT_CAP, TIMING_TOL, errored_pct, parse_bench_args,
+                       timed_min_ms)
 
 DATASET_KEY = dataset_key()
 
-FIXED_ALGORITHMS = supported_for("jax", "fixed")
-ADAPTIVE_ALGORITHMS = supported_for("jax", "adaptive")
-
-NS, ANALYSIS, ALGORITHMS, PROBLEMS = parse_bench_args(
+NS, ANALYSIS, ALGORITHMS, PROBLEMS, MODES = parse_bench_args(
     sys.argv[1:], "jax")
+# A mode outside --mode runs nothing.
+FIXED_ALGORITHMS = supported_for("jax", "fixed") if "fixed" in MODES else ()
+ADAPTIVE_ALGORITHMS = (supported_for("jax", "adaptive")
+                       if "adaptive" in MODES else ())
 REPEATS = REPEAT_CAP
 
 # Persistent XLA compilation cache; off in states mode so compiles run cold.
@@ -86,12 +87,8 @@ class ClassicalRK4(AbstractERK):
         return 4
 
 
-# Newton convergence target for the fixed-step implicit stage solve.
-ROOT_FINDER_TOL = 1.0e-2
-
-
-def make_solver(algorithm, fixed_tol=None):
-    """Diffrax solver; a fixed step size leaves nothing for an implicit solver to take its root-finder tolerances from, so fixed_tol supplies them."""
+def make_solver(algorithm, fixed=False):
+    """Diffrax solver; an adaptive implicit solver scales its Newton norm by the step controller's tolerances, a fixed-step one by the protocol's [newton] table."""
     if algorithm == "euler":
         return diffrax.Euler()
     if algorithm == "classical-rk4":
@@ -99,10 +96,10 @@ def make_solver(algorithm, fixed_tol=None):
     if algorithm == "tsit5":
         return diffrax.Tsit5()
     if algorithm == "kvaerno3":
-        if fixed_tol is None:
+        if not fixed:
             return diffrax.Kvaerno3()
         return diffrax.Kvaerno3(root_finder=diffrax.VeryChord(
-            rtol=fixed_tol, atol=fixed_tol, norm=optx.rms_norm))
+            rtol=NEWTON_RTOL, atol=NEWTON_ATOL, norm=optx.rms_norm))
     raise ValueError("no diffrax solver for {0}".format(algorithm))
 
 
@@ -113,14 +110,15 @@ def final_states(sol):
     return finals
 
 
-def best_times_ms(solve, args, label, n, samples_file, point):
-    """(with_transfers_ms, device_only_ms, errored_percent, abandon) over REPEATS timed runs; abandon means every larger N is hopeless too. Each timed leg's attempts go to samples_file."""
+def best_times_ms(solve, args, label, n):
+    """(with_transfers_ms, device_only_ms, errored_percent, abandon, samples_both, samples_none) over REPEATS timed runs; abandon means every larger N is hopeless too."""
+    nan = float("nan")
     try:
         compiled = solve.lower(args).compile()
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
             label, n, type(err).__name__, err))
-        return float("nan"), float("nan"), 100.0, True
+        return nan, nan, 100.0, True, None, None
     usage = compiled.memory_analysis()
     limit = jax.local_devices()[0].memory_stats()["bytes_limit"]
     if usage is not None:
@@ -131,7 +129,7 @@ def best_times_ms(solve, args, label, n, samples_file, point):
         if needed > limit:
             print("ERROR: the {0} solve does not fit in device memory at "
                   "N={1}; no timing recorded.".format(label, n))
-            return float("nan"), float("nan"), 100.0, True
+            return nan, nan, 100.0, True, None, None
 
     host_args = np.asarray(jax.device_get(args))
 
@@ -143,30 +141,29 @@ def best_times_ms(solve, args, label, n, samples_file, point):
         # Args already resident, results left on device; block_until_ready only.
         return jax.block_until_ready(solve(args))
 
+    samples_both = samples_none = None
     try:
-        both, sol, samples = timed_min_ms(with_transfers, REPEATS)
-        append_samples(samples_file, point, "both", samples)
+        both, sol, samples_both = timed_min_ms(with_transfers, REPEATS)
         pct = errored_pct(final_states(sol))
         none = None
         if both is not None:
-            none, _, samples = timed_min_ms(device_only, REPEATS)
-            append_samples(samples_file, point, "none", samples)
+            none, _, samples_none = timed_min_ms(device_only, REPEATS)
         if both is None or none is None:
             print("WATCHDOG {0} at N={1}: run exceeded the cap".format(
                 label, n))
-            return (float("nan") if both is None else both, float("nan"),
-                    pct, True)
+            return (nan if both is None else both, nan, pct, True,
+                    samples_both, samples_none)
     except Exception as err:
         print("FAILED {0} at N={1} ({2}: {3})".format(
             label, n, type(err).__name__, err))
-        return float("nan"), float("nan"), 100.0, False
-    return both, none, pct, False
+        return nan, nan, 100.0, False, samples_both, samples_none
+    return both, none, pct, False, samples_both, samples_none
 
 
 # %%
 # JIT-compiled ensemble solves; fixed uses the default ConstantStepSize.
 def make_fixed(problem, algorithm, dt0=None, max_steps=4096):
-    solver = make_solver(algorithm, fixed_tol=ROOT_FINDER_TOL)
+    solver = make_solver(algorithm, fixed=True)
     vector_field, y0 = build_problem(problem)
     duration = problem["duration"]
     dt0 = problem.timing_dt if dt0 is None else dt0
@@ -208,28 +205,26 @@ def make_adaptive(problem, algorithm, tol=TIMING_TOL,
 
 def run_wp(problem, parameterList):
     """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, N_WP, load_golden, ensemble_error,
-                           timed_min_ms, wp_outfile)
+    from wp_common import TOLS, load_golden, ensemble_error
 
     golden = load_golden(problem)
 
-    def bench(m, setting, outfh, outfile, samples_file, point, remaining):
-        """Write one row; False when a run breached the watchdog."""
+    def bench(m, setting, leg, remaining):
+        """Record one point; False when a run breached the watchdog."""
         breached = False
         pct = 100.0
+        samples = None
 
         def on_breach():
             # The hard exit skips sweep()'s abandon path, so fill the leg here.
-            for rest in remaining:
-                write_wp_row(outfh, outfile, rest, float("nan"), float("nan"),
-                             100.0)
+            leg.nan_wp(remaining)
             print("WATCHDOG wp {0} setting={1:g}: run never returned"
                   .format(problem.name, setting))
 
         try:
             t_ms, sol, samples = timed_min_ms(
-                lambda: jax.block_until_ready(m(parameterList)), 20, on_breach)
-            append_samples(samples_file, point, "none", samples)
+                lambda: jax.block_until_ready(m(parameterList)), REPEATS,
+                on_breach)
             finals = final_states(sol)
             pct = errored_pct(finals)
             if t_ms is None:
@@ -243,47 +238,31 @@ def run_wp(problem, parameterList):
             t_ms, err = float("nan"), float("nan")
         print("wp {0} setting={1:g}: {2:.2f} ms, err={3:.3e}, "
               "errored={4:.1f}%".format(problem.name, setting, t_ms, err, pct))
-        write_wp_row(outfh, outfile, setting, t_ms, err, pct)
+        leg.record_wp(setting, t_ms, err, pct, samples=samples)
         return not breached
 
     def sweep(mode, algorithm, settings, make):
         # Later settings are slower, so a breach abandons the leg as NaN rows.
-        outfile = wp_outfile("JAX", "Jax", mode, algorithm, DATASET_KEY,
-                             problem)
-        if skip_wp_leg(problem.name, algorithm, mode, outfile):
+        settings = list(settings)
+        leg = Leg("jax", DATASET_KEY, "wp", problem, algorithm, mode)
+        if skip_wp_leg(leg, settings):
             print("-- resume: skipping wp {0} {1} {2} (already covered)"
                   .format(problem.name, mode, algorithm))
             return
-        samples_file = samples_outfile("JAX", "Jax", "wp", mode, algorithm,
-                                       DATASET_KEY, problem)
-        setting_kind = "dt" if mode == "fixed" else "tol"
-        # --floor merges the new times in; the log gains a fresh series.
-        if not floor_enabled():
-            reset_samples(samples_file)
-        settings = list(settings)
-        with open(outfile, "a" if floor_enabled() else "w") as f:
-            breached = False
-            nan = float("nan")
-            for index, setting in enumerate(settings):
-                if breached:
-                    write_wp_row(f, outfile, setting, nan, nan, 100.0)
-                    continue
-                # Parameters are already resident and results stay on device.
-                point = sample_point("wp", problem.name, algorithm, mode,
-                                     N_WP, problem["states"], setting_kind,
-                                     setting)
-                if not bench(make(setting), setting, f, outfile,
-                             samples_file, point, settings[index:]):
-                    print("WATCHDOG wp {0} setting={1:g}: run exceeded "
-                          "the cap".format(problem.name, setting))
-                    breached = True
+        for index, setting in enumerate(settings):
+            # Parameters are already resident and results stay on device.
+            if not bench(make(setting), setting, leg, settings[index:]):
+                print("WATCHDOG wp {0} setting={1:g}: run exceeded "
+                      "the cap".format(problem.name, setting))
+                leg.nan_wp(settings[index + 1:])
+                break
 
     for algorithm in ALGORITHMS:
         if not problem.supports("jax"):
             continue
         if algorithm in FIXED_ALGORITHMS:
             # max_steps covers the finest euler dt (2^17 steps).
-            sweep("fixed", algorithm, dts_for(algorithm, problem),
+            sweep("fixed", algorithm, problem.dts(algorithm),
                   lambda dt: make_fixed(problem, algorithm, dt,
                                         max_steps=262144))
         if algorithm in ADAPTIVE_ALGORITHMS:
@@ -303,13 +282,8 @@ def run_times(problem):
                 continue
             main = (make_fixed(problem, algorithm) if mode == "fixed"
                     else make_adaptive(problem, algorithm))
-            outfile = times_outfile("JAX", "Jax", mode, algorithm,
-                                    DATASET_KEY, problem)
-            samples_file = samples_outfile("JAX", "Jax", "times", mode,
-                                           algorithm, DATASET_KEY, problem)
-            run_ns = [n for n in NS
-                      if not skip_point(problem.name, algorithm, mode, n,
-                                        outfile)]
+            leg = Leg("jax", DATASET_KEY, "times", problem, algorithm, mode)
+            run_ns = [n for n in NS if not skip_point(leg, n)]
             if not run_ns:
                 print("-- resume: skipping {0} {1} {2} (already covered)"
                       .format(problem.name, mode, algorithm))
@@ -318,38 +292,30 @@ def run_times(problem):
                 print("-- resume: {0} {1} {2} runs N={3}".format(
                     problem.name, mode, algorithm,
                     ",".join(str(n) for n in run_ns)))
-            # Drop stale rows for the points about to rerun.
-            prune_reruns(outfile, run_ns)
-            with open(outfile, "a+") as file:
-                for index, n in enumerate(run_ns):
-                    parameterList = jnp.asarray(problem.sweep(n))
-                    best_time, best_time_dev, pct, abandon = best_times_ms(
-                        main, parameterList,
-                        "{0} {1}".format(mode, algorithm), n, samples_file,
-                        sample_point("times", problem.name, algorithm, mode,
-                                     n, problem["states"]))
-                    print("{:} ODE solves ({}, {}, {}) completed in {:.1f} "
-                          "ms ({:.1f} ms without transfers)".format(
-                              n, problem.name, algorithm, mode, best_time,
-                              best_time_dev))
-                    write_times_row(file, outfile, n,
-                                    (best_time, best_time_dev, pct))
-                    # The pairwise numerical cross-check reads this fixed CSV name.
-                    if (mode == "fixed" and n == 32768
-                            and algorithm == "tsit5"
-                            and np.isfinite(best_time)):
-                        np.savetxt(os.path.join(
-                            data_dir("numerical", DATASET_KEY,
-                                     problem=problem),
-                            "jax.csv"), final_states(main(parameterList)),
-                            delimiter=',')
-                    if abandon:
-                        # Larger sizes are slower or bigger, so the leg ends.
-                        nan = float("nan")
-                        for rest in run_ns[index + 1:]:
-                            write_times_row(file, outfile, rest,
-                                            (nan, nan, 100.0))
-                        break
+            for index, n in enumerate(run_ns):
+                parameterList = jnp.asarray(problem.sweep(n))
+                (best_time, best_time_dev, pct, abandon, samples_both,
+                 samples_none) = best_times_ms(
+                    main, parameterList, "{0} {1}".format(mode, algorithm), n)
+                print("{:} ODE solves ({}, {}, {}) completed in {:.1f} "
+                      "ms ({:.1f} ms without transfers)".format(
+                          n, problem.name, algorithm, mode, best_time,
+                          best_time_dev))
+                leg.record_times(n, best_time, best_time_dev, pct,
+                                 samples_both, samples_none)
+                # The pairwise numerical cross-check reads this fixed CSV name.
+                if (mode == "fixed" and n == 32768
+                        and algorithm == "tsit5"
+                        and np.isfinite(best_time)):
+                    np.savetxt(os.path.join(
+                        data_dir("numerical", DATASET_KEY,
+                                 problem=problem),
+                        "jax.csv"), final_states(main(parameterList)),
+                        delimiter=',')
+                if abandon:
+                    # Larger sizes are slower or bigger, so the leg ends.
+                    leg.nan_times(run_ns[index + 1:])
+                    break
 
 
 def run_states():
@@ -358,7 +324,7 @@ def run_states():
     import timeit
 
     from problems import STATES_PROBLEM, states_row
-    from wp_common import STATES_N, states_outfile
+    from wp_common import STATES_N
 
     n = STATES_N
     grid = NS
@@ -368,64 +334,49 @@ def run_states():
                          else ADAPTIVE_ALGORITHMS)
             if algorithm not in supported:
                 continue
-            outfile = states_outfile("JAX", "Jax", mode, algorithm,
-                                     DATASET_KEY)
-            run_grid = [s for s in grid
-                        if not skip_point(STATES_PROBLEM, algorithm, mode, s,
-                                          outfile)]
+            leg = Leg("jax", DATASET_KEY, "states", STATES_PROBLEM, algorithm,
+                      mode)
+            run_grid = [s for s in grid if not skip_point(leg, n, s)]
             if not run_grid:
                 print("-- resume: skipping states {0} {1} (already covered)"
                       .format(mode, algorithm))
                 continue
-            samples_file = samples_outfile("JAX", "Jax", "states", mode,
-                                           algorithm, DATASET_KEY,
-                                           STATES_PROBLEM)
-            # A resumed or --floor leg appends to what earlier runs recorded.
-            if not (resume_active() or floor_enabled()):
-                reset_samples(samples_file)
-            prune_reruns(outfile, run_grid)
             nan = float("nan")
-            with open(outfile, "a" if resume_active() or floor_enabled()
-                      else "w") as file:
-                for index, nstates in enumerate(run_grid):
-                    row = states_row(nstates)
-                    main = (make_fixed(row, algorithm) if mode == "fixed"
-                            else make_adaptive(row, algorithm))
-                    parameterList = jnp.asarray(row.sweep(n))
-                    label = "states={0} {1} {2}".format(nstates, mode,
-                                                        algorithm)
-                    try:
-                        started = timeit.default_timer()
-                        jax.block_until_ready(main(parameterList))
-                        build_s = timeit.default_timer() - started
-                    except Exception as err:
-                        print("FAILED {0} at N={1} ({2}: {3})".format(
-                            label, n, type(err).__name__, err))
-                        write_times_row(file, outfile, nstates,
-                                        (nan, nan, nan, 100.0))
-                        continue
-                    best_time, best_time_dev, pct, abandon = best_times_ms(
-                        main, parameterList, label, n, samples_file,
-                        sample_point("states", STATES_PROBLEM, algorithm,
-                                     mode, n, nstates))
-                    print("{:} ODE solves ({}) completed in {:.1f} ms "
-                          "({:.1f} ms without transfers)".format(
-                              n, label, best_time, best_time_dev))
-                    write_times_row(file, outfile, nstates,
-                                    (best_time, best_time_dev, build_s, pct))
-                    if abandon:
-                        # Larger systems are slower, so the leg ends.
-                        for rest in run_grid[index + 1:]:
-                            write_times_row(file, outfile, rest,
-                                            (nan, nan, nan, 100.0))
-                        break
+            for index, nstates in enumerate(run_grid):
+                row = states_row(nstates)
+                main = (make_fixed(row, algorithm) if mode == "fixed"
+                        else make_adaptive(row, algorithm))
+                parameterList = jnp.asarray(row.sweep(n))
+                label = "states={0} {1} {2}".format(nstates, mode,
+                                                    algorithm)
+                try:
+                    started = timeit.default_timer()
+                    jax.block_until_ready(main(parameterList))
+                    build_s = timeit.default_timer() - started
+                except Exception as err:
+                    print("FAILED {0} at N={1} ({2}: {3})".format(
+                        label, n, type(err).__name__, err))
+                    leg.record_times(n, nan, nan, 100.0, states=nstates)
+                    continue
+                (best_time, best_time_dev, pct, abandon, samples_both,
+                 samples_none) = best_times_ms(main, parameterList, label, n)
+                print("{:} ODE solves ({}) completed in {:.1f} ms "
+                      "({:.1f} ms without transfers)".format(
+                          n, label, best_time, best_time_dev))
+                leg.record_times(n, best_time, best_time_dev, pct,
+                                 samples_both, samples_none, build_s=build_s,
+                                 states=nstates)
+                if abandon:
+                    # Larger systems are slower, so the leg ends.
+                    leg.nan_states(run_grid[index + 1:])
+                    break
 
 
 def run_warm():
     """Compile every timing and wp-setting kernel without running them."""
     import timeit
 
-    from wp_common import N_WP, TOLS, dts_for
+    from wp_common import N_WP, TOLS
 
     counts = NS or [8]
 
@@ -449,7 +400,7 @@ def run_warm():
                              jnp.asarray(problem.sweep(n)),
                              f"{problem.name} fixed {algorithm} N={n}")
                 wp_args = jnp.asarray(problem.sweep(N_WP))
-                for dt in dts_for(algorithm, problem):
+                for dt in problem.dts(algorithm):
                     warm_one(lambda: make_fixed(problem, algorithm, dt,
                                                 max_steps=262144),
                              wp_args,

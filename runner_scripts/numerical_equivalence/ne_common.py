@@ -5,172 +5,47 @@ import os
 
 import numpy as np
 
-from problems import DEFAULT_PROBLEM, get_problem
-from protocol import (DT0_FRACTION, DT_MAX_FRACTION,  # noqa: F401
-                      DT_MIN_FRACTION, N_NE, TOLS as TOLS_NE)
-
-
-def _row(problem):
-    """Accept a problem row or a problem name."""
-    return problem if isinstance(problem, dict) else get_problem(problem)
+from problems import DEFAULT_PROBLEM, as_problem
+from protocol import N_NE, N_WP
 
 
 def dts_ne(problem=DEFAULT_PROBLEM):
     """The fixed-step dt grid for a problem's ne sweep."""
-    return _row(problem).ne_dts()
+    return as_problem(problem).ne_dts()
 
 
-def dt_pins_ne(problem=DEFAULT_PROBLEM):
-    """Initial dt and the dt clamps for a problem's adaptive ne sweep."""
-    duration = _row(problem)["duration"]
-    return (duration * DT0_FRACTION, duration * DT_MIN_FRACTION,
-            duration * DT_MAX_FRACTION)
+def ne_sweep(problem=DEFAULT_PROBLEM):
+    """The Float32 ne ensemble grid: the first N_NE points of the N_WP sweep."""
+    return as_problem(problem).sweep(N_WP, dtype=np.float32)[:N_NE]
+
+NE_DIR = os.path.join("data", "numerical_equivalence")
+JULIA_NE_DIR = os.path.join(NE_DIR, "julia")
 
 
-def golden_ne_path(problem=DEFAULT_PROBLEM):
-    """Path of the ne golden reference for a problem."""
-    return os.path.join(
-        "data", "numerical",
-        "golden_ne_{0}_{1}.csv".format(_row(problem)["problem"], N_NE))
-
-ALGORITHMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "algorithms.csv")
-
-JULIA_NE_DIR = os.path.join("data", "numerical_equivalence", "julia")
-CUBIE_NE_DIR = os.path.join("data", "numerical_equivalence", "cubie")
-
-
-def load_algorithms(name="all"):
-    """Return the mutual algorithm table as a list of dicts.
-
-    Keys: ``cubie_alias``, ``julia_expr``, ``order`` (int), ``family``,
-    ``adaptive`` (bool — cubie carries an embedded error estimate, so the
-    algorithm belongs to the mutual adaptive sweep), ``notes``.
-    """
-    with open(ALGORITHMS_CSV, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    for row in rows:
-        row["order"] = int(row["order"])
-        row["adaptive"] = row["adaptive"].strip().lower() == "true"
-    if name != "all":
-        rows = [row for row in rows if row["cubie_alias"] == name]
-        if not rows:
-            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
-    return rows
-
-
-def runs_fixed(row):
-    """Whether the algorithm runs the fixed-step dt sweep (non-erk families)."""
-    return row["family"] != "erk"
-
-
-def cubie_default_controller(alias, family, order):
-    """Cubie's resolved controller settings for a default-tier solve.
-
-    Family table, then config class defaults, gain keys filtered to the
-    controller type; None when the family has no adaptive table.
-    """
-    from cubie.integrators.algorithms import (generic_dirk, generic_erk,
-                                              generic_firk,
-                                              generic_rosenbrock_w,
-                                              crank_nicolson)
-    tables = {
-        "dirk": generic_dirk.DIRK_ADAPTIVE_DEFAULTS,
-        "erk": generic_erk.ERK_ADAPTIVE_DEFAULTS,
-        "firk": generic_firk.FIRK_ADAPTIVE_DEFAULTS,
-        "rosenbrock": generic_rosenbrock_w.ROSENBROCK_ADAPTIVE_DEFAULTS,
-    }
-    if alias == "crank_nicolson":
-        table = crank_nicolson.CN_DEFAULTS
-    elif family in tables:
-        table = tables[family]
-    else:
-        return None
-    resolved = {
-        # PI config class defaults (adaptive_PI_controller.py /
-        # adaptive_step_controller.py) for keys the family table omits.
-        "step_controller": "pi", "kp": 0.7, "ki": -0.4, "safety": 0.9,
-        "min_gain": 0.2, "max_gain": 10.0,
-    }
-    for key, value in dict(table.step_controller).items():
-        if callable(value):
-            value = value(order)
-        resolved[key] = value
-    gain_keys = {"i": {"kp"}, "pi": {"kp", "ki"}, "pid": {"kp", "ki", "kd"}}
-    allowed = gain_keys.get(resolved["step_controller"], set())
-    for key in ("kp", "ki", "kd"):
-        if key not in allowed:
-            resolved.pop(key, None)
-    resolved.pop("deadband_min", None)
-    resolved.pop("deadband_max", None)
-    return resolved
-
-
-def controllers_equal(a, b, rel_tol=1e-9):
-    """Whether two controller-settings dicts request the same controller.
-
-    Controller names compare exactly, numeric keys to ``rel_tol``; a key
-    present on one side only makes the dicts unequal.
-    """
-    if a is None or b is None:
-        return False
-    if a.get("step_controller") != b.get("step_controller"):
-        return False
-    keys = (set(a) | set(b)) - {"step_controller"}
-    for key in keys:
-        if key not in a or key not in b:
-            return False
-        va, vb = float(a[key]), float(b[key])
-        if not np.isclose(va, vb, rtol=rel_tol, atol=0.0):
-            return False
-    return True
-
-
-def algorithm_names():
-    return ["all"] + [row["cubie_alias"] for row in load_algorithms()]
+def ne_keys(package):
+    """Dataset keys with ne outputs of a package (julia, cubie or cubie_mlir)."""
+    root = os.path.join(NE_DIR, package)
+    if not os.path.isdir(root):
+        return set()
+    return {name for name in os.listdir(root)
+            if os.path.isdir(os.path.join(root, name))}
 
 
 def load_golden_ne(problem=DEFAULT_PROBLEM):
-    """Load the golden file; returns (sweep, states) float64 arrays."""
-    row = _row(problem)
-    path = golden_ne_path(row)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(
-            "{0} not found - generate it first with `julia -t auto --project=. "
-            "runner_scripts/numerical_equivalence/generate_golden_ne.jl "
-            "--problem {1}`".format(path, row["problem"]))
-    data = np.loadtxt(path, delimiter=",")
-    expected = (N_NE, row["states"] + 1)
-    if data.shape != expected:
-        raise ValueError("golden ne reference has shape {0}, expected {1}"
-                         .format(data.shape, expected))
-    return data[:, 0], data[:, 1:]
-
-
-def ensemble_error(final_states, golden_states):
-    """l2-at-final error over the ensemble, computed in float64.
-
-    Same metric as the wp sweeps: sqrt(mean((final - golden)**2)) over the
-    (N_NE, 3) array.
-    """
-    diff = np.asarray(final_states, dtype=np.float64) - golden_states
-    return float(np.sqrt(np.mean(diff ** 2)))
+    """(sweep, golden states) of the ne ensemble as float64 arrays: the first N_NE rows of the wp golden."""
+    from wp_common import load_golden
+    row = as_problem(problem)
+    return np.float64(ne_sweep(row)), load_golden(row)[:N_NE]
 
 
 def ensemble_error_masked(final_states, golden_states, mask):
-    """l2-at-final error over a masked subset of the ensemble, in float64.
-
-    ``mask`` is a boolean (N_NE,) array selecting the trajectories to include
-    (e.g. the trajectories both stacks converged on). Returns NaN when the
-    mask selects nothing, so a fully non-converged point drops out of the
-    comparison rather than contaminating it.
-    """
+    """The wp sweeps' l2-at-final error over the trajectories mask selects (both stacks converged); NaN when it selects none, so a fully non-converged point drops out of the comparison."""
+    from wp_common import ensemble_error
     mask = np.asarray(mask, dtype=bool)
     if not mask.any():
         return float("nan")
-    diff = (np.asarray(final_states, dtype=np.float64)[mask]
-            - np.asarray(golden_states, dtype=np.float64)[mask])
-    return float(np.sqrt(np.mean(diff ** 2)))
+    return ensemble_error(np.asarray(final_states)[mask],
+                          np.asarray(golden_states, dtype=np.float64)[mask])
 
 
 # Columns that are not part of the final state.
@@ -257,14 +132,14 @@ def julia_ne_dir(problem=DEFAULT_PROBLEM, dataset_key=None):
     if dataset_key is None:
         from bench_key import dataset_key as current_key
         dataset_key = current_key()
-    d = os.path.join(JULIA_NE_DIR, dataset_key, _row(problem)["problem"])
+    d = os.path.join(JULIA_NE_DIR, dataset_key, as_problem(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM):
-    """Directory of one machine's cubie outputs for a problem."""
-    d = os.path.join(CUBIE_NE_DIR, dataset_key, _row(problem)["problem"])
+def cubie_ne_dir(dataset_key, problem=DEFAULT_PROBLEM, package="cubie"):
+    """Directory of one machine's outputs of a cubie package for a problem; creates it."""
+    d = os.path.join(NE_DIR, package, dataset_key, as_problem(problem)["problem"])
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -275,9 +150,10 @@ def julia_ne_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
                         "{0}.csv".format(alias))
 
 
-def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-machine cubie output under a key dir; creates it."""
-    return os.path.join(cubie_ne_dir(dataset_key, problem),
+def cubie_ne_file(alias, dataset_key, problem=DEFAULT_PROBLEM,
+                  package="cubie"):
+    """Path of a cubie package's fixed-sweep output for one machine."""
+    return os.path.join(cubie_ne_dir(dataset_key, problem, package),
                         "{0}.csv".format(alias))
 
 
@@ -288,9 +164,9 @@ def julia_ne_adaptive_file(alias, problem=DEFAULT_PROBLEM, dataset_key=None):
 
 
 def cubie_ne_adaptive_file(alias, tier, dataset_key,
-                           problem=DEFAULT_PROBLEM):
-    """Cubie adaptive-sweep output per controller tier: "default" or "matched"."""
-    return os.path.join(cubie_ne_dir(dataset_key, problem),
+                           problem=DEFAULT_PROBLEM, package="cubie"):
+    """A cubie package's adaptive-sweep output per controller tier: "default" or "matched"."""
+    return os.path.join(cubie_ne_dir(dataset_key, problem, package),
                         "{0}_adaptive_{1}.csv".format(alias, tier))
 
 

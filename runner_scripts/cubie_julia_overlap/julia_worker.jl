@@ -10,17 +10,22 @@ using CSV
 using DelimitedFiles
 using Printf
 using Statistics
+using GPU_ODE_JuliaKernels
 
 CUDA.allowscalar(false)
 
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "julia_prob.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
-# dt values are fractions of the duration.
+# Precompiled entries take precedence over runtime-built ones.
+merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
+# The fixed step is a fraction of the duration.
 const FIXED_DT = 2.0^-TIMING_DT_K
-const DT0 = DT0_FRACTION
 const ADAPTIVE_TOL = OVERLAP_TOL
 const PERFORMANCE_REPEATS = REPEAT_CAP
 const WORK_REPEATS = REPEAT_CAP
@@ -97,48 +102,24 @@ function append_row(path, values...)
     end
 end
 
-const SYSTEM = julia_system(PROBLEM)
-const ODEF = SYSTEM.mass_matrix === nothing ?
-             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
-    tgrad = SYSTEM.tgrad) :
-             ODEFunction{false}(SYSTEM.rhs; jac = SYSTEM.jac,
-    tgrad = SYSTEM.tgrad, mass_matrix = SYSTEM.mass_matrix)
-const U0 = SYSTEM.u0
-const TSPAN = (0.0f0, DURATION)
+const SYSTEM, PROB, _ = build_prob(PROBLEM)
 
-const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
+const golden_ne_states = ne_golden_states(PROBLEM)
 const golden_wp_all = readdlm(golden_path(PROBLEM), ',', Float64)
 
 function sweep_grid(kind, n)
     if kind == "numerical"
-        return Float32.(golden_ne_all[1:n, 1])
+        return ne_sweep(PROBLEM)[1:n]
     elseif kind == "work_precision"
         return Float32.(problem_sweep(PROBLEM, N_WP))[1:n]
     end
     return Float32.(problem_sweep(PROBLEM, n))
 end
 
+"Host and device ensembles over one phase's grid, and the shared problem."
 function build_problems(kind, n)
-    sweep = sweep_grid(kind, n)
-    prob = ODEProblem{false}(ODEF, U0, TSPAN, @SVector [sweep[1]])
-    probs = map(eachindex(sweep)) do i
-        DiffEqGPU.make_prob_compatible(remake(prob,
-            u0 = SYSTEM.u0_for(sweep[i]), p = @SVector [sweep[i]]))
-    end
-    # Host vector is returned too so the end-to-end timing can re-upload it.
-    return probs, cu(probs), prob
-end
-
-function run_solve(probs, prob, alg, mode, setting)
-    if mode == "fixed"
-        return DiffEqGPU.vectorized_solve(probs, prob, alg; saveat = DURATION,
-            save_everystep = false, dt = Float32(setting))
-    else
-        return DiffEqGPU.vectorized_asolve(probs, prob, alg; saveat = DURATION,
-            save_everystep = false, dt = DURATION * Float32(DT0),
-            abstol = Float32(setting), reltol = Float32(setting))
-    end
+    probs_host, probs = build_ensemble(SYSTEM, PROB, sweep_grid(kind, n))
+    return probs_host, probs, PROB
 end
 
 # The armed point's identity, for the watchdog's failure row.
@@ -158,20 +139,13 @@ function solve_end_to_end(probs_host, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
     host_us = run_watchdogged(watchdog_breach) do
-        probs = cu(probs_host)
-        sol = run_solve(probs, prob, alg, mode, setting)
-        us = Array(sol[2])
-        CUDA.synchronize()
+        _, _, us = gpu_solve_host(probs_host, prob, alg, mode, setting, PROBLEM)
         us
     end
     elapsed_ms = (time_ns() - start) / 1.0e6
     elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
         error("watchdog: run exceeded $(WATCHDOG_SECONDS) s")
-    final_vectors = host_us[end, :]
-    finals = Matrix{Float32}(undef, length(final_vectors), NSTATES)
-    for i in eachindex(final_vectors)
-        finals[i, :] .= final_vectors[i][SYSTEM.golden_index]
-    end
+    finals = final_states(SYSTEM, host_us[end, :])
     size(finals) == (length(probs_host), NSTATES) || error(
         "unexpected final-state size $(size(finals)); expected " *
         "($(length(probs_host)), $(NSTATES))")
@@ -183,8 +157,7 @@ function solve_device_only(probs, prob, alg, mode, setting)
     CUDA.synchronize()
     start = time_ns()
     run_watchdogged(watchdog_breach) do
-        run_solve(probs, prob, alg, mode, setting)
-        CUDA.synchronize()
+        gpu_solve_device(probs, prob, alg, mode, setting, PROBLEM)
     end
     elapsed_ms = (time_ns() - start) / 1.0e6
     elapsed_ms > WATCHDOG_SECONDS * 1000.0 &&
@@ -230,18 +203,15 @@ end
 
 const POINT_FAILURE_COUNT = Ref(0)
 
-table = collect(CSV.File(joinpath(HERE, "algorithms.csv")))
-if ALGORITHM != "all"
-    table = filter(row -> String(row.cubie_alias) == ALGORITHM, table)
-    isempty(table) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
-end
+table = overlap_algorithms(ALGORITHM)
+isempty(table) && error("'$(ALGORITHM)' is not in the overlap set; see runner_scripts/algorithms.csv")
 phases = ANALYSIS == "all" ? ("performance", "numerical", "work_precision") :
     (replace(ANALYSIS, "-" => "_"),)
 
 for row in table
-    alias = String(row.cubie_alias)
+    alias = row["algorithm"]
     alg = try
-        eval(Meta.parse(String(row.julia_constructor)))
+        gpu_solver(alias)
     catch err
         for phase in phases
             record_failure(alias, phase, "all", "julia", 0, "constructor", NaN, err)
@@ -260,7 +230,7 @@ for row in table
             repeats = PROTOCOL.performance_repeats
         elseif phase == "numerical"
             # erk-family rows run no fixed numerical sweep.
-            if uppercase(String(row.family)) != "ERK"
+            if runs_fixed_ne(row)
                 append!(points, [("fixed", "dt", DURATION * dt, PROTOCOL.ne_n) for dt in PROTOCOL.ne_dts])
             end
             append!(points, [("adaptive", "tol", tol, PROTOCOL.ne_n) for tol in PROTOCOL.ne_tols])
@@ -292,7 +262,7 @@ for row in table
                         setting, finals)
                     append_row(METRIC_FILE, "julia", alias, phase, mode, tier, n,
                         setting_kind, setting,
-                        golden_rmse(finals, golden_ne_all[1:n, 2:(1 + NSTATES)]),
+                        golden_rmse(finals, golden_ne_states[1:n, :]),
                         finite, failed, finals_path)
                     println("OK julia $(alias) $(phase) $(mode) $(setting_kind)=$(setting) N=$(n)")
                     continue

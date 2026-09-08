@@ -1,7 +1,7 @@
 # Numerical-equivalence (ne) sweeps for raw DifferentialEquations.jl in Float32.
 #
 # Two sweeps over every algorithm mutually supported by cubie and
-# DifferentialEquations.jl (runner_scripts/numerical_equivalence/algorithms.csv):
+# DifferentialEquations.jl (the ne rows of runner_scripts/algorithms.csv):
 #
 # * fixed:    error-vs-dt convergence study, fixed-step at every dt in the
 #             dyadic grid. Isolates the tableau from the controller.
@@ -14,19 +14,15 @@
 #             constants are exported (controller_constants.csv) so the cubie
 #             runner can mirror them exactly for its "matched" tier.
 #
-# The protocol mirrors ne_common.py; keep the two in sync.
+# Grids, tolerances and pins come from runner_scripts/protocol.toml through protocol.jl.
 #
-# Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
-# all Float32 (the rho grid is read from the golden file, whose values are
-# exactly representable in Float32), and every trajectory's final state is
-# asserted to still be Float32 — a Float64 anywhere means the solve silently
-# promoted and the point is recorded as failed.
+# Everything the solve sees is Float32; a Float64 final state fails the point.
 #
 # Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
 #   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
 #
 # Run from the repo root:
-#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [fixed|adaptive|all]
+#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [--controller fixed|adaptive|all] [--algorithm <all|list>] [--problem <all|list>]
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK
@@ -59,10 +55,10 @@ MODE in ("fixed", "adaptive", "all") ||
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
-const TOLS_NE = TOLS
 
 const PROBLEM = get(NE_OPT, "problem", "all")
 const PROBLEMS = resolve_problems(PROBLEM, "julia")
@@ -107,10 +103,9 @@ function construct_fehlberg_45(::Type{T}) where {T}
 end
 
 
-const TABLE_ALL = collect(CSV.File(joinpath(@__DIR__, "algorithms.csv")))
-const TABLE = ALGORITHM == "all" ? TABLE_ALL :
-    filter(row -> String(row.cubie_alias) == ALGORITHM, TABLE_ALL)
-isempty(TABLE) && error("unknown algorithm '$(ALGORITHM)'; see algorithms.csv")
+include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
+const TABLE = ne_algorithms(ALGORITHM)
+isempty(TABLE) && error("'$(ALGORITHM)' is not in the ne set; see runner_scripts/algorithms.csv")
 
 failures = Tuple{String, String, Float64, String}[]
 
@@ -118,20 +113,11 @@ failures = Tuple{String, String, Float64, String}[]
 function setup(problem)
     name = problem["problem"]
     nstates = problem["states"]
-    golden_path = joinpath(REPO_ROOT, "data", "numerical",
-        "golden_ne_$(name)_$(N_NE).csv")
-    isfile(golden_path) || error(
-        "$(golden_path) not found - generate it first with `julia -t auto " *
-        "--project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl " *
-        "--problem $(name)`")
-    golden = readdlm(golden_path, ',')
-    size(golden) == (N_NE, nstates + 1) || error(
-        "golden ne reference has size $(size(golden)), expected " *
-        "($(N_NE), $(nstates + 1))")
-    sweep32 = Float32.(golden[:, 1])
-    # The swept values are float32-rounded, so the cast back is exact.
-    all(Float64.(sweep32) .== golden[:, 1]) || error(
-        "golden parameter column is not exactly representable in Float32")
+    sweep32 = ne_sweep(problem)
+    golden_states = ne_golden_states(problem)
+    size(golden_states) == (N_NE, nstates) || error(
+        "golden ne reference has size $(size(golden_states)), expected " *
+        "($(N_NE), $(nstates))")
 
     system = julia_system(problem)
     duration = Float32(problem["duration"])
@@ -154,16 +140,13 @@ function setup(problem)
 
     outdir = data_dir(REPO_ROOT, joinpath("numerical_equivalence", "julia"),
         DATASET_KEY, name)
-    return (name = name, nstates = nstates, golden_states = golden[:, 2:end],
+    return (name = name, nstates = nstates, golden_states = golden_states,
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
-        dts = problem_dts_ne(problem),
-        dt0 = duration * Float32(DT0_FRACTION),
-        dtmin = duration * Float32(DT_MIN_FRACTION),
-        dtmax = duration * Float32(DT_MAX_FRACTION))
+        dts = problem_ne_dts(problem),
+        dt0 = Float32(problem_timing_dt(problem)),
+        dtmin = duration * Float32(DT_MIN_FRACTION))
 end
-
-problem_dts_ne(problem) = problem_ne_dts(problem)
 
 "Final states in golden order, step counts and retcodes of one ensemble solve."
 function collect_finals(sim, ctx)
@@ -201,13 +184,13 @@ state_header(nstates) = join(["s$(s)" for s in 1:nstates], ",")
 # ---------------------------------------------------------------------------
 function run_fixed(ctx)
     for row in TABLE
-        alias = String(row.cubie_alias)
-        expr = String(row.julia_expr)
-        if String(row.family) == "erk"
+        alias = row["algorithm"]
+        expr = row["julia_cpu"]
+        if !runs_fixed_ne(row)
             println("=== fixed $(alias): skipped (no fixed sweep for erk)")
             continue
         end
-        println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row.order)) ===")
+        println("=== $(ctx.name) fixed $(alias) -> $(expr) (order $(row["order"])) ===")
         alg = try
             eval(Meta.parse(expr))
         catch err
@@ -222,13 +205,10 @@ function run_fixed(ctx)
         wrote_any = false
         for dt in ctx.dts
             try
-                # abstol/reltol are pinned to the OrdinaryDiffEq defaults
-                # rather than left implicit: with adaptive=false they only
-                # control the implicit solvers' Newton termination, and the
-                # cubie runner's inner-tolerance pin is derived from them.
+                # With adaptive = false, abstol/reltol only scale the Newton termination; the [newton] table pins them.
                 sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, dt = Float32(dt), adaptive = false,
-                    abstol = 1.0f-6, reltol = 1.0f-3,
+                    abstol = Float32(NEWTON_ATOL), reltol = Float32(NEWTON_RTOL),
                     save_everystep = false, save_start = false, dense = false)
                 finals, _, _, n_bad, converged = collect_finals(sim, ctx)
                 err = ensemble_err(finals, ctx.golden_states)
@@ -267,10 +247,10 @@ function run_adaptive(ctx)
         "cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order")
 
     for row in TABLE
-        alias = String(row.cubie_alias)
-        expr = String(row.julia_expr)
+        alias = row["algorithm"]
+        expr = row["julia_cpu"]
         # Only the mutual adaptive set runs.
-        if lowercase(string(row.adaptive)) != "true"
+        if !row["ne_adaptive"]
             println("=== adaptive $(alias): skipped (not in the mutual " *
                     "adaptive set)")
             continue
@@ -289,7 +269,7 @@ function run_adaptive(ctx)
             continue
         end
         println("=== $(ctx.name) adaptive $(alias) -> $(expr) " *
-                "(order $(row.order), default controller) ===")
+                "(order $(row["order"]), default controller) ===")
 
         # Resolve and export the default controller constants so the cubie
         # runner can mirror them ("matched" tier).
@@ -303,7 +283,7 @@ function run_adaptive(ctx)
             b2 = hasproperty(ctrl, :beta2) ? string(ctrl.beta2) : ""
             println(const_io,
                 "$(alias),$(cname),$(b1),$(b2),$(basic.qmin),$(basic.qmax)," *
-                "$(basic.gamma),$(row.order)")
+                "$(basic.gamma),$(row["order"])")
             println("  controller: $(cname) beta1=$(b1) beta2=$(b2) " *
                     "qmin=$(basic.qmin) qmax=$(basic.qmax) " *
                     "gamma=$(basic.gamma)")
@@ -317,12 +297,12 @@ function run_adaptive(ctx)
         println(io,
             "tol,traj,$(state_header(ctx.nstates)),naccept,nreject,converged")
         wrote_any = false
-        for tol in TOLS_NE
+        for tol in TOLS
             try
                 sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, adaptive = true, dt = ctx.dt0,
                     abstol = Float32(tol), reltol = Float32(tol),
-                    dtmin = ctx.dtmin, dtmax = ctx.dtmax,
+                    dtmin = ctx.dtmin,
                     save_everystep = false, save_start = false, dense = false)
                 finals, naccept, nreject, n_bad, converged =
                     collect_finals(sim, ctx)

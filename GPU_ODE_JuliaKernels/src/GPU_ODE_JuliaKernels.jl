@@ -29,29 +29,24 @@ for row in resolve_problems("all", "julia")
 end
 const ENTRIES = _ENTRIES
 
-# Mirrors TIMING_TOL in runner_scripts/wp_common.py and bench_ode_gpu.jl.
-const TIMING_TOL = 1.0f-5
 # Trajectory count is runtime data, not a kernel specialization axis.
 const WORKLOAD_N = 4
 
-"One solve per supported mode, with the bench writer's exact call shape."
+"Every algorithm the timed sweeps or the overlap suite run on the kernel path."
+workload_algorithms() = unique(vcat(supported_algorithms("julia"),
+    [row["algorithm"] for row in overlap_algorithms()]))
+
+"One fixed and one adaptive solve through the shared kernel-path functions."
 function _warm_leg(row, algorithm)
     solver = gpu_solver(algorithm)
     system, prob, duration = build_prob_parts(ENTRIES[row["problem"]], row)
-    dt0 = Float32(problem_timing_dt(row))
     # Kernels specialize on types, so a zero-step tspan warms them in bounded time.
     prob = remake(prob, tspan = (0.0f0, 0.0f0))
     probs_host, probs = build_ensemble(system, prob, row, WORKLOAD_N)
-    if algorithm in supported_algorithms("julia", "fixed")
-        sol = CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob, solver;
-            saveat = 0.0f0, save_everystep = false, dt = dt0)
-        Array(sol[1])
-        Array(sol[2])
-    end
-    if algorithm in supported_algorithms("julia", "adaptive")
-        sol = CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob, solver;
-            saveat = 0.0f0, save_everystep = false,
-            reltol = TIMING_TOL, abstol = TIMING_TOL, dt = dt0)
+    for (mode, setting) in (("fixed", problem_timing_dt(row)),
+                            ("adaptive", TIMING_TOL))
+        sol = CUDA.@sync gpu_solve(probs, prob, solver, mode, setting, row;
+            saveat = 0.0f0)
         Array(sol[1])
         Array(sol[2])
     end
@@ -63,8 +58,7 @@ end
     if CUDA.functional()
         @compile_workload begin
             for row in resolve_problems("all", "julia")
-                for algorithm in supported_algorithms("julia")
-                    problem_supports(row, "julia") || continue
+                for algorithm in workload_algorithms()
                     elapsed = @elapsed try
                         _warm_leg(row, algorithm)
                     catch err

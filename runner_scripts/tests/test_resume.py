@@ -1,4 +1,4 @@
-"""Continuation tests: cursor parsing, run-order skipping and on-disk coverage."""
+"""Continuation tests: cursor parsing, run-order skipping and store coverage."""
 
 import os
 import shutil
@@ -13,9 +13,12 @@ sys.path.insert(0, os.path.dirname(HERE))
 import resume  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from problems import problem_names  # noqa: E402
+from protocol import N_WP, STATES_N, TOLS  # noqa: E402
+from results import Leg  # noqa: E402
 
 PROBLEMS = problem_names()
 ALGORITHMS = algorithm_names()
+NAN = float("nan")
 
 
 class EnvCase(unittest.TestCase):
@@ -28,16 +31,16 @@ class EnvCase(unittest.TestCase):
         os.environ.pop("BENCH_RESUME", None)
         os.environ.pop("BENCH_NO_OVERWRITE", None)
         os.environ.pop("BENCH_RESUME_FROM", None)
+        os.environ.pop("BENCH_FLOOR", None)
         resume._reset_cache()
         self.addCleanup(resume._reset_cache)
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
 
-    def outfile(self, rows=""):
-        path = os.path.join(self.tmp, "times.txt")
-        with open(path, "w") as handle:
-            handle.write(rows)
-        return path
+    def leg(self, analysis="times", problem=None, algorithm=None,
+            mode="fixed"):
+        return Leg("cubie", "test_key", analysis, problem or PROBLEMS[0],
+                   algorithm or ALGORITHMS[0], mode, root=self.tmp)
 
 
 class ParseCursorTests(EnvCase):
@@ -129,196 +132,140 @@ class CursorSkipTests(EnvCase):
                                             "fixed"))
 
 
-class DiskSkipTests(EnvCase):
+class StoreSkipTests(EnvCase):
     def test_disabled_never_skips(self):
-        path = self.outfile("8 1.0 2.0\n")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 8, path))
+        leg = self.leg()
+        leg.record_times(8, 1.0, 2.0, 0.0)
+        self.assertFalse(resume.skip_point(leg, 8))
 
-    def test_recorded_row_skips(self):
+    def test_resume_skips_recorded_and_nan_rows(self):
         os.environ["BENCH_RESUME"] = "1"
-        path = self.outfile("8 1.0 2.0\n32 nan nan\n")
-        self.assertTrue(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                          "fixed", 8, path))
-        # A NaN row is a recorded failure, not a gap.
-        self.assertTrue(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                          "fixed", 32, path))
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 128, path))
+        leg = self.leg()
+        leg.record_times(8, 1.0, 2.0, 0.0)
+        leg.nan_times([32])
+        self.assertTrue(resume.skip_point(leg, 8))
+        self.assertTrue(resume.skip_point(leg, 32))
+        self.assertFalse(resume.skip_point(leg, 128))
 
-    def test_tab_separated_rows_count(self):
-        os.environ["BENCH_RESUME"] = "1"
-        path = self.outfile("8\t1.0\t2.0\n")
-        self.assertTrue(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                          "fixed", 8, path))
-
-    def test_torn_row_is_not_recorded(self):
-        os.environ["BENCH_RESUME"] = "1"
-        path = self.outfile("8\n")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 8, path))
-
-    def test_missing_file_never_skips(self):
-        os.environ["BENCH_RESUME"] = "1"
-        path = os.path.join(self.tmp, "absent.txt")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 8, path))
-
-
-class NoOverwriteTests(EnvCase):
-    def test_finite_row_skips(self):
+    def test_no_overwrite_retries_nan_and_absent_rows(self):
         os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8 1.0 2.0\n")
-        self.assertTrue(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                          "fixed", 8, path))
-
-    def test_nan_row_reruns(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8 1.0 2.0\n32 nan nan\n")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 32, path))
-
-    def test_absent_row_reruns(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8 1.0 2.0\n")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 128, path))
-
-    def test_missing_file_never_skips(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = os.path.join(self.tmp, "absent.txt")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 8, path))
-
-    def test_torn_row_reruns(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8\n")
-        self.assertFalse(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", 8, path))
+        leg = self.leg()
+        leg.record_times(8, 1.0, 2.0, 0.0)
+        leg.nan_times([32])
+        self.assertTrue(resume.skip_point(leg, 8))
+        self.assertFalse(resume.skip_point(leg, 32))
+        self.assertFalse(resume.skip_point(leg, 128))
 
     def test_resume_still_skips_nan_when_both_set(self):
         os.environ["BENCH_RESUME"] = "1"
         os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("32 nan nan\n")
-        self.assertTrue(resume.skip_point(PROBLEMS[0], ALGORITHMS[0],
-                                          "fixed", 32, path))
+        leg = self.leg()
+        leg.nan_times([32])
+        self.assertTrue(resume.skip_point(leg, 32))
 
-    def test_wp_leg_with_nan_rows_reruns(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        count = resume.wp_settings_count(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        rows = "".join("{0} nan nan\n".format(i) for i in range(count))
-        path = self.outfile(rows)
-        self.assertFalse(resume.skip_wp_leg(PROBLEMS[0], ALGORITHMS[0],
-                                            "fixed", path))
+    def test_states_points_are_keyed_by_state_count(self):
+        os.environ["BENCH_RESUME"] = "1"
+        leg = self.leg("states", problem="lorenz96")
+        leg.record_times(STATES_N, 1.0, 2.0, 0.0, build_s=0.5, states=16)
+        self.assertTrue(resume.skip_point(leg, STATES_N, 16))
+        self.assertFalse(resume.skip_point(leg, STATES_N, 32))
 
-    def test_wp_leg_with_finite_rows_skips(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        count = resume.wp_settings_count(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        rows = "".join("{0} 1.5 2.5\n".format(i) for i in range(count))
-        path = self.outfile(rows)
-        self.assertTrue(resume.skip_wp_leg(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", path))
+    def test_cursor_applies_to_the_states_count(self):
+        os.environ["BENCH_RESUME_FROM"] = "lorenz96:32"
+        leg = self.leg("states", problem="lorenz96")
+        self.assertTrue(resume.skip_point(leg, STATES_N, 16))
+        self.assertFalse(resume.skip_point(leg, STATES_N, 32))
 
-
-class PruneRerunsTests(EnvCase):
-    def test_inactive_leaves_the_file_alone(self):
-        path = self.outfile("8 nan nan\n32 1.0 2.0\n")
-        resume.prune_reruns(path, [8])
-        with open(path) as handle:
-            self.assertEqual(handle.read(), "8 nan nan\n32 1.0 2.0\n")
-
-    def test_drops_only_the_rerun_rows(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8 1.0 2.0\n32 nan nan\n128 1.0 2.0\n")
-        resume.prune_reruns(path, [32])
-        with open(path) as handle:
-            self.assertEqual(handle.read(), "8 1.0 2.0\n128 1.0 2.0\n")
-
-    def test_torn_row_survives(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8\n32 nan nan\n")
-        resume.prune_reruns(path, [8, 32])
-        with open(path) as handle:
-            self.assertEqual(handle.read(), "8\n")
-
-    def test_missing_file_is_a_noop(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = os.path.join(self.tmp, "absent.txt")
-        resume.prune_reruns(path, [8])
-        self.assertFalse(os.path.exists(path))
+    def test_a_store_of_another_leg_never_skips(self):
+        os.environ["BENCH_RESUME"] = "1"
+        self.leg(algorithm=ALGORITHMS[1]).record_times(8, 1.0, 2.0, 0.0)
+        self.assertFalse(resume.skip_point(self.leg(), 8))
 
 
 class WpLegTests(EnvCase):
-    def _complete_rows(self, problem, algorithm, mode):
-        count = resume.wp_settings_count(problem, algorithm, mode)
-        return "".join("{0} nan nan\n".format(i) for i in range(count)), count
+    def wp(self):
+        return self.leg("wp", mode="adaptive")
 
     def test_complete_leg_skips(self):
         os.environ["BENCH_RESUME"] = "1"
-        rows, _ = self._complete_rows(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        path = self.outfile(rows)
-        self.assertTrue(resume.skip_wp_leg(PROBLEMS[0], ALGORITHMS[0],
-                                           "fixed", path))
+        leg = self.wp()
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        self.assertTrue(resume.skip_wp_leg(leg, TOLS))
 
     def test_partial_leg_reruns(self):
         os.environ["BENCH_RESUME"] = "1"
-        rows, count = self._complete_rows(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        partial = "".join(rows.splitlines(True)[:count - 1])
-        path = self.outfile(partial)
-        self.assertFalse(resume.skip_wp_leg(PROBLEMS[0], ALGORITHMS[0],
-                                            "fixed", path))
+        leg = self.wp()
+        for tol in TOLS[:-1]:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        self.assertFalse(resume.skip_wp_leg(leg, TOLS))
 
-    def test_adaptive_expects_tols(self):
-        from wp_common import TOLS
-        self.assertEqual(
-            resume.wp_settings_count(PROBLEMS[0], ALGORITHMS[0], "adaptive"),
-            len(TOLS))
+    def test_no_overwrite_reruns_a_leg_with_nan_rows(self):
+        os.environ["BENCH_NO_OVERWRITE"] = "1"
+        leg = self.wp()
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        leg.nan_wp([TOLS[-1]])
+        self.assertFalse(resume.skip_wp_leg(leg, TOLS))
+        os.environ["BENCH_RESUME"] = "1"
+        self.assertTrue(resume.skip_wp_leg(leg, TOLS))
 
     def test_disabled_never_skips(self):
-        rows, _ = self._complete_rows(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        path = self.outfile(rows)
-        self.assertFalse(resume.skip_wp_leg(PROBLEMS[0], ALGORITHMS[0],
-                                            "fixed", path))
+        leg = self.wp()
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        self.assertFalse(resume.skip_wp_leg(leg, TOLS))
+
+    def test_status_reads_n_wp(self):
+        leg = self.wp()
+        leg.record_wp(TOLS[0], 1.0, 0.1, 0.0)
+        self.assertEqual(leg.status(N_WP, setting=TOLS[0]), "finite")
+
+    def test_a_recorded_default_tier_does_not_cover_the_matched_tier(self):
+        leg = self.wp()
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        os.environ["BENCH_RESUME"] = "1"
+        self.assertTrue(resume.skip_wp_leg(leg, TOLS))
+        self.assertFalse(resume.skip_wp_leg(leg, TOLS, tier="matched"))
+        leg.record_wp(TOLS[0], 2.0, 0.1, 0.0, tier="matched")
+        self.assertEqual(leg.status(N_WP, setting=TOLS[0], tier="matched"), "finite")
+        from results import load
+        self.assertEqual(len(load(leg.path)), len(TOLS) + 1)
 
 
 class CliTests(EnvCase):
-    def _cli(self, *argv):
+    def run_cli(self, argv):
         import io
         from contextlib import redirect_stdout
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            resume._cli(list(argv))
-        return buffer.getvalue().strip()
+        import results
+        out = io.StringIO()
+        with mock.patch.object(results, "data_root", lambda: self.tmp), \
+                redirect_stdout(out):
+            resume._cli(argv)
+        return out.getvalue().strip()
 
     def test_point_run_and_skip(self):
         os.environ["BENCH_RESUME"] = "1"
-        path = self.outfile("8 1.0 2.0\n")
-        self.assertEqual(
-            self._cli("point", PROBLEMS[0], ALGORITHMS[0], "fixed", "8",
-                      path), "skip")
-        self.assertEqual(
-            self._cli("point", PROBLEMS[0], ALGORITHMS[0], "fixed", "32",
-                      path), "run")
+        self.leg().record_times(8, 1.0, 2.0, 0.0)
+        base = ["point", "cubie", "test_key", "times", PROBLEMS[0],
+                ALGORITHMS[0], "fixed"]
+        self.assertEqual(self.run_cli(base + ["8"]), "skip")
+        self.assertEqual(self.run_cli(base + ["32"]), "run")
 
     def test_leg(self):
         os.environ["BENCH_RESUME"] = "1"
-        count = resume.wp_settings_count(PROBLEMS[0], ALGORITHMS[0], "fixed")
-        path = self.outfile(
-            "".join("{0} nan nan\n".format(i) for i in range(count)))
-        self.assertEqual(
-            self._cli("leg", PROBLEMS[0], ALGORITHMS[0], "fixed", path),
-            "skip")
-
-    def test_prune_verb_drops_a_point(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        path = self.outfile("8 1.0 2.0\n32 nan nan\n")
-        self._cli("prune", "32", path)
-        with open(path) as handle:
-            self.assertEqual(handle.read(), "8 1.0 2.0\n")
+        leg = self.leg("wp", mode="adaptive")
+        argv = ["leg", "cubie", "test_key", PROBLEMS[0], ALGORITHMS[0],
+                "adaptive"]
+        self.assertEqual(self.run_cli(argv), "run")
+        for tol in TOLS:
+            leg.record_wp(tol, 1.0, 0.1, 0.0)
+        self.assertEqual(self.run_cli(argv), "skip")
 
     def test_bad_usage_exits(self):
         with self.assertRaises(SystemExit):
-            resume._cli(["point", "too", "few"])
+            resume._cli(["point", "only"])
 
 
 class ActiveTests(EnvCase):
@@ -328,17 +275,9 @@ class ActiveTests(EnvCase):
     def test_resume_env_activates(self):
         os.environ["BENCH_RESUME"] = "1"
         self.assertTrue(resume.active())
-
-    def test_zero_is_off(self):
-        os.environ["BENCH_RESUME"] = "0"
-        self.assertFalse(resume.active())
-
-    def test_no_overwrite_activates(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        self.assertTrue(resume.active())
-
-    def test_cursor_activates(self):
+        os.environ.pop("BENCH_RESUME")
         os.environ["BENCH_RESUME_FROM"] = PROBLEMS[0]
+        resume._reset_cache()
         self.assertTrue(resume.active())
 
 

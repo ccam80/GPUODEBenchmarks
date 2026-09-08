@@ -37,9 +37,14 @@ TIMING_TOL = float(_adaptive["timing_tol"])
 OVERLAP_TOL = float(_adaptive["overlap_tol"])
 TOL_K = tuple(int(k) for k in _adaptive["tol_k"])
 TOLS = [10.0 ** -k for k in range(TOL_K[0], TOL_K[1] + 1)]
-DT0_FRACTION = float(_adaptive["dt0_fraction"])
 DT_MIN_FRACTION = float(_adaptive["dt_min_fraction"])
-DT_MAX_FRACTION = float(_adaptive["dt_max_fraction"])
+
+# Fixed-step Newton termination scale; adaptive solves use the step tolerance.
+NEWTON_ATOL = float(PROTOCOL["newton"]["atol"])
+NEWTON_RTOL = float(PROTOCOL["newton"]["rtol"])
+
+OPTIMIZE_N = int(PROTOCOL["optimize"]["n"])
+OPTIMIZE_PER_POINT_FAMILIES = tuple(PROTOCOL["optimize"]["per_point_families"])
 
 REPEAT_CAP = int(_repeats["cap"])
 REPEAT_SCHEDULE = tuple((float(limit), int(floor), int(ceiling))

@@ -16,6 +16,7 @@ the analyzer runs after the selected workers finish.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shutil
@@ -28,7 +29,9 @@ ROOT = Path(__file__).resolve().parent
 SUITE = ROOT / "runner_scripts" / "cubie_julia_overlap"
 sys.path.insert(0, str(ROOT / "runner_scripts"))
 sys.path.insert(0, str(SUITE))
+from algorithms import overlap_algorithms  # noqa: E402 - repository helper bootstrap
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
+from cubie_adapter import BACKENDS  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
     parse_ns, phases_for, prune_csv,
@@ -56,15 +59,18 @@ def parser():
     p.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all",
                    help="Which analysis to run; one not selected keeps its existing rows.")
     p.add_argument("-p", "--package", choices=("all", "cubie", "julia"), default="all")
+    p.add_argument("--backend", choices=("cubie", "cubie_mlir"), default="cubie",
+                   help="Cubie package whose backend, system name and optimize rows the worker uses.")
     p.add_argument("-n", "--nmax", default="16777216",
                    help="Sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.")
     p.add_argument("--from-n", type=int, default=0,
                    help="Continue the performance analysis at this N; rows below it are kept.")
-    p.add_argument("--algorithm", choices=algorithm_names(), default="all",
-                   help="Run one algorithm; the others keep their existing rows.")
-    p.add_argument("-s", "--problem", choices=["all"] + problem_names(),
-                   default="all",
-                   help="Run one problem; each gets its own output directory.")
+    p.add_argument("--algorithm", default="all",
+                   help="all | comma list of " + ", ".join(algorithm_names()[1:])
+                   + "; the others keep their existing rows.")
+    p.add_argument("-s", "--problem", default="all",
+                   help="all | comma list of " + ", ".join(problem_names())
+                   + "; each gets its own output directory.")
     return p
 
 
@@ -80,6 +86,8 @@ def main():
     if args.from_n and args.analysis != "performance":
         parser().error("--from-n continues the performance analysis; pass -a performance")
     key = dataset_key()
+    if not overlap_algorithms(args.algorithm):
+        parser().error("no requested algorithm is in the overlap suite")
     problems = resolve_problems(args.problem, "cubie")
     if not problems:
         parser().error("no requested problem is in the overlap suite")
@@ -107,7 +115,8 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
         commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
     if "cubie" in packages:
-        commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
+        commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")]
+                         + shared + ["--package", args.backend]))
     commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"),
                                   "--output", str(output), "--key", key,
                                   "--problem", problem["problem"]]))
@@ -116,14 +125,17 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
     for label, command in commands:
         print("{}: {}".format(label, subprocess.list2cmdline(command)))
 
-    # Cubie resolves its CUDA backend at import time from this variable.
-    worker_env = dict(os.environ)
-    worker_env.setdefault("CUBIE_CUDA_BACKEND", "numba-cuda")
-    print("Cubie backend: {}".format(worker_env["CUBIE_CUDA_BACKEND"]))
+    # The cubie worker selects its backend from --package through cubie_adapter.
+    backend = BACKENDS[args.backend]
+    print("Cubie backend: {}".format(backend))
 
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SUITE / "diffeqgpu_ode_inventory.csv", output / "diffeqgpu_ode_inventory.csv")
-    shutil.copy2(SUITE / "algorithms.csv", output / "overlap_algorithms.csv")
+    with (output / "overlap_algorithms.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["algorithm", "julia_gpu", "order", "family"])
+        for row in overlap_algorithms():
+            writer.writerow([row["algorithm"], row["julia_gpu"], row["order"], row["family"]])
 
     # Clear the rows this run replaces; the workers only append.
     for framework in packages:
@@ -133,15 +145,16 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
             if dropped:
                 print("Replacing {} row(s) in {}_{}.csv".format(dropped, framework, kind))
         if "numerical" in phases:
-            stale = output / "finals" / framework
-            if args.algorithm != "all":
-                stale = stale / args.algorithm
-            shutil.rmtree(stale, ignore_errors=True)
+            stale = [output / "finals" / framework] if args.algorithm == "all" else [
+                output / "finals" / framework / name
+                for name in args.algorithm.split(",") if name]
+            for path in stale:
+                shutil.rmtree(path, ignore_errors=True)
 
     manifest = {
         "dataset_key": key, "problem": problem["problem"],
         "analysis": args.analysis, "package": args.package,
-        "cubie_backend": worker_env["CUBIE_CUDA_BACKEND"],
+        "cubie_backend": backend,
         "nmax": args.nmax, "performance_ns": ns, "from_n": args.from_n,
         "algorithm": args.algorithm,
         "commands": [c for _, c in commands],
@@ -152,8 +165,7 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
     for label, command in commands:
         print("\n=== {} ===".format(label), flush=True)
         try:
-            completed = subprocess.run(command, cwd=str(ROOT), check=False,
-                                       env=worker_env)
+            completed = subprocess.run(command, cwd=str(ROOT), check=False)
             code = completed.returncode
         except OSError as exc:
             code = 127

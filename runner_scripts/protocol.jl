@@ -21,9 +21,11 @@ if !isdefined(@__MODULE__, :PROTOCOL)
     const OVERLAP_TOL = Float64(PROTOCOL["adaptive"]["overlap_tol"])
     const TOL_K = Tuple(Int.(PROTOCOL["adaptive"]["tol_k"]))
     const TOLS = [10.0^-k for k in TOL_K[1]:TOL_K[2]]
-    const DT0_FRACTION = Float64(PROTOCOL["adaptive"]["dt0_fraction"])
     const DT_MIN_FRACTION = Float64(PROTOCOL["adaptive"]["dt_min_fraction"])
-    const DT_MAX_FRACTION = Float64(PROTOCOL["adaptive"]["dt_max_fraction"])
+
+    # Fixed-step Newton termination scale; adaptive solves use the step tolerance.
+    const NEWTON_ATOL = Float64(PROTOCOL["newton"]["atol"])
+    const NEWTON_RTOL = Float64(PROTOCOL["newton"]["rtol"])
 
     const REPEAT_CAP = Int(PROTOCOL["repeats"]["cap"])
     const REPEAT_SCHEDULE = Tuple((Float64(row[1]), Int(row[2]), Int(row[3]))

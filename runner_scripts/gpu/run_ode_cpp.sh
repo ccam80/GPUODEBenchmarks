@@ -5,14 +5,23 @@ set -e
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
-# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
+# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive); -g and -m each narrow the pair.
 SOLVERS=""
-case "$ALGORITHM" in
-    all) SOLVERS="RK4 RKCK45";;
-    classical-rk4) SOLVERS="RK4";;
-    cash-karp-54) SOLVERS="RKCK45";;
-    *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
+for alg in ${ALGORITHM//,/ }; do
+	case "$alg" in
+		all) SOLVERS="RK4 RKCK45";;
+		classical-rk4) SOLVERS="$SOLVERS RK4";;
+		cash-karp-54) SOLVERS="$SOLVERS RKCK45";;
+	esac
+done
+case "$MODE" in
+	fixed) SOLVERS=$(echo "$SOLVERS" | tr ' ' '\n' | awk '$1 == "RK4"');;
+	adaptive) SOLVERS=$(echo "$SOLVERS" | tr ' ' '\n' | awk '$1 == "RKCK45"');;
 esac
+if [ -z "$(echo "$SOLVERS" | tr -d ' \n')" ]; then
+	echo "MPGOS runs none of algorithm '$ALGORITHM' in mode '$MODE'; skipping."
+	exit 0
+fi
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 
@@ -27,43 +36,24 @@ case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
-# nan_row <file> <key> [extra]: append one NaN row (errored 100%), merging under --floor; creates the problem directory.
+# nan_row <times|states> <problem> <solver> <N|states> [build_s]: record one NaN point (errored 100%) in the store.
 nan_row() {
-	local file=$1 key=$2 extra=${3:-}
-	mkdir -p "$(dirname "$file")"
-	if [ -n "$FLOOR_ACTIVE" ]; then
-		python3 ./runner_scripts/resume.py merge "$file" tab "$key" nan nan ${extra:+"$extra"} 100
-	elif [ -n "$extra" ]; then
-		printf '%s\tnan\tnan\t%s\t100\n' "$key" "$extra" >> "$file"
-	else
-		printf '%s\tnan\tnan\t100\n' "$key" >> "$file"
-	fi
+	local kind=$1 problem=$2 solver=$3 key=$4 build=${5:-}
+	python3 ./runner_scripts/results.py nan cpp "$DATASET_KEY" "$kind" "$problem" "$(alg_for "$solver")" "$(mode_for "$solver")" "$key" ${build:+"$build"}
 }
 
-# resume_skip <times|states|wp> <problem> <solver> [N]: true when covered.
+# resume_skip <times|states|wp> <problem> <solver> [N|states]: true when the store covers the point.
 resume_skip() {
 	[ -n "$RESUME_ACTIVE" ] || return 1
 	local kind=$1 problem=$2 solver=$3 n=${4:-}
-	local mode alg outfile
+	local mode alg
 	mode=$(mode_for "$solver")
 	alg=$(alg_for "$solver")
-	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
 	if [ "$kind" == "wp" ]; then
-		[ "$(python3 ./runner_scripts/resume.py leg "$problem" "$alg" "$mode" "$outfile")" == "skip" ]
+		[ "$(python3 ./runner_scripts/resume.py leg cpp "$DATASET_KEY" "$problem" "$alg" "$mode")" == "skip" ]
 	else
-		[ "$(python3 ./runner_scripts/resume.py point "$problem" "$alg" "$mode" "$n" "$outfile")" == "skip" ]
+		[ "$(python3 ./runner_scripts/resume.py point cpp "$DATASET_KEY" "$kind" "$problem" "$alg" "$mode" "$n")" == "skip" ]
 	fi
-}
-
-# resume_prune <times|states> <problem> <solver> <N>: drop a retried point's stale rows.
-resume_prune() {
-	[ -n "$RESUME_ACTIVE" ] || return 0
-	local kind=$1 problem=$2 solver=$3 n=$4
-	local mode alg outfile
-	mode=$(mode_for "$solver")
-	alg=$(alg_for "$solver")
-	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
-	python3 ./runner_scripts/resume.py prune "$n" "$outfile"
 }
 
 # The protocol header is generated before the build and hashed with the sources.
@@ -131,28 +121,22 @@ warm_nt_builds() {
 if [ "$ANALYSIS" == "states" ]; then
 	STATES_N=$N_STATES
 	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
-	# A resumed or --floor run appends to what earlier runs recorded.
-	if [ -z "$RESUME_ACTIVE" ] && [ -z "$FLOOR_ACTIVE" ]; then
-		rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
-	fi
 	for solver in $SOLVERS
 	do
 		BREACHED=""
-		STATES_FILE="./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_$(mode_for "$solver")_$(alg_for "$solver").txt"
 		for n in $GRID
 		do
 			if resume_skip states lorenz96 "$solver" "$n"; then
 				echo "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
 				continue
 			fi
-			resume_prune states lorenz96 "$solver" "$n"
 			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
 			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
 			# After a breach: keep the build time, NaN the solve.
 			if [ -n "$BREACHED" ]; then
-				nan_row "$STATES_FILE" "$n" "$BUILD_S"
+				nan_row states lorenz96 "$solver" "$n" "$BUILD_S"
 				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
 				continue
 			fi
@@ -163,7 +147,7 @@ if [ "$ANALYSIS" == "states" ]; then
 			elif [ "$rc" -ne 0 ]; then
 				# A failed point is a NaN row with its build time; the grid goes on.
 				echo "FAILED lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): Bench.exe exit $rc"
-				nan_row "$STATES_FILE" "$n" "$BUILD_S"
+				nan_row states lorenz96 "$solver" "$n" "$BUILD_S"
 			fi
 		done
 	done
@@ -207,17 +191,15 @@ do
 	for solver in $SOLVERS
 	do
 		BREACHED=""
-		TIMES_FILE="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_times_$(mode_for "$solver")_$(alg_for "$solver").txt"
 		for a in $NLIST
 		do
 			if resume_skip times "$problem" "$solver" "$a"; then
 				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
 				continue
 			fi
-			resume_prune times "$problem" "$solver" "$a"
 			# A breached leg's larger sizes are recorded as NaN without running.
 			if [ -n "$BREACHED" ]; then
-				nan_row "$TIMES_FILE" "$a"
+				nan_row times "$problem" "$solver" "$a"
 				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"
 				continue
 			fi
@@ -230,7 +212,7 @@ do
 			elif [ "$rc" -ne 0 ]; then
 				# A failed point (OOM, launch error) is a NaN row; the sweep goes on.
 				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: Bench.exe exit $rc"
-				nan_row "$TIMES_FILE" "$a"
+				nan_row times "$problem" "$solver" "$a"
 			fi
 		done
 	done

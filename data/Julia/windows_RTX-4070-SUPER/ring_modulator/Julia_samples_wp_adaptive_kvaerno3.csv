@@ -1,5 +1,0 @@
-analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms
-wp,ring_modulator,kvaerno3,adaptive,d2h,tol,0.01,131072,15,0,6467.136500
-wp,ring_modulator,kvaerno3,adaptive,d2h,tol,0.01,131072,15,1,6381.980900
-wp,ring_modulator,kvaerno3,adaptive,d2h,tol,0.01,131072,15,2,6397.693900
-wp,ring_modulator,kvaerno3,adaptive,d2h,tol,0.01,131072,15,3,6389.344700

@@ -9,33 +9,27 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALGORITHMS_CSV = Path(__file__).with_name("algorithms.csv")
 # Numerical grids and adaptive pins are shared with the NE suite.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
-from ne_common import (  # noqa: E402 - path bootstrap above
-    controllers_equal, cubie_default_controller, read_ne_csv,
-    read_ne_adaptive_csv,
+from algorithms import overlap_algorithms  # noqa: E402 - path bootstrap above
+from ne_common import (  # noqa: E402, F401 - path bootstrap above
+    cubie_ne_adaptive_file, cubie_ne_file, load_golden_ne, ne_sweep,
+    read_ne_csv, read_ne_adaptive_csv,
 )
 from protocol import (  # noqa: E402 - path bootstrap above
-    DT0_FRACTION as DT0, DT_MAX_FRACTION as DT_MAX,
-    DT_MIN_FRACTION as DT_MIN, N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP,
-    TIMING_DT_K, TOLS, WP_K, fixed_dts, parse_ns, performance_ns,
+    N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP, TIMING_DT_K, TOLS, WP_K,
+    fixed_dts, parse_ns, performance_ns,
 )
 from wp_common import golden_path as golden_wp  # noqa: E402, F401 - path bootstrap above
 
 # dt grids as duration fractions; the workers scale by the duration.
 NE_DTS = fixed_dts(1.0, NE_K)
 
-CUBIE_NE_DATA = REPO_ROOT / "data" / "numerical_equivalence" / "cubie"
-
-
-def golden_ne(problem):
-    """Path of the ne golden reference for a problem row or name."""
-    name = problem["problem"] if isinstance(problem, dict) else problem
-    return REPO_ROOT / "data" / "numerical" / "golden_ne_{0}_{1}.csv".format(
-        name, N_NE)
+def golden_ne_states(problem):
+    """The (N_NE, states) Float64 golden of the ne ensemble."""
+    return load_golden_ne(problem)[1]
 
 # CLI analysis names; the CSVs record the underscored form.
 ANALYSES = ("performance", "numerical", "work-precision")
@@ -50,11 +44,6 @@ ADAPTIVE_TOL = OVERLAP_TOL
 PERFORMANCE_REPEATS = REPEAT_CAP
 WORK_REPEATS = REPEAT_CAP
 WP_DTS = fixed_dts(1.0, WP_K)
-WP_TOLS = TOLS
-NE_TOLS = TOLS
-
-# Overlap family labels -> ne_common family keys.
-NE_FAMILY = {"ERK": "erk", "ESDIRK": "dirk", "Rosenbrock-W": "rosenbrock"}
 
 # "transfers": "both" includes h2d and d2h, "none" includes neither.
 # One row per timed point: the workers reduce their repeats before writing, so
@@ -71,19 +60,16 @@ FAILURE_FIELDS = ["framework", "algorithm", "phase", "mode", "tier", "n",
 
 
 def algorithms(name="all"):
-    with ALGORITHMS_CSV.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    for row in rows:
-        row["order"] = int(row["order"])
-    if name != "all":
-        rows = [row for row in rows if row["cubie_alias"] == name]
-        if not rows:
-            raise SystemExit("unknown algorithm '{}'; see algorithms.csv".format(name))
+    """The overlap rows of runner_scripts/algorithms.csv, narrowed by name."""
+    rows = overlap_algorithms(name)
+    if not rows:
+        raise SystemExit("'{}' is not in the overlap set; see "
+                         "runner_scripts/algorithms.csv".format(name))
     return rows
 
 
 def algorithm_names():
-    return ["all"] + [row["cubie_alias"] for row in algorithms()]
+    return ["all"] + [row["algorithm"] for row in algorithms()]
 
 
 def protocol(nmax, from_n=0):
@@ -92,10 +78,10 @@ def protocol(nmax, from_n=0):
         "performance_repeats": PERFORMANCE_REPEATS,
         "ne_n": N_NE,
         "ne_dts": NE_DTS,
-        "ne_tols": NE_TOLS,
+        "ne_tols": TOLS,
         "wp_n": N_WP,
         "wp_dts": WP_DTS,
-        "wp_tols": WP_TOLS,
+        "wp_tols": TOLS,
         "work_repeats": WORK_REPEATS,
     }
 
@@ -115,13 +101,6 @@ def timing_stats(values):
             "max_ms": float(np.max(a))}
 
 
-def scaled_dts(problem):
-    """Fixed step and the adaptive dt pins for a problem, in problem time."""
-    duration = problem["duration"]
-    return (duration * FIXED_DT, duration * DT0, duration * DT_MIN,
-            duration * DT_MAX)
-
-
 def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +112,7 @@ def ensure_csv(path, fields):
 
 def regenerated(row, phases, from_n=0, algorithm="all", ns=None):
     """True when a run over `phases` will produce this row again."""
-    if algorithm != "all" and row.get("algorithm") != algorithm:
+    if algorithm != "all" and row.get("algorithm") not in algorithm.split(","):
         return False
     if row.get("phase") not in phases:
         return False
@@ -192,19 +171,3 @@ def rmse(finals, golden):
         return math.nan
     delta = np.asarray(finals[mask], dtype=np.float64) - np.asarray(golden[mask], dtype=np.float64)
     return float(np.sqrt(np.mean(delta * delta)))
-
-
-def pi_controller(order, family):
-    """Return the PI-controller configuration used by the comparison tier."""
-    from cubie.integrators.algorithms.generic_dirk import (
-        dirk_default_ki,
-        dirk_default_kp,
-    )
-    return {
-        "step_controller": "pi",
-        "kp": dirk_default_kp,
-        "ki": dirk_default_ki,
-        "safety": 0.9,
-        "min_gain": 0.2,
-        "max_gain": 10.0,
-    }

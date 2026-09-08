@@ -22,12 +22,13 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "errored.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "samples.jl"))
+include(joinpath(dirname(@__DIR__), "runner_scripts", "results.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
 const REPO_ROOT = dirname(@__DIR__)
+const STORE = result_store(REPO_ROOT, "julia", DATASET_KEY)
 
 requested_algorithm = "all"
 requested_problem = "all"
@@ -91,11 +92,7 @@ algorithm_modes(algorithm) = [mode
 
 "Ensemble l2-at-final error against the Float64 golden reference."
 function ensemble_error(system, us, golden)
-    final = Array(us[end, :])
-    m = Matrix{Float64}(undef, length(final), length(system.golden_index))
-    for i in eachindex(final)
-        m[i, :] .= Float64.(final[i][system.golden_index])
-    end
+    m = Float64.(final_states(system, Array(us[end, :])))
     return sqrt(sum(abs2, m .- golden) / length(m))
 end
 
@@ -105,84 +102,77 @@ function failed(what, err)
     return NaN
 end
 
-"Append `n NaN NaN` timing rows for the given sweep sizes; --floor merges them so recorded rows survive."
-function nan_rows(outfile, ns)
+"Record NaN rows for the given sweep sizes of a leg."
+function nan_rows(problem, algorithm, mode, ns)
     isinteractive() && return
-    if floor_enabled()
-        for n in ns
-            merge_min_row(outfile, n, (NaN, NaN, 100.0))
-        end
-        return
-    end
-    open(outfile, "a+") do io
-        for n in ns
-            println(io, n, " NaN NaN 100.0")
-        end
-        flush(io)
+    for n in ns
+        result_record_times(STORE, "julia", DATASET_KEY, "times", problem,
+            algorithm, mode, n, problem["states"], NaN, NaN, 100.0)
     end
 end
 
+"Record NaN wp rows for the given settings of a leg."
+function nan_wp_rows(problem, algorithm, mode, settings)
+    for setting in settings
+        result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
+            setting, NaN, NaN, 100.0)
+    end
+end
+
+"True when one N or states point of a julia leg is covered."
+function point_covered(analysis, problem, algorithm, mode, n, states)
+    kind, setting = timing_setting(problem, mode)
+    key = analysis == "states" ? states : n
+    return skip_point(STORE, analysis, problem["problem"], algorithm, mode, key,
+        n, states, kind, setting)
+end
+
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
-function wp_sweep(solve_once, system, problem, algorithm, mode, path, settings,
+function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
         golden, label)
-    if skip_wp_leg(problem["problem"], algorithm, mode, path, length(settings))
+    if skip_wp_leg(STORE, problem["problem"], algorithm, mode, settings,
+            problem["states"])
         println("-- resume: skipping wp $(label) (already covered)")
         return
     end
-    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
-        "wp", mode, algorithm, problem)
-    setting_kind = mode == "fixed" ? "dt" : "tol"
-    # --floor merges the new times in; the log gains a fresh series instead.
-    floor_enabled() || reset_samples(samples_file)
-    open(path, floor_enabled() ? "a" : "w") do io
-        breached = false
-        compiled = false
-        for (index, setting) in enumerate(settings)
-            if breached
-                write_wp_row(io, path, setting, NaN, NaN, 100.0)
-                continue
+    compiled = false
+    for (index, setting) in enumerate(settings)
+        on_breach = () -> begin
+            nan_wp_rows(problem, algorithm, mode, settings[index:end])
+            println("WATCHDOG $(label) setting=$(setting): run never returned")
+        end
+        samples = nothing
+        t_ms, err, pct = try
+            if !compiled
+                # The first solve carries the kernel compile, off the GPU lock.
+                run_watchdogged(() -> solve_once(setting), on_breach)
+                compiled = true
             end
-            point = sample_point("wp", problem["problem"], algorithm, mode,
-                N_WP, problem["states"]; setting_kind = setting_kind,
-                setting = setting)
-            on_breach = () -> begin
-                for s in settings[index:end]
-                    write_wp_row(io, path, s, NaN, NaN, 100.0)
+            with_gpu_lock() do
+                warm = @elapsed sol = run_watchdogged(
+                    () -> solve_once(setting), on_breach)
+                if warm > WATCHDOG_SECONDS
+                    (NaN, NaN, 100.0)
+                else
+                    e = ensemble_error(system, sol[2], golden)
+                    p = errored_pct(@view sol[2][end, :])
+                    # The ensemble is resident and the result stays on the device.
+                    t, samples, _ = watchdogged_min_ms(
+                        () -> solve_once(setting), on_breach, REPEATS)
+                    (t, isnan(t) ? NaN : e, p)
                 end
-                flush(io)
-                println("WATCHDOG $(label) setting=$(setting): run never returned")
             end
-            t_ms, err, pct = try
-                if !compiled
-                    # The first solve carries the kernel compile, off the GPU lock.
-                    run_watchdogged(() -> solve_once(setting), on_breach)
-                    compiled = true
-                end
-                with_gpu_lock() do
-                    warm = @elapsed sol = run_watchdogged(
-                        () -> solve_once(setting), on_breach)
-                    if warm > WATCHDOG_SECONDS
-                        (NaN, NaN, 100.0)
-                    else
-                        e = ensemble_error(system, sol[2], golden)
-                        p = errored_pct(@view sol[2][end, :])
-                        t, samples, _ = watchdogged_min_ms(
-                            () -> solve_once(setting), on_breach, REPEATS)
-                        # The ensemble is resident, so only the d2h is timed.
-                        append_samples(samples_file, point, "d2h", samples)
-                        (t, isnan(t) ? NaN : e, p)
-                    end
-                end
-            catch err
-                (failed("wp $(label) setting=$(setting)", err), NaN, 100.0)
-            end
-            if isnan(t_ms)
-                println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
-                breached = true
-            end
-            write_wp_row(io, path, setting, t_ms, err, pct)
-            println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err), " *
-                    "errored=$(round(pct, digits = 1))%")
+        catch err
+            (failed("wp $(label) setting=$(setting)", err), NaN, 100.0)
+        end
+        result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
+            setting, t_ms, err, pct; samples = samples)
+        println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err), " *
+                "errored=$(round(pct, digits = 1))%")
+        if isnan(t_ms)
+            println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
+            nan_wp_rows(problem, algorithm, mode, settings[(index + 1):end])
+            break
         end
     end
 end
@@ -192,39 +182,18 @@ function run_wp(problem)
     golden = readdlm(golden_path(problem), ',', Float64)
     system, prob, duration = build_prob(problem)
     probs_host, probs = build_ensemble(system, prob, problem, N_WP)
-    outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
-    dt0 = Float32(problem_timing_dt(problem))
 
     for algorithm in ALGORITHMS
         problem_supports(problem, "julia") || continue
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
-
-        if "fixed" in algorithm_modes(algorithm)
-            wp_sweep(system, problem, algorithm, "fixed",
-                joinpath(outdir, "Julia_wp_fixed_$(algorithm).txt"),
-                collect(problem_dts(problem)), golden,
-                "$(label) fixed") do dt
-                CUDA.@sync sol = DiffEqGPU.vectorized_solve(probs, prob,
-                    solver; saveat = duration, save_everystep = false,
-                    dt = Float32(dt))
-                ts = Array(sol[1])
-                us = Array(sol[2])
-                sol
-            end
-        end
-
-        if "adaptive" in algorithm_modes(algorithm)
-            wp_sweep(system, problem, algorithm, "adaptive",
-                joinpath(outdir, "Julia_wp_adaptive_$(algorithm).txt"),
-                [10.0^-k for k in 2:8], golden,
-                "$(label) adaptive") do tol
-                CUDA.@sync sol = DiffEqGPU.vectorized_asolve(probs, prob,
-                    solver; saveat = duration, save_everystep = false,
-                    reltol = Float32(tol), abstol = Float32(tol), dt = dt0)
-                ts = Array(sol[1])
-                us = Array(sol[2])
-                sol
+        settings = Dict("fixed" => collect(problem_dts(problem, algorithm)),
+            "adaptive" => TOLS)
+        for mode in algorithm_modes(algorithm)
+            # The ensemble is resident; the timed solve leaves its result on the device.
+            wp_sweep(system, problem, algorithm, mode, settings[mode], golden,
+                "$(label) $(mode)") do setting
+                gpu_solve_device(probs, prob, solver, mode, setting, problem)
             end
         end
     end
@@ -233,15 +202,12 @@ end
 # One (algorithm, mode) leg: every sweep size ascending on one compiled kernel.
 function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     solver = gpu_solver(algorithm)
-    dt0 = Float32(problem_timing_dt(problem))
-    outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, problem)
-    outfile = joinpath(outdir, "Julia_times_$(mode)_$(algorithm).txt")
-    samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY, "Julia",
-        "times", mode, algorithm, problem)
+    _, setting = timing_setting(problem, mode)
     compiled = false
 
     run_ns = [n for n in NS
-              if !skip_point(problem["problem"], algorithm, mode, n, outfile)]
+              if !point_covered("times", problem, algorithm, mode, n,
+                  problem["states"])]
     if isempty(run_ns)
         println("-- resume: skipping $(problem["problem"]) $(mode) " *
                 "$(algorithm) (already covered)")
@@ -251,71 +217,42 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
                 "runs N=" * join(run_ns, ","))
     end
-    # Drop stale rows for the points about to rerun.
-    prune_reruns(outfile, run_ns)
 
     for (index, n) in enumerate(run_ns)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
         probs_host, probs = build_ensemble(system, prob, problem, n)
 
-        device_solve = () -> begin
-            # Device-only: probs already resident, results left there.
-            if mode == "fixed"
-                CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob, solver,
-                    saveat = duration, save_everystep = false, dt = dt0)
-            else
-                CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob, solver,
-                    saveat = duration, save_everystep = false,
-                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
-            end
-        end
-        full_solve = () -> begin
-            # Array(ts), Array(us) mirror what the higher-level wrapper transfers back.
-            probs_d = cu(probs_host)
-            sol = if mode == "fixed"
-                CUDA.@sync DiffEqGPU.vectorized_solve(probs_d, prob, solver,
-                    saveat = duration, save_everystep = false, dt = dt0)
-            else
-                CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob, solver,
-                    saveat = duration, save_everystep = false,
-                    reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL), dt = dt0)
-            end
-            ts = Array(sol[1])
-            us = Array(sol[2])
-            sol
-        end
+        device_solve = () -> gpu_solve_device(probs, prob, solver, mode,
+            setting, problem)
+        full_solve = () -> gpu_solve_host(probs_host, prob, solver, mode,
+            setting, problem)[1]
         # NaN rows for every uncovered point this process will no longer reach.
         on_breach = () -> begin
-            nan_rows(outfile, run_ns[index:end])
+            nan_rows(problem, algorithm, mode, run_ns[index:end])
             for (later_algorithm, later_mode) in later_legs()
-                later_out = joinpath(outdir,
-                    "Julia_times_$(later_mode)_$(later_algorithm).txt")
-                nan_rows(later_out,
+                nan_rows(problem, later_algorithm, later_mode,
                     [m for m in NS
-                     if !skip_point(problem["problem"], later_algorithm,
-                         later_mode, m, later_out)])
+                     if !point_covered("times", problem, later_algorithm,
+                         later_mode, m, problem["states"])])
             end
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run never returned")
         end
 
+        samples_none = samples_both = nothing
         t_ms, t_dev_ms, pct, breached = try
             if !compiled
                 # The first solve carries the kernel compile, off the GPU lock.
                 run_watchdogged(device_solve, on_breach)
                 compiled = true
             end
-            point = sample_point("times", problem["problem"], algorithm, mode,
-                n, problem["states"])
             t_dev, t, pct = with_gpu_lock() do
-                td, samples, dev_sol = watchdogged_min_ms(device_solve,
+                td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
                     on_breach, REPEATS)
-                append_samples(samples_file, point, "none", samples)
                 isnan(td) && return (td, NaN, 100.0)
                 p = errored_pct(@view dev_sol[2][end, :])
-                tt, samples, _ = watchdogged_min_ms(full_solve, on_breach,
+                tt, samples_both, _ = watchdogged_min_ms(full_solve, on_breach,
                     REPEATS)
-                append_samples(samples_file, point, "both", samples)
                 (td, tt, p)
             end
             (t, t_dev, pct, isnan(t))
@@ -325,7 +262,10 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
         end
         ran = !isnan(t_ms)
 
-        isinteractive() || record_row(outfile, n, (t_ms, t_dev_ms, pct))
+        isinteractive() || result_record_times(STORE, "julia", DATASET_KEY,
+            "times", problem, algorithm, mode, n, problem["states"], t_ms,
+            t_dev_ms, pct; samples_both = samples_both,
+            samples_none = samples_none)
 
         # Save numerical output for 32768-trajectory run
         if ran && !isinteractive() && n == 32768 && algorithm == "tsit5"
@@ -348,7 +288,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             # Larger sweep sizes are slower, so the leg ends here.
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run exceeded the cap")
-            nan_rows(outfile, run_ns[(index + 1):end])
+            nan_rows(problem, algorithm, mode, run_ns[(index + 1):end])
             return
         end
     end
@@ -374,53 +314,24 @@ function run_states(nstates, n)
     row = copy(get_problem("lorenz96"))
     row["states"] = nstates
     system, prob, duration = build_prob_parts(entry, row)
-    dt0 = Float32(problem_timing_dt(row))
-    outdir = data_dir(REPO_ROOT, "Julia", DATASET_KEY, row)
 
     for algorithm in ALGORITHMS
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
-            outfile = joinpath(outdir, "Julia_states_$(mode)_$(algorithm).txt")
-            if skip_point(row["problem"], algorithm, mode, nstates, outfile)
+            _, setting = timing_setting(row, mode)
+            if point_covered("states", row, algorithm, mode, n, nstates)
                 println("-- resume: skipping states=$(nstates) $(mode) " *
                         "$(algorithm) (already covered)")
                 continue
             end
-            samples_file = samples_outfile(REPO_ROOT, "Julia", DATASET_KEY,
-                "Julia", "states", mode, algorithm, row)
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
+            samples_none = samples_both = nothing
             t_ms, t_dev_ms, build_s, pct = try
                 probs_host, probs = build_ensemble(system, prob, row, n)
-                device_solve = () -> begin
-                    if mode == "fixed"
-                        CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob,
-                            solver, saveat = duration,
-                            save_everystep = false, dt = dt0)
-                    else
-                        CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob,
-                            solver, saveat = duration,
-                            save_everystep = false,
-                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
-                            dt = dt0)
-                    end
-                end
-                full_solve = () -> begin
-                    probs_d = cu(probs_host)
-                    sol = if mode == "fixed"
-                        CUDA.@sync DiffEqGPU.vectorized_solve(probs_d, prob,
-                            solver, saveat = duration,
-                            save_everystep = false, dt = dt0)
-                    else
-                        CUDA.@sync DiffEqGPU.vectorized_asolve(probs_d, prob,
-                            solver, saveat = duration,
-                            save_everystep = false,
-                            reltol = Float32(TIMING_TOL), abstol = Float32(TIMING_TOL),
-                            dt = dt0)
-                    end
-                    ts = Array(sol[1])
-                    us = Array(sol[2])
-                    sol
-                end
+                device_solve = () -> gpu_solve_device(probs, prob, solver,
+                    mode, setting, row)
+                full_solve = () -> gpu_solve_host(probs_host, prob, solver,
+                    mode, setting, row)[1]
                 # Uncapped: the first solve carries the kernel compile.
                 build = @elapsed device_solve()
                 marker = get(ENV, "BENCH_STATES_MARKER", "")
@@ -428,17 +339,13 @@ function run_states(nstates, n)
                 on_breach = () -> println("WATCHDOG lorenz96 " *
                     "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
                     "run never returned")
-                point = sample_point("states", row["problem"], algorithm,
-                    mode, n, nstates)
                 t_dev, t, pct = with_gpu_lock() do
-                    td, samples, dev_sol = watchdogged_min_ms(device_solve,
+                    td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
                         on_breach, REPEATS)
-                    append_samples(samples_file, point, "none", samples)
                     isnan(td) && return (td, NaN, 100.0)
                     p = errored_pct(@view dev_sol[2][end, :])
-                    tt, samples, _ = watchdogged_min_ms(full_solve, on_breach,
-                        REPEATS)
-                    append_samples(samples_file, point, "both", samples)
+                    tt, samples_both, _ = watchdogged_min_ms(full_solve,
+                        on_breach, REPEATS)
                     (td, tt, p)
                 end
                 isnan(t) &&
@@ -449,8 +356,10 @@ function run_states(nstates, n)
                 (failed("lorenz96 states=$(nstates) $(mode) $(algorithm) " *
                         "N=$(n)", err), NaN, NaN, 100.0)
             end
-            isinteractive() ||
-                record_row(outfile, nstates, (t_ms, t_dev_ms, build_s, pct))
+            isinteractive() || result_record_times(STORE, "julia", DATASET_KEY,
+                "states", row, algorithm, mode, n, nstates, t_ms, t_dev_ms, pct;
+                samples_both = samples_both, samples_none = samples_none,
+                build_s = build_s)
             GC.gc()
             CUDA.reclaim()
             println("states=$(nstates) $(mode) $(algorithm): $(t_ms) ms")
@@ -478,22 +387,18 @@ end
 function write_finals(system, problem, sol, name, duration)
     # Do not count solves that never wrote a final time
     final_times = Array(sol[1][end, :])
-    final_states = Array(sol[2][end, :])
-    # One row per trajectory, one column per golden state.
-    m = Matrix{Float64}(undef, length(final_states),
-        length(system.golden_index))
+    m = Float64.(final_states(system, Array(sol[2][end, :])))
     arrived = 0
-    for i in eachindex(final_states)
+    for i in eachindex(final_times)
         if isapprox(Float64(final_times[i]), Float64(duration); rtol = 1.0f-4)
-            m[i, :] .= Float64.(final_states[i][system.golden_index])
             arrived += 1
         else
             m[i, :] .= NaN
         end
     end
-    if arrived < length(final_states)
-        @warn "$(name): $(length(final_states) - arrived) of " *
-              "$(length(final_states)) trajectories stopped before " *
+    if arrived < length(final_times)
+        @warn "$(name): $(length(final_times) - arrived) of " *
+              "$(length(final_times)) trajectories stopped before " *
               "t=$(duration); written as NaN rows"
     end
     df = DataFrame(m, :auto)

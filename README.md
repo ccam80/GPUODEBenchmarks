@@ -158,12 +158,14 @@ timing and work-precision sweeps to the listed integration algorithms (see
 
 ### Algorithm-matched subsets
 
-`runner_scripts/algorithms.csv` is the algorithm registry: one row per
-integration algorithm, naming the frameworks that run it fixed-step and the
-frameworks that run it adaptively, in the cubie vocabulary. Both
-`algorithms.py` and `algorithms.jl` read that file, and every bench script
-takes its supported set from it. Each figure contains only packages running
-the same method:
+`runner_scripts/algorithms.csv` is the algorithm registry, one row per
+integration algorithm in the cubie vocabulary: `fixed` and `adaptive` name the
+frameworks that time it in each mode, `ne` and `ne_adaptive` place it in the
+numerical-equivalence sweeps, `julia_cpu` is its DifferentialEquations.jl
+constructor, and `julia_gpu` its DiffEqGPU constructor for the overlap suite.
+Both `algorithms.py` and `algorithms.jl` read that file, and every suite takes
+its set from it. Each timing figure contains only packages running the same
+method:
 
 | Subset | Mode | Algorithm | Members |
 |---|---|---|---|
@@ -199,21 +201,29 @@ comparison is what each package delivers for a requested accuracy, which is
 why the figures plot achieved error rather than step counts. Adaptive points
 take `atol = rtol` from `adaptive.timing_tol` in `runner_scripts/protocol.toml`
 for the N-sweep and from its `tol_k` grid for work-precision, and start from the
-problem's timing dt. Nothing else is set: every package runs its shipped
-step-controller defaults.
+problem's timing dt; cubie and the DifferentialEquations.jl NE sweep floor the
+step at `duration * adaptive.dt_min_fraction`, DiffEqGPU's kernels at 1e-14.
+Nothing else is set: every package runs its shipped step-controller defaults.
 
 Controllers are matched in one place only, the cubie against
 DifferentialEquations.jl overlap suite, which repeats each comparison with
-cubie's controller set to Julia's (`pi_controller` in
-`runner_scripts/cubie_julia_overlap/common.py`).
+cubie's controller set to the DIRK PI defaults (`pi_tier_controller` in
+`runner_scripts/cubie_adapter.py`).
 
 `eps(Float32)` is 1.2e-7, so the tightest points of the tolerance grid and
 the 1e-8 `TIMING_TOL` ask for more than the working precision resolves.
-Cubie warns `newton_rtol is at or above the step controller rtol` from 1e-7
-down. A fixed step leaves diffrax's implicit solvers nothing to take their
-root-finder tolerances from, so the bench passes the run's tolerance the way
-an adaptive controller would; its chord iteration still diverges on lorenz,
-and that point records NaN.
+
+### Implicit stage solves
+
+The `[newton]` table of `runner_scripts/protocol.toml` scales the fixed-step
+Newton termination test, `eta * rms(dz / (atol + rtol |u|)) < 0.01`, in
+OrdinaryDiffEq (`abstol`/`reltol` with `adaptive = false`), diffrax
+(`VeryChord(rtol, atol, norm = rms_norm)`) and cubie
+(`newton_atol`/`newton_rtol`). Adaptive solves scale it by the step tolerance
+in all three; cubie warns `newton_rtol is at or above the step controller
+rtol` at every implicit solver build and floors `newton_rtol` at
+`4 eps(Float32)`. DiffEqGPU's kernels stop at an unscaled residual rms below
+`100 eps(Float32)` and take no tolerance.
 
 All benchmark entry points accept `-g <algorithms>` (default `all`, meaning
 every algorithm the framework supports; a comma list runs the listed ones);
@@ -226,10 +236,8 @@ a framework that does not support a requested algorithm skips cleanly:
     $ ./run_full_dataset.sh --algorithm euler
 ```
 
-Timing files are named
-`data/<package>/<os>_<gpu>/<problem>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
-(work-precision files use `_wp_` in place of `_times_`). Data without the
-algorithm field is regenerated fresh rather than migrated.
+Every timed point is one row of `data/<package>/<os>_<gpu>/results.csv`, the
+result store described under "Result store" below.
 
 ### Repeat count
 
@@ -256,51 +264,23 @@ repeat rule and watchdog value. Python reads it through
 the MPGOS launchers generate `GPU_ODE_MPGOS/protocol.h` from it before each
 build. `python runner_scripts/protocol.py get <table.key>` prints one value.
 
-### Per-repeat timing log
+### Result store
 
-Every timed point is a minimum over its repeats, and each of those runs is
-also written to
-`<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv` beside
-the reduced file, one row per attempt:
-
-`analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms`
-
-* `repeat` is 0 for the warm-up, which carries the first-call compile, and
-  1..k for the runs the minimum is taken over.
-* `transfers` is what the timed region copies: `both` (h2d and d2h), `none`
-  (neither) or `d2h` (inputs already resident). Each timed leg of a point
-  writes its own rows.
-* `setting_kind`/`setting` carry the wp sweep's `dt` or `tol`, and are
-  `none`/`nan` elsewhere.
-* A run that breaches the watchdog is logged before its leg is abandoned.
-
-The samples file follows its reduced sibling's write mode: the wp and states
-sweeps rewrite theirs each run, the N sweep appends, and a `--floor` re-run
-always appends a fresh block headed by repeat 0, which `collect_samples.py`
-separates as a new series. Filtering to `repeat > 0` and taking the minimum
-per (leg, point) reproduces the reduced file. The
-writers are `SampleLog` in `runner_scripts/wp_common.py`,
-`runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
-
-#### Master run-times table
-
-`runner_scripts/collect_samples.py` gathers every log under `data/` into one
-table, replacing `data/master_run_times.csv` whole each run:
-
-```bash
-python3 runner_scripts/collect_samples.py            # --data-root/--out to override
-```
-
-Rows keep their log's columns and gain the four its path and shape carry:
-`package`, `key` (the `<os>_<gpu>` directory), `prefix` (the writer, so `Cubie`
-and `Cubie_mlir` stay apart) and `series`. A `series` is one block of rows
-headed by `repeat` 0, counted from 0 within its file: one timed leg of one run.
-The N sweep appends, so a re-run or a resumed run leaves a second block for a
-leg it repeats - same point and transfers, later series - and a minimum belongs
-inside one series, never across two. Rows sort by leg, then series and repeat;
-a log being appended to while the collector runs can end in a torn line, which
-is dropped and named on stderr. Only the standard library is imported, so it
-runs under a bare `python3` on any machine holding a copy of `data/`.
+`data/<package>/<os>_<gpu>/results.csv` holds one row per timed point and
+transfer leg, written by `runner_scripts/results.py` (Python writers and the
+MPGOS launcher and binary) and `runner_scripts/results.jl` (Julia writers).
+The identity columns are `package, key, analysis, problem, algorithm, mode,
+setting_kind, setting, n, states, tier, transfers`; `analysis` is `times`,
+`wp` or `states`, `setting` the dt or tolerance the point ran at, `n` the
+ensemble size and `states` the state count. `transfers` is `both` (h2d and
+d2h) or `none`; the N and states sweeps record both legs, work-precision
+`none` only. The value columns are `min_ms`, `samples_ms` (every attempt in
+ms, `;`-joined, warm-up first; `min_ms` is the minimum after the warm-up),
+`errored_pct`, `error` (wp rows) and `build_s` (states rows). Readers compute
+spread from `samples_ms` (`results.samples_of`, `result_samples`). A row with
+the same identity replaces the recorded one; under `--floor` the lower
+`min_ms` stays. `python runner_scripts/results.py` offers `record`, `nan`,
+`status` and `clear`.
 
 ### Problems
 
@@ -365,10 +345,9 @@ Every problem attempts every algorithm its frameworks support; a failed solve is
 `run_benchmark -a states` times lorenz96 at 4-128 states
 (`BENCH_STATES_GRID=<comma list>` overrides) and a fixed
 131072-trajectory ensemble, in every framework and algorithm
-the problem's frameworks support, exclusions included. Rows are
-`states t_ms t_dev_ms build_s` in
-`<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
-data directory. `build_s` is the wall time from solver construction to
+the problem's frameworks support, exclusions included. Rows land in the
+result store with `analysis = states`, `problem = lorenz96` and the state
+count in `states`. `build_s` is the wall time from solver construction to
 the first completed solve; the sweep bypasses every compiled-kernel
 cache, making it a cold compile on every run. A size with no finite time in
 either mode cancels the pending and running larger sizes of that
@@ -407,6 +386,17 @@ each model — then runs the timed sweep against warm caches.
 solvers, every work-precision setting, and julia's `Pkg.precompile`;
 `run_full_dataset -a warm` does that for every package. States-sweep
 kernels are never warmed.
+
+Cubie tunes before it warms. `run_benchmark -p cubie -a optimize` runs
+`Solver.optimize` on an `optimize.n`-trajectory batch and records the winning
+unrolling, buffer placement, block size and residency in
+`data/CUBIE/<key>/optimize.csv` (`CUBIE_MLIR` for the MLIR backend); every
+later solver of that point is built with those settings. Explicit algorithms
+are tuned once per (problem, algorithm, mode) at the timing setting; the
+families in `optimize.per_point_families` are tuned at every work-precision
+setting as well. The performance and work-precision launchers run the step
+first and skip points already recorded, `--keep` preserves the rows,
+and the states sweep tunes each size after timing its cold build.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
@@ -454,40 +444,51 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`run_full_dataset.sh` drives every suite in one set-and-forget run — the
-timing sweeps, the work-precision sweeps, the numerical-equivalence suite, the
-per-algorithm cubie vs. DiffEqGPU overlap comparison, and finally the plots
-and comparison reports:
+`bench.py` runs every stage: cubie optimize and warm, the timing, states and
+work-precision sweeps, numerical equivalence, the overlap comparison, plots and
+reports. Every axis (package, analysis, algorithm, problem, mode, N) takes a
+comma list and `--point` retakes single points; the `run_*.sh`/`.bat` scripts
+forward to it. Without `--keep` a run first drops only the store rows it is
+about to record.
 
 ```bash
-    $ ./run_full_dataset.sh                     # everything, nmax = 2^24
-    $ ./run_full_dataset.sh -n $((2**25))       # larger ceiling
-    $ ./run_full_dataset.sh -n $((2**23)),$((2**27))  # exact trajectory counts only
-    $ ./run_full_dataset.sh -a performance      # one analysis
-    $ ./run_full_dataset.sh -p cpp              # one package
-    $ ./run_full_dataset.sh -p cubie,julia -g euler,tsit5   # subsets of both
-    $ ./run_full_dataset.sh --resume                # skip every point already on disk
-    $ ./run_full_dataset.sh --no-overwrite          # keep finite results, retry NaN and absent points
-    $ ./run_full_dataset.sh --resume-from jax       # restart the perf sweep at a package
-    $ ./run_full_dataset.sh --resume \
+    $ python3 bench.py                           # everything, nmax = 2^24
+    $ python3 bench.py -n $((2**25))             # larger ceiling
+    $ python3 bench.py -n $((2**23)),$((2**27))  # exact trajectory counts only
+    $ python3 bench.py -a performance            # one analysis
+    $ python3 bench.py -a optimize,warm -p cubie # tune and fill the cubie caches only
+    $ python3 bench.py -p cpp                    # one package
+    $ python3 bench.py -p cubie,julia -g euler,tsit5   # subsets of both
+    $ python3 bench.py --mode adaptive -s pollu  # one mode of one problem
+    $ python3 bench.py --resume                  # skip every point already on disk
+    $ python3 bench.py --no-overwrite            # keep finite results, retry NaN and absent points
+    $ python3 bench.py --resume-from jax         # restart the perf sweep at a package
+    $ python3 bench.py --resume \
         --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
-                                                    # ...or at an exact (problem, algorithm, mode, N)
-    $ ./run_full_dataset.sh --floor -s lorenz       # re-run and keep the lower time per point
+                                                 # ...or at an exact (problem, algorithm, mode, N)
+    $ python3 bench.py --floor -s lorenz         # re-run and keep the lower time per point
+    $ python3 bench.py --point times:cubie:lorenz:tsit5:fixed:32768 \
+                       --point wp:julia:pollu:kvaerno3 --point states:cpp:lorenz96:classical-rk4:16
+    $ python3 bench.py --points-file retakes.txt # one point per line
 ```
 
+A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
+state count>]`; a run of points replaces only those rows and redraws the plots,
+and a point without a mode re-measures both modes. `JULIA` names the
+julia launcher, e.g. `JULIA="julia +1.13"`.
+
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
-already in its output file and deletes nothing; NaN rows count as recorded.
+already in the result store and deletes nothing; NaN rows count as recorded.
 `--no-overwrite` skips only points with a finite recorded time; NaN and
-absent rows rerun, and a rerun point's stale rows are dropped before the
-new row is appended. `--keep` gives the no-deletion behaviour on its own.
+absent rows rerun, and a rerun point replaces its row. `--keep` gives the
+no-deletion behaviour on its own.
 `--resume-from` places a cursor in the run order (problems.csv order, then
 algorithms.csv order, fixed before adaptive, N ascending) and skips
 everything before it — use it to step over a point that hangs, since a hung
 point leaves no row for `--resume` to skip. `--floor` re-runs the selected
 points (it skips nothing, and implies `--keep`) and merges each result into
-the recorded file by keeping the lower time — per column for the times and
-states rows, per (time, error) pair for the wp rows — so a re-run can only
-tighten a recorded minimum. Which points re-run comes from the flags that
+the store by keeping the row with the lower time, per transfer leg, so a
+re-run can only tighten a recorded minimum. Which points re-run comes from the flags that
 already select work (`-s`, `-g`, `-n`). All four flags are also accepted by
 `run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from` starts at
 the problem:
@@ -498,11 +499,10 @@ the problem:
         --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
 ```
 
-**On Windows** the same flags apply through `run_full_dataset.bat`, a wrapper
-for `run_full_dataset.ps1`:
+**On Windows** the same flags apply:
 
 ```cmd
-    > run_full_dataset.bat -n 16777216 -a performance,work-precision
+    > python bench.py -n 16777216 -a performance,work-precision
 ```
 
 At high trajectory counts some frameworks will exhaust GPU memory. Each
@@ -605,12 +605,9 @@ to specify the upper bound of the trajectories to benchmark. By default
 $N = 2^{24}$, where the simulation runs for $n \in 8 \le n < N$, with
 the multiples of $4$.
 
-The data will be generated in the `data/Julia` directory, with two files
-for fixed and adaptive time-stepping simulations. Each \".txt\" row is
-`N time_ms time_device_only_ms`: the number of trajectories, the
-end-to-end time (h2d + solve + d2h) in milliseconds, and the same solve
-with the inputs already resident and the results left on the device.
-Every framework's timing files share this format.
+Rows land in `data/Julia/<os>_<gpu>/results.csv` with `analysis = times`, two
+per (problem, algorithm, mode, N): `transfers = both` times h2d + solve + d2h,
+`transfers = none` the resident solve alone. See "Result store" above.
 
 Additionally, to benchmark ODE solvers for other backends:
 
@@ -660,7 +657,7 @@ programs can be run with the same script by changing the arguments as:
     > run_benchmark.bat -p cpp -d gpu -m ode
 ```
 
-It will generate the data files in the `data/cpp` folder.
+Its rows land in `data/CPP/<os>_<gpu>/results.csv`.
 
 **Note for Windows:** The C++ runner script uses PowerShell for file manipulation. Ensure PowerShell is available and that the execution policy allows running scripts.
 
@@ -728,9 +725,11 @@ Then run the benchmarks by:
 CUBIE is benchmarked twice: once on the stock `numba-cuda` compilation
 pipeline (`cubie`) and once on the `numba-cuda-mlir` pipeline (`cubie_mlir`).
 Both run from a **single shared virtual environment** holding one PyPI install
-of `cubie` with both backends present; the active backend is chosen at import
-time by the `CUBIE_CUDA_BACKEND` environment variable, which each launcher
-exports for you (`numba-cuda` and `mlir` respectively).
+of `cubie` with both backends present; `runner_scripts/cubie_adapter.py`
+sets `CUBIE_CUDA_BACKEND` from the package name before cubie is imported
+(`numba-cuda` and `mlir` respectively) and names each package's systems so
+both suites, the overlap worker and the NE sweep share one generated-code
+cache per backend.
 `GPU_ODE_CUBIE_MLIR/venv` is a link to `GPU_ODE_CUBIE/venv`. Set it up with
 `setup_all_environments.py` or the individual `setup_environment.py`
 scripts (see [SETUP.md](SETUP.md)), then run:
@@ -1007,11 +1006,11 @@ artifact.
 Each framework's `wp` mode sweeps the controls it supports, once per
 supported algorithm (narrow with `-g <algorithm>`): fixed-step sweeps use
 dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
-adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
-usual timing protocol
-(untimed warm-up, repeated solves, best time) and computes the ensemble l2
-error of the final states against the golden reference. The grids are the
-`[fixed]` and `[adaptive]` tables of `runner_scripts/protocol.toml`.
+adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting times the
+resident solve (untimed warm-up, repeated solves, best time; a `transfers =
+none` row) and scores one untimed solve's final states against the golden
+reference. The grids are the `[fixed]` and `[adaptive]` tables of
+`runner_scripts/protocol.toml`.
 
 ```bash
 ./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision
@@ -1027,9 +1026,9 @@ error of the final states against the golden reference. The grids are the
 package's work-precision sweeps and the plot in one go:
 `./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 
-Results are written per machine as
-`data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
-with rows `<setting> <time_ms> <error>`. Notes:
+Results land in the machine's result store with `analysis = wp`, the dt or
+tolerance in `setting`, the time in `min_ms` and the ensemble l2 error in
+`error`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
   `block_until_ready`, torch `cuda.synchronize`), unlike the historical
@@ -1057,31 +1056,28 @@ numerical-equivalence (`ne`) suite instead compares error against *dt*, per
 algorithm, to answer a different question: **does each cubie algorithm
 actually calculate what its named method should?** Every implicit-family
 algorithm mutually supported by cubie and DifferentialEquations.jl (the
-mapping lives in `runner_scripts/numerical_equivalence/algorithms.csv`)
-integrates the same Lorenz ensemble (N = 1024, rho in [0, 21], t in [0, 1])
-fixed-step at every dyadic dt from 1/2 to 1/8192 — **both stacks in
+`ne` rows of `runner_scripts/algorithms.csv`) integrates each problem's ne
+ensemble, the first `ensemble.n_ne` (1024) points of its work-precision sweep
+scored on the same rows of the wp golden, fixed-step at every dyadic
+`duration * 2^-k` for `k` in `fixed.ne_k` (1 to 13) — **both stacks in
 Float32** — and the final states are compared against the Float64 golden
 reference and against each other. erk-family algorithms run only the
-adaptive sweep. The small-dt end of the grid resolves the fp-precision
-tail.
+adaptive sweep. The small-dt end of the grid resolves the fp-precision tail.
 
-Float32 discipline on the Julia side is enforced, not assumed: u0, tspan, dt
-and the parameter vector are constructed as Float32 (the rho grid is read
-from the golden file, whose values are exactly representable in Float32) and
-every trajectory's final state is asserted to still be Float32, so a silent
-promotion to Float64 aborts the run.
+On the Julia side u0, tspan, dt and the parameter vector are constructed as
+Float32 (the sweep grid is the Float32 wp grid) and every trajectory's final
+state is asserted to still be Float32; a promotion to Float64 aborts the run.
 
 ### Running the suite
 
-One command runs everything (golden reference if missing, both reference
-sweeps, both cubie sweeps, comparison report + plots):
+One command runs the golden, the DifferentialEquations.jl sweeps, the cubie ne legs and the comparison:
 
 ```bash
 ./run_numerical_equivalence.sh              # Linux/macOS/WSL
 run_numerical_equivalence.bat               # Windows
 ```
 
-Both take `--controller fixed|adaptive|all` (default `all`) to run just one
+Both take `--mode fixed|adaptive|all` (default `all`) to run just one
 of the two sweep types, `-p julia|cubie|all` to run one side of the
 comparison, and exit non-zero when any step fails.
 `run_all_benchmarks.sh -a numerical` appends the same suite to a full
@@ -1097,23 +1093,24 @@ dominate the wall time (one kernel compile per algorithm/setting point,
 committed; the setup script builds the Julia environment, including the
 OrdinaryDiffEq solver sub-libraries this suite needs).
 
-The suite's four steps, each also runnable by hand (the two sweep runners
-take the same optional `fixed|adaptive|all` mode argument):
+The ne ensemble is the first 1024 points of the wp sweep and golden for every problem. The steps, each runnable by hand with the optional `fixed|adaptive|all` mode:
 
 ```bash
-julia -t auto --project=. runner_scripts/numerical_equivalence/generate_golden_ne.jl
-#   -> data/numerical/golden_ne_<problem>_1024.csv  (Float64, machine independent)
+julia -t auto --project=. runner_scripts/golden/generate_golden.jl
+#   -> data/numerical/golden_<problem>_131072.csv  (Float64, machine independent)
 julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>.csv            (fixed sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/controller_constants.csv   (resolved defaults)
-GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/numerical_equivalence.py
-#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>.csv
-#   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
+GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/bench_cubie.py ne        # bench_cubie_mlir.py for the MLIR backend
+#   timed wp legs of the ne algorithms; the first 1024 rows of each solve's finals land in
+#   -> data/numerical_equivalence/<cubie|cubie_mlir>/<os>_<gpu>/<problem>/<algorithm>.csv
+#   -> data/numerical_equivalence/<cubie|cubie_mlir>/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
-#   -> plots/<os>_<gpu>/numerical_equivalence_fixed.csv
-#   -> plots/<os>_<gpu>/numerical_equivalence_adaptive.csv
-#   -> plots/<os>_<gpu>/numerical_equivalence.png (+ _adaptive variant)
+#   one set per cubie package with outputs:
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>_fixed.csv
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>_adaptive.csv
+#   -> plots/<os>_<gpu>/<problem>/numerical_equivalence_<package>.png (+ _adaptive variant)
 ```
 
 ### Adaptive sweeps
@@ -1122,7 +1119,7 @@ The fixed-step sweep deliberately removes the step-size controller to
 isolate each tableau; the adaptive sweep tests the opposite composite —
 embedded estimator + error norm + controller — under real controller
 dynamics. Every algorithm with an embedded error estimate on *both* sides
-(the `adaptive` column of `algorithms.csv`, cross-checked at runtime
+(the `ne_adaptive` column of `algorithms.csv`, cross-checked at runtime
 against cubie's `tableau.has_error_estimate` and OrdinaryDiffEq's
 `isadaptive`) integrates the ensemble at atol = rtol over 1e-2 .. 1e-8, in
 Float32, with pinned initial dt and dt bounds, and errors are compared
@@ -1137,9 +1134,10 @@ Cubie runs each algorithm twice:
 * **matched** — controller type, gains, safety factor and gain clamps
   mirrored from the constants DifferentialEquations.jl resolved for that
   algorithm (exported to `controller_constants.csv`; the gain mapping
-  `kp = beta1*(order+1)`, `ki = -beta2*(order+1)` accounts for the two
-  stacks' different exponent conventions — derivation in
-  `GPU_ODE_CUBIE/numerical_equivalence.py`). This tier exists to isolate
+  `proportional_gain = beta2*(order+1)`,
+  `integral_gain = (beta1 - beta2)*(order+1)` in
+  `runner_scripts/cubie_adapter.py` accounts for the two stacks' exponent
+  conventions). This tier exists to isolate
   how much of the difference between the two stacks comes from the step
   controller rather than the algorithm. When the matched constants equal
   cubie's own defaults, the matched file is written from the default

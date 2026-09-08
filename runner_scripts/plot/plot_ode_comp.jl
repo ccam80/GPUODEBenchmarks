@@ -4,24 +4,13 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 include(joinpath(dirname(@__DIR__), "errored.jl"))
+include(joinpath(dirname(@__DIR__), "results.jl"))
 
-# Reads data/<package>/<os>_<gpu>/<problem>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt
-# and emits one plot per (group, problem, mode, algorithm, transfer variant)
-# plus an "all" overview into plots/<group>/<problem>/. ARGS[1] overrides the data dir.
+# Reads the `times` rows of every data/<package>/<os>_<gpu>/results.csv and
+# emits one plot per (group, problem, mode, algorithm, transfer variant) plus an
+# "all" overview into plots/<group>/<problem>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
-
-# display name => (subdirectory, filename prefix)
-# Note: MPGOS data files are stored under `CPP/` in the repo's `data/` folder.
-frameworks = [
-    ("Julia", "Julia", "Julia"),
-    ("MPGOS", "CPP", "MPGOS"),
-    ("JAX", "JAX", "Jax"),
-    ("PYTORCH", "PYTORCH", "Torch"),
-    ("CUBIE", "CUBIE", "Cubie"),
-    ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
-    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
-]
 
 # color/marker choices per framework, identical across every figure
 colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
@@ -45,52 +34,30 @@ struct Series
     y::Vector{Float64}
 end
 
-# Discover every timing file under data/<package>/<key>/ and load it.
-function collect_series(base_path, frameworks)
-    series = Series[]
-    for (display, dir, prefix) in frameworks
-        dpath = joinpath(base_path, dir)
-        isdir(dpath) || continue
-        pat = Regex("^" * prefix * "_times_(fixed|adaptive)_([^_]+)[.]txt" * "\$")
-        for key in sort(readdir(dpath))
-            kpath = joinpath(dpath, key)
-            isdir(kpath) || continue
-            parts = split(key, '_')
-            length(parts) == 2 || continue
-            os, gpu = String(parts[1]), String(parts[2])
-            for problem in sort(readdir(kpath))
-                ppath = joinpath(kpath, problem)
-                isdir(ppath) || continue
-                for fname in sort(readdir(ppath))
-                    m = match(pat, fname)
-                    m === nothing && continue
-                    mode = String(m.captures[1])
-                    algorithm = String(m.captures[2])
-                    data = readdlm(joinpath(ppath, fname))
-                    isempty(data) && continue
-                    ncol = size(data, 2)
-                    ncol in (3, 4) || error(
-                        "$(fname) has $(ncol) columns; expected 3 " *
-                        "(N, time_with_transfers_ms, time_device_only_ms) " *
-                        "or 4 with a trailing errored percent")
-                    if ncol == 4
-                        # Drop rows past the errored bar.
-                        data = data[within_error_budget.(data[:, 4]), :]
-                        isempty(data) && continue
-                    end
-                    order = sortperm(data[:, 1])
-                    ns = Float64.(data[order, 1])
-                    push!(series, Series(display, problem, mode, algorithm,
-                                         "both", os, gpu, key, ns,
-                                         data[order, 2] .* 1e-3))
-                    push!(series, Series(display, problem, mode, algorithm,
-                                         "none", os, gpu, key, ns,
-                                         data[order, 3] .* 1e-3))
-                end
-            end
-        end
+# One curve per (package, key, problem, mode, algorithm, transfers) from the store's times rows.
+function collect_series(base_path)
+    groups = Dict{NTuple{6, String}, Vector{Tuple{Float64, Float64}}}()
+    meta = Dict{NTuple{6, String}, Tuple{String, String}}()
+    for row in result_rows_under(base_path)
+        row["analysis"] == "times" || continue
+        # Drop rows past the errored bar.
+        within_error_budget(_result_float(row["errored_pct"])) || continue
+        id = (RESULT_DISPLAY[row["package"]], row["problem"], row["mode"],
+              row["algorithm"], row["transfers"], row["key"])
+        push!(get!(groups, id, Tuple{Float64, Float64}[]),
+              (parse(Float64, row["n"]), _result_float(row["min_ms"]) * 1e-3))
+        meta[id] = (row["os"], row["gpu"])
     end
-    return series
+    series = Series[]
+    for (id, points) in groups
+        sort!(points)
+        display, problem, mode, algorithm, transfers, key = id
+        os, gpu = meta[id]
+        push!(series, Series(display, problem, mode, algorithm, transfers, os,
+            gpu, key, first.(points), last.(points)))
+    end
+    return sort(series, by = s -> (s.display, s.problem, s.mode, s.algorithm,
+        s.transfers, s.key))
 end
 
 # Draw one plot; alg_label "all" mixes algorithms and labels them per series.
@@ -130,10 +97,10 @@ function render_plot(sel, group_label, problem, mode_label, alg_label, transfers
 end
 
 function main()
-    series = collect_series(base_path, frameworks)
+    series = collect_series(base_path)
     if isempty(series)
-        println("Warning: no keyed timing files found under $(base_path). Nothing to plot.")
-        println("Expected files like <package>/<os>_<gpu>/<Prefix>_times_adaptive_<algorithm>.txt (run the benchmarks first).")
+        println("Warning: no times rows found under $(base_path). Nothing to plot.")
+        println("Expected <package>/<os>_<gpu>/results.csv files (run the benchmarks first).")
         return
     end
 

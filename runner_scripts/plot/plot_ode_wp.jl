@@ -4,24 +4,13 @@ using Dates
 using Statistics
 using Plots.PlotMeasures
 include(joinpath(dirname(@__DIR__), "errored.jl"))
+include(joinpath(dirname(@__DIR__), "results.jl"))
 
-# Reads data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt
-# and emits one error-vs-time plot per (group, problem, mode, algorithm) plus an
-# "all" overview into plots/<group>/<problem>/. ARGS[1] overrides the data dir.
+# Reads the `wp` rows of every data/<package>/<os>_<gpu>/results.csv and emits
+# one error-vs-time plot per (group, problem, mode, algorithm) plus an "all"
+# overview into plots/<group>/<problem>/. ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
-
-# display name => (subdirectory, filename prefix)
-# Note: MPGOS data files are stored under `CPP/` in the repo's `data/` folder.
-frameworks = [
-    ("Julia", "Julia", "Julia"),
-    ("MPGOS", "CPP", "MPGOS"),
-    ("JAX", "JAX", "Jax"),
-    ("PYTORCH", "PYTORCH", "Torch"),
-    ("CUBIE", "CUBIE", "Cubie"),
-    ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
-    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
-]
 
 # color/marker choices per framework (same as plot_ode_comp.jl)
 colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
@@ -44,54 +33,35 @@ struct WPSeries
     time_s::Vector{Float64}
 end
 
-# Discover every wp file under data/<package>/<key>/ and load it.
-function collect_series(base_path, frameworks)
-    series = WPSeries[]
-    for (display, dir, prefix) in frameworks
-        dpath = joinpath(base_path, dir)
-        isdir(dpath) || continue
-        pat = Regex("^" * prefix * "_wp_(fixed|adaptive)_([^_]+)[.]txt" * "\$")
-        for key in sort(readdir(dpath))
-            kpath = joinpath(dpath, key)
-            isdir(kpath) || continue
-            parts = split(key, '_')
-            length(parts) == 2 || continue
-            os, gpu = String(parts[1]), String(parts[2])
-            for problem in sort(readdir(kpath))
-                ppath = joinpath(kpath, problem)
-                isdir(ppath) || continue
-                for fname in sort(readdir(ppath))
-                    m = match(pat, fname)
-                    m === nothing && continue
-                    mode = String(m.captures[1])
-                    algorithm = String(m.captures[2])
-                    fpath = joinpath(ppath, fname)
-                    # readdlm raises on a file with no data rows, so screen those out.
-                    isempty(strip(read(fpath, String))) && continue
-                    data = readdlm(fpath)
-                    isempty(data) && continue
-                    setting = Float64.(data[:, 1])
-                    err = Float64.(data[:, 3])
-                    time_s = Float64.(data[:, 2]) .* 1e-3
-                    # Drop non-positive errors (log axis). Order points along the
-                    # sweep (loose -> tight setting) so the float32 roundoff U-turn
-                    # in the fixed curves is traced rather than folded onto itself.
-                    keep = err .> 0
-                    if size(data, 2) >= 4
-                        # Drop rows past the errored bar.
-                        keep = keep .& within_error_budget.(data[:, 4])
-                    end
-                    setting, err, time_s = setting[keep], err[keep], time_s[keep]
-                    isempty(err) && continue
-                    order = sortperm(setting, rev = true)
-                    push!(series, WPSeries(display, problem, mode, algorithm,
-                                           os, gpu, key, err[order],
-                                           time_s[order]))
-                end
-            end
-        end
+# One curve per (package, key, problem, mode, algorithm) from the store's wp rows.
+function collect_series(base_path)
+    groups = Dict{NTuple{5, String}, Vector{NTuple{3, Float64}}}()
+    meta = Dict{NTuple{5, String}, Tuple{String, String}}()
+    for row in result_rows_under(base_path)
+        row["analysis"] == "wp" || continue
+        # Work-precision rows are resident-solve legs.
+        row["transfers"] == "none" || continue
+        err = _result_float(row["error"])
+        # Drop non-positive errors (log axis) and rows past the errored bar.
+        (isfinite(err) && err > 0) || continue
+        within_error_budget(_result_float(row["errored_pct"])) || continue
+        id = (RESULT_DISPLAY[row["package"]], row["problem"], row["mode"],
+              row["algorithm"], row["key"])
+        push!(get!(groups, id, NTuple{3, Float64}[]),
+              (_result_float(row["setting"]), err,
+               _result_float(row["min_ms"]) * 1e-3))
+        meta[id] = (row["os"], row["gpu"])
     end
-    return series
+    series = WPSeries[]
+    for (id, points) in groups
+        # Loose -> tight setting, so the float32 roundoff U-turn is traced.
+        sort!(points, by = first, rev = true)
+        display, problem, mode, algorithm, key = id
+        os, gpu = meta[id]
+        push!(series, WPSeries(display, problem, mode, algorithm, os, gpu, key,
+            [p[2] for p in points], [p[3] for p in points]))
+    end
+    return sort(series, by = s -> (s.display, s.problem, s.mode, s.algorithm, s.key))
 end
 
 # Draw one plot; alg_label "all" mixes algorithms and labels them per series.
@@ -128,10 +98,10 @@ function render_plot(sel, group_label, problem, mode_label, alg_label, plots_dir
 end
 
 function main()
-    series = collect_series(base_path, frameworks)
+    series = collect_series(base_path)
     if isempty(series)
-        println("Warning: no keyed wp files found under $(base_path). Nothing to plot.")
-        println("Expected files like <package>/<os>_<gpu>/<Prefix>_wp_adaptive_<algorithm>.txt (run the wp benchmarks first).")
+        println("Warning: no wp rows found under $(base_path). Nothing to plot.")
+        println("Expected <package>/<os>_<gpu>/results.csv files (run the wp benchmarks first).")
         return
     end
 

@@ -1,9 +1,8 @@
 """Cubie system definitions, one builder per problem, shared by every cubie suite."""
 
 import numpy as np
-import cubie as qb
 
-from problems import get_problem
+from problems import as_problem
 
 # Ring modulator constants (Test Set for IVP Solvers, problem II-3).
 RING_CONSTANTS = {
@@ -65,6 +64,7 @@ RING_COMMON = """
 
 
 def _lorenz(problem, precision, name):
+    import cubie as qb
     system = qb.create_ODE_system(
         """
         dx = sigma * (y - x)
@@ -93,6 +93,7 @@ def _lorenz96(problem, precision, name):
     # Uniform state 8 with x1 perturbed to 9.
     states = {"x{0}".format(i): 9.0 if i == 1 else 8.0
               for i in range(1, n + 1)}
+    import cubie as qb
     system = qb.create_ODE_system(
         "\n".join(lines),
         states=dict(states),
@@ -136,6 +137,7 @@ def _pleiades(problem, precision, name):
                            ("u", PLEIADES_U0), ("v", PLEIADES_V0)):
         for i, value in enumerate(values, start=1):
             states["{0}{1}".format(prefix, i)] = value
+    import cubie as qb
     system = qb.create_ODE_system(
         "\n".join(lines),
         states=dict(states),
@@ -162,6 +164,7 @@ POLLU_STATES.update(y2=0.2, y4=0.04, y7=0.1, y8=0.3, y9=0.01, y17=0.007)
 
 def _pollu(problem, precision, name):
     """Verwer's air pollution mechanism; the swept photolysis rate is k1."""
+    import cubie as qb
     system = qb.create_ODE_system(
         """
         r1 = k1 * y1
@@ -228,6 +231,7 @@ def _ring_modulator(problem, precision, name):
     dU6 = (-I6 - qD2 + qD4) / Cs
 """ + RING_COMMON
     constants = dict(RING_CONSTANTS, Uin1_amplitude=0.5)
+    import cubie as qb
     system = qb.create_ODE_system(
         equations,
         states=dict(RING_STATES),
@@ -247,6 +251,7 @@ def _ring_modulator_index2(problem, precision, name):
     0 = I5 + qD1 - qD3
     0 = -I6 - qD2 + qD4
 """ + RING_COMMON
+    import cubie as qb
     system = qb.create_ODE_system(
         equations,
         states=dict(RING_STATES),
@@ -329,6 +334,7 @@ NAND_EQUATIONS = """
 
 def _nand_gate(problem, precision, name):
     """Index-0 implicit DE; the swept supply voltage is VDD."""
+    import cubie as qb
     system = qb.create_ODE_system(
         NAND_EQUATIONS,
         states=dict(NAND_STATES),
@@ -377,7 +383,7 @@ def build_system(problem, precision=np.float32, name_suffix=""):
 
     ``name_suffix`` separates one caller's generated-code cache from
     another's for the same equations."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     key = row["problem"]
     if key not in _BUILDERS:
         raise SystemExit("no cubie definition for problem '{0}'".format(key))
@@ -386,8 +392,10 @@ def build_system(problem, precision=np.float32, name_suffix=""):
 
 
 def variable_order(problem):
-    """The problem's own variables, in golden-reference order."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    """The problem's own variables, in golden-reference order; a resized lorenz96 row lists its own state count."""
+    row = as_problem(problem)
+    if row["problem"] in ("lorenz96", "lorenz96_20"):
+        return tuple("x{0}".format(i) for i in range(1, row["states"] + 1))
     return _ORDER[row["problem"]]
 
 
@@ -433,5 +441,5 @@ def final_states(system, solution, problem):
 
 def sweep_parameters(problem, n, precision=np.float32):
     """The ensemble parameter dict: the swept scalar over the problem range."""
-    row = problem if isinstance(problem, dict) else get_problem(problem)
+    row = as_problem(problem)
     return {row["sweep_parameter"]: row.sweep(n, dtype=precision)}

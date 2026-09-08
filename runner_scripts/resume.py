@@ -1,24 +1,21 @@
-"""Continuation of partial runs; mirrored by resume.jl.
+"""Continuation of partial runs against the result store; mirrored by resume.jl.
 
-BENCH_RESUME=1 skips every point whose row is already in its output file
-(NaN rows count as recorded). BENCH_NO_OVERWRITE=1 skips only points whose
-row holds a finite time; NaN and absent rows rerun. BENCH_RESUME_FROM is a
-cursor problem[:algorithm][:fixed|adaptive][:N] into the run order
-(problems.csv, then algorithms.csv, fixed before adaptive, N ascending);
-points strictly before it are skipped. The problem[:N] form floors every
-leg of that problem at N; in the states sweep N is the state count. A wp
-leg is skipped only when its file holds a row per setting. BENCH_FLOOR=1
-skips and prunes nothing; each result merges into the recorded file,
-keeping the lower time per column (per (time, error) pair for wp rows).
+BENCH_RESUME=1 skips every point with a row in the store (NaN rows count).
+BENCH_NO_OVERWRITE=1 skips only points whose row holds a finite time.
+BENCH_RESUME_FROM is a cursor problem[:algorithm][:fixed|adaptive][:N] into the
+run order (problems.csv, then algorithms.csv, fixed before adaptive, N
+ascending); points strictly before it are skipped. The problem[:N] form floors
+every leg of that problem at N; in the states sweep N is the state count. A wp
+leg is skipped only when every setting is covered. BENCH_FLOOR=1 skips nothing
+and each result merges into the store keeping the lower time.
 """
 
-import math
 import os
 
-from algorithms import algorithm_names, get_algorithm
+from algorithms import MODES, algorithm_names, get_algorithm
 from problems import get_problem, problem_names
-
-MODES = ("fixed", "adaptive")
+from protocol import N_WP, STATES_N
+from results import floor_enabled, wp_settings  # noqa: F401
 
 _CURSOR_CACHE = []          # [] = unparsed, [None] or [dict] once parsed
 
@@ -31,11 +28,6 @@ def resume_enabled():
 def no_overwrite_enabled():
     """True when BENCH_NO_OVERWRITE asks to keep only finite recorded rows."""
     return os.environ.get("BENCH_NO_OVERWRITE", "") not in ("", "0")
-
-
-def floor_enabled():
-    """True when BENCH_FLOOR asks to merge re-runs by keeping the lower time."""
-    return os.environ.get("BENCH_FLOOR", "") not in ("", "0")
 
 
 def parse_cursor(spec):
@@ -107,240 +99,48 @@ def cursor_skips(problem, algorithm, mode, n=None):
     return cur["n"] is not None and n is not None and n < cur["n"]
 
 
-def recorded_values(path):
-    """First-column integers of the rows already in an output file."""
-    values = set()
-    try:
-        with open(path) as handle:
-            for line in handle:
-                fields = line.split()
-                if len(fields) < 2:
-                    continue
-                try:
-                    values.add(int(float(fields[0])))
-                except ValueError:
-                    continue
-    except OSError:
-        pass
-    return values
-
-
-def _finite(token):
-    """The token as a finite float, or None."""
-    try:
-        value = float(token)
-    except ValueError:
-        return None
-    return value if math.isfinite(value) else None
-
-
-def numeric_values(path):
-    """First-column integers of the rows whose time field is finite."""
-    values = set()
-    try:
-        with open(path) as handle:
-            for line in handle:
-                fields = line.split()
-                if len(fields) < 2 or _finite(fields[1]) is None:
-                    continue
-                try:
-                    values.add(int(float(fields[0])))
-                except ValueError:
-                    continue
-    except OSError:
-        pass
-    return values
-
-
-def prune_reruns(outfile, ns):
-    """Drop the rows for the points about to rerun."""
-    # --floor merges at write time; the recorded rows must survive.
-    if floor_enabled() or not active() or not ns:
-        return
-    rerun = set(ns)
-
-    def stale(line):
-        fields = line.split()
-        if len(fields) < 2:
-            return False
-        try:
-            return int(float(fields[0])) in rerun
-        except ValueError:
-            return False
-
-    try:
-        with open(outfile) as handle:
-            lines = handle.readlines()
-    except OSError:
-        return
-    kept = [line for line in lines if not stale(line)]
-    if len(kept) < len(lines):
-        with open(outfile, "w") as handle:
-            handle.writelines(kept)
-
-
-def _row_count(path, finite_only=False):
-    try:
-        with open(path) as handle:
-            return sum(1 for line in handle
-                       if len(line.split()) >= 2
-                       and (not finite_only
-                            or _finite(line.split()[1]) is not None))
-    except OSError:
-        return 0
-
-
-def skip_point(problem, algorithm, mode, n, outfile):
-    """True when one (problem, algorithm, mode, n) sweep point is covered."""
-    if cursor_skips(problem, algorithm, mode, n):
+def _status_skips(status):
+    """Whether a recorded status is covered under the active flags."""
+    if resume_enabled() and status != "absent":
         return True
-    if resume_enabled() and n in recorded_values(outfile):
+    return no_overwrite_enabled() and status == "finite"
+
+
+def skip_point(leg, n, states=None):
+    """True when one N or states point of a results.Leg is covered."""
+    key = states if leg.analysis == "states" else n
+    if cursor_skips(leg.problem.name, leg.algorithm, leg.mode, key):
         return True
-    return no_overwrite_enabled() and n in numeric_values(outfile)
+    return _status_skips(leg.status(n, states))
 
 
-def wp_settings_count(problem, algorithm, mode):
-    """Rows a complete wp file holds; grids mirrored across the writers."""
-    if mode == "fixed":
-        return len(get_problem(problem).dts(algorithm))
-    from wp_common import TOLS
-    return len(TOLS)
-
-
-def skip_wp_leg(problem, algorithm, mode, outfile):
-    """True when a whole work-precision leg is covered."""
-    if cursor_skips(problem, algorithm, mode):
+def skip_wp_leg(leg, settings, tier="default"):
+    """True when every setting of a work-precision results.Leg is covered in the tier."""
+    if cursor_skips(leg.problem.name, leg.algorithm, leg.mode):
         return True
-    expected = wp_settings_count(problem, algorithm, mode)
-    if resume_enabled() and _row_count(outfile) >= expected:
-        return True
-    return (no_overwrite_enabled()
-            and _row_count(outfile, finite_only=True) >= expected)
-
-
-def _lower(recorded, new):
-    """The lower of two times; NaN loses to any finite value."""
-    if math.isnan(recorded):
-        return new
-    if math.isnan(new):
-        return recorded
-    return min(recorded, new)
-
-
-def _read_lines(path):
-    try:
-        with open(path) as handle:
-            return handle.readlines()
-    except OSError:
-        return []
-
-
-def merge_min_row(path, key, values, sep=" "):
-    """--floor: merge `key values...` into path, keeping the lower value per column; recorded fields beyond the merged columns survive."""
-    values = [float(v) for v in values]
-    out = []
-    merged = False
-    for line in _read_lines(path):
-        fields = line.split()
-        row_key = None
-        if fields:
-            try:
-                row_key = int(float(fields[0]))
-            except ValueError:
-                pass
-        if merged or row_key != key:
-            out.append(line)
-            continue
-        recorded = []
-        for i in range(len(values)):
-            try:
-                recorded.append(float(fields[1 + i]))
-            except (IndexError, ValueError):
-                recorded.append(float("nan"))
-        combined = [_lower(r, v) for r, v in zip(recorded, values)]
-        tail = fields[1 + len(values):]
-        out.append(sep.join([str(key)] + [str(v) for v in combined] + tail)
-                   + "\n")
-        merged = True
-    if not merged:
-        out.append(sep.join([str(key)] + [str(v) for v in values]) + "\n")
-    with open(path, "w") as handle:
-        handle.writelines(out)
-
-
-def merge_wp_row(path, setting, t_ms, err, errored_pct):
-    """--floor: merge one wp row, keeping the (time, error, errored percent) triple with the lower time."""
-    new_row = "{0:.10g} {1} {2:.10e} {3:.4f}\n".format(
-        setting, t_ms, err, float(errored_pct))
-    out = []
-    merged = False
-    for line in _read_lines(path):
-        fields = line.split()
-        row_key = None
-        if fields:
-            try:
-                row_key = float(fields[0])
-            except ValueError:
-                pass
-        if (merged or row_key is None
-                or not math.isclose(row_key, setting, rel_tol=1e-8)):
-            out.append(line)
-            continue
-        merged = True
-        try:
-            recorded_t = float(fields[1])
-        except (IndexError, ValueError):
-            recorded_t = float("nan")
-        if math.isnan(recorded_t) or (not math.isnan(t_ms)
-                                      and t_ms < recorded_t):
-            out.append(new_row)
-        else:
-            out.append(line)
-    if not merged:
-        out.append(new_row)
-    with open(path, "w") as handle:
-        handle.writelines(out)
-
-
-def write_times_row(handle, path, key, values):
-    """One N-sweep or states row through the open handle, or a --floor merge into path keeping the lower time per column."""
-    if floor_enabled():
-        merge_min_row(path, key, values)
-        return
-    handle.write(" ".join([str(key)] + [str(float(v)) for v in values])
-                 + "\n")
-    handle.flush()
-
-
-def write_wp_row(handle, path, setting, t_ms, err, errored_pct):
-    """One `setting t_ms err errored_pct` row through the open handle, or a --floor merge into path keeping the row with the lower time."""
-    if floor_enabled():
-        merge_wp_row(path, setting, t_ms, err, errored_pct)
-        return
-    handle.write("{0:.10g} {1} {2:.10e} {3:.4f}\n".format(
-        setting, t_ms, err, float(errored_pct)))
-    handle.flush()
+    if not (resume_enabled() or no_overwrite_enabled()):
+        return False
+    return all(_status_skips(leg.status(N_WP, setting=setting, tier=tier))
+               for setting in settings)
 
 
 def _cli(argv):
-    """Shell entry: "skip"/"run" for a point or wp leg; "prune" drops one
-    point's rows; "merge" floor-merges one times/states row."""
-    usage = ("usage: resume.py point <problem> <algorithm> <mode> <N> "
-             "<outfile> | leg <problem> <algorithm> <mode> <outfile> | "
-             "prune <N> <outfile> | merge <outfile> <space|tab> <N> "
-             "<value>...")
-    if len(argv) >= 1 and argv[0] == "point" and len(argv) == 6:
-        skip = skip_point(argv[1], argv[2], argv[3], int(argv[4]), argv[5])
-    elif len(argv) >= 1 and argv[0] == "leg" and len(argv) == 5:
-        skip = skip_wp_leg(argv[1], argv[2], argv[3], argv[4])
-    elif len(argv) >= 1 and argv[0] == "prune" and len(argv) == 3:
-        prune_reruns(argv[2], [int(argv[1])])
-        return 0
-    elif len(argv) >= 5 and argv[0] == "merge" and argv[2] in ("space",
-                                                               "tab"):
-        merge_min_row(argv[1], int(argv[3]), [float(v) for v in argv[4:]],
-                      sep=" " if argv[2] == "space" else "\t")
-        return 0
+    """Shell entry: "skip"/"run" for a point or a wp leg of a package."""
+    from results import Leg
+    usage = ("usage: resume.py point <package> <key> <analysis> <problem> "
+             "<algorithm> <mode> <N|states> | leg <package> <key> <problem> "
+             "<algorithm> <mode>")
+    if len(argv) == 8 and argv[0] == "point":
+        package, key, analysis, problem, algorithm, mode, value = argv[1:]
+        leg = Leg(package, key, analysis, problem, algorithm, mode)
+        if analysis == "states":
+            skip = skip_point(leg, STATES_N, int(value))
+        else:
+            skip = skip_point(leg, int(value))
+    elif len(argv) == 6 and argv[0] == "leg":
+        package, key, problem, algorithm, mode = argv[1:]
+        leg = Leg(package, key, "wp", problem, algorithm, mode)
+        skip = skip_wp_leg(leg, wp_settings(leg.problem, algorithm, mode, package))
     else:
         raise SystemExit(usage)
     print("skip" if skip else "run")

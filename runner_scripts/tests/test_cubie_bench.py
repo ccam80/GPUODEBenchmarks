@@ -21,7 +21,7 @@ sys.modules["cubie.cache_root"] = cubie.cache_root
 
 import cubie_bench  # noqa: E402
 import cubie_worker  # noqa: E402
-from problems import STATES_PROBLEM, get_problem  # noqa: E402
+from problems import get_problem  # noqa: E402
 
 
 class FakeDeviceArray:
@@ -61,8 +61,7 @@ class FakeSolver:
         self.last_n = None
         self.device_results = []
 
-    def solve(self, initial_values, parameters, blocksize, duration,
-              on_device=False):
+    def solve(self, initial_values, parameters, duration, on_device=False):
         n = initial_values.shape[1]
         self.calls.append((n, on_device))
         if on_device:
@@ -112,24 +111,39 @@ def grid(solver, n):
     return np.zeros((3, n), np.float32), np.zeros((1, n), np.float32)
 
 
-def read_rows(path):
+def read_rows(analysis):
+    """{n or states: [t_both, t_none, (build_s,) errored_pct]} from the CUBIE test store."""
+    import results
     rows = {}
-    with open(path) as handle:
-        for line in handle:
-            fields = line.split()
-            rows[int(float(fields[0]))] = [float(v) for v in fields[1:]]
-    return rows
+    for row in results.load(results.store_path("cubie", "test_key")):
+        if row["analysis"] != analysis:
+            continue
+        key = int(row["states"] if analysis == "states" else row["n"])
+        entry = rows.setdefault(key, {})
+        entry[row["transfers"]] = float(row["min_ms"])
+        entry["build_s"] = float(row["build_s"])
+        entry["errored_pct"] = float(row["errored_pct"])
+    out = {}
+    for key, entry in rows.items():
+        values = [entry.get("both", float("nan")),
+                  entry.get("none", float("nan"))]
+        if analysis == "states":
+            values.append(entry["build_s"])
+        values.append(entry["errored_pct"])
+        out[key] = values
+    return out
 
 
-def sample_legs(path):
-    """{(n, transfers): count} from a samples log."""
+def sample_legs(analysis="times"):
+    """{(n, transfers): attempt count} for the rows of the CUBIE test store that carry attempts."""
+    import results
     counts = {}
-    with open(path) as handle:
-        header = handle.readline().strip().split(",")
-        for line in handle:
-            row = dict(zip(header, line.strip().split(",")))
-            key = (int(row["n"]), row["transfers"])
-            counts[key] = counts.get(key, 0) + 1
+    for row in results.load(results.store_path("cubie", "test_key")):
+        if row["analysis"] != analysis:
+            continue
+        attempts = results.samples_of(row)
+        if attempts:
+            counts[(int(row["n"]), row["transfers"])] = len(attempts)
     return counts
 
 
@@ -138,33 +152,35 @@ class SweepCase(unittest.TestCase):
         self.cwd = os.getcwd()
         self.tmp = tempfile.mkdtemp()
         os.chdir(self.tmp)
-        self.saved = (cubie_bench._make_fixed_solver, cubie_bench._device_leg,
-                      cubie_bench.final_states, cubie_bench.build_system)
+        adapter = cubie_bench.adapter
+        self.saved = (adapter.make_solver, adapter.build_system,
+                      adapter.optimize_point, adapter.load_optimized,
+                      cubie_bench._device_leg, cubie_bench.final_states)
         cubie_bench.final_states = (
             lambda system, solution, problem: solution.finals)
+        # The states sweep optimises each size; the fake solver has no kernels.
+        adapter.optimize_point = lambda *args, **kwargs: {"label": "fake"}
+        adapter.load_optimized = lambda *args, **kwargs: None
 
     def tearDown(self):
-        (cubie_bench._make_fixed_solver, cubie_bench._device_leg,
-         cubie_bench.final_states, cubie_bench.build_system) = self.saved
+        adapter = cubie_bench.adapter
+        (adapter.make_solver, adapter.build_system, adapter.optimize_point,
+         adapter.load_optimized, cubie_bench._device_leg,
+         cubie_bench.final_states) = self.saved
         os.chdir(self.cwd)
 
     def opts(self, ns):
         return {"ns": ns, "algorithms": ["classical-rk4"],
                 "fixed": ["classical-rk4"], "adaptive": [],
-                "framework": "cubie", "framework_dir": "CUBIE",
-                "prefix": "Cubie", "dataset_key": "test_key",
-                "numerical_tag": "cubie", "name_suffix": ""}
+                "framework": "cubie", "dataset_key": "test_key",
+                "numerical_tag": "cubie"}
 
     def run_times(self, solver, ns):
-        cubie_bench._make_fixed_solver = (
-            lambda system, problem, algorithm, dt=None: solver)
+        cubie_bench.adapter.make_solver = (
+            lambda system, problem, algorithm, mode, setting=None, **kw: solver)
         problem = get_problem("lorenz")
         cubie_bench._run_times(problem, self.opts(ns), object(), grid)
-        base = os.path.join("data", "CUBIE", "test_key", "lorenz")
-        return (read_rows(os.path.join(
-                    base, "Cubie_times_fixed_classical-rk4.txt")),
-                sample_legs(os.path.join(
-                    base, "Cubie_samples_times_fixed_classical-rk4.csv")))
+        return read_rows("times"), sample_legs("times")
 
 
 class TestTimesResidency(SweepCase):
@@ -240,21 +256,18 @@ class TestStatesLegIsolation(SweepCase):
     def test_chunked_host_leg_keeps_host_time_and_build_time(self):
         solvers = {}
 
-        def make_solver(system, row, algorithm, dt=None):
+        def make_solver(system, row, algorithm, mode, setting=None, **kw):
             solver = FakeSolver(chunk_at=1)   # every host leg chunks
             solvers[row["states"]] = solver
             return solver
 
-        cubie_bench._make_fixed_solver = make_solver
-        cubie_bench.build_system = (
-            lambda row, precision, name_suffix="":
-            (object(), {"x{0}".format(i): 8.0
-                        for i in range(1, row["states"] + 1)}))
+        cubie_bench.adapter.make_solver = make_solver
+        cubie_bench.adapter.build_system = (
+            lambda problem, package, precision=None, states=None:
+            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
         opts = self.opts([4, 8])
         cubie_bench._run_states(opts)
-        path = os.path.join("data", "CUBIE", "test_key", STATES_PROBLEM,
-                            "Cubie_states_fixed_classical-rk4.txt")
-        rows = read_rows(path)
+        rows = read_rows("states")
         for nstates in (4, 8):
             t_ms, t_dev, build_s, pct = rows[nstates]
             self.assertTrue(math.isfinite(t_ms))
@@ -265,31 +278,95 @@ class TestStatesLegIsolation(SweepCase):
     def test_device_leg_reuses_each_sizes_inputs(self):
         solvers = {}
 
-        def make_solver(system, row, algorithm, dt=None):
+        def make_solver(system, row, algorithm, mode, setting=None, **kw):
             solver = FakeSolver()
             solvers[row["states"]] = solver
             return solver
 
-        cubie_bench._make_fixed_solver = make_solver
-        cubie_bench.build_system = (
-            lambda row, precision, name_suffix="":
-            (object(), {"x{0}".format(i): 8.0
-                        for i in range(1, row["states"] + 1)}))
+        cubie_bench.adapter.make_solver = make_solver
+        cubie_bench.adapter.build_system = (
+            lambda problem, package, precision=None, states=None:
+            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
         cubie_bench._run_states(self.opts([4, 8]))
-        path = os.path.join("data", "CUBIE", "test_key", STATES_PROBLEM,
-                            "Cubie_states_fixed_classical-rk4.txt")
-        rows = read_rows(path)
+        rows = read_rows("states")
         for nstates in (4, 8):
             self.assertTrue(all(math.isfinite(v) for v in rows[nstates]))
             self.assertTrue(any(on_device
                                 for _, on_device in solvers[nstates].calls))
 
 
+class TestWorkPrecisionNe(SweepCase):
+    def setUp(self):
+        super().setUp()
+        import wp_common
+        self.saved_golden = wp_common.load_golden
+        wp_common.load_golden = lambda problem: np.zeros((131072, 3))
+
+    def tearDown(self):
+        import wp_common
+        wp_common.load_golden = self.saved_golden
+        super().tearDown()
+
+    def run_wp(self, algorithms, fixed, adaptive):
+        self.solvers = []
+
+        def make_solver(system, problem, algorithm, mode, setting=None, **kw):
+            self.solvers.append(FakeSolver())
+            return self.solvers[-1]
+
+        cubie_bench.adapter.make_solver = make_solver
+        opts = dict(self.opts([131072]), algorithms=algorithms, fixed=(),
+                    adaptive=(), wp_fixed=fixed, wp_adaptive=adaptive)
+        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
+        import results
+        return [row for row in results.load(results.store_path("cubie", "test_key"))
+                if row["analysis"] == "wp"]
+
+    def test_a_wp_point_is_timed_on_the_resident_inputs(self):
+        rows = self.run_wp(["euler"], ("euler",), ())
+        self.assertTrue(rows)
+        self.assertTrue(all(row["transfers"] == "none" for row in rows))
+        self.assertTrue(all(math.isfinite(float(row["min_ms"])) for row in rows))
+        for solver in self.solvers:
+            # One untimed host solve for the finals, then only device solves.
+            self.assertEqual([on_device for _, on_device in solver.calls][:2],
+                             [False, True])
+            self.assertTrue(all(on_device for _, on_device in solver.calls[1:]))
+
+    def test_an_ne_leg_times_the_ne_grid_and_writes_its_finals(self):
+        from protocol import N_NE
+        from problems import get_problem as problem_row
+        rows = self.run_wp(["backwards_euler"], ("backwards_euler",), ())
+        dts = problem_row("lorenz").ne_dts()
+        self.assertEqual(len(rows), len(dts))
+        self.assertTrue(all(row["tier"] == "default" for row in rows))
+        path = os.path.join("data", "numerical_equivalence", "cubie", "test_key",
+                            "lorenz", "backwards_euler.csv")
+        self.assertTrue(os.path.isfile(path))
+        # The MLIR package writes beside, never over, the numba-cuda files.
+        opts = dict(self.opts([131072]), algorithms=["backwards_euler"], fixed=(),
+                    adaptive=(), wp_fixed=("backwards_euler",), wp_adaptive=(),
+                    framework="cubie_mlir")
+        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
+        self.assertTrue(os.path.isfile(os.path.join(
+            "data", "numerical_equivalence", "cubie_mlir", "test_key", "lorenz",
+            "backwards_euler.csv")))
+        with open(path) as handle:
+            lines = handle.read().splitlines()
+        self.assertEqual(lines[0], "dt,traj,s1,s2,s3")
+        self.assertEqual(len(lines) - 1, N_NE * len(dts))
+
+    def test_a_timed_only_leg_writes_no_ne_file(self):
+        rows = self.run_wp(["euler"], ("euler",), ())
+        self.assertEqual(len(rows), 10)
+        self.assertFalse(os.path.exists(os.path.join("data", "numerical_equivalence")))
+
+
 class TestWorkerDeviceLeg(unittest.TestCase):
     def test_samples_reuse_the_resident_inputs(self):
         solver = FakeSolver()
         initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 64, 1.0)
+        solver.solve(initials, parameters, 1.0)
         samples = cubie_worker.time_device_leg(solver, 1.0, 20)
         self.assertEqual(len(samples), 20)
         self.assertEqual(len(solver.device_results), 20)
@@ -299,7 +376,7 @@ class TestWorkerDeviceLeg(unittest.TestCase):
     def test_chunked_host_leg_raises_before_any_device_solve(self):
         solver = FakeSolver(chunk_at=1)
         initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 64, 1.0)
+        solver.solve(initials, parameters, 1.0)
         with self.assertRaises(ValueError):
             cubie_worker.time_device_leg(solver, 1.0, 20)
         self.assertEqual(solver.device_results, [])

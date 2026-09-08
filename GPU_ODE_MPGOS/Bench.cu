@@ -57,6 +57,7 @@ void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRE
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -136,53 +137,6 @@ static std::string DataDir(const std::string& package)
 	return dir + "/";
 }
 
-// Per-repeat timing log, as in runner_scripts/wp_common.py.
-static const char* SampleHeader =
-	"analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms";
-
-// The identity of one timed point, shared by its timed legs.
-struct SamplePoint
-{
-	std::string Analysis;
-	std::string Algorithm;
-	std::string Mode;
-	std::string SettingKind;
-	double Setting;
-	int N;
-	int States;
-};
-
-// Drop a leg's log, for the sweeps whose reduced file is rewritten.
-static void ResetSamples(const std::string& Path)
-{
-	remove(Path.c_str());
-}
-
-// Append one row per attempt of one timed leg, warm-up as repeat 0.
-static void AppendSamples(const std::string& Path, const SamplePoint& Point,
-                          const std::string& Transfers,
-                          const std::vector<double>& Samples)
-{
-	std::ifstream Probe(Path.c_str());
-	bool Header = !Probe.good();
-	Probe.close();
-
-	char SettingText[32];
-	snprintf(SettingText, sizeof(SettingText), "%.10g", Point.Setting);
-
-	std::ofstream Out(Path.c_str(), std::ios::app);
-	if (Header) Out << SampleHeader << "\n";
-	for (size_t r = 0; r < Samples.size(); ++r)
-	{
-		char MsText[32];
-		snprintf(MsText, sizeof(MsText), "%.6f", Samples[r]);
-		Out << Point.Analysis << "," << PROBLEM_NAME << "," << Point.Algorithm
-		    << "," << Point.Mode << "," << Transfers << "," << Point.SettingKind
-		    << "," << SettingText << "," << Point.N << "," << Point.States
-		    << "," << r << "," << MsText << "\n";
-	}
-}
-
 // Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
 static double WatchdogSeconds()
 {
@@ -226,30 +180,6 @@ static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling
 	return MedianMs(Timed) / Min - 1.0 <= PROTOCOL_REPEAT_SPREAD;
 }
 
-// BENCH_FLOOR: merge re-runs by keeping the lower recorded time.
-static bool FloorEnabled()
-{
-	const char* env = std::getenv("BENCH_FLOOR");
-	return env && *env && strcmp(env, "0") != 0;
-}
-
-// The lower of two times; nan loses to any finite value.
-static double LowerTime(double Recorded, double New)
-{
-	if (std::isnan(Recorded)) return New;
-	if (std::isnan(New)) return Recorded;
-	return std::min(Recorded, New);
-}
-
-static std::vector<std::string> ReadLines(const std::string& Path)
-{
-	std::vector<std::string> Lines;
-	std::ifstream In(Path.c_str());
-	std::string Line;
-	while (std::getline(In, Line)) Lines.push_back(Line);
-	return Lines;
-}
-
 // The token as a double; nan when it does not parse.
 static double ParseTime(const std::string& Token)
 {
@@ -259,51 +189,42 @@ static double ParseTime(const std::string& Token)
 	return (End == Start) ? std::nan("") : Value;
 }
 
-// First whitespace-separated token as a double; nan when there is none.
-static double RowKey(const std::string& Line)
+static std::string Fmt(double Value)
 {
-	std::istringstream Fields(Line);
-	std::string Token;
-	if (Fields >> Token) return ParseTime(Token);
-	return std::nan("");
+	if (std::isnan(Value)) return "nan";
+	char Text[32];
+	snprintf(Text, sizeof(Text), "%.10g", Value);
+	return Text;
 }
 
-// --floor: merge one tab-separated row, keeping the lower value per column.
-static void MergeMinRow(const std::string& Path, long long Key,
-                        const std::vector<double>& Values)
+// One store row through runner_scripts/results.py; Samples is every attempt in ms, warm-up first.
+static void RecordResult(const std::string& Analysis, const std::string& Mode,
+                         const std::string& Algorithm, const std::string& SettingKind,
+                         double Setting, int N, int States, const std::string& Transfers,
+                         double MinMs, const std::vector<double>* Samples,
+                         double ErroredPercent, double Err, double BuildS)
 {
-	std::vector<std::string> Lines = ReadLines(Path);
-	bool Merged = false;
-	for (size_t i = 0; i < Lines.size() && !Merged; ++i)
+#ifdef _WIN32
+	const char* Python = "python";
+#else
+	const char* Python = "python3";
+#endif
+	std::ostringstream Cmd;
+	Cmd << Python << " runner_scripts/results.py record cpp " << DatasetKey()
+	    << " " << Analysis << " " << PROBLEM_NAME << " " << Algorithm << " " << Mode
+	    << " " << SettingKind << " " << Fmt(Setting) << " " << N << " " << States
+	    << " default " << Transfers << " min_ms=" << Fmt(MinMs)
+	    << " errored_pct=" << Fmt(ErroredPercent) << " error=" << Fmt(Err)
+	    << " build_s=" << Fmt(BuildS);
+	if (Samples && !Samples->empty())
 	{
-		double Parsed = RowKey(Lines[i]);
-		if (std::isnan(Parsed) || (long long)llround(Parsed) != Key) continue;
-		std::istringstream Fields(Lines[i]);
-		std::string Token;
-		std::vector<std::string> Tokens;
-		while (Fields >> Token) Tokens.push_back(Token);
-		std::ostringstream Row;
-		Row << Key;
-		for (size_t c = 0; c < Values.size(); ++c)
-		{
-			double Recorded = std::nan("");
-			if (c + 1 < Tokens.size()) Recorded = ParseTime(Tokens[c + 1]);
-			Row << "\t" << LowerTime(Recorded, Values[c]);
-		}
-		for (size_t c = Values.size() + 1; c < Tokens.size(); ++c)
-			Row << "\t" << Tokens[c];
-		Lines[i] = Row.str();
-		Merged = true;
+		Cmd << " samples=";
+		for (size_t i = 0; i < Samples->size(); ++i)
+			Cmd << (i ? ";" : "") << Fmt((*Samples)[i]);
 	}
-	if (!Merged)
-	{
-		std::ostringstream Row;
-		Row << Key;
-		for (size_t c = 0; c < Values.size(); ++c) Row << "\t" << Values[c];
-		Lines.push_back(Row.str());
-	}
-	std::ofstream Out(Path.c_str());
-	for (size_t i = 0; i < Lines.size(); ++i) Out << Lines[i] << "\n";
+	int Status = system(Cmd.str().c_str());
+	if (Status != 0)
+		std::cerr << "results.py record failed (" << Status << "): " << Cmd.str() << std::endl;
 }
 
 // Percent of trajectories whose final state is not finite; mirrors errored_pct in runner_scripts/wp_common.py.
@@ -326,73 +247,17 @@ static double ErroredPct(SolverT& Solver, int Threads, int States)
 	return 100.0 * (double) Bad / (double) Threads;
 }
 
-// --floor: merge one wp row, keeping the (time, error) pair with the lower time.
-static void MergeWpRow(const std::string& Path, double Setting, double Ms,
-                       double Err, double ErroredPercent)
-{
-	std::ostringstream NewRow;
-	NewRow.precision(12);
-	NewRow << Setting << " " << Ms << " " << std::scientific << Err
-	       << std::fixed << " " << ErroredPercent;
-	std::vector<std::string> Lines = ReadLines(Path);
-	bool Merged = false;
-	for (size_t i = 0; i < Lines.size() && !Merged; ++i)
-	{
-		double Parsed = RowKey(Lines[i]);
-		if (std::isnan(Parsed)) continue;
-		double Tolerance = 1.0e-8 * std::max(std::fabs(Parsed), std::fabs(Setting));
-		if (std::fabs(Parsed - Setting) > Tolerance) continue;
-		Merged = true;
-		std::istringstream Fields(Lines[i]);
-		std::string Token;
-		double Recorded = std::nan("");
-		if (Fields >> Token && Fields >> Token) Recorded = ParseTime(Token);
-		if (std::isnan(Recorded) || (!std::isnan(Ms) && Ms < Recorded))
-			Lines[i] = NewRow.str();
-	}
-	if (!Merged) Lines.push_back(NewRow.str());
-	std::ofstream Out(Path.c_str());
-	for (size_t i = 0; i < Lines.size(); ++i) Out << Lines[i] << "\n";
-}
-
-// --floor's watchdog path: append only the rows whose key is not yet recorded.
-static void AppendMissingRows(const std::string& Path,
-                              const std::vector<std::string>& Rows)
-{
-	std::vector<double> Keys;
-	{
-		std::vector<std::string> Lines = ReadLines(Path);
-		for (size_t i = 0; i < Lines.size(); ++i)
-			Keys.push_back(RowKey(Lines[i]));
-	}
-	std::ofstream Out(Path.c_str(), std::ios::app);
-	for (size_t i = 0; i < Rows.size(); ++i)
-	{
-		double Key = RowKey(Rows[i]);
-		bool Present = false;
-		for (size_t k = 0; k < Keys.size() && !Present; ++k)
-		{
-			if (std::isnan(Keys[k])) continue;
-			double Tolerance = 1.0e-8 * std::max(std::fabs(Keys[k]),
-			                                     std::fabs(Key));
-			Present = std::fabs(Keys[k] - Key) <= Tolerance;
-		}
-		if (!Present) Out << Rows[i] << "\n";
-	}
-}
-
 // Breach exit code from the protocol; the runner NaN-fills the leg's remaining sizes.
 static const int WatchdogExitCode = PROTOCOL_WATCHDOG_EXIT_CODE;
 
-// Mode and algorithm names for filenames and watchdog messages.
+// Mode and algorithm names for the store and watchdog messages.
 static const char* ModeName      = (SOLVER == RK4) ? "fixed" : "adaptive";
 static const char* AlgorithmName = (SOLVER == RK4) ? "classical-rk4"
                                                    : "cash-karp-54";
 static bool StatesRun = false;   // set in main; states rows are SD-keyed
 
 static std::mutex WatchdogLock;
-static std::string WatchdogFile;
-static std::vector<std::string> WatchdogRows;
+static std::function<void()> WatchdogRecord;
 static std::atomic<long long> WatchdogDeadlineMs(0);   // 0 = disarmed
 
 static long long NowMs()
@@ -401,12 +266,11 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Arm with the rows to append if the run never returns; margin over the soft cap.
-static void ArmWatchdog(const std::string& file, const std::vector<std::string>& rows)
+// Arm with the NaN rows to record if the run never returns; margin over the soft cap.
+static void ArmWatchdog(std::function<void()> record)
 {
 	std::lock_guard<std::mutex> hold(WatchdogLock);
-	WatchdogFile = file;
-	WatchdogRows = rows;
+	WatchdogRecord = record;
 	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
 }
 
@@ -423,18 +287,7 @@ static void WatchdogMain()
 		long long deadline = WatchdogDeadlineMs;
 		if (deadline == 0 || NowMs() < deadline) continue;
 		std::lock_guard<std::mutex> hold(WatchdogLock);
-		if (FloorEnabled())
-		{
-			// The recorded rows already cover these points; NaN adds nothing.
-			AppendMissingRows(WatchdogFile, WatchdogRows);
-		}
-		else
-		{
-			std::ofstream out(WatchdogFile.c_str(), std::ios::app);
-			for (size_t i = 0; i < WatchdogRows.size(); ++i)
-				out << WatchdogRows[i] << "\n";
-			out.close();
-		}
+		if (WatchdogRecord) WatchdogRecord();
 		std::cout << "WATCHDOG " << PROBLEM_NAME;
 		if (StatesRun) std::cout << " states=" << SD;
 		std::cout << " " << ModeName << " " << AlgorithmName << " N=" << NT
@@ -527,20 +380,16 @@ int main(int argc, char *argv[])
 			for (int k = PROTOCOL_TOL_K_LO; k <= PROTOCOL_TOL_K_HI; k++)
 				Settings.push_back(pow(10.0, -k));
 
-		// Filenames carry the cubie-vocabulary algorithm name.
+		// The store carries the cubie-vocabulary algorithm name.
 		string Mode = ModeName;
 		string Algorithm = AlgorithmName;
-		const std::string WpDir = DataDir("CPP");
-		const std::string WpPath = WpDir + "MPGOS_wp_" + Mode + "_" + Algorithm + ".txt";
-		// --floor merges into the recorded file, so it must not be truncated.
-		ofstream wpfile(WpPath.c_str(), FloorEnabled()
-			? (std::ios::out | std::ios::app) : std::ios::out);
-		wpfile.precision(12);
-		const std::string WpSamplesPath = WpDir + "MPGOS_samples_wp_" + Mode
-			+ "_" + Algorithm + ".csv";
-		// --floor re-runs gain a fresh series in the log instead.
-		if (!FloorEnabled()) ResetSamples(WpSamplesPath);
 		const std::string SettingKind = FixedMode ? "dt" : "tol";
+		// NaN rows for the settings from si on, for a breach or a hard exit.
+		auto NanFrom = [&](size_t si) {
+			for (size_t sj = si; sj < Settings.size(); sj++)
+				RecordResult("wp", Mode, Algorithm, SettingKind, Settings[sj], NT, SD,
+					"none", std::nan(""), NULL, 100.0, std::nan(""), std::nan(""));
+		};
 
 		// Repeat ceiling; the count follows the first timed run's duration.
 		const int Repeats = PROTOCOL_REPEAT_CAP;
@@ -557,16 +406,6 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			// Later settings are slower, so a breach abandons the sweep as NaN rows.
-			std::vector<std::string> NanRows;
-			for (size_t sj = si; sj < Settings.size(); sj++)
-			{
-				std::ostringstream row;
-				row.precision(12);
-				row << Settings[sj] << " nan nan 100";
-				NanRows.push_back(row.str());
-			}
-
 			bool Breached = false;
 			double BestMs = 1.0e300;
 			std::vector<double> WpSamples;
@@ -578,16 +417,18 @@ int main(int argc, char *argv[])
 				FillSolverObject(Scan, Parameters_R_Values, NT);
 				Scan.SynchroniseFromHostToDevice(All);
 
-				ArmWatchdog(WpPath, NanRows);
+				// Kernel only is timed; a hard exit NaN-fills this and every later setting.
+				ArmWatchdog([&, si]() { NanFrom(si); });
 				auto T0 = std::chrono::steady_clock::now();
 				Scan.Solve();
 				Scan.InsertSynchronisationPoint();
 				Scan.SynchroniseSolver();
-				// ActualState only: All would also copy the NDO dense-output registers.
-				Scan.SynchroniseFromDeviceToHost(ActualState);
 				Scan.SynchroniseDevice();
 				auto T1 = std::chrono::steady_clock::now();
 				DisarmWatchdog();
+				// ActualState only: All would also copy the NDO dense-output registers.
+				Scan.SynchroniseFromDeviceToHost(ActualState);
+				Scan.SynchroniseDevice();
 
 				cudaError_t WpErr = cudaGetLastError();
 				if (WpErr != cudaSuccess)
@@ -606,25 +447,9 @@ int main(int argc, char *argv[])
 				if (r == 1) RepeatBounds(WpTimed[0], Repeats, WpFloor, WpCeiling);
 				if (RepeatsDone(WpTimed, WpFloor, WpCeiling)) break;
 			}
-			// The h2d is outside the timed region; the ActualState d2h is inside.
-			SamplePoint WpPoint = {"wp", Algorithm, Mode, SettingKind, Setting,
-				NT, SD};
-			AppendSamples(WpSamplesPath, WpPoint, "d2h", WpSamples);
-
 			if (Breached)
 			{
-				if (FloorEnabled())
-				{
-					for (size_t sj = si; sj < Settings.size(); sj++)
-						MergeWpRow(WpPath, Settings[sj], std::nan(""),
-							std::nan(""), 100.0);
-				}
-				else
-				{
-					for (size_t i = 0; i < NanRows.size(); ++i)
-						wpfile << NanRows[i] << "\n";
-					wpfile.flush();
-				}
+				NanFrom(si);
 				cout << "WATCHDOG " << PROBLEM_NAME << " " << Mode << " "
 				     << Algorithm << " wp setting=" << Setting
 				     << ": run exceeded the cap" << endl;
@@ -641,21 +466,12 @@ int main(int argc, char *argv[])
 			double Err = sqrt(Sum2 / (NT * (double)SD));
 			const double WpErroredPct = ErroredPct(Scan, NT, SD);
 
-			if (FloorEnabled())
-			{
-				MergeWpRow(WpPath, Setting, BestMs, Err, WpErroredPct);
-			}
-			else
-			{
-				wpfile << Setting << " " << BestMs << " " << scientific << Err
-				       << fixed << " " << WpErroredPct << "\n";
-				wpfile.flush();
-			}
+			RecordResult("wp", Mode, Algorithm, SettingKind, Setting, NT, SD, "none",
+				BestMs, &WpSamples, WpErroredPct, Err, std::nan(""));
 			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
 			     << " ms, err=" << scientific << Err << fixed
 			     << ", errored=" << WpErroredPct << "%" << endl;
 		}
-		wpfile.close();
 
 		cout << "wp sweep finished!" << endl;
 		return 0;
@@ -667,22 +483,17 @@ int main(int argc, char *argv[])
 	const std::string TimesAnalysis = StatesMode ? "states" : "times";
 	const std::string TimesMode = ModeName;
 	const std::string TimesAlgorithm = AlgorithmName;
-	const std::string TimesDir = DataDir("CPP");
-	const std::string TimesPath = TimesDir + "MPGOS_" + TimesAnalysis +
-		"_" + TimesMode + "_" + TimesAlgorithm + ".txt";
-	const std::string TimesSamplesPath = TimesDir + "MPGOS_samples_" +
-		TimesAnalysis + "_" + TimesMode + "_" + TimesAlgorithm + ".csv";
-	SamplePoint TimesPoint = {TimesAnalysis, TimesAlgorithm, TimesMode,
-		"none", std::nan(""), NT, SD};
-	std::vector<std::string> TimesNanRow;
-	{
-		std::ostringstream row;
-		if (StatesMode)
-			row << SD << "\tnan\tnan\t" << StatesBuild << "\t100";
-		else
-			row << NT << "\tnan\tnan\t100";
-		TimesNanRow.push_back(row.str());
-	}
+	const std::string TimesSettingKind = (SOLVER == RK4) ? "dt" : "tol";
+	const double TimesSetting = (SOLVER == RK4) ? (double)TIMING_DT
+	                                            : (double)PROTOCOL_TIMING_TOL;
+	const double BuildS = ParseTime(StatesBuild);
+	// Both transfer legs of this point, NaN-timed, for a breach or a hard exit.
+	auto RecordNan = [&]() {
+		RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
+			TimesSetting, NT, SD, "both", std::nan(""), NULL, 100.0, std::nan(""), BuildS);
+		RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
+			TimesSetting, NT, SD, "none", std::nan(""), NULL, 100.0, std::nan(""), BuildS);
+	};
 	bool TimesBreached = false;
 
 	// Device-only timing: the untimed h2d resets the in-place solver state.
@@ -695,7 +506,7 @@ int main(int argc, char *argv[])
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 		Scan.SynchroniseFromHostToDevice(All);
 
-		ArmWatchdog(TimesPath, TimesNanRow);
+		ArmWatchdog(RecordNan);
 		auto T0 = std::chrono::steady_clock::now();
 		Scan.Solve();
 		Scan.InsertSynchronisationPoint();
@@ -714,7 +525,6 @@ int main(int argc, char *argv[])
 			DeviceCeiling);
 		if (RepeatsDone(DeviceTimed, DeviceFloor, DeviceCeiling)) break;
 	}
-	AppendSamples(TimesSamplesPath, TimesPoint, "none", DeviceSamples);
 
 	// End-to-end timing: h2d, kernel, ActualState d2h.
 	double ElapsedMs = 1.0e300;
@@ -725,7 +535,7 @@ int main(int argc, char *argv[])
 	{
 		FillSolverObject(Scan, Parameters_R_Values, NT);
 
-		ArmWatchdog(TimesPath, TimesNanRow);
+		ArmWatchdog(RecordNan);
 		auto T0 = std::chrono::steady_clock::now();
 		Scan.SynchroniseFromHostToDevice(All);
 		Scan.Solve();
@@ -746,23 +556,10 @@ int main(int argc, char *argv[])
 			EndToEndFloor, EndToEndCeiling);
 		if (RepeatsDone(EndToEndTimed, EndToEndFloor, EndToEndCeiling)) break;
 	}
-	AppendSamples(TimesSamplesPath, TimesPoint, "both", EndToEndSamples);
 
 	if (TimesBreached)
 	{
-		if (FloorEnabled())
-		{
-			std::vector<double> NanValues(2, std::nan(""));
-			if (StatesMode) NanValues.push_back(ParseTime(StatesBuild));
-			NanValues.push_back(100.0);
-			MergeMinRow(TimesPath, StatesMode ? SD : NT, NanValues);
-		}
-		else
-		{
-			std::ofstream out(TimesPath.c_str(), std::ios::app);
-			out << TimesNanRow[0] << "\n";
-			out.close();
-		}
+		RecordNan();
 		cout << "WATCHDOG " << PROBLEM_NAME;
 		if (StatesMode) cout << " states=" << SD;
 		cout << " " << TimesMode << " " << TimesAlgorithm << " N=" << NT
@@ -787,26 +584,12 @@ int main(int argc, char *argv[])
 	cout << "Ensemble size:                   " << NT << endl << endl;
 
 
-	if (FloorEnabled())
-	{
-		std::vector<double> RowValues;
-		RowValues.push_back(ElapsedMs);
-		RowValues.push_back(ElapsedDeviceMs);
-		if (StatesMode) RowValues.push_back(ParseTime(StatesBuild));
-		RowValues.push_back(ErroredPercent);
-		MergeMinRow(TimesPath, StatesMode ? SD : NT, RowValues);
-	}
-	else
-	{
-		ofstream datafile(TimesPath.c_str(), ios::app);
-		if (StatesMode)
-			datafile << SD << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
-			         << "\t" << StatesBuild << "\t" << ErroredPercent << "\n";
-		else
-			datafile << NT << "\t" << ElapsedMs << "\t" << ElapsedDeviceMs
-			         << "\t" << ErroredPercent << "\n";
-		datafile.close();
-	}
+	RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
+		TimesSetting, NT, SD, "both", ElapsedMs, &EndToEndSamples, ErroredPercent,
+		std::nan(""), BuildS);
+	RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
+		TimesSetting, NT, SD, "none", ElapsedDeviceMs, &DeviceSamples, ErroredPercent,
+		std::nan(""), BuildS);
 
 	//SaveData(Scan, NT);
 

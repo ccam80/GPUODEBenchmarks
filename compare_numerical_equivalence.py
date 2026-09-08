@@ -10,13 +10,15 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "runner_scripts"))
 sys.path.insert(0, os.path.join(_HERE, "runner_scripts", "numerical_equivalence"))
+from algorithms import NE_PACKAGES, ne_algorithms  # noqa: E402
 from bench_key import group_dir  # noqa: E402
 from problems import problem_names, resolve_problems  # noqa: E402
-from ne_common import (TOLS_NE, dts_ne, load_algorithms, load_golden_ne,
+from protocol import TOLS  # noqa: E402
+from ne_common import (dts_ne, load_golden_ne,  # noqa: E402
                        ensemble_error_masked, julia_ne_file, cubie_ne_file,
                        julia_ne_adaptive_file, cubie_ne_adaptive_file,
                        read_ne_csv_masked, read_ne_adaptive_csv_masked,
-                       runs_fixed, CUBIE_NE_DIR)
+                       NE_DIR, ne_keys)
 
 # Windows consoles default to a legacy codepage (cp1252) that cannot encode
 # the glyphs printed below; force UTF-8 where supported.
@@ -30,17 +32,6 @@ FLOOR_REL = 4e-6
 
 
 
-def discover_keys():
-    """Dataset keys present in the cubie ne output directory."""
-    keys = set()
-    if not os.path.isdir(CUBIE_NE_DIR):
-        return keys
-    for name in os.listdir(CUBIE_NE_DIR):
-        if os.path.isdir(os.path.join(CUBIE_NE_DIR, name)):
-            keys.add(name)
-    return keys
-
-
 def _ratio(err_c, err_j):
     if err_c is None or err_j in (None, 0.0):
         return None
@@ -49,11 +40,11 @@ def _ratio(err_c, err_j):
     return err_c / err_j
 
 
-def analyse_algorithm(row, key, golden_states, problem):
-    """Per-dt errors for one algorithm's fixed-step sweep."""
-    alias = row["cubie_alias"]
+def analyse_algorithm(row, key, golden_states, problem, package):
+    """Per-dt errors for one algorithm's fixed-step sweep of a cubie package."""
+    alias = row["algorithm"]
     jfile = julia_ne_file(alias, problem, key)
-    cfile = cubie_ne_file(alias, key, problem)
+    cfile = cubie_ne_file(alias, key, problem, package)
     julia = read_ne_csv_masked(jfile) if os.path.isfile(jfile) else None
     cubie = read_ne_csv_masked(cfile) if os.path.isfile(cfile) else None
 
@@ -88,21 +79,21 @@ def analyse_algorithm(row, key, golden_states, problem):
     return {"row": row, "points": points}
 
 
-def analyse_adaptive(row, key, golden_states, problem):
-    """Per-tolerance errors for one algorithm's adaptive tiers."""
-    alias = row["cubie_alias"]
+def analyse_adaptive(row, key, golden_states, problem, package):
+    """Per-tolerance errors for one algorithm's adaptive tiers of a cubie package."""
+    alias = row["algorithm"]
     jfile = julia_ne_adaptive_file(alias, problem, key)
     julia = read_ne_adaptive_csv_masked(jfile) if os.path.isfile(jfile) else None
     tiers = {}
     for tier in ("default", "matched"):
-        cfile = cubie_ne_adaptive_file(alias, tier, key, problem)
+        cfile = cubie_ne_adaptive_file(alias, tier, key, problem, package)
         tiers[tier] = (read_ne_adaptive_csv_masked(cfile)
                        if os.path.isfile(cfile) else None)
     if not any(tiers.values()):
         return None
 
     points = []
-    for tol in TOLS_NE:
+    for tol in TOLS:
         j = julia.get(tol) if julia else None
         dflt = tiers["default"].get(tol) if tiers["default"] else None
         mtch = tiers["matched"].get(tol) if tiers["matched"] else None
@@ -154,7 +145,7 @@ def write_fixed_csv(results, outfile):
             row = res["row"]
             for p in res["points"]:
                 writer.writerow([
-                    row["cubie_alias"], row["family"], row["order"], p["dt"],
+                    row["algorithm"], row["family"], row["order"], p["dt"],
                     p["err_cubie"], p["err_julia"], p["ratio"],
                     p["nonconv_cubie"], p["nonconv_julia"], p["mutual_n"]])
 
@@ -168,7 +159,7 @@ def write_adaptive_csv(results, outfile):
             row = res["row"]
             for p in res["points"]:
                 writer.writerow([
-                    row["cubie_alias"], row["family"], row["order"], p["tol"],
+                    row["algorithm"], row["family"], row["order"], p["tol"],
                     p["err_default"], p["err_matched"], p["err_julia"],
                     p["ratio_default"], p["ratio_matched"], p["julia_steps"],
                     p["nonconv_default"], p["nonconv_matched"],
@@ -185,7 +176,7 @@ def _grid(n):
     return fig, np.atleast_2d(axes), nrows, ncols
 
 
-def write_plot(key, results, scale, outfile, problem):
+def write_plot(key, results, scale, outfile, problem, package):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -205,7 +196,7 @@ def write_plot(key, results, scale, outfile, problem):
             ax.loglog(dts_j, errs_j, "x--", color="tab:red", label="DiffEq.jl")
         ax.axhline(FLOOR_REL * scale, color="gray", linewidth=0.5,
                    linestyle="-.")
-        ax.set_title(row["cubie_alias"], fontsize=9)
+        ax.set_title(row["algorithm"], fontsize=9)
         ax.grid(True, which="both", alpha=0.2)
         if idx == 0:
             ax.legend(fontsize=7)
@@ -218,15 +209,15 @@ def write_plot(key, results, scale, outfile, problem):
         ax.set_xlabel("dt")
     for r in range(nrows):
         axes[r][0].set_ylabel("ensemble l2 error")
-    fig.suptitle("Numerical equivalence, Float32 fixed-step {0} ensemble "
-                 "({1})".format(problem["display"], key))
+    fig.suptitle("Numerical equivalence, Float32 fixed-step {0} ensemble, "
+                 "{1} ({2})".format(problem["display"], package, key))
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     fig.savefig(outfile, dpi=130)
     plt.close(fig)
 
 
-def write_adaptive_plot(key, adaptive_results, scale, outfile, problem):
+def write_adaptive_plot(key, adaptive_results, scale, outfile, problem, package):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -247,7 +238,7 @@ def write_adaptive_plot(key, adaptive_results, scale, outfile, problem):
         ax.loglog(tols, tols, ":", color="gray", linewidth=1, label="err = tol")
         ax.axhline(FLOOR_REL * scale, color="gray", linewidth=0.5,
                    linestyle="-.")
-        ax.set_title(res["row"]["cubie_alias"], fontsize=9)
+        ax.set_title(res["row"]["algorithm"], fontsize=9)
         ax.grid(True, which="both", alpha=0.2)
         if idx == 0:
             ax.legend(fontsize=7)
@@ -257,43 +248,43 @@ def write_adaptive_plot(key, adaptive_results, scale, outfile, problem):
         ax.set_xlabel("tolerance (atol = rtol)")
     for r in range(nrows):
         axes[r][0].set_ylabel("ensemble l2 error")
-    fig.suptitle("Adaptive numerical equivalence, Float32 {0} ensemble "
-                 "({1})".format(problem["display"], key))
+    fig.suptitle("Adaptive numerical equivalence, Float32 {0} ensemble, "
+                 "{1} ({2})".format(problem["display"], package, key))
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     fig.savefig(outfile, dpi=130)
     plt.close(fig)
 
 
-def compare_problem(problem, algorithms, keys):
-    """Write the report and plots for one problem, once per dataset key."""
+def compare_problem(problem, algorithms, package, keys):
+    """The report and plots of one cubie package for one problem, per dataset key."""
     _, golden_states = load_golden_ne(problem)
     scale = float(np.sqrt(np.mean(golden_states ** 2)))
 
     for key in sorted(keys):
-        results = [analyse_algorithm(row, key, golden_states, problem)
-                   for row in algorithms if runs_fixed(row)]
+        results = [analyse_algorithm(row, key, golden_states, problem, package)
+                   for row in algorithms if row.runs_fixed_ne]
         adaptive_results = [
-            res for res in (analyse_adaptive(row, key, golden_states, problem)
+            res for res in (analyse_adaptive(row, key, golden_states, problem, package)
                             for row in algorithms)
             if res is not None]
         outdir = group_dir(key, problem)
+        stem = "numerical_equivalence_" + package
 
-        fixed_csv = os.path.join(outdir, "numerical_equivalence_fixed.csv")
-        plot = os.path.join(outdir, "numerical_equivalence.png")
+        fixed_csv = os.path.join(outdir, stem + "_fixed.csv")
+        plot = os.path.join(outdir, stem + ".png")
         write_fixed_csv(results, fixed_csv)
-        write_plot(key, results, scale, plot, problem)
-        print("[{0}/{1}] {2} algorithms -> {3}, {4}".format(
-            key, problem.name, len(results), fixed_csv, plot))
+        write_plot(key, results, scale, plot, problem, package)
+        print("[{0}/{1}/{2}] {3} algorithms -> {4}, {5}".format(
+            key, problem.name, package, len(results), fixed_csv, plot))
 
         if adaptive_results:
-            adaptive_csv = os.path.join(
-                outdir, "numerical_equivalence_adaptive.csv")
-            aplot = os.path.join(outdir, "numerical_equivalence_adaptive.png")
+            adaptive_csv = os.path.join(outdir, stem + "_adaptive.csv")
+            aplot = os.path.join(outdir, stem + "_adaptive.png")
             write_adaptive_csv(adaptive_results, adaptive_csv)
-            write_adaptive_plot(key, adaptive_results, scale, aplot, problem)
-            print("[{0}/{1}] adaptive: {2} algorithms -> {3}, {4}".format(
-                key, problem.name, len(adaptive_results), adaptive_csv, aplot))
+            write_adaptive_plot(key, adaptive_results, scale, aplot, problem, package)
+            print("[{0}/{1}/{2}] adaptive: {3} algorithms -> {4}, {5}".format(
+                key, problem.name, package, len(adaptive_results), adaptive_csv, aplot))
 
 
 def main():
@@ -304,16 +295,17 @@ def main():
     args = parser.parse_args()
 
     problems = resolve_problems(args.problem, "cubie")
-    algorithms = load_algorithms()
-    keys = discover_keys()
-    if not keys:
-        print("No cubie ne outputs found in {0}; run "
-              "GPU_ODE_CUBIE/numerical_equivalence.py first."
-              .format(CUBIE_NE_DIR))
+    algorithms = ne_algorithms()
+    keyed = {package: ne_keys(package) for package in NE_PACKAGES}
+    keyed = {package: keys for package, keys in keyed.items() if keys}
+    if not keyed:
+        print("No cubie ne outputs found under {0}; run `bench.py -a numerical "
+              "-p cubie` first.".format(os.path.join(NE_DIR, "<cubie|cubie_mlir>")))
         return 1
 
     for problem in problems:
-        compare_problem(problem, algorithms, keys)
+        for package, keys in keyed.items():
+            compare_problem(problem, algorithms, package, keys)
     return 0
 
 

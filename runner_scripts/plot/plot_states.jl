@@ -2,24 +2,14 @@ using Plots
 using DelimitedFiles
 using Plots.PlotMeasures
 include(joinpath(dirname(@__DIR__), "errored.jl"))
+include(joinpath(dirname(@__DIR__), "results.jl"))
 
-# Reads data/<package>/<os>_<gpu>/lorenz96/<Prefix>_states_<mode>_<algorithm>.txt
-# (rows: states t_ms t_dev_ms build_s) and emits one figure per
-# (key, mode, algorithm) into plots/states/<key>/: solid = run time, dashed =
-# compile time, each trace ending at its last finite value. ARGS[1] overrides
-# the data dir.
+# Reads the `states` rows of every data/<package>/<os>_<gpu>/results.csv and
+# emits one figure per (key, mode, algorithm) into plots/states/<key>/: solid =
+# run time, dashed = compile time, each trace ending at its last finite value.
+# ARGS[1] overrides the data dir.
 parent_dir = length(ARGS) != 0 ? ARGS[1] : "data"
 base_path = joinpath(dirname(dirname(@__DIR__)), parent_dir)
-
-frameworks = [
-    ("Julia", "Julia", "Julia"),
-    ("MPGOS", "CPP", "MPGOS"),
-    ("JAX", "JAX", "Jax"),
-    ("PYTORCH", "PYTORCH", "Torch"),
-    ("CUBIE", "CUBIE", "Cubie"),
-    ("CUBIE_MLIR", "CUBIE_MLIR", "Cubie_mlir"),
-    ("MYOKIT CUDA", "MYOKIT_CUDA", "Myokit_cuda"),
-]
 
 colors = Dict("Julia"=>:Green, "MPGOS"=>:Orange, "JAX"=>:Red,
     "PYTORCH"=>:DarkRed, "CUBIE"=>:Blue, "CUBIE_MLIR"=>:Purple,
@@ -38,33 +28,27 @@ struct StatesSeries
     build_s::Vector{Float64}
 end
 
-function collect_series(base_path, frameworks)
-    series = StatesSeries[]
-    for (display, dir, prefix) in frameworks
-        dpath = joinpath(base_path, dir)
-        isdir(dpath) || continue
-        pat = Regex("^" * prefix * "_states_(fixed|adaptive)_(.+)[.]txt\$")
-        for key in sort(readdir(dpath))
-            ppath = joinpath(dpath, key, "lorenz96")
-            isdir(ppath) || continue
-            for file in sort(readdir(ppath))
-                m = match(pat, file)
-                m === nothing && continue
-                # Untyped, so a short row reads as "" in the errored column.
-                raw = readdlm(joinpath(ppath, file))
-                size(raw, 2) >= 4 || continue
-                if size(raw, 2) >= 5
-                    # Drop rows past the errored bar.
-                    raw = raw[within_error_budget.(raw[:, 5]), :]
-                    isempty(raw) && continue
-                end
-                push!(series, StatesSeries(display, String(m[1]),
-                    String(m[2]), key, Float64.(raw[:, 1]),
-                    Float64.(raw[:, 2]) ./ 1000.0, Float64.(raw[:, 4])))
-            end
-        end
+# One trace per (package, key, mode, algorithm) from the store's states rows, host-path leg.
+function collect_series(base_path)
+    groups = Dict{NTuple{4, String}, Vector{NTuple{3, Float64}}}()
+    for row in result_rows_under(base_path)
+        (row["analysis"] == "states" && row["transfers"] == "both") || continue
+        # Drop rows past the errored bar.
+        within_error_budget(_result_float(row["errored_pct"])) || continue
+        id = (RESULT_DISPLAY[row["package"]], row["mode"], row["algorithm"],
+              row["key"])
+        push!(get!(groups, id, NTuple{3, Float64}[]),
+              (parse(Float64, row["states"]), _result_float(row["min_ms"]) / 1000.0,
+               _result_float(row["build_s"])))
     end
-    return series
+    series = StatesSeries[]
+    for (id, points) in groups
+        sort!(points, by = first)
+        display, mode, algorithm, key = id
+        push!(series, StatesSeries(display, mode, algorithm, key,
+            first.(points), [p[2] for p in points], [p[3] for p in points]))
+    end
+    return sort(series, by = s -> (s.display, s.mode, s.algorithm, s.key))
 end
 
 # One figure per (key, mode, algorithm): solid run trace, dashed compile trace.
@@ -105,4 +89,4 @@ function plot_states(series)
     end
 end
 
-plot_states(collect_series(base_path, frameworks))
+plot_states(collect_series(base_path))
