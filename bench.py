@@ -504,13 +504,18 @@ class Run:
                                        self.julia(os.path.join("runner_scripts", "numerical_equivalence", "ne_diffeq.jl"),
                                                   "--controller", mode, "--algorithm", algorithm,
                                                   "--problem", problem), critical=False)
+        # The cubie ne finals are the first N_NE rows of the work-precision solves, so the ne sweep is that leg set; its rows replace by identity.
         for cubie_pkg in cubie_pkgs:
             if worst != 0:
                 break
-            worst = self.step("ne: {0} sweeps".format(cubie_pkg), "numerical_equivalence.log", launch.Command(
-                cubie_pkg, [launch.cubie_python(), os.path.join(ROOT, "GPU_ODE_CUBIE", "numerical_equivalence.py"),
-                            "--package", cubie_pkg, "--controller", mode,
-                            "--algorithm", algorithm, "--problem", problem]), critical=False)
+            saved_keep = self.args.keep
+            self.args.keep = True
+            try:
+                status = self.package_stage("numerical", cubie_pkg, self.plan["nlist"], algorithm, problem, mode,
+                                            label="ne:" + cubie_pkg, logfile="numerical_equivalence.log")
+            finally:
+                self.args.keep = saved_keep
+            worst = 0 if status in ("OK", "SKIPPED") else 1
         if worst != 0:
             self.record("ne", "FAILED", "-", worst)
             return

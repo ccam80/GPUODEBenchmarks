@@ -96,6 +96,37 @@ def resolve_modes(request):
     return tuple(mode for mode in MODES if mode in names)
 
 
+# The packages whose work-precision sweep also carries the numerical-equivalence set.
+NE_PACKAGES = ("cubie", "cubie_mlir")
+
+
+def ne_member(row, mode):
+    """Whether an algorithm row is in the ne sweep for a mode."""
+    if mode == "fixed":
+        return row.in_ne and row.runs_fixed_ne
+    return row["ne_adaptive"]
+
+
+def wp_supported_for(framework, mode):
+    """Algorithm names a framework's work-precision sweep runs in a mode: the timed set, plus the ne set for NE_PACKAGES."""
+    return tuple(row["algorithm"] for row in load_algorithms()
+                 if row.supports(framework, mode)
+                 or (framework in NE_PACKAGES and ne_member(row, mode)))
+
+
+def resolve_wp_algorithms(request, framework):
+    """Resolve "all" or a comma list to the algorithms a framework's work-precision sweep runs."""
+    supported = tuple(dict.fromkeys(wp_supported_for(framework, "fixed")
+                                    + wp_supported_for(framework, "adaptive")))
+    ordered = [name for name in algorithm_names() if name in supported]
+    if request in (None, "", "all"):
+        return ordered
+    names = [name for name in request.split(",") if name]
+    for name in names:
+        get_algorithm(name)
+    return [name for name in names if name in supported]
+
+
 def _select(rows, request):
     """Rows named by "all" or a comma list; an unknown name exits."""
     if request in (None, "", "all"):

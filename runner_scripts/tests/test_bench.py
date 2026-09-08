@@ -165,7 +165,15 @@ class LaunchTests(unittest.TestCase):
     def test_ordering_and_store_names(self):
         self.assertEqual(launch.ordered(["jax", "cubie_mlir", "cubie"]), ["cubie", "cubie_mlir", "jax"])
         self.assertEqual(launch.store_analysis("work-precision"), "wp")
+        self.assertEqual(launch.store_analysis("numerical"), "wp")
         self.assertEqual(launch.store_analysis("performance"), "times")
+
+    def test_numerical_is_the_cubie_ne_legs(self):
+        self.assertEqual(self.labels("cubie", "numerical"), ["optimize", "ne"])
+        self.assertEqual(launch.commands("cubie", "numerical", [8], "8", "all", "pollu")[1].argv[-3:],
+                         ["all", "--problem", "pollu"])
+        for package in ("julia", "pytorch", "cpp"):
+            self.assertEqual(launch.commands(package, "numerical", [8], "8", "all", "all"), [])
 
     def test_julia_command_honours_a_channel(self):
         saved = os.environ.get("JULIA")

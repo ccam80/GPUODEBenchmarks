@@ -6,7 +6,9 @@ import threading
 
 import numpy as np
 
-from algorithms import resolve_algorithms, resolve_modes
+from algorithms import (NE_PACKAGES, get_algorithm, ne_member,
+                        resolve_algorithms, resolve_modes,
+                        resolve_wp_algorithms)
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
 from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
@@ -111,6 +113,16 @@ def dts_for(algorithm, problem=DEFAULT_PROBLEM):
     return _row(problem).dts(algorithm)
 
 
+def wp_settings(problem, algorithm, mode, framework):
+    """The settings a framework's work-precision leg sweeps: the ne dt grid for an ne member of NE_PACKAGES, else the wp dt grid; tolerances are one grid."""
+    if mode == "adaptive":
+        return list(TOLS)
+    row = _row(problem)
+    if framework in NE_PACKAGES and ne_member(get_algorithm(algorithm), "fixed"):
+        return row.ne_dts()
+    return row.dts(algorithm)
+
+
 def golden_path(problem=DEFAULT_PROBLEM):
     """Path of the Float64 reference final states for a problem."""
     return os.path.join(
@@ -176,13 +188,13 @@ def append_samples(path, point, transfers, samples):
 
 
 def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes)."""
+    """Parse <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes); wp and ne resolve against the work-precision membership."""
     if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|states|warm[:N,N,...]|optimize "
+        raise SystemExit("usage: <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize "
                          "[algorithm|all] [--problem <name|all>] "
                          "[--mode <fixed|adaptive|all>]")
-    if argv[0] == "wp":
-        analysis, ns = "wp", [N_WP]
+    if argv[0] in ("wp", "ne"):
+        analysis, ns = argv[0], [N_WP]
     elif argv[0] == "optimize":
         analysis, ns = "optimize", [N_WP]
     elif argv[0] == "states":
@@ -215,6 +227,13 @@ def parse_bench_args(argv, framework):
             mode_request = tok.split("=", 1)[1]
         else:
             request = tok
-    algorithms = resolve_algorithms(request, framework)
+    if analysis in ("wp", "ne", "warm", "optimize"):
+        algorithms = resolve_wp_algorithms(request, framework)
+    else:
+        algorithms = resolve_algorithms(request, framework)
+    if analysis == "ne":
+        algorithms = [name for name in algorithms
+                      if any(ne_member(get_algorithm(name), mode)
+                             for mode in ("fixed", "adaptive"))]
     problems = resolve_problems(problem_request, framework)
     return ns, analysis, algorithms, problems, resolve_modes(mode_request)

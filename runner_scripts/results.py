@@ -300,8 +300,8 @@ class Leg:
                     build_s=build_s)
 
     def record_wp(self, setting, t_ms, error, errored_pct, transfers="both",
-                  samples=None):
-        self.record(N_WP, transfers, setting=setting, min_ms=t_ms,
+                  samples=None, tier="default"):
+        self.record(N_WP, transfers, setting=setting, tier=tier, min_ms=t_ms,
                     error=error, errored_pct=errored_pct, samples=samples)
 
     def nan_times(self, ns):
