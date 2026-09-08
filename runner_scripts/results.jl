@@ -6,8 +6,9 @@ include(joinpath(@__DIR__, "protocol.jl"))
 
 const RESULT_IDENTITY = ("package", "key", "analysis", "problem", "algorithm",
     "mode", "setting_kind", "setting", "n", "states", "tier", "transfers")
-const RESULT_VALUES = ("min_ms", "median_ms", "p05_ms", "p95_ms", "max_ms",
-    "samples", "errored_pct", "error", "build_s", "recorded_utc")
+# samples_ms is every attempt in ms, warm-up first, ';'-joined; min_ms is the minimum over the attempts after the warm-up.
+const RESULT_VALUES = ("min_ms", "samples_ms", "errored_pct", "error", "build_s",
+    "recorded_utc")
 const RESULT_FIELDS = (RESULT_IDENTITY..., RESULT_VALUES...)
 const RESULT_PACKAGE_DIRS = Dict("cubie" => "CUBIE", "cubie_mlir" => "CUBIE_MLIR",
     "julia" => "Julia", "cpp" => "CPP", "jax" => "JAX", "pytorch" => "PYTORCH",
@@ -98,39 +99,22 @@ function result_locked(f, path)
     end
 end
 
-"Linear-interpolation percentile, as numpy's default."
-function _result_percentile(ordered, pct)
-    length(ordered) == 1 && return ordered[1]
-    position = (length(ordered) - 1) * pct / 100.0
-    low = Int(floor(position))
-    high = min(low + 1, length(ordered) - 1)
-    return ordered[low + 1] + (ordered[high + 1] - ordered[low + 1]) * (position - low)
-end
+"The attempts of a row in ms, warm-up first; empty when none were recorded."
+result_samples(row) = [parse(Float64, v) for v in split(get(row, "samples_ms", ""), ';') if !isempty(v)]
 
-"One store row; samples (attempts in ms, warm-up first) fill the spread columns."
+"One store row; samples is every attempt in ms, warm-up first."
 function result_row(package, key, analysis, problem, algorithm, mode,
         setting_kind, setting, n, states; tier = "default", transfers = "both",
         min_ms = NaN, samples = nothing, errored_pct = NaN, error = NaN,
         build_s = NaN)
-    timed = samples === nothing || length(samples) < 2 ? Float64[] :
-            Float64.(samples[2:end])
-    median_ms = p05 = p95 = max_ms = NaN
-    if !isempty(timed)
-        ordered = sort(timed)
-        median_ms = _result_percentile(ordered, 50.0)
-        p05 = _result_percentile(ordered, 5.0)
-        p95 = _result_percentile(ordered, 95.0)
-        max_ms = ordered[end]
-    end
+    attempts = samples === nothing ? Float64[] : Float64.(samples)
     return Dict{String, String}(
         "package" => package, "key" => key, "analysis" => analysis,
         "problem" => problem, "algorithm" => algorithm, "mode" => mode,
         "setting_kind" => setting_kind, "setting" => _result_fmt(Float64(setting)),
         "n" => string(Int(n)), "states" => string(Int(states)), "tier" => tier,
         "transfers" => transfers, "min_ms" => _result_fmt(Float64(min_ms)),
-        "median_ms" => _result_fmt(median_ms), "p05_ms" => _result_fmt(p05),
-        "p95_ms" => _result_fmt(p95), "max_ms" => _result_fmt(max_ms),
-        "samples" => string(length(timed)),
+        "samples_ms" => join(_result_fmt.(attempts), ";"),
         "errored_pct" => _result_fmt(Float64(errored_pct)),
         "error" => _result_fmt(Float64(error)),
         "build_s" => _result_fmt(Float64(build_s)),

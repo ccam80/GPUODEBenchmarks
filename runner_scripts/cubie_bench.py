@@ -16,9 +16,8 @@ import cubie_adapter as adapter  # noqa: E402
 from algorithms import supported_for, wp_supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import final_states, sweep_parameters
-from results import PACKAGE_DIRS, PREFIXES, Leg
-from resume import (active as resume_active, floor_enabled, skip_point,
-                    skip_wp_leg)
+from results import Leg
+from resume import skip_point, skip_wp_leg
 from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
 
 REPEATS = REPEAT_CAP
@@ -135,9 +134,8 @@ def _run_wp(problem, opts, system, grid):
     """dt / tolerance sweep at N = N_WP; an ne member's legs also write the first N_NE rows of their finals as its ne files."""
     from algorithms import NE_PACKAGES, get_algorithm, ne_member
     from protocol import N_NE
-    from wp_common import (N_WP, append_samples, load_golden, ensemble_error,
-                           reset_samples, sample_point, samples_outfile,
-                           timed_min_ms, wp_settings)
+    from wp_common import (N_WP, load_golden, ensemble_error, timed_min_ms,
+                           wp_settings)
 
     duration = problem["duration"]
     golden = load_golden(problem)
@@ -167,13 +165,6 @@ def _run_wp(problem, opts, system, grid):
             print(f"-- resume: skipping wp {problem.name} {mode} "
                   f"{algorithm} [{tier}] (already covered)")
             return
-        samples_file = samples_outfile(opts["framework_dir"], opts["prefix"],
-                                       "wp", mode, algorithm,
-                                       opts["dataset_key"], problem, tier)
-        setting_kind = "dt" if mode == "fixed" else "tol"
-        # --floor merges the new times in; the log gains a fresh series.
-        if not floor_enabled():
-            reset_samples(samples_file)
         breached = False
         ne_finals = []
         for setting in settings:
@@ -186,10 +177,6 @@ def _run_wp(problem, opts, system, grid):
                     solver = _make_solver(opts, system, problem, algorithm,
                                           mode, setting, controller=controller)
                     t_ms, err, pct, samples, finals = bench_solver(solver)
-                    append_samples(samples_file, sample_point(
-                        "wp", problem.name, algorithm, mode, N_WP,
-                        problem["states"], setting_kind, setting),
-                        "both", samples)
                     if finals is not None:
                         ne_finals.append((setting, finals))
                 except Exception as exc:
@@ -235,8 +222,7 @@ def _run_wp(problem, opts, system, grid):
 
 def _run_times(problem, opts, system, grid):
     """N-sweep timing: each (algorithm, mode) leg walks the sizes ascending on one solver."""
-    from wp_common import (append_samples, sample_point, samples_outfile,
-                           timed_min_ms)
+    from wp_common import timed_min_ms
 
     duration = problem["duration"]
     dataset = opts["dataset_key"]
@@ -278,9 +264,6 @@ def _run_times(problem, opts, system, grid):
                 continue
             leg = Leg(opts["framework"], dataset, "times", problem, algorithm,
                       mode)
-            samples_file = samples_outfile(
-                opts["framework_dir"], opts["prefix"], "times", mode,
-                algorithm, dataset, problem)
             run_ns = [n for n in ns if not skip_point(leg, n)]
             if not run_ns:
                 print(f"-- resume: skipping {problem.name} {mode} "
@@ -302,8 +285,6 @@ def _run_times(problem, opts, system, grid):
                 print(f"Running {problem.name}, {n} trajectories, "
                       f"{mode} dt, {algorithm}...")
                 label = f"{problem.name} {mode} {algorithm} N={n}"
-                point = sample_point("times", problem.name, algorithm,
-                                     mode, n, problem["states"])
                 want_finals = (n == 32768
                                and (mode, algorithm) in numerical_names)
                 finals = None
@@ -312,7 +293,6 @@ def _run_times(problem, opts, system, grid):
                 try:
                     best, finals, pct, samples_both = host_leg(
                         solver, n, want_finals)
-                    append_samples(samples_file, point, "both", samples_both)
                 except Exception as exc:
                     best = _failed(exc, label)
                 if best is None:
@@ -331,8 +311,6 @@ def _run_times(problem, opts, system, grid):
                     try:
                         best_dev, samples_none = _device_leg(
                             solver, duration, REPEATS)
-                        append_samples(samples_file, point, "none",
-                                       samples_none)
                     except Exception as exc:
                         best_dev = _failed(exc, label + " device-only")
                     if best_dev is None:
@@ -520,8 +498,7 @@ def _run_states(opts):
 
     from cubie.cache_root import set_cache_root
     from problems import STATES_PROBLEM, states_row
-    from wp_common import (STATES_N, append_samples, reset_samples,
-                           sample_point, samples_outfile, timed_min_ms)
+    from wp_common import STATES_N, timed_min_ms
 
     # Throwaway cache root: every states compile runs cold.
     set_cache_root(tempfile.mkdtemp(prefix="cubie_states_"))
@@ -548,12 +525,6 @@ def _run_states(opts):
                 print(f"-- resume: skipping states {mode} {algorithm} "
                       "(already covered)")
                 continue
-            samples_file = samples_outfile(
-                opts["framework_dir"], opts["prefix"], "states", mode,
-                algorithm, opts["dataset_key"], STATES_PROBLEM)
-            # A resumed or --floor leg appends to what earlier runs recorded.
-            if not (resume_active() or floor_enabled()):
-                reset_samples(samples_file)
             # A device-only breach abandons that column alone.
             device_breached = False
             for index, nstates in enumerate(run_grid):
@@ -563,8 +534,6 @@ def _run_states(opts):
                       f"{n} trajectories, {mode} dt, {algorithm}...")
                 label = (f"lorenz96 states={nstates} {mode} {algorithm} "
                          f"N={n}")
-                point = sample_point("states", STATES_PROBLEM,
-                                     algorithm, mode, n, nstates)
                 t_ms = t_dev = build_s = float("nan")
                 pct = 100.0
                 breached = False
@@ -605,7 +574,6 @@ def _run_states(opts):
                             parameters=sweep_parameters(row, n, PRECISION))
                     best, solution, samples_both = timed_min_ms(
                         with_transfers, REPEATS)
-                    append_samples(samples_file, point, "both", samples_both)
                     breached = best is None
                     if not breached:
                         t_ms = best
@@ -622,8 +590,6 @@ def _run_states(opts):
                         try:
                             best_dev, samples_none = _device_leg(
                                 solver, duration, REPEATS)
-                            append_samples(samples_file, point, "none",
-                                           samples_none)
                             if best_dev is None:
                                 device_breached = True
                                 print(f"WATCHDOG {label} device-only: "
@@ -671,8 +637,6 @@ def run(argv, package):
         "analysis": analysis,
         "framework": package,
         "algorithms": algorithms,
-        "framework_dir": PACKAGE_DIRS[package],
-        "prefix": PREFIXES[PACKAGE_DIRS[package]],
         "numerical_tag": package,
         "fixed": supported_for(package, "fixed") if "fixed" in modes else (),
         "adaptive": (supported_for(package, "adaptive")

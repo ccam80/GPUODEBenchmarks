@@ -1,4 +1,4 @@
-"""The result store: rows replace by identity, --floor keeps the lower time, status drives resume, and legacy files import."""
+"""The result store: rows replace by identity, --floor keeps the lower time, status drives resume, and every attempt rides in samples_ms."""
 
 import csv
 import math
@@ -44,10 +44,22 @@ class RecordTests(StoreCase):
         self.assertAlmostEqual(float(rows[0]["setting"]), 2.0 ** -10)
         self.assertEqual(rows[0]["n"], "8")
         self.assertEqual(rows[0]["states"], "3")
-        self.assertEqual(rows[0]["samples"], "2")
-        self.assertEqual(float(rows[0]["median_ms"]), 1.75)
-        self.assertEqual(float(rows[0]["max_ms"]), 2.0)
+        # Every attempt, warm-up first; the recorded time is the min after it.
+        self.assertEqual(rows[0]["samples_ms"], "9;2;1.5")
+        self.assertEqual(results.samples_of(rows[0]), [9.0, 2.0, 1.5])
+        self.assertEqual(min(results.samples_of(rows[0])[1:]),
+                         float(rows[0]["min_ms"]))
         self.assertEqual(rows[1]["min_ms"], "0.5")
+        self.assertEqual(results.samples_of(rows[1]), [3.0, 0.5, 0.6])
+
+    def test_a_row_without_attempts_has_an_empty_samples_column(self):
+        leg = self.leg()
+        leg.nan_times([8])
+        row = results.load(leg.path)[0]
+        self.assertEqual(row["samples_ms"], "")
+        self.assertEqual(results.samples_of(row), [])
+        with open(leg.path, newline="") as handle:
+            self.assertEqual(next(csv.reader(handle)), list(results.FIELDS))
 
     def test_an_adaptive_leg_carries_the_timing_tolerance(self):
         leg = self.leg(mode="adaptive")
@@ -122,56 +134,11 @@ class RecordTests(StoreCase):
                 ["nan", "cpp", "k", "states", "lorenz96", "classical-rk4",
                  "fixed", "16", "0.75"]), 0)
             rows = results.load(results.store_path("cpp", "k", self.tmp))
-        self.assertEqual(rows[0]["samples"], "2")
-        self.assertEqual(rows[0]["median_ms"], "1.75")
+        self.assertEqual(rows[0]["samples_ms"], "9;2;1.5")
         states = [r for r in rows if r["analysis"] == "states"]
         self.assertEqual(len(states), 2)
         self.assertEqual(states[0]["build_s"], "0.75")
         self.assertTrue(math.isnan(float(states[0]["min_ms"])))
-
-
-class ImportTests(StoreCase):
-    def write(self, relative, text):
-        path = os.path.join(self.tmp, relative)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as handle:
-            handle.write(text)
-        return path
-
-    def test_legacy_files_become_rows_with_their_samples(self):
-        base = os.path.join("Julia", "k_gpu", "lorenz")
-        self.write(os.path.join(base, "Julia_times_fixed_tsit5.txt"),
-                   "8 1.5 0.5 0.0\n32 nan nan 100.0\n")
-        self.write(os.path.join(base, "Julia_samples_times_fixed_tsit5.csv"),
-                   "analysis,problem,algorithm,mode,transfers,setting_kind,"
-                   "setting,n,states,repeat,ms\n"
-                   "times,lorenz,tsit5,fixed,both,none,nan,8,3,0,9.0\n"
-                   "times,lorenz,tsit5,fixed,both,none,nan,8,3,1,2.0\n"
-                   "times,lorenz,tsit5,fixed,both,none,nan,8,3,2,1.5\n")
-        self.write(os.path.join(base, "Julia_wp_adaptive_tsit5.txt"),
-                   "0.01 1.2 0.05\n1e-08 nan nan 100\n")
-        self.write(os.path.join("Julia", "k_gpu", "lorenz96",
-                                "Julia_states_fixed_tsit5.txt"),
-                   "4\t1.88\t0.30\t1.04\n")
-        converted = results.import_legacy(self.tmp, remove=True)
-        self.assertEqual(len(converted), 3)
-        self.assertFalse(os.path.exists(converted[0]))
-        rows = results.load(results.store_path("julia", "k_gpu", self.tmp))
-        times = [r for r in rows if r["analysis"] == "times"]
-        self.assertEqual(len(times), 4)
-        both8 = [r for r in times if r["n"] == "8" and r["transfers"] == "both"][0]
-        self.assertEqual(both8["samples"], "2")
-        self.assertEqual(both8["median_ms"], "1.75")
-        wp = [r for r in rows if r["analysis"] == "wp"]
-        self.assertEqual([r["transfers"] for r in wp], ["d2h", "d2h"])
-        self.assertEqual(wp[0]["error"], "0.05")
-        self.assertTrue(math.isnan(float(wp[0]["errored_pct"])))
-        states = [r for r in rows if r["analysis"] == "states"]
-        self.assertEqual((states[0]["states"], states[0]["n"],
-                          states[0]["build_s"]), ("4", str(STATES_N), "1.04"))
-        with open(results.store_path("julia", "k_gpu", self.tmp),
-                  newline="") as handle:
-            self.assertEqual(next(csv.reader(handle)), list(results.FIELDS))
 
 
 if __name__ == "__main__":

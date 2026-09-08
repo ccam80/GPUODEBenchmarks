@@ -134,15 +134,16 @@ def read_rows(analysis):
     return out
 
 
-def sample_legs(path):
-    """{(n, transfers): count} from a samples log."""
+def sample_legs(analysis="times"):
+    """{(n, transfers): attempt count} for the rows of the CUBIE test store that carry attempts."""
+    import results
     counts = {}
-    with open(path) as handle:
-        header = handle.readline().strip().split(",")
-        for line in handle:
-            row = dict(zip(header, line.strip().split(",")))
-            key = (int(row["n"]), row["transfers"])
-            counts[key] = counts.get(key, 0) + 1
+    for row in results.load(results.store_path("cubie", "test_key")):
+        if row["analysis"] != analysis:
+            continue
+        attempts = results.samples_of(row)
+        if attempts:
+            counts[(int(row["n"]), row["transfers"])] = len(attempts)
     return counts
 
 
@@ -171,8 +172,7 @@ class SweepCase(unittest.TestCase):
     def opts(self, ns):
         return {"ns": ns, "algorithms": ["classical-rk4"],
                 "fixed": ["classical-rk4"], "adaptive": [],
-                "framework": "cubie", "framework_dir": "CUBIE",
-                "prefix": "Cubie", "dataset_key": "test_key",
+                "framework": "cubie", "dataset_key": "test_key",
                 "numerical_tag": "cubie"}
 
     def run_times(self, solver, ns):
@@ -180,10 +180,7 @@ class SweepCase(unittest.TestCase):
             lambda system, problem, algorithm, mode, setting=None, **kw: solver)
         problem = get_problem("lorenz")
         cubie_bench._run_times(problem, self.opts(ns), object(), grid)
-        base = os.path.join("data", "CUBIE", "test_key", "lorenz")
-        return (read_rows("times"),
-                sample_legs(os.path.join(
-                    base, "Cubie_samples_times_fixed_classical-rk4.csv")))
+        return read_rows("times"), sample_legs("times")
 
 
 class TestTimesResidency(SweepCase):
@@ -333,8 +330,7 @@ class TestWorkPrecisionNe(SweepCase):
         # The MLIR package writes beside, never over, the numba-cuda files.
         opts = dict(self.opts([131072]), algorithms=["backwards_euler"], fixed=(),
                     adaptive=(), wp_fixed=("backwards_euler",), wp_adaptive=(),
-                    framework="cubie_mlir", framework_dir="CUBIE_MLIR",
-                    prefix="Cubie_mlir")
+                    framework="cubie_mlir")
         cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
         self.assertTrue(os.path.isfile(os.path.join(
             "data", "numerical_equivalence", "cubie_mlir", "test_key", "lorenz",
