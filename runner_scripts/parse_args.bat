@@ -26,7 +26,8 @@ if /i "%ANALYSIS%"=="performance" goto check_nmax
 if /i "%ANALYSIS%"=="work-precision" goto check_nmax
 if /i "%ANALYSIS%"=="states" goto check_nmax
 if /i "%ANALYSIS%"=="warm" goto check_nmax
-echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^)
+if /i "%ANALYSIS%"=="optimize" goto check_nmax
+echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^|optimize^)
 exit /b 1
 
 :check_nmax

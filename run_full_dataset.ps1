@@ -21,7 +21,7 @@
 #   run_full_dataset.bat --clock-tolerance 30      # widen the drift threshold (MHz)
 #
 #   -p, --package   all (default) | comma list of julia | cpp | pytorch | jax | cubie | cubie_mlir | myokit_cuda
-#   -a, --analysis  all (default) | comma list of warm | performance | states | work-precision | numerical | overlap | plots
+#   -a, --analysis  all (default) | comma list of optimize | warm | performance | states | work-precision | numerical | overlap | plots
 #   -n, --nmax      sweep ceiling (8, 32, ... <= n; default 16777216) or comma list of exact Ns
 #   -g, --algorithm all (default) | comma list of the names in runner_scripts/algorithms.csv
 #   -s, --problem   all (default) | comma list of names from runner_scripts\problems.csv
@@ -38,6 +38,7 @@ Set-Location $PSScriptRoot
 
 $NMax = '16777216'
 $DoPerf = $true
+$DoOptimize = $false
 $DoWarm = $false
 $DoStates = $true
 $DoWp = $true
@@ -73,7 +74,7 @@ function Show-Usage {
 # Selecting plots alone redraws everything on disk; otherwise plots track perf/wp.
 function Set-Analyses {
     param([string]$List)
-    $script:DoPerf = $false; $script:DoWarm = $false; $script:DoStates = $false; $script:DoWp = $false; $script:DoNe = $false
+    $script:DoPerf = $false; $script:DoOptimize = $false; $script:DoWarm = $false; $script:DoStates = $false; $script:DoWp = $false; $script:DoNe = $false
     $script:DoOverlap = $false; $script:DoPlots = $false
     foreach ($item in $List.Split(',')) {
         switch ($item.Trim()) {
@@ -82,6 +83,7 @@ function Set-Analyses {
                 $script:DoOverlap = $true; $script:DoPlots = $true
             }
             'performance' { $script:DoPerf = $true; $script:DoPlots = $true }
+            'optimize' { $script:DoOptimize = $true }
             'warm' { $script:DoWarm = $true }
             'states' { $script:DoStates = $true; $script:DoPlots = $true }
             'work-precision' { $script:DoWp = $true; $script:DoPlots = $true }
@@ -89,7 +91,7 @@ function Set-Analyses {
             'overlap' { $script:DoOverlap = $true }
             'plots' { $script:DoPlots = $true; $script:PlotAll = $true }
             default {
-                Write-Host "Unknown analysis '$item' (all|warm|performance|states|work-precision|numerical|overlap|plots)"
+                Write-Host "Unknown analysis '$item' (all|optimize|warm|performance|states|work-precision|numerical|overlap|plots)"
                 exit 1
             }
         }
@@ -338,7 +340,7 @@ Write-Host "Algorithm   : $Algorithm"
 Write-Host "Problems    : $Problem"
 Write-Host "Packages    : $($Languages -join ', ')"
 Write-Host "Log dir     : $LogDir"
-Write-Host "Analyses    : warm=$DoWarm performance=$DoPerf states=$DoStates work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
+Write-Host "Analyses    : optimize=$DoOptimize warm=$DoWarm performance=$DoPerf states=$DoStates work-precision=$DoWp numerical=$DoNe overlap=$DoOverlap plots=$DoPlots"
 Write-Host "Clocks      : $ClockStatus"
 if ($ResumeFrom) { Write-Host "Resume from : $ResumeFrom" }
 Write-Host ''
@@ -372,6 +374,21 @@ try {
     Start-ClockMonitor (Join-Path $LogDir 'clocks.csv') | Out-Null
 
     $skipping = [bool]$ResumePkg
+
+    # ------------------------------------------------------------- optimize
+    if ($DoOptimize) {
+        foreach ($lang in $Languages) {
+            if ($lang -notin @('cubie', 'cubie_mlir')) {
+                Add-Record "optimize:$lang" 'SKIPPED' 'no optimize step' '-'
+                continue
+            }
+            $ClockCritical = $true; $StepLabel = "optimize:$lang"
+            $status = Invoke-Step "Optimize kernels: $lang" "optimize_$lang.log" `
+                ".\run_benchmark.bat -p $lang -d gpu -m ode -a optimize -g `"$Algorithm`" -s `"$Problem`"$BenchFlags"
+            if ($status -eq 0) { Add-Record "optimize:$lang" 'OK' '-' "$status" }
+            else { Add-Record "optimize:$lang" 'FAILED' '-' "$status" }
+        }
+    }
 
     # ----------------------------------------------------------------- warm
     if ($DoWarm) {

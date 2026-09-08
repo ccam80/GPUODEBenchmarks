@@ -120,8 +120,8 @@ if /i not "%MODEL%"=="ode" if /i not "%MODEL%"=="sde" (
     popd
     exit /b 1
 )
-if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" if /i not "%ANALYSIS%"=="states" if /i not "%ANALYSIS%"=="warm" (
-    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^)
+if /i not "%ANALYSIS%"=="performance" if /i not "%ANALYSIS%"=="work-precision" if /i not "%ANALYSIS%"=="states" if /i not "%ANALYSIS%"=="warm" if /i not "%ANALYSIS%"=="optimize" (
+    echo Unknown analysis "%ANALYSIS%" ^(performance^|work-precision^|states^|warm^|optimize^)
     popd
     exit /b 1
 )
@@ -197,8 +197,11 @@ set benchmark_exit=0
 for %%g in (!ALG_LIST!) do (
     echo Benchmarking %PACKAGE% %DEVICE% ensemble %MODEL% solvers ^(%ANALYSIS%, %%g, %PROBLEM%^)...
 
-    REM Clear this machine's store rows for the analysis, algorithm and problems being run.
-    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" if /i not "%ANALYSIS%"=="warm" (
+    REM Clear this machine's optimize rows, or store rows, for the algorithm and problems being run.
+    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" if /i "%ANALYSIS%"=="optimize" (
+        for %%d in (!PROBLEM:,= !) do python runner_scripts\cubie_adapter.py clear %PACKAGE% !DATASET_KEY! %%g %%d >nul
+    )
+    if not defined KEEP if /i "%DEVICE%"=="gpu" if /i "%MODEL%"=="ode" if /i not "%ANALYSIS%"=="warm" if /i not "%ANALYSIS%"=="optimize" (
         set "STORE_ANALYSIS=times"
         if /i "%ANALYSIS%"=="work-precision" set "STORE_ANALYSIS=wp"
         if /i "%ANALYSIS%"=="states" set "STORE_ANALYSIS=states"

@@ -157,9 +157,8 @@ function setup(problem)
         golden_index = system.golden_index,
         prob = prob, eprob = eprob, outdir = outdir,
         dts = problem_dts_ne(problem),
-        dt0 = duration * Float32(DT0_FRACTION),
-        dtmin = duration * Float32(DT_MIN_FRACTION),
-        dtmax = duration * Float32(DT_MAX_FRACTION))
+        dt0 = Float32(problem_timing_dt(problem)),
+        dtmin = duration * Float32(DT_MIN_FRACTION))
 end
 
 problem_dts_ne(problem) = problem_ne_dts(problem)
@@ -321,7 +320,7 @@ function run_adaptive(ctx)
                 sim = solve(ctx.eprob, alg, EnsembleThreads();
                     trajectories = N_NE, adaptive = true, dt = ctx.dt0,
                     abstol = Float32(tol), reltol = Float32(tol),
-                    dtmin = ctx.dtmin, dtmax = ctx.dtmax,
+                    dtmin = ctx.dtmin,
                     save_everystep = false, save_start = false, dense = false)
                 finals, naccept, nreject, n_bad, converged =
                     collect_finals(sim, ctx)

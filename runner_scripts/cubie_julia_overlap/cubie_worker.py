@@ -16,30 +16,21 @@ import time
 from pathlib import Path
 
 import numpy as np
-import cubie as qb
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
+import cubie_adapter as adapter  # noqa: E402
 from common import (  # noqa: E402 - suite-local bootstrap above
     ADAPTIVE_TOL, CUBIE_NE_DATA, FAILURE_FIELDS, ANALYSES, METRIC_FIELDS,
-    N_WP, TIMING_FIELDS, algorithms, append_csv, controllers_equal,
-    cubie_default_controller, ensure_csv, finite_counts, golden_ne, golden_wp,
-    phases_for, pi_controller, point_slug, protocol as suite_protocol,
-    read_ne_csv, read_ne_adaptive_csv, rmse, scaled_dts, timing_stats,
-    write_json,
+    N_WP, TIMING_FIELDS, algorithms, append_csv, ensure_csv, finite_counts,
+    golden_ne, golden_wp, phases_for, point_slug, protocol as suite_protocol,
+    read_ne_csv, read_ne_adaptive_csv, rmse, timing_stats, write_json,
 )
 from bench_key import dataset_key  # noqa: E402
 from wp_common import repeat_bounds, repeats_done  # noqa: E402
-from cubie_systems import (build_system, final_states,  # noqa: E402
-                           output_types)
+from cubie_systems import final_states  # noqa: E402
 from problems import get_problem  # noqa: E402
-
-try:
-    from cubie.time_logger import default_timelogger
-    default_timelogger.set_verbosity(None)
-except Exception:
-    pass
 
 
 def parse_args():
@@ -50,6 +41,8 @@ def parse_args():
     parser.add_argument("--from-n", type=int, default=0)
     parser.add_argument("--algorithm", default="all")
     parser.add_argument("--problem", default="lorenz")
+    parser.add_argument("--package", choices=adapter.PACKAGES, default="cubie",
+                        help="Cubie package: backend, system name and optimize rows.")
     return parser.parse_args()
 
 
@@ -61,10 +54,6 @@ def package_version():
         return "unknown"
 
 
-def make_system(problem):
-    return build_system(problem, np.float32, name_suffix="DirectOverlap")
-
-
 def sweep_grid(problem, kind, n):
     """The ensemble parameter values for one phase."""
     if kind == "work_precision":
@@ -72,33 +61,20 @@ def sweep_grid(problem, kind, n):
     return problem.sweep(n, dtype=np.float32)
 
 
-def make_solver(system, alias, mode, setting, order, family, tier, pins):
-    duration, _, dt0, dt_min, dt_max = pins
-    common = dict(algorithm=alias, save_every=duration,
-                  output_types=output_types(system),
-                  time_logging_level=None)
-    if mode == "fixed":
-        return qb.Solver(system, dt=setting, step_controller="fixed", **common)
-    settings = {"dt": dt0, "dt_min": dt_min, "dt_max": dt_max,
-                "atol": setting, "rtol": setting}
-    controller = {} if tier == "default" else pi_controller(order, family)
-    if controller:
-        settings["step_controller"] = controller.pop("step_controller")
-    solver = qb.Solver(system, **settings, **common)
-    if controller:
-        recognised = set(solver.update(controller, silent=True))
-        ignored = set(controller) - recognised
-        if ignored:
-            raise ValueError("Cubie ignored PI controller settings: " + ", ".join(sorted(ignored)))
-    return solver
+def make_solver(system, problem, alias, mode, setting, order, tier, package,
+                key):
+    """One point's solver; the pi tier applies the DIRK PI defaults to every family."""
+    controller = adapter.pi_tier_controller(order) if tier == "pi" else None
+    return adapter.make_solver(system, problem, alias, mode, setting,
+                               package=package, key=key,
+                               controller=controller)
 
 
 def solve_once(solver, initials, parameters, duration, nstates, system,
                problem):
     """Time one solve including the h2d and d2h transfers; solve() returns synchronised."""
     start = time.perf_counter()
-    solution = solver.solve(initial_values=initials, parameters=parameters,
-                            blocksize=64, duration=duration)
+    solution = adapter.solve(solver, initials, parameters, duration)
     # solve() already returns host buffers; this is a host-side view.
     finals = final_states(system, solution, problem)
     elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -110,9 +86,7 @@ def solve_once(solver, initials, parameters, duration, nstates, system,
 def solve_once_on_device(solver, d_initials, d_parameters, duration):
     """Time one solve with neither transfer: resident inputs in, results left on the device."""
     start = time.perf_counter()
-    result = solver.solve(initial_values=d_initials, parameters=d_parameters,
-                          blocksize=64, duration=duration, on_device=True)
-    result.stream.synchronize()
+    adapter.solve(solver, d_initials, d_parameters, duration, on_device=True)
     return (time.perf_counter() - start) * 1000.0
 
 
@@ -191,6 +165,10 @@ def write_finals(root, algorithm, mode, tier, setting_kind, setting, finals):
 
 def main():
     args = parse_args()
+    adapter.select_backend(args.package)
+    from cubie.time_logger import default_timelogger
+    default_timelogger.set_verbosity(None)
+    key = dataset_key()
     args.output.mkdir(parents=True, exist_ok=True)
     timing_file = ensure_csv(args.output / "cubie_timings.csv", TIMING_FIELDS)
     metric_file = ensure_csv(args.output / "cubie_metrics.csv", METRIC_FIELDS)
@@ -201,13 +179,14 @@ def main():
     nstates = problem["states"]
     write_json(args.output / "cubie_metadata.json", {
         "framework": "cubie", "problem": problem["problem"],
+        "package": args.package, "backend": adapter.BACKENDS[args.package],
         "cubie_version": package_version(),
         "python": sys.version, "platform": platform.platform(),
         "protocol": protocol,
     })
-    fixed_dt, dt0, dt_min, dt_max = scaled_dts(problem)
-    pins = (duration, fixed_dt, dt0, dt_min, dt_max)
-    system, initial_values = make_system(problem)
+    fixed_dt = problem.timing_dt
+    system, initial_values = adapter.build_system(problem, args.package,
+                                                  np.float32)
     phases = phases_for(args.analysis)
     point_failure_count = 0
 
@@ -228,10 +207,9 @@ def main():
     for row in algorithms(args.algorithm):
         alias, order, family = row["algorithm"], row["order"], row["family"]
         # Skip the pi tier when it resolves to cubie's shipped defaults.
-        pi_resolved = {key: (value(order) if callable(value) else value)
-                       for key, value in pi_controller(order, family).items()}
-        shipped = cubie_default_controller(alias, family, order)
-        if controllers_equal(pi_resolved, shipped):
+        shipped = adapter.default_controller(alias, family, order)
+        if adapter.controllers_equal(adapter.pi_tier_controller(order),
+                                     shipped):
             adaptive_tiers = ("default",)
             print("cubie {}: pi tier equals the shipped defaults; skipped"
                   .format(alias), flush=True)
@@ -265,8 +243,8 @@ def main():
                 try:
                     # Release the previous point before allocating this one.
                     solver = initials = params = finals = None
-                    solver = make_solver(system, alias, mode, setting, order,
-                                         family, tier, pins)
+                    solver = make_solver(system, problem, alias, mode, setting,
+                                         order, tier, args.package, key)
                     initials, params = solver.build_grid(
                         initial_values=initial_values,
                         parameters={problem["sweep_parameter"]:

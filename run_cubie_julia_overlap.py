@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "runner_scripts"))
 sys.path.insert(0, str(SUITE))
 from algorithms import overlap_algorithms  # noqa: E402 - repository helper bootstrap
 from bench_key import dataset_key  # noqa: E402 - repository helper bootstrap
+from cubie_adapter import BACKENDS  # noqa: E402 - repository helper bootstrap
 from common import (  # noqa: E402 - suite helper bootstrap
     ANALYSES, FAILURE_FIELDS, METRIC_FIELDS, TIMING_FIELDS, algorithm_names,
     parse_ns, phases_for, prune_csv,
@@ -58,6 +59,8 @@ def parser():
     p.add_argument("-a", "--analysis", choices=ANALYSES + ("all",), default="all",
                    help="Which analysis to run; one not selected keeps its existing rows.")
     p.add_argument("-p", "--package", choices=("all", "cubie", "julia"), default="all")
+    p.add_argument("--backend", choices=("cubie", "cubie_mlir"), default="cubie",
+                   help="Cubie package whose backend, system name and optimize rows the worker uses.")
     p.add_argument("-n", "--nmax", default="16777216",
                    help="Sweep ceiling (8, 32, ... <= n) or a comma list of exact trajectory counts.")
     p.add_argument("--from-n", type=int, default=0,
@@ -109,7 +112,8 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
         commands.append(("julia", [julia, "--startup-file=no", "-t", "auto",
                                    "--project={}".format(ROOT), str(SUITE / "julia_worker.jl")] + shared))
     if "cubie" in packages:
-        commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")] + shared))
+        commands.append(("cubie", [str(cubie_python), str(SUITE / "cubie_worker.py")]
+                         + shared + ["--package", args.backend]))
     commands.append(("analysis", [str(cubie_python), str(SUITE / "analyze.py"),
                                   "--output", str(output), "--key", key,
                                   "--problem", problem["problem"]]))
@@ -120,7 +124,7 @@ def run_problem(problem, args, ns, key, packages, cubie_python, julia, phases):
 
     # Cubie resolves its CUDA backend at import time from this variable.
     worker_env = dict(os.environ)
-    worker_env.setdefault("CUBIE_CUDA_BACKEND", "numba-cuda")
+    worker_env["CUBIE_CUDA_BACKEND"] = BACKENDS[args.backend]
     print("Cubie backend: {}".format(worker_env["CUBIE_CUDA_BACKEND"]))
 
     output.mkdir(parents=True, exist_ok=True)

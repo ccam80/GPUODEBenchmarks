@@ -16,14 +16,17 @@ wp_k = [4, 13]
 euler_k = [8, 17]
 ne_k = [1, 13]
 
-# Tolerances are atol = rtol; the sweep grid is 10^-k.
+# Tolerances are atol = rtol; the sweep grid is 10^-k. Adaptive solves start at the timing step and floor at duration * dt_min_fraction.
 [adaptive]
 timing_tol = 1.0e-5
 overlap_tol = 1.0e-8
 tol_k = [2, 8]
-dt0_fraction = 1.0e-2
 dt_min_fraction = 1.0e-6
-dt_max_fraction = 0.5
+
+# Solver.optimize runs on an n-trajectory batch; families listed are optimised at every setting, the rest once per leg.
+[optimize]
+n = 262144
+per_point_families = ["dirk", "firk", "rosenbrock", "implicit"]
 
 # Rows are [first-run seconds below, floor, ceiling]; a leg stops past its floor once median/min - 1 is within spread.
 [repeats]

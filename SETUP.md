@@ -62,13 +62,14 @@ This script simply points `GPU_ODE_CUBIE_MLIR/venv` at the shared
 verifies that the MLIR backend activates. Run the CUBIE setup first; if the
 shared venv is missing this script builds it on demand.
 
-The benchmark launchers export the backend they need, so no manual switching is
-required:
+`runner_scripts/cubie_adapter.py` sets the backend from the package name
+before cubie is imported, so no manual switching is required and a value
+already in the shell is overridden:
 
-| Suite | Launcher sets |
+| Package | Backend |
 |---|---|
-| `GPU_ODE_CUBIE` | `CUBIE_CUDA_BACKEND=numba-cuda` |
-| `GPU_ODE_CUBIE_MLIR` | `CUBIE_CUDA_BACKEND=mlir` |
+| `cubie` | `CUBIE_CUDA_BACKEND=numba-cuda` |
+| `cubie_mlir` | `CUBIE_CUDA_BACKEND=mlir` |
 
 To activate (either path reaches the same venv):
 - Linux/macOS: `source GPU_ODE_CUBIE_MLIR/venv/bin/activate`

@@ -200,14 +200,14 @@ Every framework is given the same tolerance and its own step controller: the
 comparison is what each package delivers for a requested accuracy, which is
 why the figures plot achieved error rather than step counts. Adaptive points
 take `atol = rtol` from `adaptive.timing_tol` in `runner_scripts/protocol.toml`
-for the N-sweep and from its `tol_k` grid for work-precision, and start from the
-problem's timing dt. Nothing else is set: every package runs its shipped
-step-controller defaults.
+for the N-sweep and from its `tol_k` grid for work-precision, start from the
+problem's timing dt, and floor the step at `duration * adaptive.dt_min_fraction`.
+Nothing else is set: every package runs its shipped step-controller defaults.
 
 Controllers are matched in one place only, the cubie against
 DifferentialEquations.jl overlap suite, which repeats each comparison with
-cubie's controller set to Julia's (`pi_controller` in
-`runner_scripts/cubie_julia_overlap/common.py`).
+cubie's controller set to the DIRK PI defaults (`pi_tier_controller` in
+`runner_scripts/cubie_adapter.py`).
 
 `eps(Float32)` is 1.2e-7, so the tightest points of the tolerance grid and
 the 1e-8 `TIMING_TOL` ask for more than the working precision resolves.
@@ -421,6 +421,17 @@ each model — then runs the timed sweep against warm caches.
 solvers, every work-precision setting, and julia's `Pkg.precompile`;
 `run_full_dataset -a warm` does that for every package. States-sweep
 kernels are never warmed.
+
+Cubie tunes before it warms. `run_benchmark -p cubie -a optimize` runs
+`Solver.optimize` on an `optimize.n`-trajectory batch and records the winning
+unrolling, buffer placement, block size and residency in
+`data/CUBIE/<key>/optimize.csv` (`CUBIE_MLIR` for the MLIR backend); every
+later solver of that point is built with those settings. Explicit algorithms
+are tuned once per (problem, algorithm, mode) at the timing setting; the
+families in `optimize.per_point_families` are tuned at every work-precision
+setting as well. The performance and work-precision launchers run the step
+first and skip points already recorded, `--keep` preserves the rows,
+and the states sweep tunes each size after timing its cold build.
 
 The ring modulator is problem II-3 of the test set: a 15-state circuit model
 whose stiffness scales with `1/Cs`. At `Cs = 0` the four capacitor rows
@@ -741,9 +752,11 @@ Then run the benchmarks by:
 CUBIE is benchmarked twice: once on the stock `numba-cuda` compilation
 pipeline (`cubie`) and once on the `numba-cuda-mlir` pipeline (`cubie_mlir`).
 Both run from a **single shared virtual environment** holding one PyPI install
-of `cubie` with both backends present; the active backend is chosen at import
-time by the `CUBIE_CUDA_BACKEND` environment variable, which each launcher
-exports for you (`numba-cuda` and `mlir` respectively).
+of `cubie` with both backends present; `runner_scripts/cubie_adapter.py`
+sets `CUBIE_CUDA_BACKEND` from the package name before cubie is imported
+(`numba-cuda` and `mlir` respectively) and names each package's systems so
+both suites, the overlap worker and the NE sweep share one generated-code
+cache per backend.
 `GPU_ODE_CUBIE_MLIR/venv` is a link to `GPU_ODE_CUBIE/venv`. Set it up with
 `setup_all_environments.py` or the individual `setup_environment.py`
 scripts (see [SETUP.md](SETUP.md)), then run:
@@ -1150,9 +1163,10 @@ Cubie runs each algorithm twice:
 * **matched** — controller type, gains, safety factor and gain clamps
   mirrored from the constants DifferentialEquations.jl resolved for that
   algorithm (exported to `controller_constants.csv`; the gain mapping
-  `kp = beta1*(order+1)`, `ki = -beta2*(order+1)` accounts for the two
-  stacks' different exponent conventions — derivation in
-  `GPU_ODE_CUBIE/numerical_equivalence.py`). This tier exists to isolate
+  `proportional_gain = beta2*(order+1)`,
+  `integral_gain = (beta1 - beta2)*(order+1)` in
+  `runner_scripts/cubie_adapter.py` accounts for the two stacks' exponent
+  conventions). This tier exists to isolate
   how much of the difference between the two stacks comes from the step
   controller rather than the algorithm. When the matched constants equal
   cubie's own defaults, the matched file is written from the default

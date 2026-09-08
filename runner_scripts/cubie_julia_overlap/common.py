@@ -15,13 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]
                        / "numerical_equivalence"))
 from algorithms import overlap_algorithms  # noqa: E402 - path bootstrap above
 from ne_common import (  # noqa: E402 - path bootstrap above
-    controllers_equal, cubie_default_controller, read_ne_csv,
-    read_ne_adaptive_csv,
+    read_ne_csv, read_ne_adaptive_csv,
 )
 from protocol import (  # noqa: E402 - path bootstrap above
-    DT0_FRACTION as DT0, DT_MAX_FRACTION as DT_MAX,
-    DT_MIN_FRACTION as DT_MIN, N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP,
-    TIMING_DT_K, TOLS, WP_K, fixed_dts, parse_ns, performance_ns,
+    N_NE, N_WP, NE_K, OVERLAP_TOL, REPEAT_CAP, TIMING_DT_K, TOLS, WP_K,
+    fixed_dts, parse_ns, performance_ns,
 )
 from wp_common import golden_path as golden_wp  # noqa: E402, F401 - path bootstrap above
 
@@ -109,13 +107,6 @@ def timing_stats(values):
             "max_ms": float(np.max(a))}
 
 
-def scaled_dts(problem):
-    """Fixed step and the adaptive dt pins for a problem, in problem time."""
-    duration = problem["duration"]
-    return (duration * FIXED_DT, duration * DT0, duration * DT_MIN,
-            duration * DT_MAX)
-
-
 def ensure_csv(path, fields):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,19 +177,3 @@ def rmse(finals, golden):
         return math.nan
     delta = np.asarray(finals[mask], dtype=np.float64) - np.asarray(golden[mask], dtype=np.float64)
     return float(np.sqrt(np.mean(delta * delta)))
-
-
-def pi_controller(order, family):
-    """Return the PI-controller configuration used by the comparison tier."""
-    from cubie.integrators.algorithms.generic_dirk import (
-        dirk_default_ki,
-        dirk_default_kp,
-    )
-    return {
-        "step_controller": "pi",
-        "kp": dirk_default_kp,
-        "ki": dirk_default_ki,
-        "safety": 0.9,
-        "min_gain": 0.2,
-        "max_gain": 10.0,
-    }

@@ -61,8 +61,7 @@ class FakeSolver:
         self.last_n = None
         self.device_results = []
 
-    def solve(self, initial_values, parameters, blocksize, duration,
-              on_device=False):
+    def solve(self, initial_values, parameters, duration, on_device=False):
         n = initial_values.shape[1]
         self.calls.append((n, on_device))
         if on_device:
@@ -152,14 +151,21 @@ class SweepCase(unittest.TestCase):
         self.cwd = os.getcwd()
         self.tmp = tempfile.mkdtemp()
         os.chdir(self.tmp)
-        self.saved = (cubie_bench._make_fixed_solver, cubie_bench._device_leg,
-                      cubie_bench.final_states, cubie_bench.build_system)
+        adapter = cubie_bench.adapter
+        self.saved = (adapter.make_solver, adapter.build_system,
+                      adapter.optimize_point, adapter.load_optimized,
+                      cubie_bench._device_leg, cubie_bench.final_states)
         cubie_bench.final_states = (
             lambda system, solution, problem: solution.finals)
+        # The states sweep optimises each size; the fake solver has no kernels.
+        adapter.optimize_point = lambda *args, **kwargs: {"label": "fake"}
+        adapter.load_optimized = lambda *args, **kwargs: None
 
     def tearDown(self):
-        (cubie_bench._make_fixed_solver, cubie_bench._device_leg,
-         cubie_bench.final_states, cubie_bench.build_system) = self.saved
+        adapter = cubie_bench.adapter
+        (adapter.make_solver, adapter.build_system, adapter.optimize_point,
+         adapter.load_optimized, cubie_bench._device_leg,
+         cubie_bench.final_states) = self.saved
         os.chdir(self.cwd)
 
     def opts(self, ns):
@@ -167,11 +173,11 @@ class SweepCase(unittest.TestCase):
                 "fixed": ["classical-rk4"], "adaptive": [],
                 "framework": "cubie", "framework_dir": "CUBIE",
                 "prefix": "Cubie", "dataset_key": "test_key",
-                "numerical_tag": "cubie", "name_suffix": ""}
+                "numerical_tag": "cubie"}
 
     def run_times(self, solver, ns):
-        cubie_bench._make_fixed_solver = (
-            lambda system, problem, algorithm, dt=None: solver)
+        cubie_bench.adapter.make_solver = (
+            lambda system, problem, algorithm, mode, setting=None, **kw: solver)
         problem = get_problem("lorenz")
         cubie_bench._run_times(problem, self.opts(ns), object(), grid)
         base = os.path.join("data", "CUBIE", "test_key", "lorenz")
@@ -253,16 +259,15 @@ class TestStatesLegIsolation(SweepCase):
     def test_chunked_host_leg_keeps_host_time_and_build_time(self):
         solvers = {}
 
-        def make_solver(system, row, algorithm, dt=None):
+        def make_solver(system, row, algorithm, mode, setting=None, **kw):
             solver = FakeSolver(chunk_at=1)   # every host leg chunks
             solvers[row["states"]] = solver
             return solver
 
-        cubie_bench._make_fixed_solver = make_solver
-        cubie_bench.build_system = (
-            lambda row, precision, name_suffix="":
-            (object(), {"x{0}".format(i): 8.0
-                        for i in range(1, row["states"] + 1)}))
+        cubie_bench.adapter.make_solver = make_solver
+        cubie_bench.adapter.build_system = (
+            lambda problem, package, precision=None, states=None:
+            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
         opts = self.opts([4, 8])
         cubie_bench._run_states(opts)
         rows = read_rows("states")
@@ -276,16 +281,15 @@ class TestStatesLegIsolation(SweepCase):
     def test_device_leg_reuses_each_sizes_inputs(self):
         solvers = {}
 
-        def make_solver(system, row, algorithm, dt=None):
+        def make_solver(system, row, algorithm, mode, setting=None, **kw):
             solver = FakeSolver()
             solvers[row["states"]] = solver
             return solver
 
-        cubie_bench._make_fixed_solver = make_solver
-        cubie_bench.build_system = (
-            lambda row, precision, name_suffix="":
-            (object(), {"x{0}".format(i): 8.0
-                        for i in range(1, row["states"] + 1)}))
+        cubie_bench.adapter.make_solver = make_solver
+        cubie_bench.adapter.build_system = (
+            lambda problem, package, precision=None, states=None:
+            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
         cubie_bench._run_states(self.opts([4, 8]))
         rows = read_rows("states")
         for nstates in (4, 8):
@@ -298,7 +302,7 @@ class TestWorkerDeviceLeg(unittest.TestCase):
     def test_samples_reuse_the_resident_inputs(self):
         solver = FakeSolver()
         initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 64, 1.0)
+        solver.solve(initials, parameters, 1.0)
         samples = cubie_worker.time_device_leg(solver, 1.0, 20)
         self.assertEqual(len(samples), 20)
         self.assertEqual(len(solver.device_results), 20)
@@ -308,7 +312,7 @@ class TestWorkerDeviceLeg(unittest.TestCase):
     def test_chunked_host_leg_raises_before_any_device_solve(self):
         solver = FakeSolver(chunk_at=1)
         initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 64, 1.0)
+        solver.solve(initials, parameters, 1.0)
         with self.assertRaises(ValueError):
             cubie_worker.time_device_leg(solver, 1.0, 20)
         self.assertEqual(solver.device_results, [])

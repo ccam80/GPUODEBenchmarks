@@ -21,36 +21,33 @@ runner_scripts/numerical_equivalence/ne_common.py):
       tier's, the default results are written for the matched file.
 
 Run from the repo root (inside the GPU_ODE_CUBIE venv):
-    python GPU_ODE_CUBIE/numerical_equivalence.py [fixed|adaptive|all]
+    python GPU_ODE_CUBIE/numerical_equivalence.py [--package cubie|cubie_mlir] [--controller fixed|adaptive|all]
 """
 
-import os
 import argparse
+import os
 import sys
 
 import numpy as np
-import cubie as qb
-from cubie.integrators.algorithms import resolve_alias
-from cubie.time_logger import default_timelogger
-
-default_timelogger.set_verbosity(None)
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts"))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "runner_scripts",
                                 "numerical_equivalence"))
-from algorithms import ne_algorithms
-from bench_key import dataset_key
-from cubie_systems import build_system, final_states, output_types
-from problems import problem_names, resolve_problems
-from ne_common import (TOLS_NE, N_NE, dts_ne, dt_pins_ne,
+from algorithms import ne_algorithms  # noqa: E402
+import cubie_adapter as adapter  # noqa: E402
+from bench_key import dataset_key  # noqa: E402
+from cubie_systems import final_states  # noqa: E402
+from problems import problem_names, resolve_problems  # noqa: E402
+from ne_common import (TOLS_NE, N_NE, dts_ne,  # noqa: E402
                        load_golden_ne, ensemble_error,
                        load_controller_constants, cubie_ne_file,
                        cubie_ne_adaptive_file, write_ne_csv,
-                       write_ne_adaptive_csv,
-                       cubie_default_controller, controllers_equal)
+                       write_ne_adaptive_csv)
 
 _parser = argparse.ArgumentParser(description="cubie Float32 equivalence sweeps.")
+_parser.add_argument("--package", choices=adapter.PACKAGES, default="cubie",
+                     help="Cubie package: backend, system name and optimize rows.")
 _parser.add_argument("--controller", choices=("fixed", "adaptive", "all"), default="all")
 _parser.add_argument("--algorithm", default="all",
                      help="all | comma list of ne rows in runner_scripts/algorithms.csv")
@@ -59,7 +56,14 @@ _parser.add_argument("--problem", default="all",
 _args = _parser.parse_args()
 MODE = _args.controller
 ALGORITHM = _args.algorithm
+PACKAGE = _args.package
 PROBLEMS = resolve_problems(_args.problem, "cubie")
+
+adapter.select_backend(PACKAGE)
+from cubie.integrators.algorithms import resolve_alias  # noqa: E402
+from cubie.time_logger import default_timelogger  # noqa: E402
+
+default_timelogger.set_verbosity(None)
 
 DATASET_KEY = dataset_key()
 
@@ -80,12 +84,8 @@ def cubie_is_adaptive(alias):
 
 def solve_finals(solver, initials_array, parameter_array, ctx):
     """One solve; returns a copied (N_NE, states) float32 finals array."""
-    solution = solver.solve(
-        initial_values=initials_array,
-        parameters=parameter_array,
-        blocksize=64,
-        duration=ctx["duration"],
-    )
+    solution = adapter.solve(solver, initials_array, parameter_array,
+                             ctx["duration"])
     # Copy: the returned array views cubie's output buffer, which the next
     # solve overwrites in place.
     finals = np.array(final_states(ctx["system"], solution,
@@ -101,11 +101,11 @@ def solve_finals(solver, initials_array, parameter_array, ctx):
 
 def problem_context(problem):
     """System, ensemble grid and golden states for one problem."""
-    system, initial_conditions = build_system(problem, precision)
+    system, initial_conditions = adapter.build_system(problem, PACKAGE,
+                                                      precision)
     # The golden file's parameter column is the float32-rounded grid every
     # consumer integrates; cubie's cast to float32 is exact on these values.
     golden_sweep, golden_states = load_golden_ne(problem)
-    dt0, dt_min, dt_max = dt_pins_ne(problem)
     return {
         "problem": problem,
         "system": system,
@@ -115,9 +115,6 @@ def problem_context(problem):
         "duration": problem["duration"],
         "nstates": problem["states"],
         "dts": dts_ne(problem),
-        "dt0": dt0,
-        "dt_min": dt_min,
-        "dt_max": dt_max,
     }
 
 
@@ -133,15 +130,9 @@ def run_fixed(ctx):
             continue
         print("=== {0} fixed {1} (order {2}) ==="
               .format(ctx["problem"].name, alias, row["order"]))
-        solver = qb.Solver(
-            ctx["system"],
-            algorithm=alias,
-            dt=ctx["dts"][0],
-            save_every=ctx["duration"],
-            step_controller='fixed',
-            output_types=output_types(ctx["system"]),
-            time_logging_level=None,
-        )
+        solver = adapter.make_solver(ctx["system"], ctx["problem"], alias,
+                                     "fixed", ctx["dts"][0], package=PACKAGE,
+                                     key=DATASET_KEY)
         initials_array, parameter_array = solver.build_grid(
             initial_values=ctx["initial_conditions"],
             parameters=ctx["parameters"])
@@ -175,35 +166,6 @@ def run_fixed(ctx):
 def run_adaptive(ctx):
     constants = load_controller_constants(ctx["problem"])
 
-    def matched_controller_settings(alias, order):
-        """Cubie controller kwargs mirroring Julia's resolved defaults.
-
-        Julia's PI updates dt*gamma*EEst^(-beta1)*errold^(+beta2); cubie's PI
-        gain is safety*EEst^(-kp/(order+1))*errold^(-ki/(order+1)) with order
-        the classical order it feeds the exponent, so kp = beta1*(order+1)
-        and ki = -beta2*(order+1). qmin/qmax bound the same gain quantity as
-        cubie's min_gain/max_gain. Julia's PredictiveController (Radau) maps
-        to cubie's gustafsson controller.
-        """
-        c = constants.get(alias)
-        if c is None:
-            return None, "no julia controller constants"
-        if c["controller"] == "PIController":
-            return {
-                "step_controller": "pi",
-                "kp": c["beta1"] * (order + 1),
-                "ki": -c["beta2"] * (order + 1),
-                "safety": c["gamma"],
-                "min_gain": c["qmin"],
-                "max_gain": c["qmax"],
-            }, None
-        if c["controller"] == "PredictiveController":
-            return {
-                "step_controller": "gustafsson",
-                "safety": c["gamma"],
-            }, None
-        return None, "unmapped julia controller {0}".format(c["controller"])
-
     for row in ne_algorithms(ALGORITHM):
         alias = row["algorithm"]
         if not row["ne_adaptive"]:
@@ -219,16 +181,19 @@ def run_adaptive(ctx):
                   "OrdinaryDiffEq) ===".format(alias))
             continue
 
-        matched, why_not = matched_controller_settings(alias, row["order"])
-        tiers = [("default", {})]
+        matched, why_not = adapter.matched_controller(constants.get(alias),
+                                                      row["order"])
+        tiers = [("default", None)]
         matched_reuses_default = False
-        shipped = cubie_default_controller(alias, row["family"], row["order"])
+        shipped = adapter.default_controller(alias, row["family"],
+                                             row["order"])
         if matched is None:
             print("=== adaptive {0}: no matched tier ({1}) ==="
                   .format(alias, why_not))
         elif (shipped is not None
               and matched["step_controller"] == shipped["step_controller"]
-              and controllers_equal(dict(shipped, **matched), shipped)):
+              and adapter.controllers_equal(dict(shipped, **matched),
+                                            shipped)):
             # Matched resolves to the shipped defaults; reuse the results.
             matched_reuses_default = True
             print("=== adaptive {0}: matched tier equals cubie's defaults; "
@@ -236,37 +201,17 @@ def run_adaptive(ctx):
         else:
             tiers.append(("matched", matched))
 
-        for tier, controller_settings in tiers:
+        for tier, controller in tiers:
             print("=== {0} adaptive {1} [{2}] (order {3}) ==="
                   .format(ctx["problem"].name, alias, tier, row["order"]))
             try:
-                # The default tier passes no controller: cubie as shipped.
-                controller_kwargs = {}
-                if "step_controller" in controller_settings:
-                    controller_kwargs["step_controller"] = (
-                        controller_settings["step_controller"])
-                solver = qb.Solver(
-                    ctx["system"],
-                    algorithm=alias,
-                    dt=ctx["dt0"],
-                    dt_min=ctx["dt_min"],
-                    dt_max=ctx["dt_max"],
-                    atol=TOLS_NE[0],
-                    rtol=TOLS_NE[0],
-                    save_every=ctx["duration"],
-                    output_types=output_types(ctx["system"]),
-                    time_logging_level=None,
-                    **controller_kwargs,
-                )
-                extra = {k: v for k, v in controller_settings.items()
-                         if k != "step_controller"}
-                if extra:
-                    recognised = solver.update(extra, silent=True)
-                    ignored = set(extra) - recognised
-                    print("  controller settings applied: {0}{1}".format(
-                        sorted(recognised),
-                        " (ignored: {0})".format(sorted(ignored))
-                        if ignored else ""))
+                solver = adapter.make_solver(
+                    ctx["system"], ctx["problem"], alias, "adaptive",
+                    TOLS_NE[0], package=PACKAGE, key=DATASET_KEY,
+                    controller=controller)
+                if controller:
+                    print("  controller settings applied: {0}".format(
+                        sorted(controller)))
                 initials_array, parameter_array = solver.build_grid(
                     initial_values=ctx["initial_conditions"],
                     parameters=ctx["parameters"])
@@ -277,10 +222,11 @@ def run_adaptive(ctx):
                     type(exc).__name__, exc)))
                 continue
 
+            dt0, _ = adapter.pins(ctx["problem"])
             per_tol = []
             for tol in TOLS_NE:
                 try:
-                    solver.update(atol=tol, rtol=tol, dt=ctx["dt0"])
+                    solver.update(atol=tol, rtol=tol, dt=dt0)
                     finals = solve_finals(solver, initials_array,
                                           parameter_array, ctx)
                     err = ensemble_error(finals, ctx["golden_states"])
