@@ -1,20 +1,16 @@
 # Unification plan
 
-The benchmark suite becomes one entry point that generates trials, one runner per
-package that executes a trial list, one store that every runner writes, and
-analyses that are offline views over that store. This document is the contract
-every packet below is built and reviewed against. Starting point: `main` at the
-merge of the #89..#102 stack (tree identical to `chore/one-problem-row-helper`).
+One entry point generates trials, one runner per package executes them, one
+store holds every row, and analyses are offline views over the store. Every
+packet is built and reviewed against section 1.
 
 ## 1. Contracts
 
 ### 1.1 Packages
 
-`cubie`, `cubie_mlir`, `jax`, `pytorch`, `myokit_cuda`, `cpp`, `julia_gpu`,
-`julia_cpu`. `julia_gpu` is the DiffEqGPU kernel path (today's `julia`);
-`julia_cpu` is DifferentialEquations.jl on `EnsembleThreads` (today's
-`ne_diffeq.jl`). Package names are used verbatim as store partitions; the
-`PACKAGE_DIRS` map goes.
+`cubie`, `cubie_mlir`, `jax`, `pytorch`, `myokit_cuda`, `cpp`, `julia_gpu`
+(DiffEqGPU kernels), `julia_cpu` (DifferentialEquations.jl on
+`EnsembleThreads`). Package names are the store partition names.
 
 `package_version` per package: cubie `importlib.metadata.version("cubie")` plus
 the backend name; jax `jax.__version__`; pytorch `torch.__version__` plus the
@@ -83,15 +79,13 @@ python store.py query   "<sql over results>"               # CSV on stdout
 python store.py clear   <filter.json>
 ```
 
-`results.jl` becomes a shim that serialises rows with JSON.jl and calls the CLI;
-`Bench.cu` calls the CLI as it does today. Parquet2.jl is tried in packet 2; if
-it round-trips through DuckDB the Julia writers may use it directly, otherwise
-the shim stands.
+`results.jl` serialises rows with JSON.jl and calls the CLI; `Bench.cu` calls
+the CLI. Packet 2 tries Parquet2.jl; the Julia writers use it directly only if
+it round-trips through DuckDB.
 
-Dependencies `pyarrow` and `duckdb` are added to the suite interpreter, which is
-`GPU_ODE_CUBIE/venv` (already the interpreter for the NE, overlap and comparison
-scripts); `launch.cubie_python()` is renamed `suite_python()`. `bench.py` and
-the analyses run under it; the shell wrappers select it.
+The suite interpreter is `GPU_ODE_CUBIE/venv` with `pyarrow` and `duckdb`
+installed, exposed as `launch.suite_python()`. `bench.py`, the analyses and the
+shell wrappers run under it.
 
 ### 1.3 Trials
 
@@ -112,10 +106,9 @@ nothing else. One line per trial:
 ```
 
 Ordinal order is ascending cost: N ascending, dt descending, tol descending,
-states ascending. `error` is computed only for `grid = prefix` trials (the golden
-covers them); `sweep` trials record NaN error. `warm` trials are never recorded;
-`optimize` trials exist for cubie packages only and record to the existing
-`optimize.csv`.
+states ascending. `error` is computed for `grid = prefix` trials only; `sweep`
+trials record NaN. `warm` trials are never recorded; `optimize` trials exist for
+cubie packages only and record to `optimize.csv`.
 
 ### 1.4 Runner contract
 
@@ -129,7 +122,7 @@ Every runner, in every language:
    ordinals ascending, and times each requested transfer leg with one untimed
    warm-up followed by the protocol repeat schedule (`timed_min_ms` semantics).
 2. Writes `<trials>.progress` (`{"id": ..., "started_utc": ...}`) before starting
-   each trial, so the driver can attribute a hard exit.
+   each trial.
 3. Records every finished trial through the store before starting the next.
 4. Applies one abandon rule. Outcomes per (trial, transfers) are `ok`,
    `timeout` (soft cap, run returned), `oom`, `error`. After `timeout` or `oom`
@@ -140,25 +133,23 @@ Every runner, in every language:
    `none` row. OOM is classified by exception type or message (CUDA
    `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`,
    torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`).
-5. Exits 0 when the loop completed, 3 on a watchdog hard exit (the hard watchdog
-   from `wp_common.run_watchdogged` and `watchdog.jl`, unchanged), anything else
-   on a crash. On exit 3 the driver reads the progress file, records
+5. Exits 0 when the loop completed, 3 on a watchdog hard exit
+   (`wp_common.run_watchdogged`, `watchdog.jl`), anything else on a crash. On
+   exit 3 the driver reads the progress file, records
    `reason = "abandoned: hard-exit at ordinal k"` for the higher ordinals of that
-   leg, and re-invokes the runner with the trials that still have no row. A
-   non-3 crash is recorded in the run summary and the driver moves to the next
+   leg, and re-invokes the runner with the trials that still have no row. On any
+   other non-zero exit the driver records the summary line and moves to the next
    package.
-6. `warm` trials compile only: cubie `Solver.compile(...)` (present in
-   `cubie.batchsolving.solver`), jax `lower().compile()`, MPGOS nvcc into the
-   build cache, Myokit the NVRTC module build without a solve, julia_gpu one
-   compile per leg at n = 8 off the GPU lock, pytorch nothing. States legs are
-   never warmed; their cold `build_s` is the measurement.
+6. `warm` trials compile only: cubie `Solver.compile(...)`, jax
+   `lower().compile()`, MPGOS nvcc into the build cache, Myokit the NVRTC module
+   build, julia_gpu one compile per leg at n = 8 off the GPU lock, pytorch
+   nothing. States legs are never warmed; their cold `build_s` is the
+   measurement.
 7. Records `package_version` and `suite_rev` on every row.
 
-The Julia states compile budget (`BENCH_STATES_BUDGET`, `BENCH_STATES_MARKER`)
-and the cancel-larger-across-modes behaviour are removed; states legs follow the
-same abandon rule as every other leg. The `BENCH_RESUME`, `BENCH_NO_OVERWRITE`,
-`BENCH_RESUME_FROM` and `BENCH_FLOOR` contracts are removed; resume is a filter
-at generation time and floor is the runner flag above.
+States legs follow the same abandon rule as every other leg; there is no
+compile budget. Resume is a filter at generation time; floor is the runner flag
+above; runners read no environment variables for either.
 
 ### 1.5 Entry point
 
@@ -192,10 +183,9 @@ packages per `[optimize]`; `warm` trials for every leg of packages that compile.
 
 Filters: `--resume` drops solve trials whose every requested transfers row is
 present; `--no-overwrite` drops those whose rows are all finite; without either,
-rows are replaced as they are recorded. `--resume-from` is gone (a hung point
-now leaves a `hard-exit` row for `--resume` to skip).
+rows are replaced as they are recorded.
 
-The run loop keeps today's clock guard, log directory, manifest and summary.
+The run loop keeps the clock guard, log directory, manifest and summary.
 `bench.py` never invokes an analysis.
 
 ### 1.6 Views
@@ -214,13 +204,12 @@ store and the goldens, tolerate absent `errored_pct`, `reason`, `samples_ms`,
 | `pairwise.py` | finals at n = 32768 across packages per problem |
 
 Rows with `errored_pct > plots.max_errored_pct` are dropped where the column is
-a number. The Julia plot scripts are removed once these exist.
+a number.
 
 ## 2. Packets
 
-Each packet is one worktree, one branch off `main`, one PR, with tests run in
-the PR. "Done" is the acceptance line. The review checks are what the PR is
-read against.
+One worktree, one branch off `main`, one PR per packet. "Done" is the
+acceptance line; "Review" is what the PR is read against.
 
 ### P1 base cleanup
 Depends on: nothing.
@@ -261,8 +250,8 @@ exists); NE `controller_constants.csv` to `controllers/<problem>.csv`;
 times row (cubie `_unadaptive` = classical-rk4 fixed, `_adaptive` = tsit5
 adaptive, `jax.csv` = tsit5 fixed, `pytorch.csv` = classical-rk4 fixed,
 `myokit_cuda.csv` = euler fixed, `julia_fixed`/`julia_adaptive` = tsit5;
-`mpgos.csv` and `mpgos_internalsave.csv` are dropped because both MPGOS solvers
-wrote the same name). Old trees deleted; goldens untouched.
+`mpgos.csv` and `mpgos_internalsave.csv` dropped). Old trees deleted; goldens
+untouched.
 Done: a DuckDB count per (key, package) equals the converted input counts
 printed by the script; the PR body carries the table.
 Review: no row invented; dropped inputs listed; `.gitignore` no longer ignores
@@ -378,12 +367,9 @@ Conflict hotspots: `launch.py` (P4 owns the registry; runner packets each add
 one line), `algorithms.csv` (P4 only), `results.jl` (P2 only), `README.md`
 (P1 removes sections, P11 rewrites; runner packets do not touch it).
 
-## 4. Decisions taken
+## 4. Fixed decisions
 
-- No database service and no per-machine CSV trees: parquet leg files queried
-  with DuckDB, synced between machines later (rsync over tailscale, deferred).
-- Julia writers go through the Python shim unless Parquet2.jl proves out in P2.
-- Analyses move to Python so the store has one reader stack.
-- Committed wp rows timed with transfers are deleted, not tolerated.
-- The MPGOS 32768 finals are dropped in conversion (ambiguous solver).
-- `GPU_ODE_CUBIE/venv` is the suite interpreter.
+- Store: parquet leg files read with DuckDB; no database service; cross-machine
+  sync deferred.
+- Analyses: Python and matplotlib only.
+- Suite interpreter: `GPU_ODE_CUBIE/venv`.
