@@ -140,13 +140,11 @@ Every runner, in every language:
    leg, and re-invokes the runner with the trials that still have no row. On any
    other non-zero exit the driver records the summary line and moves to the next
    package.
-6. `warm` trials compile without solving wherever the stack has a compile
-   entry: cubie `Solver.compile(...)`, jax `jit(f).lower(args).compile()` at the
-   trial's n into the persistent cache, MPGOS nvcc into the build cache, Myokit
-   `load_model` (the `RawModule` build). julia_gpu has no separable compile and
-   no cross-process kernel cache, so its warm is one solve at n = 8 inside the
-   leg's process, off the GPU lock, never recorded. pytorch is eager and has no
-   warm. States legs are never warmed; their cold `build_s` is the measurement.
+6. `warm` trials: cubie `Solver.compile(...)`; jax
+   `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build
+   cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's
+   process, off the GPU lock; pytorch none. Warm trials are never recorded.
+   States legs are never warmed.
 7. Records `package_version` and `suite_rev` on every row.
 
 States legs follow the same abandon rule as every other leg; there is no
