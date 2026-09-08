@@ -6,18 +6,8 @@ import os
 import numpy as np
 
 from problems import DEFAULT_PROBLEM, get_problem
-
-# Dyadic dt grids come from the problems module as duration fractions.
-
-# Adaptive sweep: atol = rtol tolerance grid.
-TOLS_NE = [10.0 ** -k for k in range(2, 9)]
-
-# Adaptive-run pins, as fractions of the problem duration.
-DT0_FRACTION = 1.0e-2
-DT_MIN_FRACTION = 1.0e-6
-DT_MAX_FRACTION = 0.5
-
-N_NE = 1024
+from protocol import (DT0_FRACTION, DT_MAX_FRACTION,  # noqa: F401
+                      DT_MIN_FRACTION, N_NE, TOLS as TOLS_NE)
 
 
 def _row(problem):

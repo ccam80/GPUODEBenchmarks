@@ -110,7 +110,14 @@ function Invoke-ResumePrune {
     $outfile = "data\CPP\$DatasetKey\$ProblemName\MPGOS_${Kind}_${mode}_${alg}.txt"
     & python runner_scripts\resume.py prune $N $outfile
 }
+# The protocol header is generated before the build and hashed with the sources.
+& python runner_scripts\protocol.py --cxx-header GPU_ODE_MPGOS\protocol.h
+if ($LASTEXITCODE -ne 0) { Write-Error "protocol header generation failed" }
+$NWp = [long](& python runner_scripts\protocol.py get ensemble.n_wp)
+$NStates = [long](& python runner_scripts\protocol.py get ensemble.n_states)
+$WatchdogExit = [int](& python runner_scripts\protocol.py get watchdog.exit_code)
 $SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
+    (Resolve-Path "GPU_ODE_MPGOS\protocol.h").Path,
     (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
     @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
       Sort-Object FullName | ForEach-Object { $_.FullName })
@@ -150,7 +157,7 @@ function Build-Project {
     }
 }
 
-# Set by Invoke-Point: exit 42 is a watchdog breach, any other non-zero exit a failed point.
+# Set by Invoke-Point: the protocol's watchdog exit is a breach, any other non-zero exit a failed point.
 $script:PointBreached = $false
 $script:PointFailed = $false
 
@@ -162,8 +169,8 @@ function Invoke-Point {
     } else {
         & "GPU_ODE_MPGOS\Bench.exe"
     }
-    $script:PointBreached = ($LASTEXITCODE -eq 42)
-    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 42)
+    $script:PointBreached = ($LASTEXITCODE -eq $WatchdogExit)
+    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $WatchdogExit)
     if ($script:PointFailed) {
         $what = if ($Wp) { "wp" } else { "N=$Nt" }
         Write-Host "FAILED $ProblemName $(Get-SolverMode $Solver) $(Get-SolverAlgorithm $Solver) ${what}: Bench.exe exit $LASTEXITCODE"
@@ -230,7 +237,7 @@ function Invoke-WarmBuilds {
 
 function Get-NtTargets {
     $targets = @()
-    $nts = @($NValues + [long]131072 | Sort-Object -Unique)
+    $nts = @($NValues + $NWp | Sort-Object -Unique)
     foreach ($p in $Problems) {
         foreach ($s in $Solvers) {
             foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
@@ -251,7 +258,7 @@ if ($Analysis -eq 'performance') {
 }
 
 if ($Analysis -eq 'states') {
-    $StatesN = [long]131072
+    $StatesN = $NStates
     $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
     # A resumed or --floor run appends to what earlier runs recorded.
     if (-not $ResumeActive -and -not $FloorActive) {
@@ -280,7 +287,7 @@ if ($Analysis -eq 'states') {
                 continue
             }
             & "GPU_ODE_MPGOS\Bench.exe" states $BuildS
-            if ($LASTEXITCODE -eq 42) {
+            if ($LASTEXITCODE -eq $WatchdogExit) {
                 $breached = $true
             } elseif ($LASTEXITCODE -ne 0) {
                 # A failed point is a NaN row with its build time; the grid goes on.
@@ -300,7 +307,7 @@ foreach ($problemName in $Problems) {
                 Write-Host "-- resume: skipping wp $problemName ($solver) (already covered)"
                 continue
             }
-            Invoke-Point -ProblemName $problemName -Solver $solver -Nt 131072 -Wp
+            Invoke-Point -ProblemName $problemName -Solver $solver -Nt $NWp -Wp
         }
         continue
     }

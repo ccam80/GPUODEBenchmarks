@@ -197,8 +197,8 @@ for that point and the sweep continues; the plots drop non-finite points.
 Every framework is given the same tolerance and its own step controller: the
 comparison is what each package delivers for a requested accuracy, which is
 why the figures plot achieved error rather than step counts. Adaptive points
-take `atol = rtol` from `TIMING_TOL` in `runner_scripts/wp_common.py` for the
-N-sweep and from the `TOLS` grid for work-precision, and start from the
+take `atol = rtol` from `adaptive.timing_tol` in `runner_scripts/protocol.toml`
+for the N-sweep and from its `tol_k` grid for work-precision, and start from the
 problem's timing dt. Nothing else is set: every package runs its shipped
 step-controller defaults.
 
@@ -245,10 +245,16 @@ median/min − 1 is above 2%.
 | 3 – 5 s | 5 | 10 |
 | > 5 s | 3 | 10 |
 
-Each writer's repeat ceiling caps the schedule (20 for the sweeps and the
-overlap workers, 10 for the MPGOS wp sweep). It lives in
-`runner_scripts/wp_common.py`, `runner_scripts/watchdog.jl` and
-`GPU_ODE_MPGOS/Bench.cu`.
+The schedule, its spread and the repeat cap (`repeats.cap`, 20) are the
+`[repeats]` table of `runner_scripts/protocol.toml`.
+
+### Protocol file
+
+`runner_scripts/protocol.toml` holds every grid, tolerance, ensemble size,
+repeat rule and watchdog value. Python reads it through
+`runner_scripts/protocol.py`, Julia through `runner_scripts/protocol.jl`, and
+the MPGOS launchers generate `GPU_ODE_MPGOS/protocol.h` from it before each
+build. `python runner_scripts/protocol.py get <table.key>` prints one value.
 
 ### Per-repeat timing log
 
@@ -1004,9 +1010,8 @@ dyadic dt from 1/16 to 1/8192 (1/256 to 1/131072 for forward Euler), while
 adaptive sweeps use rtol = atol from 1e-2 to 1e-8. Each setting uses the
 usual timing protocol
 (untimed warm-up, repeated solves, best time) and computes the ensemble l2
-error of the final states against the golden reference. Protocol constants
-live in `runner_scripts/wp_common.py` (mirrored in the Julia and MPGOS
-writers).
+error of the final states against the golden reference. The grids are the
+`[fixed]` and `[adaptive]` tables of `runner_scripts/protocol.toml`.
 
 ```bash
 ./run_benchmark.sh -p cubie      -d gpu -m ode -a work-precision

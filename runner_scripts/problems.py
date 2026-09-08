@@ -3,12 +3,14 @@
 import csv
 import os
 
+from protocol import EULER_K, NE_K, TIMING_DT_K, WP_K, fixed_dts  # noqa: F401
+
 PROBLEMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "problems.csv")
 
 DEFAULT_PROBLEM = "lorenz"
 
-# The states sweep resizes this problem; see STATES_GRID in wp_common.py.
+# The states sweep resizes this problem over protocol.STATES_GRID.
 STATES_PROBLEM = "lorenz96"
 
 
@@ -19,14 +21,6 @@ def states_row(n):
 
 _INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
-
-# Dyadic dt-grid exponents as duration fractions; mirrored in problems.jl.
-WP_K = (4, 13)
-# Euler runs a finer grid than the higher-order methods.
-EULER_K = (8, 17)
-NE_K = (1, 13)
-# Timed N-sweep fixed step: duration * 2^-10.
-TIMING_DT_K = 10
 
 
 class Problem(dict):
@@ -42,18 +36,17 @@ class Problem(dict):
 
     @property
     def timing_dt(self):
-        """Fixed step used by the N-sweep: duration * 2^-10."""
+        """Fixed step used by the N-sweep: duration * 2^-timing_k."""
         return self["duration"] * 2.0 ** -TIMING_DT_K
 
     def dts(self, algorithm=None):
         """Fixed-step dt grid for the work-precision sweep."""
-        lo, hi = EULER_K if algorithm == "euler" else WP_K
-        return [self["duration"] * 2.0 ** -k for k in range(lo, hi + 1)]
+        return fixed_dts(self["duration"],
+                         EULER_K if algorithm == "euler" else WP_K)
 
     def ne_dts(self):
         """Fixed-step dt grid for the numerical-equivalence sweep."""
-        return [self["duration"] * 2.0 ** -k
-                for k in range(NE_K[0], NE_K[1] + 1)]
+        return fixed_dts(self["duration"], NE_K)
 
     def sweep(self, n, dtype=None):
         """The ensemble parameter grid: n values over the sweep range."""
@@ -113,7 +106,7 @@ def resolve_problems(request, framework=None):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--states-grid":
-        from wp_common import STATES_GRID
+        from protocol import STATES_GRID
         print(" ".join(str(n) for n in STATES_GRID))
     elif len(sys.argv) > 1:
         # <framework> [request]: the resolved problem names, one per line.

@@ -18,14 +18,12 @@ const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "watchdog.jl"))
-# Protocol constants; mirrored in common.py. dt values are fractions of the duration.
-const FIXED_DT = 2.0^-10
-const DT0 = 1.0e-2
-const ADAPTIVE_TOL = 1.0e-8
-# Repeat ceilings; the count per leg follows its first timed run's duration.
-const PERFORMANCE_REPEATS = 20
-const WORK_REPEATS = 20
-const N_WP = 131072
+# dt values are fractions of the duration.
+const FIXED_DT = 2.0^-TIMING_DT_K
+const DT0 = DT0_FRACTION
+const ADAPTIVE_TOL = OVERLAP_TOL
+const PERFORMANCE_REPEATS = REPEAT_CAP
+const WORK_REPEATS = REPEAT_CAP
 
 function cli_args(args)
     out = Dict{String, String}()
@@ -43,7 +41,7 @@ end
 const OPT = cli_args(ARGS)
 const OUT = abspath(haskey(OPT, "output") ? OPT["output"] : error("--output is required"))
 const ANALYSIS = get(OPT, "analysis", "all")
-const NMAX = get(OPT, "nmax", "16777216")
+const NMAX = get(OPT, "nmax", string(NMAX_DEFAULT))
 const FROM_N = parse(Int, get(OPT, "from-n", "0"))
 const ALGORITHM = get(OPT, "algorithm", "all")
 const PROBLEM = get_problem(get(OPT, "problem", "lorenz"))
@@ -52,26 +50,11 @@ const DURATION = Float32(PROBLEM["duration"])
 
 mkpath(OUT)
 
-# A single value is a sweep ceiling; a comma list is the exact counts.
-function parse_ns(spec, from_n)
-    if occursin(',', spec)
-        values = sort(unique(parse.(Int, filter(!isempty, split(spec, ',')))))
-        return filter(n -> n >= max(from_n, 8), values)
-    end
-    ns, n = Int[], 8
-    while n <= parse(Int, spec)
-        n >= from_n && push!(ns, n)
-        n *= 4
-    end
-    return ns
-end
-
 function protocol()
     ns = parse_ns(NMAX, FROM_N)
     return (performance_ns = ns, performance_repeats = PERFORMANCE_REPEATS,
-        ne_n = 1024, ne_dts = [2.0^-k for k in 1:13],
-        ne_tols = [10.0^-k for k in 2:8], wp_n = N_WP,
-        wp_dts = [2.0^-k for k in 4:13], wp_tols = [10.0^-k for k in 2:8],
+        ne_n = N_NE, ne_dts = fixed_dts(1.0, NE_K), ne_tols = TOLS,
+        wp_n = N_WP, wp_dts = fixed_dts(1.0, WP_K), wp_tols = TOLS,
         work_repeats = WORK_REPEATS)
 end
 const PROTOCOL = protocol()
@@ -125,8 +108,7 @@ const TSPAN = (0.0f0, DURATION)
 
 const golden_ne_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
     "golden_ne_$(PROBLEM["problem"])_1024.csv"), ',', Float64)
-const golden_wp_all = readdlm(joinpath(REPO_ROOT, "data", "numerical",
-    "golden_$(PROBLEM["problem"])_$(N_WP).csv"), ',', Float64)
+const golden_wp_all = readdlm(golden_path(PROBLEM), ',', Float64)
 
 function sweep_grid(kind, n)
     if kind == "numerical"

@@ -1,4 +1,4 @@
-"""Work-precision sweep protocol: setting, time and error rows under data/<package>/<key>/<problem>/, mirrored by the Julia and MPGOS writers."""
+"""Work-precision sweep helpers: setting, time and error rows under data/<package>/<key>/<problem>/; constants come from protocol.toml."""
 
 import os
 import sys
@@ -9,25 +9,9 @@ import numpy as np
 from algorithms import resolve_algorithms
 from bench_key import data_dir
 from problems import DEFAULT_PROBLEM, get_problem, resolve_problems
-
-TOLS = [10.0 ** -k for k in range(2, 9)]       # 1e-2 .. 1e-8, 7 points
-
-N_WP = 131072
-
-# States sweep sizes; BENCH_STATES_GRID (comma list) overrides the default.
-_STATES_ENV = os.environ.get("BENCH_STATES_GRID", "")
-STATES_GRID = (tuple(sorted(int(tok) for tok in _STATES_ENV.split(",")))
-               if _STATES_ENV else (4, 8, 16, 32, 64, 128))
-STATES_N = 131072
-
-# Adaptive N-sweep tolerance; mirrored in the Julia and MPGOS writers.
-TIMING_TOL = 1.0e-5
-
-# Per-run wall-clock ceiling in seconds; mirrored by the Julia and MPGOS writers.
-WATCHDOG_SECONDS = float(os.environ.get("BENCH_WATCHDOG_SECONDS", "120"))
-
-# Exit status of the hard-exit path; mirrors runner_scripts/watchdog.jl.
-WATCHDOG_EXIT_CODE = 3
+from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
+                      REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
+                      WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
 
 
 def run_watchdogged(run, on_breach):
@@ -75,13 +59,6 @@ def errored_pct(finals):
 # Columns of the per-repeat timing log; mirrored by the Julia and MPGOS writers.
 SAMPLE_FIELDS = ("analysis", "problem", "algorithm", "mode", "transfers",
                  "setting_kind", "setting", "n", "states", "repeat", "ms")
-
-
-# (limit_s, floor, ceiling) repeat schedule; mirrored by the Julia and MPGOS writers.
-REPEAT_SCHEDULE = ((0.1, 20, 20), (3.0, 10, 10), (5.0, 5, 10),
-                   (float("inf"), 3, 10))
-# A leg past its floor stops once median/min - 1 is within this spread.
-REPEAT_SPREAD = 0.02
 
 
 def repeat_bounds(first_s, cap):

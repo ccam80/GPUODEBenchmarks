@@ -66,8 +66,14 @@ resume_prune() {
 	python3 ./runner_scripts/resume.py prune "$n" "$outfile"
 }
 
+# The protocol header is generated before the build and hashed with the sources.
+python3 ./runner_scripts/protocol.py --cxx-header GPU_ODE_MPGOS/protocol.h
+N_WP=$(python3 ./runner_scripts/protocol.py get ensemble.n_wp)
+N_STATES=$(python3 ./runner_scripts/protocol.py get ensemble.n_states)
+WATCHDOG_EXIT=$(python3 ./runner_scripts/protocol.py get watchdog.exit_code)
+
 # Built binaries are cached per source hash, machine and build constants.
-SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
+SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/protocol.h GPU_ODE_MPGOS/makefile; \
              find GPU_ODE_MPGOS/problems GPU_ODE_MPGOS/SourceCodes -type f | sort | xargs cat) \
             | sha256sum | cut -c1-12)
 CACHE_DIR="GPU_ODE_MPGOS/build_cache/${DATASET_KEY}"
@@ -110,7 +116,7 @@ warm_nt_builds() {
 	local jobs=${BENCH_WARM_JOBS:-8}
 	mkdir -p "$CACHE_DIR"
 	local nts
-	nts=$(echo "$NLIST 131072" | tr ' ' '\n' | sort -un)
+	nts=$(echo "$NLIST $N_WP" | tr ' ' '\n' | sort -un)
 	for problem in $PROBLEMS; do
 		for solver in $SOLVERS; do
 			for a in $nts; do
@@ -123,7 +129,7 @@ warm_nt_builds() {
 }
 
 if [ "$ANALYSIS" == "states" ]; then
-	STATES_N=131072
+	STATES_N=$N_STATES
 	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
 	# A resumed or --floor run appends to what earlier runs recorded.
 	if [ -z "$RESUME_ACTIVE" ] && [ -z "$FLOOR_ACTIVE" ]; then
@@ -152,7 +158,7 @@ if [ "$ANALYSIS" == "states" ]; then
 			fi
 			rc=0
 			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S" || rc=$?
-			if [ "$rc" -eq 42 ]; then
+			if [ "$rc" -eq "$WATCHDOG_EXIT" ]; then
 				BREACHED=1
 			elif [ "$rc" -ne 0 ]; then
 				# A failed point is a NaN row with its build time; the grid goes on.
@@ -188,11 +194,11 @@ do
 				echo "-- resume: skipping wp $problem ($solver) (already covered)"
 				continue
 			fi
-			build "$problem" "$solver" 131072
-			# 42 = watchdog breach; the wp sweep NaN-fills in-process. Any other failure ends this leg only.
+			build "$problem" "$solver" "$N_WP"
+			# A watchdog breach NaN-fills the wp sweep in-process. Any other failure ends this leg only.
 			rc=0
 			./GPU_ODE_MPGOS/Bench.exe wp || rc=$?
-			if [ "$rc" -ne 0 ] && [ "$rc" -ne 42 ]; then
+			if [ "$rc" -ne 0 ] && [ "$rc" -ne "$WATCHDOG_EXIT" ]; then
 				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") wp: Bench.exe exit $rc"
 			fi
 		done
@@ -219,7 +225,7 @@ do
 			build "$problem" "$solver" "$a"
 			rc=0
 			./GPU_ODE_MPGOS/Bench.exe || rc=$?
-			if [ "$rc" -eq 42 ]; then
+			if [ "$rc" -eq "$WATCHDOG_EXIT" ]; then
 				BREACHED=1
 			elif [ "$rc" -ne 0 ]; then
 				# A failed point (OOM, launch error) is a NaN row; the sweep goes on.

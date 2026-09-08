@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 
 from bench_key import data_dir, dataset_key  # noqa: E402
+from protocol import TIMING_DT_K  # noqa: E402
 from resume import (  # noqa: E402
     active as resume_active,
     floor_enabled,
@@ -26,6 +27,7 @@ from resume import (  # noqa: E402
     write_wp_row,
 )
 from wp_common import (  # noqa: E402
+    REPEAT_CAP,
     WATCHDOG_SECONDS,
     errored_pct,
     append_samples,
@@ -46,10 +48,9 @@ from wp_common import (  # noqa: E402
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 DATASET_KEY = dataset_key()
-# The N-sweep steps duration * 2^-10, so 1024 steps keep the span exact.
-STANDARD_STEPS = 1024
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-REPEATS = 20
+# The N-sweep steps duration * 2^-timing_k, so 2^timing_k steps keep the span exact.
+STANDARD_STEPS = 2 ** TIMING_DT_K
+REPEATS = REPEAT_CAP
 # Myokit's generated CUDA kernel is forward Euler only.
 ALGORITHM = "euler"
 

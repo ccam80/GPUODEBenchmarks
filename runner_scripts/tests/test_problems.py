@@ -76,13 +76,16 @@ class RegistryTests(unittest.TestCase):
         import importlib
         import os
 
+        import protocol
         import wp_common
         os.environ["BENCH_STATES_GRID"] = "16,4,256"
         try:
+            importlib.reload(protocol)
             importlib.reload(wp_common)
             self.assertEqual((4, 16, 256), wp_common.STATES_GRID)
         finally:
             del os.environ["BENCH_STATES_GRID"]
+            importlib.reload(protocol)
             importlib.reload(wp_common)
 
     def test_states_rows_resize_lorenz96(self):

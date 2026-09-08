@@ -11,7 +11,7 @@ include(joinpath(dirname(@__DIR__), "problems.jl"))
 include(joinpath(dirname(@__DIR__), "reference_systems.jl"))
 include(joinpath(@__DIR__, "retcode_sidecar.jl"))
 
-const N = 131072
+const N = N_WP
 
 requested = "all"
 force = false
@@ -34,8 +34,8 @@ let i = 1
 end
 
 function generate(problem)
-    outdir = joinpath(dirname(dirname(@__DIR__)), "data", "numerical")
-    outfile = joinpath(outdir, "golden_$(problem["problem"])_$(N).csv")
+    outfile = golden_path(problem)
+    outdir = dirname(outfile)
     if isfile(outfile) && !force
         @info "Keeping $(outfile)"
         return

@@ -17,7 +17,7 @@ endif
 
 all: Bench.exe
 
-Bench.exe: $(SOURCE) problems/$(PROBLEM).cuh problems/stubs.cuh
+Bench.exe: $(SOURCE) protocol.h problems/$(PROBLEM).cuh problems/stubs.cuh
 	nvcc -o	Bench.exe $(SOURCE) $(INCL_DIR) $(DEFINES) $(CMPL_OPT)
 
 clean:
