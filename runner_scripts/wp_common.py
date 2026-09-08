@@ -140,31 +140,9 @@ def ensemble_error(final_states, golden):
     return float(np.sqrt(np.mean(diff ** 2)))
 
 
-def wp_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
-               problem=DEFAULT_PROBLEM):
-    """Path of the wp output file under data/<package>/<key>/<problem>."""
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_wp_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
-def times_outfile(framework_dir, prefix, mode, algorithm, dataset_key,
-                  problem=DEFAULT_PROBLEM):
-    """Path of the N-sweep timing file under data/<package>/<key>/<problem>."""
-    return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
-                        "{0}_times_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
-def states_outfile(framework_dir, prefix, mode, algorithm, dataset_key):
-    """Path of the states-sweep timing file under the lorenz96 problem dir."""
-    from problems import STATES_PROBLEM
-    return os.path.join(
-        data_dir(framework_dir, dataset_key, problem=STATES_PROBLEM),
-        "{0}_states_{1}_{2}.txt".format(prefix, mode, algorithm))
-
-
 def samples_outfile(framework_dir, prefix, analysis, mode, algorithm,
                     dataset_key, problem=DEFAULT_PROBLEM):
-    """Path of the per-repeat timing log beside its reduced output file."""
+    """Path of the per-repeat timing log under data/<package>/<key>/<problem>."""
     return os.path.join(data_dir(framework_dir, dataset_key, problem=problem),
                         "{0}_samples_{1}_{2}_{3}.csv".format(
                             prefix, analysis, mode, algorithm))

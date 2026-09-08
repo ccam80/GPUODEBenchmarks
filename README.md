@@ -228,10 +228,8 @@ a framework that does not support a requested algorithm skips cleanly:
     $ ./run_full_dataset.sh --algorithm euler
 ```
 
-Timing files are named
-`data/<package>/<os>_<gpu>/<problem>/<Prefix>_times_<fixed|adaptive>_<algorithm>.txt`
-(work-precision files use `_wp_` in place of `_times_`). Data without the
-algorithm field is regenerated fresh rather than migrated.
+Every timed point is one row of `data/<package>/<os>_<gpu>/results.csv`, the
+result store described under "Result store" below.
 
 ### Repeat count
 
@@ -258,12 +256,28 @@ repeat rule and watchdog value. Python reads it through
 the MPGOS launchers generate `GPU_ODE_MPGOS/protocol.h` from it before each
 build. `python runner_scripts/protocol.py get <table.key>` prints one value.
 
+### Result store
+
+`data/<package>/<os>_<gpu>/results.csv` holds one row per timed point and
+transfer leg, written by `runner_scripts/results.py` (Python writers and the
+MPGOS launcher and binary) and `runner_scripts/results.jl` (Julia writers).
+The identity columns are `package, key, analysis, problem, algorithm, mode,
+setting_kind, setting, n, states, tier, transfers`; `analysis` is `times`,
+`wp` or `states`, `setting` the dt or tolerance the point ran at, `n` the
+ensemble size and `states` the state count. The value columns are `min_ms`
+(the recorded time), `median_ms, p05_ms, p95_ms, max_ms, samples` over the
+timed repeats, `errored_pct`, `error` (wp rows) and `build_s` (states rows).
+A row with the same identity replaces the recorded one; under `--floor` the
+row with the lower `min_ms` stays. `python runner_scripts/results.py` offers
+`record`, `nan`, `status`, `clear` and `import-legacy` (converts the earlier
+per-file layout in place).
+
 ### Per-repeat timing log
 
 Every timed point is a minimum over its repeats, and each of those runs is
 also written to
-`<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv` beside
-the reduced file, one row per attempt:
+`<problem>/<Prefix>_samples_<times|wp|states>_<fixed|adaptive>_<algorithm>.csv`
+under the same key directory, one row per attempt:
 
 `analysis,problem,algorithm,mode,transfers,setting_kind,setting,n,states,repeat,ms`
 
@@ -276,12 +290,11 @@ the reduced file, one row per attempt:
   `none`/`nan` elsewhere.
 * A run that breaches the watchdog is logged before its leg is abandoned.
 
-The samples file follows its reduced sibling's write mode: the wp and states
-sweeps rewrite theirs each run, the N sweep appends, and a `--floor` re-run
-always appends a fresh block headed by repeat 0, which `collect_samples.py`
-separates as a new series. Filtering to `repeat > 0` and taking the minimum
-per (leg, point) reproduces the reduced file. The
-writers are `SampleLog` in `runner_scripts/wp_common.py`,
+The wp and states sweeps rewrite their log each run, the N sweep appends, and
+a `--floor` re-run always appends a fresh block headed by repeat 0, which
+`collect_samples.py` separates as a new series. Filtering to `repeat > 0` and
+taking the minimum per (leg, point) reproduces the store's `min_ms`. The
+writers are `append_samples` in `runner_scripts/wp_common.py`,
 `runner_scripts/samples.jl` and `GPU_ODE_MPGOS/Bench.cu`.
 
 #### Master run-times table
@@ -367,10 +380,9 @@ Every problem attempts every algorithm its frameworks support; a failed solve is
 `run_benchmark -a states` times lorenz96 at 4-128 states
 (`BENCH_STATES_GRID=<comma list>` overrides) and a fixed
 131072-trajectory ensemble, in every framework and algorithm
-the problem's frameworks support, exclusions included. Rows are
-`states t_ms t_dev_ms build_s` in
-`<Prefix>_states_<fixed|adaptive>_<algorithm>.txt` under the lorenz96
-data directory. `build_s` is the wall time from solver construction to
+the problem's frameworks support, exclusions included. Rows land in the
+result store with `analysis = states`, `problem = lorenz96` and the state
+count in `states`. `build_s` is the wall time from solver construction to
 the first completed solve; the sweep bypasses every compiled-kernel
 cache, making it a cold compile on every run. A size with no finite time in
 either mode cancels the pending and running larger sizes of that
@@ -478,18 +490,17 @@ and comparison reports:
 ```
 
 `--resume` skips every (problem, algorithm, mode, N) point whose row is
-already in its output file and deletes nothing; NaN rows count as recorded.
+already in the result store and deletes nothing; NaN rows count as recorded.
 `--no-overwrite` skips only points with a finite recorded time; NaN and
-absent rows rerun, and a rerun point's stale rows are dropped before the
-new row is appended. `--keep` gives the no-deletion behaviour on its own.
+absent rows rerun, and a rerun point replaces its row. `--keep` gives the
+no-deletion behaviour on its own.
 `--resume-from` places a cursor in the run order (problems.csv order, then
 algorithms.csv order, fixed before adaptive, N ascending) and skips
 everything before it — use it to step over a point that hangs, since a hung
 point leaves no row for `--resume` to skip. `--floor` re-runs the selected
 points (it skips nothing, and implies `--keep`) and merges each result into
-the recorded file by keeping the lower time — per column for the times and
-states rows, per (time, error) pair for the wp rows — so a re-run can only
-tighten a recorded minimum. Which points re-run comes from the flags that
+the store by keeping the row with the lower time, per transfer leg, so a
+re-run can only tighten a recorded minimum. Which points re-run comes from the flags that
 already select work (`-s`, `-g`, `-n`). All four flags are also accepted by
 `run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from` starts at
 the problem:
@@ -1029,9 +1040,9 @@ error of the final states against the golden reference. The grids are the
 package's work-precision sweeps and the plot in one go:
 `./run_all_benchmarks.sh -a work-precision` (`run_all_benchmarks.bat -a work-precision`).
 
-Results are written per machine as
-`data/<package>/<os>_<gpu>/<problem>/<Prefix>_wp_<fixed|adaptive>_<algorithm>.txt`
-with rows `<setting> <time_ms> <error>`. Notes:
+Results land in the machine's result store with `analysis = wp`, the dt or
+tolerance in `setting`, the time in `min_ms` and the ensemble l2 error in
+`error`. Notes:
 
 * The wp timings synchronize the device before stopping the clock (JAX
   `block_until_ready`, torch `cuda.synchronize`), unlike the historical

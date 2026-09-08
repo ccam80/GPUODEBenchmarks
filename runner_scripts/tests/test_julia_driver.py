@@ -1,6 +1,7 @@
 """States-driver and performance-driver tests with subprocess.Popen faked."""
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -13,26 +14,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
 
 import julia_driver  # noqa: E402
 import resume  # noqa: E402
+from protocol import STATES_N  # noqa: E402
+from results import Leg  # noqa: E402
+
+NAN = float("nan")
 
 
 class FakeProc(object):
     """Scripted bench process; 'hang' behavior never returns."""
 
-    def __init__(self, nstates, algorithm, outfiles, behavior, ticks=1):
+    def __init__(self, nstates, algorithm, legs, behavior, ticks=1):
         self.nstates = nstates
         self.algorithm = algorithm
-        self.outfiles = outfiles
+        self.legs = legs
         self.behavior = behavior
         self.ticks = ticks
         self.killed = False
         self._code = None
 
     def _write_rows(self, value):
-        for (mode, alg), path in self.outfiles.items():
-            if alg != self.algorithm:
-                continue
-            with open(path, "a") as handle:
-                handle.write("{0} {1} {1} 1.0\n".format(self.nstates, value))
+        for (mode, alg), leg in self.legs.items():
+            if alg == self.algorithm:
+                leg.record_times(STATES_N, value, value, 0.0, build_s=1.0,
+                                 states=self.nstates)
 
     def poll(self):
         if self.killed:
@@ -45,16 +49,13 @@ class FakeProc(object):
         if self.ticks > 0:
             return None
         if self.behavior == "ok":
-            self._write_rows("12.5")
+            self._write_rows(12.5)
         elif self.behavior == "launch_failure":
             # The bench catches the launch error and records NaN rows.
-            self._write_rows("NaN")
-        elif self.behavior == "torn":
-            # Killed mid-write: the size made it out, the timings did not.
-            for (mode, alg), path in self.outfiles.items():
-                if alg == self.algorithm:
-                    with open(path, "a") as handle:
-                        handle.write("{0}".format(self.nstates))
+            self._write_rows(NAN)
+        elif self.behavior == "silent":
+            # Killed before any row was written.
+            pass
         self._code = 0
         return self._code
 
@@ -67,29 +68,28 @@ class FakeProc(object):
 
 
 class DriverHarness(object):
-    """Patches julia_driver so run_states drives FakeProcs into a tmp dir."""
+    """Patches julia_driver so run_states drives FakeProcs into a scratch store."""
 
     def __init__(self, case, behaviors, grid, algorithms=("tsit5",)):
         self.tmp = tempfile.mkdtemp(prefix="jd_test_")
-        case.addCleanup(self._cleanup)
+        case.addCleanup(shutil.rmtree, self.tmp, True)
         self.behaviors = behaviors
         self.free_ram_gb = 999.0
         self.spawned = []
         self.live = []
         self.max_concurrent = 0
-        self.outfiles = {}
-        legs = [(mode, algorithm) for algorithm in algorithms
-                for mode in ("fixed", "adaptive")]
-        for leg in legs:
-            self.outfiles[leg] = os.path.join(
-                self.tmp, "states_{0}_{1}.txt".format(*leg))
+        self.legs = {(mode, algorithm): Leg("julia", "test", "states",
+                                            "lorenz96", algorithm, mode,
+                                            root=self.tmp)
+                     for algorithm in algorithms
+                     for mode in ("fixed", "adaptive")}
 
         def fake_popen(cmd, cwd=None, env=None):
             spec = cmd[3]  # ["julia", "--project=.", BENCH, spec, algorithm]
             nstates = int(spec.split(":")[1])
             algorithm = cmd[4]
             behavior = self.behaviors.get((nstates, algorithm), "ok")
-            proc = FakeProc(nstates, algorithm, self.outfiles, behavior)
+            proc = FakeProc(nstates, algorithm, self.legs, behavior)
             self.spawned.append((nstates, algorithm))
             self.live = [p for p in self.live if p.poll() is None]
             self.live.append(proc)
@@ -111,22 +111,20 @@ class DriverHarness(object):
                 julia_driver, "supported_for",
                 lambda fw, mode: tuple(algorithms)),
             mock.patch.object(julia_driver, "dataset_key", lambda: "test"),
-            mock.patch.object(
-                julia_driver, "states_outfile",
-                lambda fdir, prefix, mode, algorithm, key:
-                self.outfiles[(mode, algorithm)]),
+            mock.patch.object(julia_driver, "DATA_ROOT", self.tmp),
         ]
         for patch in patches:
             patch.start()
             case.addCleanup(patch.stop)
 
-    def _cleanup(self):
-        import shutil
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
     def rows(self, mode, algorithm):
-        with open(self.outfiles[(mode, algorithm)]) as handle:
-            return [line.split() for line in handle if line.strip()]
+        """[(states, min_ms)] of the host-path leg, by state count."""
+        leg = self.legs[(mode, algorithm)]
+        import results
+        rows = [r for r in results.load(leg.path)
+                if r["analysis"] == "states" and r["algorithm"] == algorithm
+                and r["mode"] == mode and r["transfers"] == "both"]
+        return sorted((int(r["states"]), r["min_ms"]) for r in rows)
 
 
 class StatesDriverTests(unittest.TestCase):
@@ -139,7 +137,7 @@ class StatesDriverTests(unittest.TestCase):
         harness = DriverHarness(self, {}, grid=(4, 8, 16))
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8", "16"])
+        self.assertEqual([r[0] for r in rows], [4, 8, 16])
         self.assertTrue(all(r[1] == "12.5" for r in rows))
 
     def test_launch_failure_cancels_larger_sizes(self):
@@ -148,10 +146,10 @@ class StatesDriverTests(unittest.TestCase):
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         # 4 succeeded; 8 failed; 16/32 cancelled and NaN-backfilled.
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8", "16", "32"])
+        self.assertEqual([r[0] for r in rows], [4, 8, 16, 32])
         self.assertEqual(rows[0][1], "12.5")
         for row in rows[1:]:
-            self.assertEqual(row[1].lower(), "nan")
+            self.assertEqual(row[1], "nan")
         # With 2 job slots, 16 may be in flight; 32 must never spawn.
         self.assertNotIn((32, "tsit5"), harness.spawned)
 
@@ -161,7 +159,7 @@ class StatesDriverTests(unittest.TestCase):
             algorithms=("tsit5", "rosenbrock23_sciml"))
         self.assertEqual(julia_driver.run_states(["all"]), 0)
         tsit5 = harness.rows("fixed", "tsit5")
-        self.assertTrue(all(r[1].lower() == "nan" for r in tsit5))
+        self.assertTrue(all(r[1] == "nan" for r in tsit5))
         rosen = harness.rows("fixed", "rosenbrock23_sciml")
         self.assertEqual([r[1] for r in rosen], ["12.5", "12.5"])
 
@@ -172,8 +170,8 @@ class StatesDriverTests(unittest.TestCase):
             grid=(4, 8))
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8"])
-        self.assertTrue(all(r[1].lower() == "nan" for r in rows))
+        self.assertEqual([r[0] for r in rows], [4, 8])
+        self.assertTrue(all(r[1] == "nan" for r in rows))
 
     def test_budget_kills_markerless_process_and_cancels_larger(self):
         os.environ["BENCH_STATES_BUDGET"] = "0.000001"
@@ -183,8 +181,8 @@ class StatesDriverTests(unittest.TestCase):
             self, {(4, "tsit5"): "hang"}, grid=(4, 8, 16))
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8", "16"])
-        self.assertTrue(all(r[1].lower() == "nan" for r in rows))
+        self.assertEqual([r[0] for r in rows], [4, 8, 16])
+        self.assertTrue(all(r[1] == "nan" for r in rows))
         self.assertNotIn((8, "tsit5"), harness.spawned)
 
     def test_low_ram_serializes_spawns(self):
@@ -193,17 +191,17 @@ class StatesDriverTests(unittest.TestCase):
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         self.assertEqual(harness.max_concurrent, 1)
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8", "16"])
+        self.assertEqual([r[0] for r in rows], [4, 8, 16])
         self.assertTrue(all(r[1] == "12.5" for r in rows))
 
-    def test_torn_last_line_is_backfilled(self):
+    def test_a_silent_process_is_backfilled(self):
         harness = DriverHarness(
-            self, {(8, "tsit5"): "torn"}, grid=(4, 8))
+            self, {(8, "tsit5"): "silent"}, grid=(4, 8))
         self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
         rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], ["4", "8"])
+        self.assertEqual([r[0] for r in rows], [4, 8])
         self.assertEqual(rows[0][1], "12.5")
-        self.assertEqual(rows[1][1].lower(), "nan")
+        self.assertEqual(rows[1][1], "nan")
 
 
 class PerfProc(object):
@@ -235,7 +233,7 @@ class PerformanceDriverTests(unittest.TestCase):
         os.environ["BENCH_JULIA_JOBS"] = "2"
 
         self.tmp = tempfile.mkdtemp(prefix="jd_perf_")
-        self.addCleanup(self._cleanup)
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.spawned = []
         self.exit_codes = {}
 
@@ -245,11 +243,6 @@ class PerformanceDriverTests(unittest.TestCase):
             self.spawned.append(cmd[3:])
             key = (cmd[6], cmd[4], cmd[8])
             return PerfProc(self.exit_codes.get(key, 0))
-
-        def fake_times_outfile(fdir, prefix, mode, algorithm, key, problem):
-            return os.path.join(self.tmp,
-                                "{0}_{1}_{2}.txt".format(problem, mode,
-                                                         algorithm))
 
         patches = [
             mock.patch.object(julia_driver.subprocess, "Popen", fake_popen),
@@ -262,17 +255,15 @@ class PerformanceDriverTests(unittest.TestCase):
             mock.patch.object(
                 julia_driver, "supported_for",
                 lambda fw, mode: ("tsit5",)),
-            mock.patch.object(julia_driver, "times_outfile",
-                              fake_times_outfile),
+            mock.patch.object(julia_driver, "DATA_ROOT", self.tmp),
         ]
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
 
-    def _cleanup(self):
-        import shutil
-        os.environ.pop("BENCH_JULIA_JOBS", None)
-        shutil.rmtree(self.tmp, ignore_errors=True)
+    def leg(self, mode):
+        return Leg("julia", "test", "times", "lorenz", "tsit5", mode,
+                   root=self.tmp)
 
     def modes_spawned(self):
         return [args[args.index("--mode") + 1] for args in self.spawned]
@@ -293,20 +284,19 @@ class PerformanceDriverTests(unittest.TestCase):
 
     def test_covered_mode_is_pruned_alone(self):
         os.environ["BENCH_RESUME"] = "1"
-        fixed = os.path.join(self.tmp, "lorenz_fixed_tsit5.txt")
-        with open(fixed, "w") as handle:
-            handle.write("8 1.0 2.0\n32 1.0 2.0\n")
+        fixed = self.leg("fixed")
+        fixed.record_times(8, 1.0, 2.0, 0.0)
+        fixed.record_times(32, 1.0, 2.0, 0.0)
         self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
         self.assertEqual(self.modes_spawned(), ["adaptive"])
 
     def test_no_overwrite_retries_the_nan_mode(self):
         os.environ["BENCH_NO_OVERWRITE"] = "1"
-        fixed = os.path.join(self.tmp, "lorenz_fixed_tsit5.txt")
-        adaptive = os.path.join(self.tmp, "lorenz_adaptive_tsit5.txt")
-        with open(fixed, "w") as handle:
-            handle.write("8 1.0 2.0\n32 1.0 2.0\n")
-        with open(adaptive, "w") as handle:
-            handle.write("8 1.0 2.0\n32 nan nan\n")
+        fixed, adaptive = self.leg("fixed"), self.leg("adaptive")
+        fixed.record_times(8, 1.0, 2.0, 0.0)
+        fixed.record_times(32, 1.0, 2.0, 0.0)
+        adaptive.record_times(8, 1.0, 2.0, 0.0)
+        adaptive.nan_times([32])
         self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
         self.assertEqual(self.modes_spawned(), ["adaptive"])
 

@@ -14,7 +14,7 @@ from problems import (  # noqa: E402
     DEFAULT_PROBLEM, get_problem, load_problems, problem_names,
     resolve_problems,
 )
-from wp_common import dts_for, golden_path, times_outfile, wp_outfile  # noqa: E402
+from wp_common import dts_for, golden_path  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -54,7 +54,7 @@ class RegistryTests(unittest.TestCase):
         self.assertFalse(row.supports("nosuchframework"))
 
     def test_bench_args_accept_an_n_list(self):
-        from wp_common import N_WP, STATES_N, parse_bench_args
+        from wp_common import N_WP, parse_bench_args
         ns, analysis, _, _ = parse_bench_args(["32,8,128"], "cubie")
         self.assertEqual([8, 32, 128], ns)
         self.assertEqual("times", analysis)
@@ -149,13 +149,6 @@ class PathTests(unittest.TestCase):
     def tearDown(self):
         os.chdir(self._cwd)
         shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def test_output_paths_carry_the_problem(self):
-        for path in (times_outfile("CUBIE", "Cubie", "fixed", "euler", "k",
-                                   self.problem),
-                     wp_outfile("CUBIE", "Cubie", "fixed", "euler", "k",
-                                self.problem)):
-            self.assertIn(os.path.join("k", self.problem.name), path)
 
     def test_golden_path_names_the_problem(self):
         self.assertIn(self.problem.name, golden_path(self.problem))
