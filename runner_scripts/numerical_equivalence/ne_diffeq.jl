@@ -55,6 +55,7 @@ MODE in ("fixed", "adaptive", "all") ||
 
 const REPO_ROOT = dirname(dirname(@__DIR__))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()

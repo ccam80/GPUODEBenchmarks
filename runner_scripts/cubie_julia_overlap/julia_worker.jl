@@ -17,6 +17,7 @@ CUDA.allowscalar(false)
 const HERE = @__DIR__
 const REPO_ROOT = dirname(dirname(HERE))
 include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
+include(joinpath(REPO_ROOT, "runner_scripts", "ne_grid.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_prob.jl"))
