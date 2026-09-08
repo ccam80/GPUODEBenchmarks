@@ -14,19 +14,19 @@
 #             constants are exported (controller_constants.csv) so the cubie
 #             runner can mirror them exactly for its "matched" tier.
 #
-# The protocol mirrors ne_common.py; keep the two in sync.
+# Grids, tolerances and pins come from runner_scripts/protocol.toml through protocol.jl.
 #
 # Float32 discipline: u0, tspan, dt, tolerances and the parameter vector are
-# all Float32 (the rho grid is read from the golden file, whose values are
-# exactly representable in Float32), and every trajectory's final state is
-# asserted to still be Float32 — a Float64 anywhere means the solve silently
-# promoted and the point is recorded as failed.
+# all Float32 (the ne grid is the Float32-rounded prefix of the wp sweep, or
+# the golden_ne column of an ne_legacy_grid problem), and every trajectory's
+# final state is asserted to still be Float32 — a Float64 anywhere means the
+# solve silently promoted and the point is recorded as failed.
 #
 # Outputs under data/numerical_equivalence/julia/<os>_<gpu>/<problem>/, traj 0-based:
 #   <alias>.csv dt,traj,states...; <alias>_adaptive.csv tol,traj,states...,naccept,nreject; controller_constants.csv
 #
 # Run from the repo root:
-#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [fixed|adaptive|all]
+#   julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl [--controller fixed|adaptive|all] [--algorithm <all|list>] [--problem <all|list>]
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK

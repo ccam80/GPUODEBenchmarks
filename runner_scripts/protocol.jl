@@ -2,7 +2,6 @@
 
 if !isdefined(@__MODULE__, :PROTOCOL)
     using TOML
-    using DelimitedFiles
 
     const PROTOCOL = TOML.parsefile(joinpath(@__DIR__, "protocol.toml"))
 
@@ -13,29 +12,6 @@ if !isdefined(@__MODULE__, :PROTOCOL)
     const N_STEP = Int(PROTOCOL["ensemble"]["n_step"])
     const NMAX_DEFAULT = Int(PROTOCOL["ensemble"]["nmax_default"])
     const NE_LEGACY_GRID = Tuple(String.(get(PROTOCOL["ensemble"], "ne_legacy_grid", String[])))
-
-    "The ne ensemble grid: golden_ne's own column for legacy problems, else the first N_NE points of the N_WP sweep; needs problems.jl."
-    function ne_sweep(problem)
-        name = problem["problem"]
-        if name in NE_LEGACY_GRID
-            path = joinpath(dirname(@__DIR__), "data", "numerical", "golden_ne_$(name)_$(N_NE).csv")
-            isfile(path) || error("$(path) not found; it defines the legacy ne grid of $(name)")
-            return Float32.(readdlm(path, ',')[:, 1])
-        end
-        return Float32.(problem_sweep(problem, N_WP))[1:N_NE]
-    end
-
-    "The Float64 golden states of the ne ensemble, (N_NE, states)."
-    function ne_golden_states(problem)
-        name = problem["problem"]
-        root = joinpath(dirname(@__DIR__), "data", "numerical")
-        if name in NE_LEGACY_GRID
-            return readdlm(joinpath(root, "golden_ne_$(name)_$(N_NE).csv"), ',')[:, 2:end]
-        end
-        path = joinpath(root, "golden_$(name)_$(N_WP).csv")
-        isfile(path) || error("$(path) not found - generate it first with `julia -t auto --project=. runner_scripts/golden/generate_golden.jl --problem $(name)`")
-        return readdlm(path, ',')[1:N_NE, :]
-    end
 
     const TIMING_DT_K = Int(PROTOCOL["fixed"]["timing_k"])
     const WP_K = Tuple(Int.(PROTOCOL["fixed"]["wp_k"]))
