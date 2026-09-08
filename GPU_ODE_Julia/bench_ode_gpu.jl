@@ -306,8 +306,7 @@ function with_gpu_lock(f)
     end
 end
 
-# One system size per process; the driver backfills rows for processes that
-# never wrote them.
+# One system size per process; the driver backfills rows a process never wrote.
 function run_states(nstates, n)
     # Runtime entry at every size, so build_s is a cold compile.
     entry = _lorenz96_entry(nstates)

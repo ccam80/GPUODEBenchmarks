@@ -762,9 +762,7 @@ prefix.
 
 ## Plotting Results
 
-The plotting scripts to visualize the simulation times. The scripts are
-located in the `runner_scripts/plot` folder. The plotting scripts are
-based on Julia. As a preliminary step:
+The Julia plotting scripts live in `runner_scripts/plot`. As a preliminary step:
 ```julia
     $ cd GPUODEBenchmarks
     $ julia project=.
