@@ -61,6 +61,11 @@ def cubie_python():
     return venv_python("cubie")
 
 
+def suite_python():
+    """The suite interpreter: GPU_ODE_CUBIE/venv with pyarrow and duckdb; bench.py, the analyses and the shell wrappers run under it."""
+    return venv_python("cubie")
+
+
 def julia_command():
     """The julia launcher as argv: `julia +1.13`, or JULIA when set."""
     return shlex.split(os.environ.get("JULIA", "julia +1.13"))

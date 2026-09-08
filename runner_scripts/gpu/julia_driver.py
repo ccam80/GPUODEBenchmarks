@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm], each with [--mode <fixed|adaptive|all>]. One process per (problem, algorithm, mode) leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states adds BENCH_STATES_BUDGET compile kills and NaN backfill."""
+"""Julia leg orchestrator: julia_driver.py performance <N,N,...> [algorithm] [problem] | wp [algorithm] [problem] | states [algorithm], each with [--mode <fixed|adaptive|all>]. One process per (problem, algorithm, mode) leg, compiles in parallel under BENCH_JULIA_JOBS (default 4) while free host RAM stays above BENCH_JULIA_MIN_FREE_GB (default 10), GPU-timed sections serialized by a pidfile; states backfills NaN rows for processes that never wrote them."""
 
 import os
 import shlex
@@ -225,14 +225,12 @@ def run_states(argv):
         return 0
 
     jobs = int(os.environ.get("BENCH_JULIA_JOBS", "4"))
-    budget = float(os.environ.get("BENCH_STATES_BUDGET", "0"))
     mode_arg = ["--mode", ",".join(modes)] if len(modes) < 2 else []
     legs = {(mode, algorithm): _leg("states", STATES_PROBLEM, algorithm, mode)
             for algorithm in algorithms
             for mode in _modes_for(algorithm, modes)}
 
     lock_path = _lock_env()
-    marker_dir = tempfile.mkdtemp(prefix="gpuode_states_")
     pending = [(nstates, algorithm) for nstates in grid
                for algorithm in algorithms]
     if resume_active():
@@ -253,7 +251,7 @@ def run_states(argv):
                 pending.remove((size, alg))
                 print(f"CANCELLED states={size} {algorithm}: {reason}")
         for other in list(running):
-            size, alg, _, _ = running[other]
+            size, alg = running[other]
             if alg == algorithm and size > nstates:
                 other.kill()
                 other.wait()
@@ -266,22 +264,19 @@ def run_states(argv):
             nstates, algorithm = pending.pop(0)
             print(f"spawning lorenz96 states={nstates} {algorithm} "
                   f"(N={ensemble})")
-            # The marker marks first-kernel compile; the budget kills only markerless processes.
-            marker = os.path.join(marker_dir, f"{nstates}_{algorithm}.done")
-            env = dict(os.environ, BENCH_GPU_LOCK=lock_path,
-                       BENCH_STATES_MARKER=marker)
+            env = dict(os.environ, BENCH_GPU_LOCK=lock_path)
             proc = subprocess.Popen(
                 julia_command() + [BENCH, f"states:{nstates}:{ensemble}",
                                    algorithm] + mode_arg,
                 cwd=REPO_ROOT, env=env)
-            running[proc] = (nstates, algorithm, time.monotonic(), marker)
+            running[proc] = (nstates, algorithm)
         time.sleep(2)
         for proc in list(running):
             state = running.get(proc)
             if state is None:
                 # cancel_larger removed it while this snapshot was polled.
                 continue
-            nstates, algorithm, started, marker = state
+            nstates, algorithm = state
             code = proc.poll()
             if code is not None:
                 del running[proc]
@@ -289,14 +284,6 @@ def run_states(argv):
                 if not _states_succeeded(legs, algorithm, nstates):
                     cancel_larger(algorithm, nstates,
                                   f"states={nstates} produced no result")
-            elif (budget > 0 and time.monotonic() - started > budget
-                  and not os.path.exists(marker)):
-                proc.kill()
-                proc.wait()
-                del running[proc]
-                print(f"BUDGET states={nstates} {algorithm}: no compile "
-                      f"within {budget:.0f}s, killed")
-                cancel_larger(algorithm, nstates, "compile budget breached")
 
     # Rows a killed or crashed process never wrote become NaN.
     for leg in legs.values():

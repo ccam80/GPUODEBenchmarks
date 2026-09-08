@@ -95,9 +95,6 @@ class DriverHarness(object):
             self.live = [p for p in self.live if p.poll() is None]
             self.live.append(proc)
             self.max_concurrent = max(self.max_concurrent, len(self.live))
-            marker = env.get("BENCH_STATES_MARKER", "")
-            if behavior != "hang" and marker:
-                open(marker, "w").close()
             return proc
 
         patches = [
@@ -130,7 +127,6 @@ class DriverHarness(object):
 
 class StatesDriverTests(unittest.TestCase):
     def setUp(self):
-        os.environ.pop("BENCH_STATES_BUDGET", None)
         os.environ["BENCH_JULIA_JOBS"] = "2"
         self.addCleanup(os.environ.pop, "BENCH_JULIA_JOBS", None)
 
@@ -173,18 +169,6 @@ class StatesDriverTests(unittest.TestCase):
         rows = harness.rows("fixed", "tsit5")
         self.assertEqual([r[0] for r in rows], [4, 8])
         self.assertTrue(all(r[1] == "nan" for r in rows))
-
-    def test_budget_kills_markerless_process_and_cancels_larger(self):
-        os.environ["BENCH_STATES_BUDGET"] = "0.000001"
-        self.addCleanup(os.environ.pop, "BENCH_STATES_BUDGET", None)
-        os.environ["BENCH_JULIA_JOBS"] = "1"
-        harness = DriverHarness(
-            self, {(4, "tsit5"): "hang"}, grid=(4, 8, 16))
-        self.assertEqual(julia_driver.run_states(["tsit5"]), 0)
-        rows = harness.rows("fixed", "tsit5")
-        self.assertEqual([r[0] for r in rows], [4, 8, 16])
-        self.assertTrue(all(r[1] == "nan" for r in rows))
-        self.assertNotIn((8, "tsit5"), harness.spawned)
 
     def test_low_ram_serializes_spawns(self):
         harness = DriverHarness(self, {}, grid=(4, 8, 16))
