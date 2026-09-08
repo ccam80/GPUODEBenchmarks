@@ -4,16 +4,17 @@
 venv*/
 **/venv*/
 
-# The CUBIE_MLIR suite shares the CUBIE venv via a symlink/junction. Git sees a
-# symlink as a file, so the directory patterns above do not cover it.
-GPU_ODE_CUBIE_MLIR/venv
+# Suite environments are shared into worktrees as symlinks (worktree_setup.py),
+# and GPU_ODE_CUBIE_MLIR/venv links at the CUBIE venv in every checkout. Git
+# sees a symlink as a file, so the directory patterns above do not cover them.
+GPU_ODE_*/venv
 
 # Ignore cubie clone directories in setup folders
 GPU_ODE_CUBIE/cubie/
 GPU_ODE_CUBIE_MLIR/cubie/
 
-# Cubie generated-code caches (one dir per system name)
-/generated/*/
+# Cubie generated-code caches (one dir per system name); a symlink in worktrees
+/generated
 
 # Local assistant/tool state
 .claude/
@@ -38,6 +39,7 @@ GPU_ODE_MYOKIT_CUDA/generated/
 /data/master_run_times.csv
 
 # Local benchmark result sets
+/data/cubie_julia_overlap/
 /data/numerical_equivalence/cubie_pre626_jul16/
 
 # Orchestrator run logs
@@ -45,6 +47,6 @@ GPU_ODE_MYOKIT_CUDA/generated/
 
 golden_ring_modulator.log*
 
-# MPGOS cached builds and generated Myokit models
-GPU_ODE_MPGOS/build_cache/
+# MPGOS cached builds (a symlink in worktrees) and generated Myokit models
+GPU_ODE_MPGOS/build_cache
 GPU_ODE_MYOKIT_CUDA/models/generated/
