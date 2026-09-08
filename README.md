@@ -1108,9 +1108,7 @@ promotion to Float64 aborts the run.
 
 ### Running the suite
 
-One command runs everything (golden reference if missing, the
-DifferentialEquations.jl sweeps, the cubie ne legs of the work-precision
-sweep, comparison report + plots):
+One command runs the golden, the DifferentialEquations.jl sweeps, the cubie ne legs and the comparison:
 
 ```bash
 ./run_numerical_equivalence.sh              # Linux/macOS/WSL
@@ -1143,7 +1141,7 @@ julia -t auto --project=. runner_scripts/numerical_equivalence/ne_diffeq.jl
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/<algorithm>_adaptive.csv   (adaptive sweep)
 #   -> data/numerical_equivalence/julia/<os>_<gpu>/<problem>/controller_constants.csv   (resolved defaults)
 GPU_ODE_CUBIE/venv/*/python GPU_ODE_CUBIE/bench_cubie.py ne
-#   the work-precision legs of the ne algorithms at N=131072, timed into results.csv; the first 1024 rows of each solve's finals land in
+#   timed wp legs of the ne algorithms; the first 1024 rows of each solve's finals land in
 #   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>.csv
 #   -> data/numerical_equivalence/cubie/<os>_<gpu>/<problem>/<algorithm>_adaptive_<tier>.csv
 GPU_ODE_CUBIE/venv/*/python compare_numerical_equivalence.py
