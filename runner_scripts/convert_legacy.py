@@ -1,14 +1,4 @@
-"""Convert the legacy CSV trees under data/ into the parquet result store, then delete them (docs/unification-plan.md, P3).
-
-    convert_legacy.py [--root data] [--dry-run] [--keep-old]
-
-Rules, one counter each in the report:
-  results.csv rows      analysis dropped, julia renamed julia_gpu; every cpp row, wp rows with transfers != none and jax kvaerno3 rows dropped
-  overlap julia_timings performance and work_precision phases become julia_gpu rows (tier fixed and julia -> default, pi kept; golden_rmse -> error; no samples); the numerical phase, its finals and the derived tables are dropped
-  NE julia trees        julia_cpu finals at n = 1024 with an untimed row per setting; controller_constants.csv -> controllers/<problem>.csv
-  numerical finals      jax.csv, pytorch.csv, myokit_cuda.csv and the cubie files attach to the n = 32768 times row; julia_*.csv and mpgos*.csv dropped
-Rows that meet by identity collapse to one: the row with samples wins, then the later recorded_utc; NaN and empty value columns of the winner fill from the loser.
-"""
+"""Convert the legacy CSV trees under data/ into the parquet store and delete them: convert_legacy.py [--root data] [--dry-run] [--keep-old]; the report counts every rule."""
 
 import argparse
 import csv
@@ -111,6 +101,7 @@ class Conversion:
                 int(row["n"]), int(row["states"]), row["tier"], row["transfers"])
 
     def add(self, row, source):
+        """Keep one row per identity: samples win, then the later stamp; the loser fills the winner's NaN and empty columns."""
         row = store.make_row(**row)
         key = self._key(row)
         standing = self.rows.get(key)
