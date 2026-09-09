@@ -27,7 +27,7 @@ mkdir -p /run/sshd && sshd -t && systemctl enable --now ssh && systemctl restart
 mkdir -p /srv/gpuode/data && chown -R cca79:cca79 /srv/gpuode
 ```
 
-Then, as `cca79`: each other machine's public key on its own line in `~/.ssh/authorized_keys`, and `rclone` and `rsync` on `PATH` (the rclone binary under `~/.local/bin` needs no root). The first tree is the committed `data/` of a checkout: `rsync -a --exclude '*.lock' --exclude '*.partial' data/ /srv/gpuode/data/`.
+Then, as `cca79`: each other machine's public key on its own line in `~/.ssh/authorized_keys`, and `rclone` and `rsync` on `PATH` (the rclone binary under `~/.local/bin` needs no root). The tree fills from each machine's push.
 
 On each other machine: `rclone` on `PATH` (Windows: `winget install Rclone.Rclone`), then
 
@@ -72,4 +72,4 @@ python runner_scripts/sync.py check
 python runner_scripts/store.py query "SELECT key, package, count(*) AS rows FROM results GROUP BY 1, 2 ORDER BY 1, 2"
 ```
 
-The analyses read the local mirror. The committed `data/` tree is a snapshot of the remote: pull, then commit it in a data PR.
+The analyses read the local mirror. `data/` is not tracked in git; the box is the only store.

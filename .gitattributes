@@ -4,5 +4,3 @@
 # Windows batch and PowerShell scripts use CRLF
 *.bat text eol=crlf
 *.ps1 text eol=crlf
-# Data files are shared byte for byte between machines
-data/** -text
