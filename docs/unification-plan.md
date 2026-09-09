@@ -305,9 +305,8 @@ Each script under `analyses/` takes `--set <name>` (repeatable), expands it with
 
 - One worktree, one branch off `main`, one PR per packet.
 - "Done" is the acceptance line; "Review" is what the PR is read against.
-- A packet replaces what it touches: no compatibility shim, no dual path.
-- `main` may not run between packets.
-- Comments, docstrings and README text describe the code; none names this document, a packet, a section or a phase.
+- A packet replaces what it touches: no shim, no dual path; `main` may not run between packets.
+- Code documentation describes the code and never names this document, a packet, a section or a phase.
 
 ### P1 store and grid
 Depends on: nothing.
