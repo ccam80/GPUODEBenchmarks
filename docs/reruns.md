@@ -20,20 +20,10 @@ A `reason` naming a controller, precision or algorithm the package does not run 
 
 ## 2. Reruns per key
 
-`--resume` skips trials with every row present, `--no-overwrite` also retakes NaN rows. The goldens stay; every other key repeats each step.
-
-First pass, enough for every plot:
+`--resume` skips trials with every row present, `--no-overwrite` also retakes NaN rows. The goldens stay; every other key repeats the step. Run the sets together; a solve two sets share is recorded once with the finals and transfers of both.
 
 ```
-python bench.py run --set perf -n 8,32,128,512,2048,8192,32768,131072,524288,2097152,8388608 --resume
-python bench.py run --set states --resume
-python bench.py run --set golden_grid --resume
-```
-
-Second pass, the largest ensemble:
-
-```
-python bench.py run --set perf -n 16777216 --resume
+python bench.py run --set perf,states,golden_grid --resume
 ```
 
 ## 3. After each step
