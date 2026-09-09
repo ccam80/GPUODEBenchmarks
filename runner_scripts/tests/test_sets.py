@@ -27,19 +27,6 @@ KEY = "windows_RTX-4070-SUPER"
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
 
-def real_cubie():
-    """True when cubie's shipped controller tables import; a stub another test module left in sys.modules is dropped first."""
-    stub = sys.modules.get("cubie")
-    if stub is not None and getattr(stub, "__spec__", None) is None:
-        for name in [n for n in sys.modules if n == "cubie" or n.startswith("cubie.")]:
-            del sys.modules[name]
-    try:
-        import cubie.integrators.algorithms  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
 ALGORITHMS = {row.name: row for row in load_algorithms()}
 PROBLEMS = {row.name: row for row in load_problems()}
 
@@ -80,8 +67,6 @@ class ShippedSetTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not real_cubie():
-            raise unittest.SkipTest("the pi and matched steppings resolve against cubie's shipped controllers")
         cls.expanded = {name: sets.expand([name], KEY, root=os.path.join(tempfile.gettempdir(), "no-data"))
                         for name in sets.set_names()}
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}

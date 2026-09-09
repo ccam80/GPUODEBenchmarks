@@ -102,10 +102,6 @@ class ControllerMappingTests(unittest.TestCase):
         self.assertFalse(adapter.controllers_equal(a, None))
 
     def test_shipped_tables_resolve_order_dependent_gains(self):
-        try:
-            import cubie.integrators.algorithms  # noqa: F401
-        except ImportError:
-            self.skipTest("cubie is not importable here")
         dirk = adapter.default_controller("kvaerno3", "dirk", 3)
         self.assertEqual(dirk["step_controller"], "pi")
         self.assertAlmostEqual(dirk["integral_gain"], 0.3 * 4 / 3)
@@ -194,10 +190,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual(adapter.clear_optimized("cubie", "k"), 0)
 
     def test_unroll_enums_round_trip(self):
-        try:
-            from cubie.cuda_simsafe import UnrollChoice
-        except ImportError:
-            self.skipTest("cubie is not importable here")
+        from cubie.cuda_simsafe import UnrollChoice
         result = FakeResult(FakeLaunch(64, 1), {
             "unroll_other_small": UnrollChoice.ROLLED,
             "state_location": "local", "blocksize": 64})

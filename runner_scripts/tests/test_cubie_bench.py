@@ -13,12 +13,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "cubie_julia_overlap"))
 
-cubie = types.ModuleType("cubie")
-cubie.cache_root = types.ModuleType("cubie.cache_root")
-cubie.cache_root.set_cache_root = lambda path: None
-sys.modules["cubie"] = cubie
-sys.modules["cubie.cache_root"] = cubie.cache_root
-
 import cubie_bench  # noqa: E402
 import cubie_worker  # noqa: E402
 from problems import get_problem  # noqa: E402
