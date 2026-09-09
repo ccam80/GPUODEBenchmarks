@@ -1,0 +1,238 @@
+"""The runner loop shared by the Python packages: a trial file in, one store row per solve trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build_leg(trial, cold)`, `compile(leg, trial, values)`, `optimize(leg, trial, values)`, `solve(leg, trial, values, transfers)` and `finals(leg, result)`, plus a `controllers` tuple; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+
+import argparse
+import gc
+import json
+import os
+import sys
+import timeit
+from datetime import datetime, timezone
+
+import grid as grid_mod
+import store as store_mod
+import trials as trials_mod
+from bench_key import dataset_key
+from protocol import REPEAT_CAP, WATCHDOG_SECONDS
+from wp_common import timed_min_ms
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_ROOT = os.path.join(REPO_ROOT, "data")
+
+NAN = float("nan")
+OUTCOMES = ("ok", "timeout", "oom", "error")
+# Exception text that names an exhausted device or host: CUDA, numba, XLA and torch.
+OOM_MARKERS = ("OUT_OF_MEMORY", "CUDA_ERROR_OUT_OF_MEMORY", "RESOURCE_EXHAUSTED",
+               "OutOfMemoryError")
+MESSAGE_CHARS = 200
+
+
+def classify(exc):
+    """'oom' when the exception is a MemoryError or its type or message carries an OOM_MARKERS entry, else 'error'."""
+    text = type(exc).__name__ + ": " + str(exc)
+    if isinstance(exc, MemoryError) or any(marker in text for marker in OOM_MARKERS):
+        return "oom"
+    return "error"
+
+
+def failure_reason(outcome, exc=None, elapsed_s=None):
+    """The reason text of a failed (trial, transfers): 'timeout: <s>s over the <cap>s cap', or '<oom|error>: <Type>: <message>'."""
+    if outcome == "timeout":
+        return "timeout: {0:.1f}s over the {1:g}s cap".format(elapsed_s, WATCHDOG_SECONDS)
+    return "{0}: {1}: {2}".format(outcome, type(exc).__name__, str(exc)[:MESSAGE_CHARS])
+
+
+def abandon_reason(history, transfers, ordinal):
+    """The abandon rule: after a timeout or oom at ordinal k on some transfers, every higher ordinal of the leg on the same transfers is not run; returns its reason, or None when the trial runs. `history` maps transfers to (outcome, ordinal) of the leg's first timeout or oom."""
+    hit = history.get(transfers)
+    if hit is None or ordinal <= hit[1]:
+        return None
+    return "abandoned: {0} at ordinal {1}".format(hit[0], hit[1])
+
+
+def legs_of(trial_list):
+    """[(leg, trials)] in first appearance, each leg's trials in file order."""
+    groups = {}
+    for trial in trial_list:
+        groups.setdefault(trial["leg"], []).append(trial)
+    return list(groups.items())
+
+
+def write_progress(path, trial):
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"trial_id": trial["trial_id"],
+                   "started_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
+                  handle)
+
+
+def label(trial, transfers=None):
+    text = "{0} {1} {2} n={3}".format(trial["problem"], trial["algorithm"], trial["controller"],
+                                      trial["n"])
+    if trial["controller"] == "fixed":
+        text += " dt={0:g}".format(trial["dt"])
+    else:
+        text += " tol={0:g}".format(trial["atol"])
+    if trial["system_params"] not in ("", "{}"):
+        text += " " + trial["system_params"]
+    if transfers:
+        text += " [" + transfers + "]"
+    return text
+
+
+class Runner:
+    """One trial file through an adapter: legs built once, ordinals walked ascending, every finished trial recorded before the next starts."""
+
+    def __init__(self, adapter, key, root=DATA_ROOT, floor=False, repeats=REPEAT_CAP):
+        self.adapter = adapter
+        self.key = key
+        self.store = store_mod.Store(root)
+        self.floor = floor
+        self.repeats = repeats
+        self.package_version = adapter.version()
+        self.suite_rev = store_mod.suite_rev(REPO_ROOT)
+
+    # -------------------------------------------------------------- rows
+    def record(self, trial, transfers, states, **values):
+        spec = {field: trial[field] for field in store_mod.TRIAL_FIELDS}
+        row = dict(spec, transfers=transfers, key=self.key, states=states,
+                   package_version=self.package_version, suite_rev=self.suite_rev)
+        row.update(values)
+        return self.store.record(row, floor=self.floor)
+
+    def record_failed_leg(self, solves, reason, states=None):
+        """Every requested transfers row of the leg's solves as NaN with one reason."""
+        for trial in solves:
+            count = self.adapter.states(trial) if states is None else states
+            for transfers in trial["transfers"]:
+                self.record(trial, transfers, count, reason=reason)
+            print("FAILED {0}: {1}".format(label(trial), reason), flush=True)
+
+    # ------------------------------------------------------------- timing
+    def time(self, leg, trial, values, transfers):
+        """(outcome, best_ms, samples, result, exc, elapsed_s) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog."""
+        def run():
+            return self.adapter.solve(leg, trial, values, transfers)
+
+        def breach():
+            print("WATCHDOG hard exit: {0} never returned".format(label(trial, transfers)),
+                  flush=True)
+
+        try:
+            best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach)
+        except Exception as exc:  # noqa: BLE001 - every failure is a row
+            return classify(exc), NAN, [], None, exc, NAN
+        if best is None:
+            return "timeout", NAN, samples, result, None, samples[-1] / 1000.0
+        return "ok", best, samples, result, None, samples[-1] / 1000.0
+
+    def finals(self, leg, trial, result):
+        """(errored_pct, finals path) of a solve's result; the finals file is written when the trial keeps finals."""
+        states, t_final, retcode = self.adapter.finals(leg, result)
+        pct = store_mod.errored_pct(states, t_final, retcode, trial["duration"])
+        path = ""
+        if trial["finals"]:
+            spec = {field: trial[field] for field in store_mod.TRIAL_FIELDS}
+            path = self.store.record_finals(dict(spec, key=self.key), states, t_final, retcode)
+        return pct, path
+
+    def run_solve(self, leg, trial, history, build_s):
+        values = grid_mod.grid(trial)
+        pct, finals_path = NAN, ""
+        finals_read = False
+        for transfers in trial["transfers"]:
+            reason = abandon_reason(history, transfers, trial["ordinal"])
+            if reason is not None:
+                self.record(trial, transfers, leg.states, reason=reason, build_s=build_s)
+                print("SKIP {0}: {1}".format(label(trial, transfers), reason), flush=True)
+                continue
+            outcome, best, samples, result, exc, elapsed = self.time(leg, trial, values, transfers)
+            if outcome in ("timeout", "oom"):
+                history.setdefault(transfers, (outcome, trial["ordinal"]))
+            if result is not None and not finals_read:
+                try:
+                    pct, finals_path = self.finals(leg, trial, result)
+                    finals_read = True
+                except Exception as finals_exc:  # noqa: BLE001 - the timing row still stands
+                    print("FINALS {0}: {1}: {2}".format(label(trial), type(finals_exc).__name__,
+                                                        finals_exc), flush=True)
+            result = None
+            reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed)
+            self.record(trial, transfers, leg.states, min_ms=best, samples_ms=samples,
+                        errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason)
+            if outcome == "ok":
+                print("{0}: {1:.3f} ms over {2} attempts, errored {3:.1f}%".format(
+                    label(trial, transfers), best, len(samples), pct), flush=True)
+            else:
+                print("FAILED {0}: {1}".format(label(trial, transfers), reason), flush=True)
+        gc.collect()
+
+    # --------------------------------------------------------------- legs
+    def run_leg(self, name, members, progress_path):
+        solves = [t for t in members if t["kind"] == "solve"]
+        controller = members[0]["controller"]
+        if controller not in self.adapter.controllers:
+            self.record_failed_leg(solves, "error: unknown controller " + controller)
+            return
+        print("== leg " + name, flush=True)
+        leg = None
+        build_s = NAN
+        history = {}
+        try:
+            for trial in members:
+                write_progress(progress_path, trial)
+                if leg is None:
+                    # The first line builds the leg; a warm line also compiles, and a cold one is timed as build_s.
+                    cold = trial["kind"] == "warm" and bool(trial["cold"])
+                    started = timeit.default_timer()
+                    try:
+                        leg = self.adapter.build_leg(trial, cold)
+                        if trial["kind"] == "warm":
+                            self.adapter.compile(leg, trial, grid_mod.grid(trial))
+                    except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
+                        reason = failure_reason(classify(exc), exc)
+                        self.record_failed_leg(solves, reason, leg.states if leg else None)
+                        return
+                    if cold:
+                        build_s = timeit.default_timer() - started
+                        print("built {0} cold in {1:.1f}s".format(name, build_s), flush=True)
+                if trial["kind"] == "warm":
+                    continue
+                if trial["kind"] == "optimize":
+                    try:
+                        self.adapter.optimize(leg, trial, grid_mod.grid(trial))
+                    except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
+                        print("OPTIMIZE {0} failed: {1}".format(
+                            label(trial), failure_reason(classify(exc), exc)), flush=True)
+                    continue
+                self.run_solve(leg, trial, history, build_s)
+        finally:
+            if leg is not None:
+                leg.close()
+                gc.collect()
+
+    def run_file(self, path):
+        """Every leg of a trial file; returns 0."""
+        trial_list = trials_mod.read_jsonl(path)
+        progress_path = path + ".progress"
+        for name, members in legs_of(trial_list):
+            self.run_leg(name, members, progress_path)
+        return 0
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--trials", required=True)
+    parser.add_argument("--floor", action="store_true")
+    return parser.parse_args(argv)
+
+
+def main(argv, make_adapter, key=None, root=DATA_ROOT):
+    """Run a trial file: `make_adapter(key, root)` gives the package adapter; the dataset key is this machine's unless given."""
+    args = parse_args(argv)
+    key = key or dataset_key()
+    adapter = make_adapter(key, root)
+    runner = Runner(adapter, key, root, floor=args.floor)
+    return runner.run_file(args.trials)
+
+
+if __name__ == "__main__":
+    sys.exit("runner.py is an entry through a package adapter; see cubie_bench.py")

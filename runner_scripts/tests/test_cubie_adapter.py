@@ -200,8 +200,8 @@ class OptimizeStoreTests(unittest.TestCase):
 
         class Solver:
             def optimize(self, initial_values, parameters, duration,
-                         verbose):
-                self.seen = (initial_values.shape, duration)
+                         verbose, force=False):
+                self.seen = (initial_values.shape, duration, force)
                 return FakeResult(FakeLaunch(64, None, 2.5),
                                   {"blocksize": 64})
 
@@ -209,9 +209,17 @@ class OptimizeStoreTests(unittest.TestCase):
         row = adapter.optimize_point(
             solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
             "cubie", "k", "tsit5", "fixed", None)
-        self.assertEqual(solver.seen, ((3, 512), self.problem["duration"]))
+        self.assertEqual(solver.seen, ((3, 512), self.problem["duration"], False))
         self.assertEqual(row["n"], "512")
         self.assertEqual(float(row["best_ms"]), 2.5)
+        forced = adapter.optimize_point(
+            solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
+            "cubie", "k", "tsit5", "fixed", None, root=os.path.join(self.tmp, "elsewhere"),
+            force=True)
+        self.assertEqual(solver.seen[2], True)
+        self.assertEqual(forced["n"], "512")
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "elsewhere", "key=k", "package=cubie",
+                                                    "optimize.csv")))
 
 
 if __name__ == "__main__":

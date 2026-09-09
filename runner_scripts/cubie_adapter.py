@@ -269,17 +269,19 @@ def record_optimized(package, key, problem, algorithm, mode, setting, result,
 
 
 def optimize_point(solver, problem, initial_values, parameters, package, key,
-                   algorithm, mode, setting, states=None, verbose=True):
-    """Run Solver.optimize on the point's batch, apply the winner to the solver and record it."""
+                   algorithm, mode, setting, states=None, verbose=True,
+                   root=None, force=False):
+    """Run Solver.optimize on the point's batch, apply the winner to the solver and record it; `force` varies settings an earlier optimize applied."""
     row = as_problem(problem)
     result = solver.optimize(initial_values, parameters,
-                             duration=row["duration"], verbose=verbose)
+                             duration=row["duration"], verbose=verbose,
+                             force=force)
     if result.best is None:
         raise RuntimeError("optimize timed no launch for {0} {1} {2}".format(
             row.name, algorithm, mode))
     return record_optimized(package, key, row, algorithm, mode, setting,
                             result, states=states,
-                            n=int(initial_values.shape[1]))
+                            n=int(initial_values.shape[1]), root=root)
 
 
 def clear_optimized(package, key, algorithm=None, problem=None, root=None):
