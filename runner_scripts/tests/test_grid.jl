@@ -68,7 +68,7 @@ end
                 1:REFERENCE_N)
             @test mismatches == 0
             mismatches == 0 || println("$(problem): $(mismatches) mismatching points")
-            # The ne grid: 1024 points up to the Float64 v[1023] reproduce the first 1024 reference points.
+            # A 1024-point grid ending at the Float64 v[1023] reproduces the first 1024 reference points.
             point = grid_point(scale, lo, hi, REFERENCE_N, 1023)
             @test Float32(point) == reference[1024]
             prefix = grid_values(scale, lo, point, 1024)

@@ -1,8 +1,8 @@
-# The ensemble grid of section 1.2, reproducing runner_scripts/grid.py bit for bit.
+# The ensemble grid, bit for bit with runner_scripts/grid.py.
 
 const GRID_SCALES = ("linear", "log")
 
-"v[0..n-1] of the 1.2 formula: float64 arithmetic, the last point pinned to grid_max, cast to Float32."
+"v[0..n-1]: Float64 arithmetic, last point pinned to grid_max, cast to Float32."
 function grid_values(scale, grid_min, grid_max, n)
     scale in GRID_SCALES || throw(ArgumentError("grid_scale '$(scale)' is not linear or log"))
     n = Int(n)
@@ -27,7 +27,7 @@ function grid_values(scale, grid_min, grid_max, n)
     return Float32.(values)
 end
 
-"v[index] of the 1.2 formula in Float64, before the cast: the grid_max of a shorter grid that reproduces v[0..index] bit for bit."
+"v[index] in Float64 before the cast; the grid_max of a shorter grid that reproduces v[0..index]."
 function grid_point(scale, grid_min, grid_max, n, index)
     scale in GRID_SCALES || throw(ArgumentError("grid_scale '$(scale)' is not linear or log"))
     n, index = Int(n), Int(index)
@@ -41,7 +41,7 @@ function grid_point(scale, grid_min, grid_max, n, index)
     return 10.0^(a + index * ((b - a) / (n - 1)))
 end
 
-"The grid of a run spec (grid_scale, grid_min, grid_max, n, precision) in its precision: the Float32 values, widened back for float64 runs."
+"The grid of a run spec in its precision: the Float32 values, widened for float64 runs."
 function grid(spec)
     values = grid_values(spec["grid_scale"], spec["grid_min"], spec["grid_max"], spec["n"])
     precision = get(spec, "precision", "float32")

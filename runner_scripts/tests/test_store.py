@@ -1,4 +1,4 @@
-"""The parquet result store: the 1.2 spec columns, run_id and trial_id hashes against a hand fixture, upsert by run_id, floor, batches, the leg lock, finals in the run precision, covering, DuckDB reads across keys, and the CLI."""
+"""The parquet result store: spec columns, hashes against a hand fixture, upsert by run_id, floor, batches, the leg lock, finals in the run precision, covering, DuckDB reads across keys, and the CLI."""
 
 import hashlib
 import json
@@ -25,7 +25,7 @@ NAN = float("nan")
 STORE_PY = os.path.join(os.path.dirname(HERE), "store.py")
 KEY = "windows_RTX-4070-SUPER"
 
-# The hand fixture: the canonical text of section 1.2 written out in table order, hashed with sha1.
+# The hand fixture: the canonical spec text written out in table order, hashed with sha1.
 FIXTURE_HEAD = (
     '{"problem":"lorenz","system_params":"{}","duration":1,"precision":"float32",'
     '"parameter":"rho","grid_scale":"linear","grid_min":0,"grid_max":21,"n":8,'

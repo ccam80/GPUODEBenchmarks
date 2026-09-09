@@ -1,4 +1,4 @@
-"""The ensemble grid of section 1.2: v[i] in float64 by the linear or log formula, the last point pinned to grid_max, cast to grid_dtype; grid.jl and GPU_ODE_MPGOS/grid.cuh reproduce it bit for bit. `python grid.py write` refreshes tests/grids/<problem>_131072.npy from problems.csv."""
+"""The ensemble grid: v[i] in float64, linear or log, last point pinned to grid_max, cast to grid_dtype; grid.jl and GPU_ODE_MPGOS/grid.cuh match it bit for bit. `python grid.py write` refreshes tests/grids/<problem>_131072.npy."""
 
 import csv
 import math
@@ -32,7 +32,7 @@ def _check(scale, grid_min, grid_max, n):
 
 
 def grid_values(scale, grid_min, grid_max, n, grid_dtype="float32"):
-    """v[0..n-1] of the 1.2 formula as a grid_dtype array."""
+    """v[0..n-1] as a grid_dtype array."""
     if grid_dtype not in GRID_DTYPES:
         raise ValueError("grid_dtype '{0}' is not float32".format(grid_dtype))
     lo, hi, n = _check(scale, grid_min, grid_max, n)
@@ -43,7 +43,7 @@ def grid_values(scale, grid_min, grid_max, n, grid_dtype="float32"):
     else:
         a, b = math.log10(lo), math.log10(hi)
         step = (b - a) / (n - 1)
-        # Scalar pow goes through the C runtime, which is what the other languages call.
+        # Scalar pow: the C runtime, as in grid.jl and grid.cuh.
         values = np.fromiter((10.0 ** (a + i * step) for i in range(n)),
                              dtype=np.float64, count=n)
     values[n - 1] = hi
@@ -51,7 +51,7 @@ def grid_values(scale, grid_min, grid_max, n, grid_dtype="float32"):
 
 
 def grid_point(scale, grid_min, grid_max, n, index):
-    """v[index] of the 1.2 formula in float64, before the cast: the grid_max of a shorter grid that reproduces v[0..index] bit for bit (the float32 value does not)."""
+    """v[index] in float64 before the cast; the grid_max of a shorter grid that reproduces v[0..index]."""
     lo, hi, n = _check(scale, grid_min, grid_max, n)
     index = int(index)
     if not 0 <= index < n:
@@ -83,7 +83,7 @@ def grid_equal(a, b):
 
 
 def grid_contains(container, spec):
-    """1.6 (7): the container's grid equals the spec's, or has the same scale, min and dtype, a larger n, and v[n-1] float32-equal to the spec's grid_max."""
+    """The container's grid equals the spec's, or shares scale, min and dtype with a larger n and v[n-1] float32-equal to the spec's grid_max."""
     if container.get("grid_dtype", "float32") != spec.get("grid_dtype", "float32"):
         return False
     if container["grid_scale"] != spec["grid_scale"]:

@@ -1,6 +1,4 @@
-// grid.cuh against a numpy reference grid: test_grid <file.npy> <scale> <grid_min> <grid_max>.
-// Exit 0 when every float matches bit for bit; prints the first mismatches and exits 1 otherwise.
-// Built by runner_scripts/tests/test_grid.py with the Bench.cu host flags (-O3 -std=c++17).
+// test_grid <file.npy> <scale> <grid_min> <grid_max>: exit 0 when grid.cuh matches the npy bit for bit, else print mismatches and exit 1.
 
 #include <cstdint>
 #include <cstdio>
@@ -82,7 +80,7 @@ int main(int argc, char** argv)
 			std::printf("%zu of %d points differ\n", mismatches, n);
 			return 1;
 		}
-		// The ne grid: 1024 points up to the double v[1023] reproduce the first 1024 reference points.
+		// A 1024-point grid ending at the double v[1023] reproduces the first 1024 reference points.
 		if (n >= 1024)
 		{
 			double point = GridPoint(scale, grid_min, grid_max, n, 1023);

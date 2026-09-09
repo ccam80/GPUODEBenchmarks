@@ -1,5 +1,4 @@
-// The ensemble grid of section 1.2, reproducing runner_scripts/grid.py bit for bit.
-// Host code: every point is built in double and cast to float; double runs widen the float values back.
+// The ensemble grid, bit for bit with runner_scripts/grid.py: host code, built in double, cast to float.
 #pragma once
 
 #include <cmath>
@@ -40,7 +39,7 @@ inline std::vector<float> GridValues(const std::string& scale, double grid_min, 
 	return out;
 }
 
-// v[index] in double, before the cast: the grid_max of a shorter grid that reproduces v[0..index] bit for bit.
+// v[index] in double before the cast; the grid_max of a shorter grid that reproduces v[0..index].
 inline double GridPoint(const std::string& scale, double grid_min, double grid_max, int n, int index)
 {
 	if (n < 2)

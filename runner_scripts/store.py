@@ -1,4 +1,4 @@
-"""The result store: one parquet file per leg under data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet, finals beside it as finals/<trial_id>.parquet, DuckDB over the tree. A row is identified by the run spec of section 1.2, hashed to run_id (the replace key) and trial_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per leg, finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key) and trial_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
 
 import argparse
 import csv
@@ -27,7 +27,7 @@ GRID_SCALES = ("linear", "log")
 GRID_DTYPES = ("float32",)
 TRANSFERS = ("both", "none")
 
-# The run spec of 1.2 in table order; the type drives validation and the canonical hash text.
+# The run spec in table order; the type drives validation and the hash text.
 SPEC_TYPES = (
     ("problem", "name"), ("system_params", "json"), ("duration", "float"),
     ("precision", "str"),
@@ -401,7 +401,7 @@ class Store:
         return "nan"
 
     def covering(self, spec, finals=False):
-        """1.6 (8): the row of the spec's run_id; with finals, a row carrying finals whose spec matches apart from the grid and whose grid contains the spec's (1.6 (7)). None otherwise."""
+        """The row of the spec's run_id; with finals, a finals row matching the spec apart from the grid whose grid contains the spec's. None otherwise."""
         if not finals:
             rows = self.rows(run_id=run_id(spec))
             return rows[0] if rows else None

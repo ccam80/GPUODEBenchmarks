@@ -21,7 +21,7 @@ NVCC_FLAGS = ["-O3", "-std=c++17"]
 
 
 def numpy_reference(scale, lo, hi, n):
-    """The 1.2 formula written out in numpy, independently of grid.py."""
+    """The grid formula written out in numpy, independently of grid.py."""
     i = np.arange(n, dtype=np.float64)
     if scale == "linear":
         v = lo + i * ((hi - lo) / (n - 1))
@@ -110,7 +110,7 @@ class ContainmentTests(unittest.TestCase):
             self.assertTrue(grid.grid_contains(full, prefix), problem)
             self.assertFalse(grid.grid_contains(prefix, full), problem)
             np.testing.assert_array_equal(grid.grid(prefix), values[:1024], err_msg=problem)
-        # The float32 point as grid_max is contained too, but does not reproduce the prefix everywhere.
+        # The float32 point as grid_max is contained but does not reproduce the prefix.
         values = grid.grid_values("linear", 0.0, 21.0, grid.REFERENCE_N)
         widened = dict(grid_scale="linear", grid_min=0.0, grid_max=float(values[1023]),
                        n=1024, grid_dtype="float32")
