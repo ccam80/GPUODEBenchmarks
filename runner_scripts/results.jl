@@ -1,4 +1,4 @@
-# The result store for the Julia writers: rows serialise with JSON.jl and land through store.py.
+# The result store for the Julia writers: rows carry the run spec of section 1.2, serialise with JSON.jl and land through store.py, which validates, hashes and writes.
 
 using Dates
 using JSON
@@ -7,6 +7,14 @@ const STORE_CLI = joinpath(@__DIR__, "store.py")
 const STORE_REPO_ROOT = dirname(@__DIR__)
 const STORE_PACKAGES = ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp",
     "julia_gpu", "julia_cpu")
+
+# The run spec of 1.2 in table order; trial_id hashes every field but transfers and key.
+const STORE_SPEC_FIELDS = ("problem", "system_params", "duration", "precision",
+    "parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype",
+    "algorithm", "controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains",
+    "newton_atol", "newton_rtol", "transfers", "package", "key")
+const STORE_TRIAL_FIELDS = Tuple(f for f in STORE_SPEC_FIELDS if !(f in ("transfers", "key")))
+const STORE_FINALS_FIELDS = (STORE_TRIAL_FIELDS..., "key")
 
 # An explicit interpreter wins over the resolved one; the test script sets it from its argument.
 const STORE_PYTHON = Ref("")
@@ -48,27 +56,39 @@ function store_suite_rev(repo_root = STORE_REPO_ROOT)
     return rev * (dirty ? "-dirty" : "")
 end
 
-"One complete store row (section 1.2): the identity as given, every value column defaulted."
-function store_row(package, key, problem, algorithm, mode, setting_kind, setting, n,
-        states; tier = "default", transfers = "both", min_ms = NaN, samples_ms = Float64[],
-        errored_pct = NaN, error = NaN, build_s = NaN, reason = "", finals = "",
-        package_version = "", suite_rev = "", recorded_utc = nothing)
-    package in STORE_PACKAGES || throw(ArgumentError("package '$(package)' is not a store package"))
-    stamp = recorded_utc === nothing ? Dates.now(Dates.UTC) : recorded_utc
-    return Dict{String, Any}(
-        "package" => String(package), "key" => String(key), "problem" => String(problem),
-        "algorithm" => String(algorithm), "mode" => String(mode),
-        "setting_kind" => String(setting_kind), "setting" => Float64(setting),
-        "n" => Int(n), "states" => Int(states), "tier" => String(tier),
-        "transfers" => String(transfers), "min_ms" => Float64(min_ms),
-        "samples_ms" => Float64[samples_ms...], "errored_pct" => Float64(errored_pct),
-        "error" => Float64(error), "build_s" => Float64(build_s),
-        "reason" => String(reason), "finals" => String(finals),
-        "package_version" => String(package_version), "suite_rev" => String(suite_rev),
-        "recorded_utc" => Dates.format(stamp, "yyyy-mm-ddTHH:MM:SS.sss") * "Z")
+"The named spec fields of a trial or row Dict (extra keys ignored); every one must be present and the package known."
+function store_spec(fields, names = STORE_SPEC_FIELDS)
+    missing = [f for f in names if !haskey(fields, f)]
+    isempty(missing) || throw(ArgumentError("spec incomplete: " * join(missing, ", ")))
+    if "package" in names
+        fields["package"] in STORE_PACKAGES ||
+            throw(ArgumentError("package '$(fields["package"])' is not a store package"))
+    end
+    return Dict{String, Any}(f => fields[f] for f in names)
 end
 
-"Record rows (a Dict or a vector of them) through the store CLI; floor keeps the lower finite time."
+"One complete store row (section 1.2): the spec fields of `spec` (a trial or spec Dict) with the value columns; store.py hashes run_id and trial_id."
+function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_pct = NaN,
+        error = NaN, reference = "", build_s = NaN, reason = "", finals = "",
+        package_version = "", suite_rev = "", recorded_utc = nothing)
+    row = store_spec(spec)
+    stamp = recorded_utc === nothing ? Dates.now(Dates.UTC) : recorded_utc
+    row["states"] = Int(states)
+    row["min_ms"] = Float64(min_ms)
+    row["samples_ms"] = Float64[samples_ms...]
+    row["errored_pct"] = Float64(errored_pct)
+    row["error"] = Float64(error)
+    row["reference"] = String(reference)
+    row["build_s"] = Float64(build_s)
+    row["reason"] = String(reason)
+    row["finals"] = String(finals)
+    row["package_version"] = String(package_version)
+    row["suite_rev"] = String(suite_rev)
+    row["recorded_utc"] = Dates.format(stamp, "yyyy-mm-ddTHH:MM:SS.sss") * "Z"
+    return row
+end
+
+"Record rows (a Dict or a vector of them) through the store CLI in one batch; floor keeps the lower finite time."
 function store_record(rows; root = nothing, floor = false)
     batch = rows isa AbstractDict ? [rows] : collect(rows)
     args = ["record", "-"]
@@ -78,12 +98,21 @@ function store_record(rows; root = nothing, floor = false)
     return nothing
 end
 
-"Write the finals file of a trial (finals is rows x states, converged one flag per row); returns the path relative to the package dir."
-function store_finals(identity, finals::AbstractMatrix, converged; root = nothing)
+function _with_spec_file(f, spec, names)
+    path = tempname() * ".json"
+    write(path, JSON.json(store_spec(spec, names); allownan = true))
+    try
+        return f(path)
+    finally
+        rm(path; force = true)
+    end
+end
+
+"Write the finals file of a trial (finals is n x states in grid order, converged one flag per row); returns finals/<trial_id>.parquet relative to the package dir."
+function store_finals(spec, finals::AbstractMatrix, converged; root = nothing)
     size(finals, 1) == length(converged) ||
         throw(ArgumentError("converged has one flag per finals row"))
-    ident_path, csv_path = tempname() * ".json", tempname() * ".csv"
-    write(ident_path, JSON.json(identity; allownan = true))
+    csv_path = tempname() * ".csv"
     open(csv_path, "w") do io
         println(io, join(vcat(["traj"], ["s$(k)" for k in 1:size(finals, 2)], ["converged"]), ","))
         for (index, row) in enumerate(eachrow(finals))
@@ -92,22 +121,26 @@ function store_finals(identity, finals::AbstractMatrix, converged; root = nothin
         end
     end
     try
-        return String(strip(read(_store_cmd(["finals", ident_path, csv_path]; root = root), String)))
+        return _with_spec_file(spec, STORE_FINALS_FIELDS) do spec_path
+            String(strip(read(_store_cmd(["finals", spec_path, csv_path]; root = root), String)))
+        end
     finally
-        rm(ident_path; force = true)
         rm(csv_path; force = true)
     end
 end
 
-"\"absent\", \"nan\" or \"finite\" for the rows carrying the identity columns given."
-function store_status(identity; root = nothing)
-    ident_path = tempname() * ".json"
-    write(ident_path, JSON.json(identity; allownan = true))
-    try
-        return String(strip(read(_store_cmd(["status", ident_path]; root = root), String)))
-    finally
-        rm(ident_path; force = true)
+"(trial_id, run_id) of a spec, hashed by store.py."
+function store_hash(spec; root = nothing)
+    ids = _with_spec_file(spec, STORE_SPEC_FIELDS) do spec_path
+        JSON.parse(read(_store_cmd(["hash", spec_path]; root = root), String))
     end
+    return (String(ids["trial_id"]), String(ids["run_id"]))
+end
+
+"\"absent\", \"nan\" or \"finite\" for the row of a run_id (or of a spec's run_id)."
+function store_status(run; root = nothing)
+    id = run isa AbstractDict ? store_hash(run; root = root)[2] : String(run)
+    return String(strip(read(_store_cmd(["status", id]; root = root), String)))
 end
 
 "The CSV text of a SQL statement over the `results` view."
