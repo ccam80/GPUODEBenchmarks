@@ -308,152 +308,105 @@ Each script under `analyses/` takes `--set <name>` (repeatable), expands it with
 - A packet replaces what it touches: no compatibility shim, no dual path.
 - `main` may not run between packets.
 
-### P1 base cleanup
-Merged (#106).
-
-### P2 store library
-Merged (#107) on the earlier identity. Reopened as P2b.
-
-### P2b store on the run spec
+### P1 store and grid
 Depends on: nothing.
-`store.py` and `results.jl` carry the 1.2 columns, `run_id`, `trial_id`,
-`reference`, `states`, the 1.3 file names, `hash`, `covering`; `mode`,
-`setting_kind`, `setting`, `tier`, `grid` gone. `runner_scripts/grid.py`
-implements the 1.2 formula and writes the numpy reference file
-`runner_scripts/tests/grids/<problem>_131072.npy`; `grid.jl` and a C++
-function reproduce it; `test_store.py` and the shim test rewritten.
-Done: tests pass; the Julia and C++ grids equal the numpy file bit for bit.
-Review: identity is exactly 1.2; hashes match a fixture computed by hand.
+- `runner_scripts/store.py` and `results.jl`: the 1.2 columns, `run_id`, `trial_id`, `reference`, `states`, the 1.3 file names, `hash`, `covering`, `record_batch`.
+- `runner_scripts/grid.py`: the 1.2 formula; writes `runner_scripts/tests/grids/<problem>_131072.npy`; `grid.jl` and `GPU_ODE_MPGOS/grid.cuh` reproduce it.
+- `test_store.py`, the Julia shim test and a grid test per language.
+Done: tests pass; Julia and C++ grids equal the numpy files bit for bit.
+Review: the identity is exactly 1.2; hashes match a hand-computed fixture.
 
-### P3 data conversion
-Open as #110 on the earlier identity. Reopened as P3b.
-
-### P3b conversion on the run spec
-Depends on: P2b.
-`convert_legacy.py` maps the legacy CSV trees (main before #110) to 1.2:
+### P2 data conversion
+Depends on: P1.
+`runner_scripts/convert_legacy.py` maps the CSV trees under `data/` to 1.2 and deletes them; one data commit for both keys.
 
 | legacy | spec |
 |---|---|
-| `mode = fixed`, `setting` | `controller = fixed`, `dt = setting`, atol, rtol, dt_min, dt_max NaN |
-| `mode = adaptive`, `setting` | `controller = default`, `atol = rtol = setting`, `dt = duration * 2^-10`, `dt_min = duration * 1e-6` (cubie, julia_cpu), NaN (jax, julia_gpu, cpp), `dt_max` NaN |
+| `mode = fixed`, `setting` | `controller = fixed`, `dt = setting`; atol, rtol, dt_min, dt_max NaN |
+| `mode = adaptive`, `setting` | `controller = default`, `atol = rtol = setting`, `dt = duration * 2^-10`; `dt_min = duration * 1e-6` for cubie and julia_cpu, NaN for jax, julia_gpu, cpp; `dt_max` NaN |
 | implicit fixed rows | `newton_atol = newton_rtol = 1e-6` |
-| implicit adaptive rows | `newton_atol = newton_rtol = setting` (cubie, jax, julia_cpu); NaN (julia_gpu) |
+| implicit adaptive rows | `newton_atol = newton_rtol = setting` for cubie, jax, julia_cpu; NaN for julia_gpu |
 | explicit rows | newton NaN |
 | `problem`, `states` | `system_params = {"states": states}` for lorenz96, `{}` otherwise; `duration`, `parameter`, `grid_scale`, `grid_min`, `grid_max` from `problems.csv`; `grid_dtype = float32` |
-| NE julia rows | `n = 1024`, `grid_max = v[1023]` of the 131072 grid; `precision = float32`; finals kept; `reason = untimed` |
-| goldens | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol`, dt fields NaN, `n = 131072`, finals kept with `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
-| overlap tiers `fixed`, `julia` | `controller = fixed` / `default`; `pi` rows `controller = pi`, `gains` from `pi_tier_controller(order)` |
+| `data/numerical_equivalence/julia` | julia_cpu rows, `n = 1024`, `grid_max = v[1023]` of the 131072 grid, finals kept, `reason = untimed`; `controller_constants.csv` to `controllers/<problem>.csv` |
+| `data/numerical/golden_*` | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol`, dt fields NaN, `n = 131072`, finals kept, `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
+| overlap `julia_timings.csv` tiers `fixed`, `julia` | `controller = fixed` / `default`; `golden_rmse` to `error`; `errored_pct` from the metrics counts |
+| `data/numerical/<key>/<problem>/{jax,pytorch,myokit_cuda}.csv` | finals on the n = 32768 rows: jax tsit5 fixed, pytorch classical-rk4 fixed, myokit_cuda euler fixed |
 | `julia` | `julia_gpu` |
+| rows meeting by `run_id` | the row with samples wins, then the later `recorded_utc`; NaN and empty values fill from the loser |
 
-Drops as in #110: every `cpp` row and `mpgos*.csv`; wp rows with
-`transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap
-`numerical` phase. `data/numerical/golden_*` deleted after conversion. One data
-commit for both keys.
-Done: DuckDB counts per (key, package) equal the script's counts; every
-converted row hashes to the `run_id` `sets.py` produces for the matching set
-member (checked for the perf, wp, ne and golden sets).
-Review: no row invented; the drop and mapping tables reproduced in the PR.
+Dropped: every `cpp` row and `mpgos*.csv`; wp rows with `transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap `numerical` phase, failures and derived tables.
+Done: DuckDB counts per (key, package) equal the script's counts; every converted perf, wp, ne and golden row hashes to the `run_id` `sets.py` produces for it.
+Review: no row invented; the mapping and drop counts reproduced in the PR body.
 
-### P4 trial model and entry point
-Open as #113 on the earlier identity. Reopened as P4b.
-
-### P4b sets, trials and entry point
-Depends on: P2b.
-`runner_scripts/sets.py` (schema, expansion, merge, reference and reuse rules
-of 1.6), the seven set files, `trials.py` (1.4 record, JSONL, legs, ordinals),
-`bench.py` (1.6 CLI, run loop, exit-3 handling), `launch.py` runner registry,
-`algorithms.csv` and `problems.csv` per 1.7, `julia_algorithms.csv`.
-Delete: `--for`, `mode`, `tier`, `grid`, `NE_PACKAGES`, `OVERLAP_PACKAGES`,
-the `ne`, `ne_adaptive`, `julia_cpu`, `julia_gpu` columns, `resume.py`,
-`resume.jl`, the env-var contract, `protocol.toml` tables other than
-`[repeats]`, `[watchdog]`, `[optimize]`.
-Done: `test_sets.py` covers every shipped set's expansion counts, the grid_n
-max resolution, matched and pi resolution, merge, reference assignment, reuse
-against a scratch store, and the narrowing flags; `bench.py plan --set perf`
-prints counts.
+### P3 sets, trials, entry point
+Depends on: P1.
+- `runner_scripts/sets.py`: schema, expansion, merge, reference and reuse rules of 1.6; the seven set files under `sets/`.
+- `runner_scripts/trials.py`: the 1.4 record, JSONL, legs, ordinals.
+- `bench.py`: the 1.6 CLI, run loop, exit-3 handling; `launch.py` runner registry.
+- `algorithms.csv` and `problems.csv` per 1.7; `julia_algorithms.csv`.
+- Delete `resume.py`, `resume.jl`, `wp_common.parse_bench_args`, the `BENCH_*` environment contract, and every `protocol.toml` table but `[repeats]`, `[watchdog]`, `[optimize]`.
+Done: `test_sets.py` covers every shipped set's expansion counts, the grid_n max, matched and pi resolution, merge, reference assignment, reuse against a scratch store, the narrowing flags; `bench.py plan --set perf` prints counts.
 Review: no trial field outside 1.4; no runner reads a catalogue.
 
-### P5 runner core and cubie
-Depends on: P4b.
-`runner_scripts/runner.py`: the 1.5 loop on an adapter interface
-(`build_leg`, `solve`, `finals`, `compile`, `optimize`, `version`);
-`cubie_bench.py` reduced to that adapter, the controller resolved from
-`controller` and `gains`; `test_runner.py` with a fake adapter covering every
-outcome, the abandon rule, the reference scoring and numerical finals.
-Done: tests; `bench.py run --set perf,wp -p cubie -s lorenz -n 32` at tiny n
-on the 4070 and the rows read back.
-Review: the abandon rule is one function; warm uses `Solver.compile`;
-`reason` on every NaN row.
+### P4 runner core and cubie
+Depends on: P3.
+- `runner_scripts/runner.py`: the 1.5 loop on an adapter interface (`build_leg`, `solve`, `finals`, `compile`, `optimize`, `version`).
+- `cubie_bench.py` as that adapter; the controller built from `controller` and `gains`.
+- `test_runner.py` with a fake adapter: every outcome, the abandon rule, reference scoring, numerical finals.
+Done: tests; `bench.py run --set perf,wp -p cubie -s lorenz -n 32` on the 4070 and the rows read back.
+Review: the abandon rule is one function; warm uses `Solver.compile`; `reason` on every NaN row.
 
-### P6 jax, pytorch, myokit_cuda
-Depends on: P5. Adapters on `runner.py`; jax warm keeps `lower().compile()`;
-pytorch and myokit reject any `controller` but `fixed`.
+### P5 jax, pytorch, myokit_cuda
+Depends on: P4.
+Adapters on `runner.py`; jax warm keeps `lower().compile()`; pytorch and myokit reject any `controller` but `fixed`.
 Done: tests; tiny-n runs where the platform allows.
 
-### P7 julia_gpu
-Depends on: P4b; parallel with P5.
-`julia_driver.py` splits the trial file per leg, spawns
-`bench_ode_gpu.jl --trials <leg file>` under the GPU lock, applies exit-3
-abandon from each progress file. `bench_ode_gpu.jl` consumes trials, records
-through `results.jl`, warms at n = 8; `controller` other than `fixed` or
-`default` is rejected.
+### P6 julia_gpu
+Depends on: P3.
+- `julia_driver.py` splits the trial file per leg, spawns `bench_ode_gpu.jl --trials <leg file>` under the GPU lock, applies exit-3 abandon from each progress file.
+- `bench_ode_gpu.jl` consumes trials, records through `results.jl`, warms at n = 8, rejects `controller` other than `fixed` or `default`.
 Done: `test_julia_driver.py` on a fake julia; a tiny-n run on the 4070.
 
-### P8 julia_cpu and the golden
-Depends on: P4b; parallel with P5 and P7.
-`GPU_ODE_Julia/bench_ode_cpu.jl` from `ne_diffeq.jl`: trials in, `float32`
-and `float64` per the spec, timings and finals out, `controllers/<problem>.csv`
-written per problem, retcode to `converged`. `verify_references.jl` checks the
-MTK systems in Float64 against the published values; `reference_systems.jl`
-and `generate_golden.jl` go when it passes, else `reference_systems.jl`
-becomes the julia_cpu system module.
-Done: `bench.py run --set golden -s lorenz` reproduces the converted golden
-finals to float64 roundoff; the ne set at n = 1024 lands rows.
+### P7 julia_cpu and golden
+Depends on: P3.
+- `GPU_ODE_Julia/bench_ode_cpu.jl` from `ne_diffeq.jl`: trials in, `float32` and `float64` per spec, timings and finals out, `controllers/<problem>.csv` per problem, retcode to `converged`.
+- `verify_references.jl` checks the MTK systems in Float64 against the published values; on a pass `reference_systems.jl` and `generate_golden.jl` are deleted, else `reference_systems.jl` becomes the julia_cpu system module.
+Done: `bench.py run --set golden -s lorenz` reproduces the converted golden finals to float64 roundoff; the ne set at n = 1024 lands rows.
 
-### P9 cpp
-Depends on: P4b; parallel with P5, P7, P8.
-`run_ode_cpp.ps1` and `.sh` take `--trials`; `mpgos_trials.py` lists builds
-and points; `Bench.cu` records rows through the store CLI and builds its grid
-by the 1.2 formula.
+### P8 cpp
+Depends on: P3.
+`run_ode_cpp.ps1` and `.sh` take `--trials`; `mpgos_trials.py` lists builds and points; `Bench.cu` records through the store CLI and builds its grid with `grid.cuh`.
 Done: a tiny-n run on Windows lands rows; the Linux script mirrors it.
 
-### P10 analyses
-Depends on: P2b, P3b, P4b; parallel with P5 to P9.
-`analyses/` per 1.8 on `sets.py`. Delete `runner_scripts/plot/*.jl`,
-`compare_numerical_equivalence.py`, `compare_numerical_results.py`,
-`run_cubie_julia_overlap.py`, `runner_scripts/cubie_julia_overlap/`,
-`run_numerical_equivalence.*`, `ne_common.py`.
+### P9 analyses
+Depends on: P2, P3.
+`analyses/` per 1.8 on `sets.py`. Delete `runner_scripts/plot/*.jl`, `compare_numerical_equivalence.py`, `compare_numerical_results.py`, `run_cubie_julia_overlap.py`, `runner_scripts/cubie_julia_overlap/`, `run_numerical_equivalence.*`, `ne_common.py`.
 Done: every script runs on the converted data and writes figures.
 
-### P11 docs and tests
-Depends on: P5 to P10. README to about 100 wrapped lines; `SETUP.md`; this
-document reduced to section 1; dead tests and `results.py`, `wp_common`
-leftovers removed.
+### P10 docs and tests
+Depends on: P4 to P9.
+README to about 100 wrapped lines; `SETUP.md`; this document reduced to section 1; dead tests, `results.py` and `wp_common` leftovers removed.
 
-### P12 smoke and reruns
-Depends on: P11. `bench.py run --set perf,wp,ne,states,overlap -n 128` on the
-4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp
-and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; `ne` for
-julia_cpu on nand_gate and ring_modulator_index2; `golden` where a problem's
-converted golden is absent; cubie and cubie_mlir in full.
+### P11 smoke and reruns
+Depends on: P10.
+`bench.py run --set perf,wp,ne,states,overlap -n 128` on the 4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; `ne` for julia_cpu on nand_gate and ring_modulator_index2; `golden` where a problem's converted golden is absent; cubie and cubie_mlir in full.
 
 ## 3. Schedule
 
 ```
-wave 2:  P2b
-wave 3:  P3b | P4b                    (both need P2b)
-wave 4:  P5 | P7 | P8 | P9 | P10      (P5, P7, P8, P9 need P4b; P10 needs P3b and P4b)
-wave 5:  P6                           (needs P5)
-wave 6:  P11, then P12
+wave 1:  P1
+wave 2:  P2 | P3
+wave 3:  P4 | P6 | P7 | P8 | P9       (P4, P6, P7, P8 need P3; P9 needs P2 and P3)
+wave 4:  P5                           (needs P4)
+wave 5:  P10, then P11
 ```
 
-Conflict hotspots: `launch.py` (P4b owns the registry; runner packets add one
-line each), `store.py` (P2b only), the set files (P4b only).
+Conflict hotspots: `launch.py` (P3 owns the registry; runner packets add one line each), `store.py` (P1 only), the set files (P3 only).
 
 ## 4. Fixed decisions
 
-- Store: parquet leg files read with DuckDB; no database service; cross-machine
-  sync deferred.
+- Store: parquet leg files read with DuckDB; no database service; cross-machine sync deferred.
 - Analyses: Python and matplotlib only.
 - Suite interpreter: `GPU_ODE_CUBIE/venv`.
 - The golden is a julia_cpu float64 row, not a separate artefact.
