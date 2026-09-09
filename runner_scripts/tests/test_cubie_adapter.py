@@ -170,6 +170,28 @@ class OptimizeStoreTests(unittest.TestCase):
         with open(adapter.optimize_path("cubie", "k")) as handle:
             self.assertEqual(sum(1 for _ in handle) - 1, 1)
 
+    def test_controller_and_gains_separate_rows_of_one_algorithm(self):
+        result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
+        other = FakeResult(FakeLaunch(256, 1), {"blocksize": 256})
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
+                                 "adaptive", None, result, controller="default",
+                                 gains="{}")
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
+                                 "adaptive", None, other, controller="pi",
+                                 gains='{"integral_gain":0.3}')
+        shipped = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
+                                         "adaptive", 1e-5, controller="default",
+                                         gains="{}")
+        self.assertEqual(shipped["settings"]["blocksize"], 64)
+        tuned = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
+                                       "adaptive", 1e-5, controller="pi",
+                                       gains='{"integral_gain":0.3}')
+        self.assertEqual(tuned["settings"]["blocksize"], 256)
+        self.assertIsNone(adapter.load_optimized(
+            "cubie", "k", self.problem, "tsit5", "adaptive", 1e-5))
+        with open(adapter.optimize_path("cubie", "k")) as handle:
+            self.assertEqual(sum(1 for _ in handle) - 1, 2)
+
     def test_clear_narrows_by_algorithm_and_problem(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         for algorithm, problem in (("tsit5", "lorenz"), ("euler", "lorenz"),

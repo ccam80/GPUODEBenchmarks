@@ -90,6 +90,7 @@ class Leg:
 
     def __init__(self, package, key, root, trial, cold=False, solver_class=None):
         self.package, self.key, self.root = package, key, root
+        self.solver_class = solver_class
         self.row = problem_row(trial)
         self.precision = PRECISIONS[trial["precision"]]
         self.duration = float(trial["duration"])
@@ -118,16 +119,23 @@ class Leg:
         self.applied = {key: trial[key] for key in STEPPING}
 
     def apply(self, trial):
-        """Update the solver when a trial's stepping differs from the one in force; the resident inputs are dropped with the kernel."""
+        """Follow a trial's stepping: a changed controller or gains rebuilds the solver, changed steps or tolerances update it; either drops the resident inputs with the kernel."""
         stepping = {key: trial[key] for key in STEPPING}
         if all(_same(stepping[key], self.applied[key]) for key in STEPPING):
             return
         self.host_result = None
-        updates = stepping_kwargs(trial)
-        updates.update(gains_of(trial))
-        self.solver.update(updates)
-        self.applied = stepping
+        self.grid_arrays = None
+        self.grid_n = None
         self.resident_n = None
+        if stepping["controller"] != self.applied["controller"] \
+                or stepping["gains"] != self.applied["gains"]:
+            self.solver.close()
+            self.solver = None
+            gc.collect()
+            self.solver = make_solver(self.system, trial, self.solver_class)
+        else:
+            self.solver.update(stepping_kwargs(trial))
+        self.applied = stepping
 
     def grid(self, values):
         """(initial_values, parameters) arrays for a grid of the swept parameter; rebuilt only when n changes."""
@@ -208,7 +216,8 @@ class CubieAdapter:
         mode, setting = optimize_setting(trial)
         row = adapter.optimize_point(leg.solver, leg.row, initials, parameters, self.package,
                                      self.key, trial["algorithm"], mode, setting,
-                                     states=leg.row["states"], root=self.root, force=True)
+                                     states=leg.row["states"], root=self.root, force=True,
+                                     controller=trial["controller"], gains=trial["gains"])
         print("optimized {0}: {1}".format(runner.label(trial), row["label"]), flush=True)
 
     def solve(self, leg, trial, values, transfers):

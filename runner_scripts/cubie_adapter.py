@@ -14,9 +14,9 @@ SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
 PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "algorithm", "mode",
-                   "setting_kind", "setting", "states", "n", "label",
-                   "best_ms", "blocksize", "resident_blocks", "settings",
-                   "recorded_utc")
+                   "controller", "gains", "setting_kind", "setting", "states",
+                   "n", "label", "best_ms", "blocksize", "resident_blocks",
+                   "settings", "recorded_utc")
 
 # Controller keys a caller may pass; everything else in a defaults table configures the step.
 CONTROLLER_KEYS = ("step_controller", "integral_gain", "proportional_gain",
@@ -168,14 +168,16 @@ def optimize_path(package, key, root=None):
     return os.path.join(directory, "optimize.csv")
 
 
-def _ident(package, key, problem, algorithm, mode, setting, states):
-    """The optimize row identity; a row recorded without a setting serves every stepping of its leg."""
+def _ident(package, key, problem, algorithm, mode, setting, states,
+           controller="", gains=""):
+    """The optimize row identity; a row recorded without a setting serves every stepping of its leg. `controller` and `gains` separate the controllers one algorithm runs under."""
     row = as_problem(problem)
     kind = "dt" if mode == "fixed" else "tol"
     text = "" if setting is None else "{0:.10g}".format(float(setting))
     return {"package": package, "key": key, "problem": row.name,
-            "algorithm": algorithm, "mode": mode, "setting_kind": kind,
-            "setting": text,
+            "algorithm": algorithm, "mode": mode,
+            "controller": controller or "", "gains": gains or "",
+            "setting_kind": kind, "setting": text,
             "states": str(int(row["states"] if states is None else states))}
 
 
@@ -230,10 +232,11 @@ def _decode(text):
 
 
 def load_optimized(package, key, problem, algorithm, mode, setting,
-                   states=None, root=None):
+                   states=None, root=None, controller="", gains=""):
     """{'settings', 'resident_blocks'} recorded for a point, or None."""
     path = optimize_path(package, key, root)
-    ident = _ident(package, key, problem, algorithm, mode, setting, states)
+    ident = _ident(package, key, problem, algorithm, mode, setting, states,
+                   controller, gains)
     with _Lock(path):
         recorded = _load(path)
     rows = [row for row in recorded if _same(row, ident)]
@@ -248,10 +251,11 @@ def load_optimized(package, key, problem, algorithm, mode, setting,
 
 
 def record_optimized(package, key, problem, algorithm, mode, setting, result,
-                     states=None, n=None, root=None):
+                     states=None, n=None, root=None, controller="", gains=""):
     """Replace the optimize row for a point with the result's best launch."""
     path = optimize_path(package, key, root)
-    ident = _ident(package, key, problem, algorithm, mode, setting, states)
+    ident = _ident(package, key, problem, algorithm, mode, setting, states,
+                   controller, gains)
     best = result.best
     row = dict(ident, n="" if n is None else str(int(n)), label=best.label,
                best_ms="{0:.6g}".format(best.best_ms),
@@ -270,7 +274,7 @@ def record_optimized(package, key, problem, algorithm, mode, setting, result,
 
 def optimize_point(solver, problem, initial_values, parameters, package, key,
                    algorithm, mode, setting, states=None, verbose=True,
-                   root=None, force=False):
+                   root=None, force=False, controller="", gains=""):
     """Run Solver.optimize on the point's batch, apply the winner to the solver and record it; `force` varies settings an earlier optimize applied."""
     row = as_problem(problem)
     result = solver.optimize(initial_values, parameters,
@@ -281,7 +285,8 @@ def optimize_point(solver, problem, initial_values, parameters, package, key,
             row.name, algorithm, mode))
     return record_optimized(package, key, row, algorithm, mode, setting,
                             result, states=states,
-                            n=int(initial_values.shape[1]), root=root)
+                            n=int(initial_values.shape[1]), root=root,
+                            controller=controller, gains=gains)
 
 
 def clear_optimized(package, key, algorithm=None, problem=None, root=None):

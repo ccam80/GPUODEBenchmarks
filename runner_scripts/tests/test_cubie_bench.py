@@ -256,10 +256,23 @@ class LegTests(AdapterCase):
         self.assertEqual(leg.solver.updates, [{"step_controller": "fixed", "dt": 2.0 ** -11}])
         # The update dropped the resident inputs, so the device solve uploaded through a host solve.
         self.assertEqual(leg.solver.calls[2:], [(8, False), (8, True)])
+        # A changed controller or gains rebuilds the solver so no earlier gain lingers.
+        old = leg.solver
         third = trial(**adaptive(controller="pi", gains='{"integral_gain":0.3}'), axis="tol")
         self.adapter.solve(leg, third, self.values(8), "both")
-        self.assertEqual(leg.solver.updates[-1], {"atol": 1e-5, "rtol": 1e-5, "dt": 2.0 ** -10,
-                                                  "step_controller": "pi", "integral_gain": 0.3})
+        self.assertTrue(old.closed)
+        self.assertIsNot(leg.solver, old)
+        self.assertEqual(len(FakeSolver.made), 2)
+        self.assertEqual(leg.solver.kwargs["step_controller"], "pi")
+        self.assertEqual(leg.solver.kwargs["atol"], 1e-5)
+        self.assertEqual(leg.solver.updates, [{"integral_gain": 0.3}])
+        self.assertEqual(leg.solver.calls, [(8, False)])
+        fourth = trial(**adaptive(controller="pi", gains='{"integral_gain":0.3}', atol=1e-6, rtol=1e-6),
+                       axis="tol", ordinal=1)
+        self.adapter.solve(leg, fourth, self.values(8), "both")
+        self.assertEqual(len(FakeSolver.made), 2)
+        self.assertEqual(leg.solver.updates[-1], {"atol": 1e-6, "rtol": 1e-6, "dt": 2.0 ** -10,
+                                                  "step_controller": "pi"})
         leg.close()
 
     def test_device_solves_reuse_the_host_solves_inputs_per_n(self):
@@ -296,7 +309,7 @@ class LegTests(AdapterCase):
         self.adapter.optimize(leg, line, self.values(64))
         self.assertEqual(leg.solver.optimized, [(64, 1.0, True)])
         tuned = cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -13,
-                                             root=self.root)
+                                             root=self.root, controller="fixed", gains="{}")
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
         leg.close()
@@ -304,10 +317,25 @@ class LegTests(AdapterCase):
         leg = self.adapter.build_leg(trial(axis="tol", **adaptive(atol=1e-4, rtol=1e-4)))
         self.adapter.optimize(leg, tol_line, self.values(64))
         self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
-                                                          root=self.root))
+                                                          root=self.root, controller="default", gains="{}"))
         self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-5,
-                                                       root=self.root))
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")))
+                                                       root=self.root, controller="default", gains="{}"))
+        # The controller and gains keep one algorithm's legs apart in the record.
+        pi_line = trial(n=64, kind="optimize", transfers=(), axis="tol",
+                        **adaptive(atol=1e-4, rtol=1e-4, controller="pi", gains='{"integral_gain":0.3}'))
+        self.adapter.optimize(leg, pi_line, self.values(64))
+        self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
+                                                          root=self.root, controller="default", gains="{}"))
+        self.assertIsNotNone(cubie_adapter.load_optimized(
+            "cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4, root=self.root, controller="pi",
+            gains='{"integral_gain":0.3}'))
+        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
+                                                       root=self.root, controller="pi", gains="{}"))
+        path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
+        with open(path) as handle:
+            lines = handle.read().splitlines()
+        self.assertEqual(len(lines) - 1, 3)
+        self.assertTrue(lines[0].startswith("package,key,problem,algorithm,mode,controller,gains,"))
         leg.close()
 
     def test_a_cold_leg_builds_in_a_fresh_cache_root_and_restores_it(self):
