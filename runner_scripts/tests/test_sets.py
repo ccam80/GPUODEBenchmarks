@@ -22,6 +22,7 @@ import trials  # noqa: E402
 from algorithms import load_algorithms  # noqa: E402
 from problems import load_problems  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
+DATA = os.path.join(ROOT, "data")
 OPTIMIZE_N = 262144
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
@@ -63,8 +64,23 @@ def problems_of(package):
     return [row for row in PROBLEMS.values() if row.supports(package)]
 
 
-def stepping_algorithms(loaded, index, package):
-    """The catalogue rows one stepping of a loaded set yields for a package: its list narrowed by capability, pi minus the shipped matches."""
+def matched_algorithms(package, names, problem):
+    """Adaptive algorithms whose julia_cpu controller row under data/ maps to a controller other than cubie's shipped one."""
+    import cubie_adapter
+    table = sets.controllers_table(KEY, problem, DATA)
+    out = []
+    for row in capable(package, "adaptive"):
+        if row.name not in names or row.name not in table:
+            continue
+        settings, _ = cubie_adapter.matched_controller(table[row.name], row["order"])
+        shipped = cubie_adapter.default_controller(row.name, row["family"], row["order"])
+        if settings is not None and not cubie_adapter.controllers_equal(settings, shipped):
+            out.append(row)
+    return out
+
+
+def stepping_algorithms(loaded, index, package, problem):
+    """The catalogue rows one stepping of a loaded set yields for a package and problem: its list narrowed by capability, pi and matched minus the shipped matches."""
     stepping = loaded["stepping"][index]
     kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
     names = [r.name for r in capable(package, kind)]
@@ -75,12 +91,12 @@ def stepping_algorithms(loaded, index, package):
     if stepping["controller"] == "pi":
         return pi_algorithms(package, names)
     if stepping["controller"] == "matched":
-        return []          # no controllers table under the test root
+        return matched_algorithms(package, names, problem)
     return [ALGORITHMS[n] for n in names]
 
 
-def leg_count(loaded, package):
-    return sum(len(stepping_algorithms(loaded, i, package)) for i in range(len(loaded["stepping"])))
+def leg_count(loaded, package, problem):
+    return sum(len(stepping_algorithms(loaded, i, package, problem)) for i in range(len(loaded["stepping"])))
 
 
 class ShippedSetTests(unittest.TestCase):
@@ -88,8 +104,7 @@ class ShippedSetTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.expanded = {name: sets.expand([name], KEY, root=os.path.join(tempfile.gettempdir(), "no-data"))
-                        for name in sets.set_names()}
+        cls.expanded = {name: sets.expand([name], KEY, root=DATA) for name in sets.set_names()}
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
     def test_the_four_sets_ship(self):
@@ -103,7 +118,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["finals"] for s in specs}, {False})
         self.assertNotIn("julia_cpu", by_package_kind(specs))
         loaded = sets.load_set("perf")
-        expected = {package: leg_count(loaded, package) * len(problems_of(package)) * len(PERF_N)
+        expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
         self.assertEqual(expected, {"cubie": 1536, "cubie_mlir": 1536, "jax": 360, "pytorch": 180,
@@ -165,7 +180,7 @@ class ShippedSetTests(unittest.TestCase):
         specs = [s for s in self.expanded["perf"] if s["stepping"] == "pi" and s["problem"] == "lorenz"
                  and s["package"] == "cubie" and s["n"] == 8]
         names = sorted(s["algorithm"] for s in specs)
-        self.assertEqual(names, sorted(r.name for r in stepping_algorithms(sets.load_set("perf"), 2, "cubie")))
+        self.assertEqual(names, sorted(r.name for r in stepping_algorithms(sets.load_set("perf"), 2, "cubie", "lorenz")))
         self.assertEqual(names, ["cash-karp-54", "rosenbrock23_sciml", "tsit5", "vern7"])
         for absent in ("kvaerno3", "kvaerno5"):
             self.assertNotIn(absent, names)
@@ -188,7 +203,7 @@ class ShippedSetTests(unittest.TestCase):
                          [4, 8, 16, 32, 64, 128])
         loaded = sets.load_set("states")
         self.assertNotIn("julia_cpu", loaded["set"]["packages"])
-        expected = {package: leg_count(loaded, package) * 6 for package in loaded["set"]["packages"]}
+        expected = {package: leg_count(loaded, package, "lorenz96") * 6 for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
         self.assertEqual(expected["cubie"], 96)
         self.assertEqual(expected["julia_gpu"], 54)
@@ -210,14 +225,18 @@ class ShippedSetTests(unittest.TestCase):
         expected = {}
         for package in loaded["set"]["packages"]:
             count = 0
-            for index, stepping in enumerate(loaded["stepping"]):
-                values = 13 if stepping["controller"] == "fixed" else len(TOLS)
-                count += len(stepping_algorithms(loaded, index, package)) * values
+            for problem in problems_of(package):
+                for index, stepping in enumerate(loaded["stepping"]):
+                    values = 13 if stepping["controller"] == "fixed" else len(TOLS)
+                    count += len(stepping_algorithms(loaded, index, package, problem.name)) * values
             if count:
-                expected[package] = count * len(problems_of(package))
+                expected[package] = count
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 3192, "cubie_mlir": 3192, "jax": 135, "cpp": 35,
-                                    "julia_gpu": 592, "julia_cpu": 2464})
+        # The cubie counts grow with the julia_cpu controller tables under data/; the others are fixed.
+        self.assertEqual({p: expected[p] for p in ("jax", "cpp", "julia_gpu", "julia_cpu")},
+                         {"jax": 135, "cpp": 35, "julia_gpu": 592, "julia_cpu": 2464})
+        matched = sum(1 for s in specs if s["stepping"] == "matched" and s["package"] == "cubie")
+        self.assertEqual(expected["cubie"], 3192 + matched)
         # No explicit algorithm at a fixed step, so the fixed-only explicit packages have no rows.
         self.assertEqual({ALGORITHMS[s["algorithm"]]["family"] for s in specs if s["controller"] == "fixed"},
                          {"dirk", "firk", "rosenbrock", "implicit"})
@@ -228,7 +247,9 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(kvaerno3, [2.0 ** -k for k in range(13, 0, -1)])
         self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
         built = self.trials["golden_grid"]
-        self.assertEqual(kind_counts(built, "cubie"), {"solve": 3192, "warm": 360, "optimize": 3192})
+        cubie = kind_counts(built, "cubie")
+        self.assertEqual(cubie["solve"], cubie["optimize"])
+        self.assertEqual(cubie["warm"], 360 + matched // len(TOLS))
         self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 2464, "warm": 256})
 
     def test_golden_grid_optimizes_before_every_solve(self):
@@ -417,7 +438,7 @@ class MergeAndNarrowTests(unittest.TestCase):
             original = getattr(cubie_adapter, name)
             setattr(cubie_adapter, name, getattr(FakeControllers, name))
             self.addCleanup(setattr, cubie_adapter, name, original)
-        self.root = os.path.join(tempfile.gettempdir(), "no-data")
+        self.root = DATA
 
     def test_a_trial_shared_by_two_sets_merges_transfers_and_finals(self):
         specs = sets.expand(["perf", "golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"])
