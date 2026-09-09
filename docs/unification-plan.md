@@ -88,7 +88,7 @@ Row schema: every spec column of 1.2 plus:
 Rules:
 - A record with the same `run_id` replaces the row; under `--floor` the lower finite `min_ms` stays and NaN never wins.
 - Absent rows are gaps; no placeholder rows.
-- A failed trial always has a `reason`; NaN `min_ms` with an empty `reason` is a finals-only row.
+- A runner records a `reason` on every failed trial; analyses treat NaN `min_ms` as untimed whatever the `reason`.
 - Finals file: `traj int32, s1..sk float32 (float64 for float64 runs), t_final float64, retcode string` (the package's failure code, empty on success), one row per grid value in grid order, all n rows.
 - Errored trajectory (`store.errored_mask`): a non-finite state, `t_final` off `duration` by over 1e-4 relative, or a non-empty `retcode`.
 - One finals file per `trial_id`, shared by the `both` and `none` rows, replaced on rerun.
