@@ -46,3 +46,6 @@ golden_ring_modulator.log*
 GPU_ODE_MPGOS/build_cache/
 GPU_ODE_MPGOS/protocol.h
 GPU_ODE_MYOKIT_CUDA/models/generated/
+
+# Trial files written by bench.py plan
+/trials/

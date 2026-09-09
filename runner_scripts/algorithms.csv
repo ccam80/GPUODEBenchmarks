@@ -1,24 +1,83 @@
-algorithm,display,family,order,fixed,adaptive,ne,ne_adaptive,julia_cpu,julia_gpu,notes
-euler,Euler,erk,1,cubie|cubie_mlir|jax|pytorch|myokit_cuda,,false,false,,,
-classical-rk4,RK4,erk,4,cubie|cubie_mlir|jax|pytorch|cpp,,false,false,,,
-tsit5,Tsit5,erk,5,cubie|cubie_mlir|jax|pytorch|julia,cubie|cubie_mlir|jax|julia,true,true,Tsit5(),GPUTsit5(),
-cash-karp-54,Cash-Karp 5(4),erk,5,,cubie|cubie_mlir|cpp,true,true,ExplicitRK(tableau = construct_cash_karp_54(Float32)),,published tableau via OrdinaryDiffEq ExplicitRK; constructors were removed from DiffEqDevTools 3.x
-rosenbrock23_sciml,Rosenbrock23,rosenbrock,2,cubie|cubie_mlir|julia,cubie|cubie_mlir|julia,true,true,Rosenbrock23(),GPURosenbrock23(autodiff=Val(false)),
-kvaerno3,Kvaerno3,dirk,3,cubie|cubie_mlir|jax|julia,cubie|cubie_mlir|jax|julia,true,true,Kvaerno3(),GPUKvaerno3(autodiff=Val(false)),
-radau_iia_5,Radau IIA 5,firk,5,cubie|cubie_mlir,cubie|cubie_mlir,true,true,RadauIIA5(),,
-bogacki-shampine-32,BS3,erk,3,,,true,true,BS3(),,
-dormand-prince-54,DP5,erk,5,,,true,true,DP5(),,
-fehlberg-45,Fehlberg 4(5),erk,5,,,true,true,ExplicitRK(tableau = construct_fehlberg_45(Float32)),,published tableau via OrdinaryDiffEq ExplicitRK; constructors were removed from DiffEqDevTools 3.x
-dormand-prince-853,DP8,erk,8,,,true,true,DP8(),,
-vern7,Vern7,erk,7,,,true,true,Vern7(),GPUVern7(),
-backwards_euler,Backward Euler,implicit,1,,,true,false,ImplicitEuler(),,
-crank_nicolson,Crank-Nicolson,implicit,2,,,true,true,Trapezoid(),,
-trapezoidal_dirk,Trapezoidal DIRK,dirk,2,,,true,false,Trapezoid(),,no embedded pair in cubie's ESDIRK trapezoidal tableau
-implicit_midpoint,Implicit midpoint,dirk,2,,,true,false,ImplicitMidpoint(),,Gauss-Legendre 2 tableau is errorless
-sdirk_2_2,SDIRK 2(2),dirk,2,,,true,false,SDIRK22(),,Alexander's tableau carries no error estimate in cubie
-l_stable_sdirk_4,L-stable SDIRK 4,dirk,4,,,true,true,Hairer4(),,
-radau_iia_3,Radau IIA 3,firk,3,,,true,true,RadauIIA3(),,
-radau_iia_9,Radau IIA 9,firk,9,,,true,true,RadauIIA9(),,
-ros3p,ROS3P,rosenbrock,3,,,true,true,ROS3P(),,
-rodas3p,Rodas3P,rosenbrock,3,,,true,true,Rodas3P(),,
-kvaerno5,Kvaerno5,dirk,5,,,true,true,Kvaerno5(),GPUKvaerno5(autodiff=Val(false)),
+algorithm,package,display,family,order,fixed,adaptive,newton
+euler,cubie,Euler,erk,1,true,false,false
+euler,cubie_mlir,Euler,erk,1,true,false,false
+euler,jax,Euler,erk,1,true,false,false
+euler,pytorch,Euler,erk,1,true,false,false
+euler,myokit_cuda,Euler,erk,1,true,false,false
+classical-rk4,cubie,RK4,erk,4,true,false,false
+classical-rk4,cubie_mlir,RK4,erk,4,true,false,false
+classical-rk4,jax,RK4,erk,4,true,false,false
+classical-rk4,pytorch,RK4,erk,4,true,false,false
+classical-rk4,cpp,RK4,erk,4,true,false,false
+tsit5,cubie,Tsit5,erk,5,true,true,false
+tsit5,cubie_mlir,Tsit5,erk,5,true,true,false
+tsit5,jax,Tsit5,erk,5,true,true,false
+tsit5,pytorch,Tsit5,erk,5,true,false,false
+tsit5,julia_gpu,Tsit5,erk,5,true,true,false
+tsit5,julia_cpu,Tsit5,erk,5,true,true,false
+cash-karp-54,cubie,Cash-Karp 5(4),erk,5,true,true,false
+cash-karp-54,cubie_mlir,Cash-Karp 5(4),erk,5,true,true,false
+cash-karp-54,cpp,Cash-Karp 5(4),erk,5,false,true,false
+cash-karp-54,julia_cpu,Cash-Karp 5(4),erk,5,true,true,false
+rosenbrock23_sciml,cubie,Rosenbrock23,rosenbrock,2,true,true,true
+rosenbrock23_sciml,cubie_mlir,Rosenbrock23,rosenbrock,2,true,true,true
+rosenbrock23_sciml,julia_gpu,Rosenbrock23,rosenbrock,2,true,true,false
+rosenbrock23_sciml,julia_cpu,Rosenbrock23,rosenbrock,2,true,true,true
+kvaerno3,cubie,Kvaerno3,dirk,3,true,true,true
+kvaerno3,cubie_mlir,Kvaerno3,dirk,3,true,true,true
+kvaerno3,jax,Kvaerno3,dirk,3,true,true,true
+kvaerno3,julia_gpu,Kvaerno3,dirk,3,true,true,false
+kvaerno3,julia_cpu,Kvaerno3,dirk,3,true,true,true
+radau_iia_5,cubie,Radau IIA 5,firk,5,true,true,true
+radau_iia_5,cubie_mlir,Radau IIA 5,firk,5,true,true,true
+radau_iia_5,julia_cpu,Radau IIA 5,firk,5,true,true,true
+bogacki-shampine-32,cubie,BS3,erk,3,true,true,false
+bogacki-shampine-32,cubie_mlir,BS3,erk,3,true,true,false
+bogacki-shampine-32,julia_cpu,BS3,erk,3,true,true,false
+dormand-prince-54,cubie,DP5,erk,5,true,true,false
+dormand-prince-54,cubie_mlir,DP5,erk,5,true,true,false
+dormand-prince-54,julia_cpu,DP5,erk,5,true,true,false
+fehlberg-45,cubie,Fehlberg 4(5),erk,5,true,true,false
+fehlberg-45,cubie_mlir,Fehlberg 4(5),erk,5,true,true,false
+fehlberg-45,julia_cpu,Fehlberg 4(5),erk,5,true,true,false
+dormand-prince-853,cubie,DP8,erk,8,true,true,false
+dormand-prince-853,cubie_mlir,DP8,erk,8,true,true,false
+dormand-prince-853,julia_cpu,DP8,erk,8,true,true,false
+vern7,cubie,Vern7,erk,7,true,true,false
+vern7,cubie_mlir,Vern7,erk,7,true,true,false
+vern7,julia_gpu,Vern7,erk,7,true,true,false
+vern7,julia_cpu,Vern7,erk,7,true,true,false
+backwards_euler,cubie,Backward Euler,implicit,1,true,false,true
+backwards_euler,cubie_mlir,Backward Euler,implicit,1,true,false,true
+backwards_euler,julia_cpu,Backward Euler,implicit,1,true,true,true
+crank_nicolson,cubie,Crank-Nicolson,implicit,2,true,true,true
+crank_nicolson,cubie_mlir,Crank-Nicolson,implicit,2,true,true,true
+crank_nicolson,julia_cpu,Crank-Nicolson,implicit,2,true,true,true
+trapezoidal_dirk,cubie,Trapezoidal DIRK,dirk,2,true,false,true
+trapezoidal_dirk,cubie_mlir,Trapezoidal DIRK,dirk,2,true,false,true
+trapezoidal_dirk,julia_cpu,Trapezoidal DIRK,dirk,2,true,false,true
+implicit_midpoint,cubie,Implicit midpoint,dirk,2,true,false,true
+implicit_midpoint,cubie_mlir,Implicit midpoint,dirk,2,true,false,true
+implicit_midpoint,julia_cpu,Implicit midpoint,dirk,2,true,false,true
+sdirk_2_2,cubie,SDIRK 2(2),dirk,2,true,false,true
+sdirk_2_2,cubie_mlir,SDIRK 2(2),dirk,2,true,false,true
+sdirk_2_2,julia_cpu,SDIRK 2(2),dirk,2,true,false,true
+l_stable_sdirk_4,cubie,L-stable SDIRK 4,dirk,4,true,true,true
+l_stable_sdirk_4,cubie_mlir,L-stable SDIRK 4,dirk,4,true,true,true
+l_stable_sdirk_4,julia_cpu,L-stable SDIRK 4,dirk,4,true,true,true
+radau_iia_3,cubie,Radau IIA 3,firk,3,true,true,true
+radau_iia_3,cubie_mlir,Radau IIA 3,firk,3,true,true,true
+radau_iia_3,julia_cpu,Radau IIA 3,firk,3,true,true,true
+radau_iia_9,cubie,Radau IIA 9,firk,9,true,true,true
+radau_iia_9,cubie_mlir,Radau IIA 9,firk,9,true,true,true
+radau_iia_9,julia_cpu,Radau IIA 9,firk,9,true,true,true
+ros3p,cubie,ROS3P,rosenbrock,3,true,true,true
+ros3p,cubie_mlir,ROS3P,rosenbrock,3,true,true,true
+ros3p,julia_cpu,ROS3P,rosenbrock,3,true,true,true
+rodas3p,cubie,Rodas3P,rosenbrock,3,true,true,true
+rodas3p,cubie_mlir,Rodas3P,rosenbrock,3,true,true,true
+rodas3p,julia_cpu,Rodas3P,rosenbrock,3,true,true,true
+kvaerno5,cubie,Kvaerno5,dirk,5,true,true,true
+kvaerno5,cubie_mlir,Kvaerno5,dirk,5,true,true,true
+kvaerno5,julia_gpu,Kvaerno5,dirk,5,true,true,false
+kvaerno5,julia_cpu,Kvaerno5,dirk,5,true,true,true

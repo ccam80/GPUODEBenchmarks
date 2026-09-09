@@ -1,4 +1,4 @@
-"""Timing, watchdog, golden-reference and CLI helpers shared by the Python bench scripts; constants come from protocol.toml."""
+"""Timing and watchdog helpers shared by the Python runners; the repeat schedule and the watchdog come from protocol.toml."""
 
 import os
 import sys
@@ -6,22 +6,12 @@ import threading
 
 import numpy as np
 
-from algorithms import (get_algorithm, ne_member, resolve_algorithms,
-                        resolve_modes)
-from problems import DEFAULT_PROBLEM, as_problem, resolve_problems
-from protocol import (N_WP, REPEAT_CAP, REPEAT_SCHEDULE,  # noqa: F401
-                      REPEAT_SPREAD, STATES_GRID, STATES_N, TIMING_TOL, TOLS,
+from protocol import (REPEAT_CAP, REPEAT_SCHEDULE, REPEAT_SPREAD,  # noqa: F401
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
-from results import wp_settings  # noqa: F401
 
 
 def run_watchdogged(run, on_breach):
-    """Run run(); when it never returns, run on_breach() and hard-exit.
-
-    The soft cap in timed_min_ms only sees a run that comes back, so a solve
-    that never returns needs this. Mirrors run_watchdogged in
-    runner_scripts/watchdog.jl.
-    """
+    """Run run(); when it never returns, run on_breach() and hard-exit with WATCHDOG_EXIT_CODE, as watchdog.jl does."""
     finished = threading.Event()
 
     def fire():
@@ -97,82 +87,3 @@ def timed_min_ms(run, repeats, on_breach=None, setup=None):
             floor, ceiling = repeat_bounds(timed[0], repeats)
         if repeats_done(timed, floor, ceiling):
             return min(timed) * 1000.0, result, samples
-
-
-def golden_path(problem=DEFAULT_PROBLEM):
-    """Path of the Float64 reference final states for a problem."""
-    return os.path.join(
-        "data", "numerical",
-        "golden_{0}_{1}.csv".format(as_problem(problem)["problem"], N_WP))
-
-
-def load_golden(problem=DEFAULT_PROBLEM):
-    """Load the Float64 golden final states, shape (N_WP, states)."""
-    row = as_problem(problem)
-    path = golden_path(row)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(
-            "{0} not found - generate it first with "
-            "`julia -t auto --project=. runner_scripts/golden/generate_golden.jl "
-            "--problem {1}`".format(path, row["problem"]))
-    golden = np.loadtxt(path, delimiter=",")
-    if golden.shape != (N_WP, row["states"]):
-        raise ValueError("golden reference has shape {0}, expected ({1}, {2})"
-                         .format(golden.shape, N_WP, row["states"]))
-    return golden
-
-
-def ensemble_error(final_states, golden):
-    """l2-at-final error over the ensemble, computed in float64."""
-    diff = np.asarray(final_states, dtype=np.float64) - golden
-    return float(np.sqrt(np.mean(diff ** 2)))
-
-
-def parse_bench_args(argv, framework):
-    """Parse <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>] into (ns, analysis, algorithms, problems, modes); wp and ne resolve against the work-precision membership."""
-    if not argv:
-        raise SystemExit("usage: <N|N,N,...>|wp|ne|states|warm[:N,N,...]|optimize "
-                         "[algorithm|all] [--problem <name|all>] "
-                         "[--mode <fixed|adaptive|all>]")
-    if argv[0] in ("wp", "ne"):
-        analysis, ns = argv[0], [N_WP]
-    elif argv[0] == "optimize":
-        analysis, ns = "optimize", [N_WP]
-    elif argv[0] == "states":
-        # In states mode ns is the state-count grid; the ensemble is STATES_N.
-        analysis, ns = "states", list(STATES_GRID)
-    elif argv[0] == "warm" or argv[0].startswith("warm:"):
-        _, _, counts = argv[0].partition(":")
-        analysis = "warm"
-        ns = sorted(int(tok) for tok in counts.split(",")) if counts else []
-    else:
-        # Ascending, so each leg walks its sweep on kernels compiled once.
-        analysis = "times"
-        ns = sorted(int(tok) for tok in argv[0].split(","))
-    request = "all"
-    problem_request = "all"
-    mode_request = "all"
-    rest = list(argv[1:])
-    while rest:
-        tok = rest.pop(0)
-        if tok in ("--problem", "-s", "--mode"):
-            if not rest:
-                raise SystemExit("{0} requires a value".format(tok))
-            if tok == "--mode":
-                mode_request = rest.pop(0)
-            else:
-                problem_request = rest.pop(0)
-        elif tok.startswith("--problem="):
-            problem_request = tok.split("=", 1)[1]
-        elif tok.startswith("--mode="):
-            mode_request = tok.split("=", 1)[1]
-        else:
-            request = tok
-    algorithms = resolve_algorithms(request, framework,
-                                    wp=analysis in ("wp", "ne", "warm", "optimize"))
-    if analysis == "ne":
-        algorithms = [name for name in algorithms
-                      if any(ne_member(get_algorithm(name), mode)
-                             for mode in ("fixed", "adaptive"))]
-    problems = resolve_problems(problem_request, framework)
-    return ns, analysis, algorithms, problems, resolve_modes(mode_request)

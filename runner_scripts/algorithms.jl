@@ -1,9 +1,6 @@
-# The algorithm axis: one row per integration algorithm in algorithms.csv, mirrored by algorithms.py.
+# The Julia constructor table: one row per algorithm in julia_algorithms.csv with the OrdinaryDiffEq (julia_cpu) and DiffEqGPU (julia_gpu) constructor expressions.
 
-const ALGORITHMS_CSV = joinpath(@__DIR__, "algorithms.csv")
-
-const _MODES = ("fixed", "adaptive")
-const _BOOLS = ("ne", "ne_adaptive")
+const JULIA_ALGORITHMS_CSV = joinpath(@__DIR__, "julia_algorithms.csv")
 
 "Split one CSV line on the commas outside double quotes."
 function _csv_fields(line)
@@ -23,25 +20,17 @@ function _csv_fields(line)
     return fields
 end
 
-"Every algorithm in declaration order, as a vector of Dict{String,Any}."
+"Every row in declaration order, as a vector of Dict{String,String}."
 function load_algorithms()
-    lines = filter(!isempty, strip.(readlines(ALGORITHMS_CSV)))
+    lines = filter(!isempty, strip.(readlines(JULIA_ALGORITHMS_CSV)))
     header = String.(split(lines[1], ','))
-    algorithms = Dict{String, Any}[]
+    algorithms = Dict{String, String}[]
     for line in lines[2:end]
         fields = _csv_fields(line)
         while length(fields) < length(header)
             push!(fields, "")
         end
-        row = Dict{String, Any}(zip(header, fields))
-        for mode in _MODES
-            row[mode] = String.(filter(!isempty, split(row[mode], '|')))
-        end
-        for flag in _BOOLS
-            row[flag] = lowercase(strip(row[flag])) == "true"
-        end
-        row["order"] = parse(Int, row["order"])
-        push!(algorithms, row)
+        push!(algorithms, Dict{String, String}(zip(header, fields)))
     end
     return algorithms
 end
@@ -53,51 +42,13 @@ function get_algorithm(name)
     for row in load_algorithms()
         row["algorithm"] == name && return row
     end
-    error("unknown algorithm '$(name)' (expected one of: all, " *
+    error("unknown algorithm '$(name)' (expected one of: " *
           join(algorithm_names(), ", ") * ")")
 end
 
-"True when the framework times this algorithm, in the mode if given."
-function algorithm_supports(row, framework, mode = nothing)
-    modes = mode === nothing ? _MODES : (mode,)
-    return any(framework in row[m] for m in modes)
+"The constructor expression of an algorithm for a package (julia_cpu or julia_gpu); errors when the package has none."
+function julia_constructor(name, package)
+    expr = get_algorithm(name)[package]
+    isempty(expr) && error("no $(package) constructor for '$(name)'")
+    return expr
 end
-
-"Algorithm names a framework times, in declaration order."
-function supported_algorithms(framework, mode = nothing)
-    return [row["algorithm"] for row in load_algorithms()
-            if algorithm_supports(row, framework, mode)]
-end
-
-"Resolve \"all\" or a comma list to the algorithms a framework times."
-function resolve_algorithms(request, framework)
-    supported = supported_algorithms(framework)
-    (request === nothing || request == "" || request == "all") && return supported
-    names = [String(name) for name in split(request, ',') if !isempty(name)]
-    for name in names
-        get_algorithm(name)
-    end
-    return [name for name in names if name in supported]
-end
-
-"Rows named by \"all\" or a comma list; an unknown name errors."
-function _select(rows, request)
-    (request === nothing || request == "" || request == "all") && return rows
-    names = [String(name) for name in split(request, ',') if !isempty(name)]
-    for name in names
-        get_algorithm(name)
-    end
-    return [row for row in rows if row["algorithm"] in names]
-end
-
-"The numerical-equivalence rows, narrowed by name."
-ne_algorithms(request = "all") =
-    _select([row for row in load_algorithms() if row["ne"]], request)
-
-"The cubie-DiffEqGPU overlap rows, narrowed by name."
-overlap_algorithms(request = "all") =
-    _select([row for row in load_algorithms() if !isempty(row["julia_gpu"])],
-            request)
-
-"The fixed-step ne sweep excludes the erk family."
-runs_fixed_ne(row) = row["family"] != "erk"
