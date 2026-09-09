@@ -329,13 +329,13 @@ Depends on: P1.
 | explicit rows | newton NaN |
 | `problem`, `states` | `system_params = {"states": states}` for lorenz96, `{}` otherwise; `duration`, `parameter`, `grid_scale`, `grid_min`, `grid_max` from `problems.csv`; `grid_dtype = float32` |
 | `data/numerical_equivalence/julia` | julia_cpu rows, `n = 1024`, `grid_max = v[1023]` of the 131072 grid, finals kept, `reason = untimed`; `controller_constants.csv` to `controllers/<problem>.csv` |
-| `data/numerical/golden_*` | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol`, dt fields NaN, `n = 131072`, finals kept, `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
+| `data/numerical/golden_*` | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol` (ring_modulator: `RadauIIA9`, `1e-13`), dt fields NaN, `n = 131072`, finals kept, `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
 | overlap `julia_timings.csv` tiers `fixed`, `julia` | `controller = fixed` / `default`; `golden_rmse` to `error`; `errored_pct` from the metrics counts |
 | `data/numerical/<key>/<problem>/{jax,pytorch,myokit_cuda}.csv` | finals on the n = 32768 rows: jax tsit5 fixed, pytorch classical-rk4 fixed, myokit_cuda euler fixed |
 | `julia` | `julia_gpu` |
 | rows meeting by `run_id` | the row with samples wins, then the later `recorded_utc`; NaN and empty values fill from the loser |
 
-Dropped: every `cpp` row and `mpgos*.csv`; wp rows with `transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap `numerical` phase, failures and derived tables.
+Dropped: every `cpp` row and `mpgos*.csv`; every `nand_gate` row outside the golden; wp rows with `transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap `numerical` phase, failures and derived tables.
 Done: DuckDB counts per (key, package) equal the script's counts; every converted perf, wp, ne and golden row hashes to the `run_id` `sets.py` produces for it.
 Review: no row invented; the mapping and drop counts reproduced in the PR body.
 
@@ -390,7 +390,7 @@ README to about 100 wrapped lines; `SETUP.md`; this document reduced to section 
 
 ### P11 smoke and reruns
 Depends on: P10.
-`bench.py run --set perf,wp,ne,states,overlap -n 128` on the 4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; `ne` for julia_cpu on nand_gate and ring_modulator_index2; `golden` where a problem's converted golden is absent; cubie and cubie_mlir in full.
+`bench.py run --set perf,wp,ne,states,overlap -n 128` on the 4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; every set on `nand_gate`; `ne` for julia_cpu on ring_modulator_index2; cubie and cubie_mlir in full.
 
 ## 3. Schedule
 
