@@ -1,4 +1,5 @@
-// test_grid <file.npy> <scale> <grid_min> <grid_max>: exit 0 when grid.cuh matches the npy bit for bit, else print mismatches and exit 1.
+// test_grid <file.npy> <scale> <grid_min> <grid_max> [<v1023>]: exit 0 when grid.cuh matches the npy bit for bit (and, given the
+// 17-digit double v[1023], when the 1024-point grid ending there reproduces the first 1024 points), else print mismatches and exit 1.
 
 #include <cstdint>
 #include <cstdio>
@@ -48,9 +49,9 @@ static std::vector<float> ReadNpy(const std::string& path)
 
 int main(int argc, char** argv)
 {
-	if (argc != 5)
+	if (argc != 5 && argc != 6)
 	{
-		std::cerr << "usage: test_grid <file.npy> <linear|log> <grid_min> <grid_max>" << std::endl;
+		std::cerr << "usage: test_grid <file.npy> <linear|log> <grid_min> <grid_max> [<v1023>]" << std::endl;
 		return 2;
 	}
 	try
@@ -80,10 +81,15 @@ int main(int argc, char** argv)
 			std::printf("%zu of %d points differ\n", mismatches, n);
 			return 1;
 		}
-		// A 1024-point grid ending at the double v[1023] reproduces the first 1024 reference points.
-		if (n >= 1024)
+		// A 1024-point grid ending at the 17-digit double v[1023] reproduces the first 1024 reference points.
+		if (argc == 6)
 		{
-			double point = GridPoint(scale, grid_min, grid_max, n, 1023);
+			if (n < 1024)
+			{
+				std::printf("%d points hold no 1024 prefix\n", n);
+				return 1;
+			}
+			double point = std::strtod(argv[5], nullptr);
 			std::vector<float> prefix = GridValues(scale, grid_min, point, 1024);
 			if ((float)point != reference[1023])
 			{

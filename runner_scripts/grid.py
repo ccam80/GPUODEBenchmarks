@@ -51,7 +51,7 @@ def grid_values(scale, grid_min, grid_max, n, grid_dtype="float32"):
 
 
 def grid_point(scale, grid_min, grid_max, n, index):
-    """v[index] in float64 before the cast; the grid_max of a shorter grid that reproduces v[0..index]."""
+    """v[index] in float64 before the cast; written with 17 digits it is the grid_max of an index + 1 point grid that reproduces v[0..index]."""
     lo, hi, n = _check(scale, grid_min, grid_max, n)
     index = int(index)
     if not 0 <= index < n:
@@ -72,33 +72,6 @@ def grid(spec):
     values = grid_values(spec["grid_scale"], spec["grid_min"], spec["grid_max"],
                          spec["n"], spec.get("grid_dtype", "float32"))
     return values.astype(PRECISIONS[precision])
-
-
-def grid_equal(a, b):
-    """The two grid specs produce the same float32 values over the same n."""
-    if int(a["n"]) != int(b["n"]):
-        return False
-    return bool(np.array_equal(grid_values(a["grid_scale"], a["grid_min"], a["grid_max"], a["n"], a.get("grid_dtype", "float32")),
-                               grid_values(b["grid_scale"], b["grid_min"], b["grid_max"], b["n"], b.get("grid_dtype", "float32"))))
-
-
-def grid_contains(container, spec):
-    """The container's grid equals the spec's, or shares scale, min and dtype with a larger n and v[n-1] float32-equal to the spec's grid_max."""
-    if container.get("grid_dtype", "float32") != spec.get("grid_dtype", "float32"):
-        return False
-    if container["grid_scale"] != spec["grid_scale"]:
-        return False
-    if float(container["grid_min"]) != float(spec["grid_min"]):
-        return False
-    n_spec, n_container = int(spec["n"]), int(container["n"])
-    if n_container < n_spec:
-        return False
-    if n_container == n_spec:
-        return float(container["grid_max"]) == float(spec["grid_max"])
-    values = grid_values(container["grid_scale"], container["grid_min"],
-                         container["grid_max"], n_container,
-                         container.get("grid_dtype", "float32"))
-    return values[n_spec - 1] == np.float32(spec["grid_max"])
 
 
 def problem_grids(path=PROBLEMS_CSV):

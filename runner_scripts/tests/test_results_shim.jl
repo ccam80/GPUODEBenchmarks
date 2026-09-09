@@ -35,16 +35,19 @@ end
     none = fixture(; transfers = "none")
 
     @testset "hashes come from store.py and status of an empty store" begin
-        trial_both, run_both = store_hash(both; root = root)
-        trial_none, run_none = store_hash(none; root = root)
-        @test length(trial_both) == 16 && length(run_both) == 16
+        trial_both, run_both, group_both = store_hash(both; root = root)
+        trial_none, run_none, group_none = store_hash(none; root = root)
+        @test length(trial_both) == 16 && length(run_both) == 16 && length(group_both) == 16
         @test trial_both == trial_none
         @test run_both != run_none
+        @test group_both == group_none
+        @test store_hash(fixture(; n = 1024, package = "cubie"); root = root)[3] == group_both
+        @test store_hash(fixture(; atol = 1e-6); root = root)[3] != group_both
         @test store_status(both; root = root) == "absent"
         @test store_status(run_both; root = root) == "absent"
         # A trial Dict with extra fields hashes the same.
-        @test store_hash(merge(both, Dict("kind" => "solve", "role" => "timed")); root = root) ==
-              (trial_both, run_both)
+        @test store_hash(merge(both, Dict("kind" => "solve", "finals" => false)); root = root) ==
+              (trial_both, run_both, group_both)
     end
 
     @testset "rows record with NaN, samples and the reason" begin
@@ -60,8 +63,8 @@ end
         @test store_status(both; root = root) == "finite"
         @test store_status(none; root = root) == "nan"
         back = query_rows("SELECT transfers, min_ms, samples_ms, reason, build_s, package_version, " *
-                          "suite_rev, states, run_id, trial_id, system_params, gains, atol, dt_min " *
-                          "FROM results ORDER BY transfers", root)
+                          "suite_rev, states, run_id, trial_id, group_id, system_params, gains, " *
+                          "atol, dt_min FROM results ORDER BY transfers", root)
         @test length(back) == 2
         first, second = back
         @test first["transfers"] == "both"
@@ -74,12 +77,16 @@ end
         @test first["system_params"] == "{}" && first["gains"] == "{}"
         @test parse(Float64, first["atol"]) == 1e-5
         @test first["dt_min"] == "nan"
-        @test (first["trial_id"], first["run_id"]) == store_hash(both; root = root)
+        @test (first["trial_id"], first["run_id"], first["group_id"]) == store_hash(both; root = root)
         @test second["min_ms"] == "nan"
         @test second["samples_ms"] == ""
         @test second["reason"] == "abandoned: oom at ordinal 2"
         @test second["trial_id"] == first["trial_id"]
+        @test second["group_id"] == first["group_id"]
         @test second["run_id"] == store_hash(none; root = root)[2]
+        # A row carries no error or reference column.
+        @test !haskey(rows[1], "error") && !haskey(rows[1], "reference")
+        @test_throws ProcessFailedException store_record(merge(rows[1], Dict("error" => 1e-4)); root = root)
     end
 
     @testset "floor keeps the lower finite time and NaN never wins" begin

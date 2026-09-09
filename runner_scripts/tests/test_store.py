@@ -1,4 +1,4 @@
-"""The parquet result store: spec columns, hashes against a hand fixture, upsert by run_id, floor, batches, the leg lock, finals in the run precision, covering, DuckDB reads across keys, and the CLI."""
+"""The parquet result store: spec columns, hashes against a hand fixture, upsert by run_id, floor, batches, the leg lock, finals in the run precision, DuckDB reads across keys, and the CLI."""
 
 import hashlib
 import json
@@ -35,8 +35,14 @@ FIXTURE_HEAD = (
 FIXTURE_TRIAL_TEXT = FIXTURE_HEAD + ',"package":"cubie"}'
 FIXTURE_RUN_TEXT = FIXTURE_HEAD + \
     ',"transfers":"both","package":"cubie","key":"windows_RTX-4070-SUPER"}'
+FIXTURE_GROUP_TEXT = (
+    '{"problem":"lorenz","system_params":"{}","duration":1,"precision":"float32",'
+    '"algorithm":"tsit5","controller":"fixed","dt":0.0009765625,'
+    '"dt_min":"nan","dt_max":"nan","atol":"nan","rtol":"nan","gains":"{}",'
+    '"newton_atol":"nan","newton_rtol":"nan"}')
 FIXTURE_TRIAL_ID = "9754cd221fddca05"
 FIXTURE_RUN_ID = "eaa18a5f41beb42f"
+FIXTURE_GROUP_ID = hashlib.sha1(FIXTURE_GROUP_TEXT.encode()).hexdigest()[:16]
 
 
 def spec(**overrides):
@@ -77,17 +83,20 @@ class StoreCase(unittest.TestCase):
 
 
 class HashTests(unittest.TestCase):
-    def test_the_identity_is_exactly_the_1_2_spec_in_table_order(self):
+    def test_the_identity_is_exactly_the_run_spec_in_table_order(self):
         self.assertEqual(store.SPEC_FIELDS, (
             "problem", "system_params", "duration", "precision",
             "parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype",
             "algorithm", "controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains",
             "newton_atol", "newton_rtol", "transfers", "package", "key"))
         self.assertEqual(store.TRIAL_FIELDS, store.SPEC_FIELDS[:-3] + ("package",))
+        self.assertEqual(store.GROUP_FIELDS, store.SPEC_FIELDS[:4] + store.SPEC_FIELDS[10:20])
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
-            "run_id", "trial_id", "states", "min_ms", "samples_ms", "errored_pct",
-            "error", "reference", "build_s", "reason", "finals", "package_version",
+            "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
+            "errored_pct", "build_s", "reason", "finals", "package_version",
             "suite_rev", "recorded_utc"])
+        for absent in ("error", "reference"):
+            self.assertNotIn(absent, store.COLUMNS)
 
     def test_hashes_match_the_hand_fixture(self):
         canonical = store.spec_of(spec())
@@ -95,12 +104,18 @@ class HashTests(unittest.TestCase):
                          FIXTURE_TRIAL_TEXT)
         self.assertEqual(store.canonical_spec_text(canonical, store.SPEC_FIELDS),
                          FIXTURE_RUN_TEXT)
+        self.assertEqual(store.canonical_spec_text(canonical, store.GROUP_FIELDS),
+                         FIXTURE_GROUP_TEXT)
         self.assertEqual(hashlib.sha1(FIXTURE_TRIAL_TEXT.encode()).hexdigest()[:16],
                          FIXTURE_TRIAL_ID)
         self.assertEqual(store.trial_id(spec()), FIXTURE_TRIAL_ID)
         self.assertEqual(store.run_id(spec()), FIXTURE_RUN_ID)
+        self.assertEqual(store.group_id(spec()), FIXTURE_GROUP_ID)
+        self.assertEqual(store.ids(spec()), {"trial_id": FIXTURE_TRIAL_ID,
+                                             "run_id": FIXTURE_RUN_ID,
+                                             "group_id": FIXTURE_GROUP_ID})
         # A trial dict with extra fields hashes the same.
-        self.assertEqual(store.trial_id(dict(spec(), kind="solve", role="timed", leg="x")),
+        self.assertEqual(store.trial_id(dict(spec(), kind="solve", finals=False, leg="x")),
                          FIXTURE_TRIAL_ID)
 
     def test_trial_id_ignores_transfers_and_key_and_run_id_does_not(self):
@@ -111,6 +126,18 @@ class HashTests(unittest.TestCase):
             self.assertNotEqual(store.run_id(other), store.run_id(base))
         self.assertNotEqual(store.trial_id(spec(package="cubie_mlir")), store.trial_id(base))
 
+    def test_group_id_ignores_the_ensemble_transfers_package_and_key(self):
+        base = spec()
+        for change in (dict(transfers="none"), dict(key="linux_A100"),
+                       dict(package="julia_gpu"), dict(n=131072),
+                       dict(n=1024, grid_max=0.16389), dict(parameter="sigma"),
+                       dict(grid_scale="log", grid_min=1e-3)):
+            self.assertEqual(store.group_id(spec(**change)), FIXTURE_GROUP_ID, change)
+        for change in (dict(dt=2.0 ** -8), dict(precision="float64"), dict(duration=2.0),
+                       dict(system_params={"states": 4}), dict(algorithm="vern7"),
+                       adaptive(), dict(gains={"kp": 0.7}), dict(newton_atol=1e-6)):
+            self.assertNotEqual(store.group_id(spec(**change)), FIXTURE_GROUP_ID, change)
+
     def test_floats_compare_exactly_and_nan_is_the_text_nan(self):
         base = store.run_id(spec())
         self.assertNotEqual(store.run_id(spec(dt=2.0 ** -10 * (1 + 1e-10))), base)
@@ -120,6 +147,11 @@ class HashTests(unittest.TestCase):
         self.assertNotEqual(store.run_id(spec(dt_min=1e-6)), base)
         self.assertEqual(store.run_id(spec(duration=1)), base)
         self.assertEqual(store.run_id(spec(n="8")), base)
+        self.assertEqual(store.run_id(spec(n=8.0)), base)
+        for bad in (dict(n=8.5), dict(n="8.5"), dict(n=True), dict(dt="1e-5x")):
+            with self.assertRaises(ValueError, msg=bad):
+                store.run_id(spec(**bad))
+        self.assertEqual(store.run_id(spec(dt_min="")), base)
 
     def test_json_fields_are_canonical(self):
         self.assertEqual(store.canonical_json({"states": 32}), '{"states":32}')
@@ -162,14 +194,13 @@ class SchemaTests(StoreCase):
         stored = table.to_pylist()[0]
         self.assertEqual(stored["run_id"], FIXTURE_RUN_ID)
         self.assertEqual(stored["trial_id"], FIXTURE_TRIAL_ID)
+        self.assertEqual(stored["group_id"], FIXTURE_GROUP_ID)
         self.assertEqual(stored["system_params"], "{}")
         self.assertEqual(stored["gains"], "{}")
         self.assertEqual(stored["samples_ms"], [9.0, 2.0, 1.5])
         self.assertEqual(stored["states"], 3)
         self.assertEqual(stored["n"], 8)
-        self.assertTrue(math.isnan(stored["error"]))
         self.assertTrue(math.isnan(stored["atol"]))
-        self.assertEqual(stored["reference"], "")
         self.assertEqual(stored["reason"], "")
         self.assertEqual(stored["finals"], "")
         self.assertEqual(stored["recorded_utc"].tzinfo.utcoffset(None).total_seconds(), 0)
@@ -178,29 +209,30 @@ class SchemaTests(StoreCase):
         standing = self.store.record(row())
         self.assertTrue(math.isnan(standing["min_ms"]))
         self.assertEqual(standing["samples_ms"], [])
-        for field in ("errored_pct", "error", "build_s"):
+        for field in ("errored_pct", "build_s"):
             self.assertTrue(math.isnan(standing[field]))
         with self.assertRaises(ValueError):
             self.store.record({k: v for k, v in row().items() if k != "controller"})
         with self.assertRaises(ValueError):
             self.store.record(spec())
-        with self.assertRaises(ValueError):
-            self.store.record(row(analysis="times"))
+        for unknown in (dict(analysis="times"), dict(error=1e-4), dict(reference="x")):
+            with self.assertRaises(ValueError):
+                self.store.record(row(**unknown))
         with self.assertRaises(ValueError):
             self.store.record(row(package="julia"))
         with self.assertRaises(ValueError):
             self.store.record(row(samples_ms="9;2;1.5"))
 
     def test_given_ids_must_hash_the_spec(self):
-        standing = self.store.record(row(run_id=FIXTURE_RUN_ID, trial_id=FIXTURE_TRIAL_ID))
+        standing = self.store.record(row(run_id=FIXTURE_RUN_ID, trial_id=FIXTURE_TRIAL_ID,
+                                         group_id=FIXTURE_GROUP_ID))
         self.assertEqual(standing["run_id"], FIXTURE_RUN_ID)
-        with self.assertRaises(ValueError):
-            self.store.record(row(run_id="0123456789abcdef"))
-        with self.assertRaises(ValueError):
-            self.store.record(row(trial_id="0123456789abcdef"))
+        for name in ("run_id", "trial_id", "group_id"):
+            with self.assertRaises(ValueError):
+                self.store.record(row(**{name: "0123456789abcdef"}))
 
     def test_null_floats_and_iso_timestamps_come_through_json(self):
-        standing = self.store.record(row(min_ms=None, error=None,
+        standing = self.store.record(row(min_ms=None, build_s=None,
                                          recorded_utc="2026-09-09T01:02:03Z"))
         self.assertTrue(math.isnan(standing["min_ms"]))
         self.assertEqual(standing["recorded_utc"],
@@ -368,8 +400,6 @@ class FinalsTests(StoreCase):
             self.assertEqual(standing["finals"], relative)
         self.assertEqual({r["finals"] for r in self.store.rows(controller="default")},
                          {relative})
-        store_relative = "key={0}/package=cubie/{1}".format(KEY, relative)
-        np.testing.assert_array_equal(self.store.load_finals_at(store_relative)[1], states)
 
     def test_float64_runs_keep_float64_finals(self):
         trial = spec(precision="float64", n=2, package="julia_cpu")
@@ -397,44 +427,22 @@ class FinalsTests(StoreCase):
                          "finals/" + store.trial_id(trial) + ".parquet")
 
 
-class CoveringTests(StoreCase):
-    def test_a_timed_spec_is_covered_by_the_row_of_its_run_id(self):
-        self.assertIsNone(self.store.covering(spec()))
-        self.store.record(row(min_ms=1.0))
-        self.assertEqual(self.store.covering(spec())["min_ms"], 1.0)
-        self.assertIsNone(self.store.covering(spec(transfers="none")))
-        self.assertIsNone(self.store.covering(spec(key="linux_A100")))
-        self.assertEqual(self.store.covering(spec(), finals=True), None)
-
-    def test_a_numerical_spec_is_covered_by_a_finals_row_whose_grid_contains_its_grid(self):
-        full = spec(**adaptive(), n=131072, package="julia_cpu", precision="float64",
-                    transfers="none")
-        values = grid.grid(dict(full, precision="float32"))
-        finals = np.zeros((131072, 3), np.float64)
-        relative = self.store.record_finals(full, finals, np.ones(131072, bool))
-        self.store.record(dict(full, states=3, finals=relative, reason="untimed"))
-        prefix = spec(**adaptive(), n=1024, grid_max=float(values[1023]),
-                      package="julia_cpu", precision="float64", transfers="both")
-        covered = self.store.covering(prefix, finals=True)
-        self.assertIsNotNone(covered)
-        self.assertEqual(covered["n"], 131072)
-        self.assertEqual(covered["finals"], relative)
-        self.assertEqual(self.store.covering(full, finals=True)["run_id"], covered["run_id"])
-        # Not across a different key, package, stepping, precision or scale.
-        for change in (dict(key="linux_A100"), dict(package="cubie"), dict(atol=1e-6),
-                       dict(precision="float32"), dict(grid_min=1.0),
-                       dict(grid_scale="log", grid_min=1e-3), dict(controller="pi"),
-                       dict(gains={"kp": 0.7}), dict(system_params={"states": 4})):
-            self.assertIsNone(self.store.covering(dict(prefix, **change), finals=True), change)
-        # A row without finals does not cover.
-        other = spec(**adaptive(), n=131072, package="cubie", transfers="none")
-        self.store.record(dict(other, states=3, min_ms=1.0))
-        self.assertIsNone(self.store.covering(dict(other, n=1024, grid_max=float(values[1023])),
-                                              finals=True))
-        # The exact n wins over a containing one.
-        exact = self.store.record_finals(prefix, np.zeros((1024, 3)), np.ones(1024, bool))
-        self.store.record(dict(prefix, states=3, finals=exact))
-        self.assertEqual(self.store.covering(prefix, finals=True)["n"], 1024)
+    def test_a_golden_row_and_a_prefix_grid_row_share_a_group_id_across_packages(self):
+        # The analyses pair rows by group_id and rebuild each grid from its own spec.
+        golden = spec(**adaptive(), n=131072, package="julia_cpu", precision="float64",
+                      transfers="none")
+        point = grid.grid_point("linear", 0.0, 21.0, 131072, 1023)
+        prefix = spec(**adaptive(), n=1024, grid_max=float(format(point, ".17g")),
+                      package="cubie", precision="float64", transfers="both")
+        relative = self.store.record_finals(golden, np.zeros((131072, 3)), np.ones(131072, bool))
+        self.store.record(dict(golden, states=3, finals=relative, reason="untimed"))
+        short = self.store.record_finals(prefix, np.zeros((1024, 3)), np.ones(1024, bool))
+        self.store.record(dict(prefix, states=3, min_ms=1.0, finals=short))
+        rows = sorted(self.store.rows(group_id=store.group_id(golden)), key=lambda r: r["n"])
+        self.assertEqual([(r["package"], r["n"]) for r in rows],
+                         [("cubie", 1024), ("julia_cpu", 131072)])
+        self.assertNotEqual(rows[0]["trial_id"], rows[1]["trial_id"])
+        np.testing.assert_array_equal(grid.grid(rows[0]), grid.grid(rows[1])[:1024])
 
 
 class DuckDBTests(StoreCase):
@@ -530,7 +538,8 @@ class CliTests(StoreCase):
         with open(spec_path, "w") as handle:
             json.dump(trial, handle)
         ids = json.loads(self.run_cli("hash", spec_path))
-        self.assertEqual(ids, {"trial_id": store.trial_id(trial), "run_id": store.run_id(trial)})
+        self.assertEqual(ids, {"trial_id": store.trial_id(trial), "run_id": store.run_id(trial),
+                               "group_id": store.group_id(trial)})
         csv_path = os.path.join(self.tmp, "finals.csv")
         with open(csv_path, "w") as handle:
             handle.write("traj,s1,s2,s3,converged\n0,1.5,2.5,3.5,1\n1,0.1,0.2,0.3,0\n")

@@ -1,5 +1,6 @@
 # grid.jl against the numpy reference grids; run with `julia --project=. runner_scripts/tests/test_grid.jl`.
 
+using Printf
 using Test
 
 include(joinpath(dirname(@__DIR__), "grid.jl"))
@@ -22,6 +23,13 @@ function read_npy_f32(path)
     data = bytes[(offset + header_len):end]
     length(data) % 4 == 0 || error("$(path) has a partial float")
     return collect(reinterpret(Float32, data))
+end
+
+"v[index] of the grid in Float64, written out with 17 digits and read back: the grid_max a set file carries."
+function written_point(scale, lo, hi, n, index)
+    point = scale == "linear" ? lo + index * ((hi - lo) / (n - 1)) :
+        10.0^(log10(lo) + index * ((log10(hi) - log10(lo)) / (n - 1)))
+    return parse(Float64, Printf.@sprintf("%.17g", point))
 end
 
 "(problem, scale, min, max) of every problems.csv row."
@@ -68,13 +76,11 @@ end
                 1:REFERENCE_N)
             @test mismatches == 0
             mismatches == 0 || println("$(problem): $(mismatches) mismatching points")
-            # A 1024-point grid ending at the Float64 v[1023] reproduces the first 1024 reference points.
-            point = grid_point(scale, lo, hi, REFERENCE_N, 1023)
+            # A 1024-point grid ending at the 17-digit Float64 v[1023] reproduces the first 1024 reference points.
+            point = written_point(scale, lo, hi, REFERENCE_N, 1023)
             @test Float32(point) == reference[1024]
             prefix = grid_values(scale, lo, point, 1024)
             @test all(reinterpret(UInt32, prefix) .== reinterpret(UInt32, reference[1:1024]))
         end
-        @test grid_point("linear", 0.0, 21.0, 8, 7) == 21.0
-        @test_throws ArgumentError grid_point("linear", 0.0, 21.0, 8, 8)
     end
 end

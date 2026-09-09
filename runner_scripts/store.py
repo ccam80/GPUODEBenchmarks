@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per leg, finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key) and trial_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per leg, finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
 
 import argparse
 import csv
@@ -15,8 +15,6 @@ from datetime import datetime, timezone
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-
-from grid import grid_contains
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,24 +40,26 @@ SPEC_TYPES = (
 SPEC_FIELDS = tuple(name for name, _ in SPEC_TYPES)
 TRIAL_FIELDS = tuple(f for f in SPEC_FIELDS if f not in ("transfers", "key"))
 FINALS_FIELDS = TRIAL_FIELDS + ("key",)
-GRID_FIELDS = ("grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
+ENSEMBLE_FIELDS = ("parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
+GROUP_FIELDS = tuple(f for f in TRIAL_FIELDS
+                     if f not in ENSEMBLE_FIELDS and f != "package")
+ID_FIELDS = {"trial_id": TRIAL_FIELDS, "run_id": SPEC_FIELDS, "group_id": GROUP_FIELDS}
 _ENUMS = {"precision": PRECISIONS, "grid_scale": GRID_SCALES,
           "grid_dtype": GRID_DTYPES, "transfers": TRANSFERS, "package": PACKAGES}
 
 _ARROW = {"name": pa.string(), "str": pa.string(), "json": pa.string(),
           "float": pa.float64(), "int": pa.int64()}
 SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
-    ("run_id", pa.string()), ("trial_id", pa.string()),
+    ("run_id", pa.string()), ("trial_id", pa.string()), ("group_id", pa.string()),
     ("states", pa.int32()), ("min_ms", pa.float64()),
     ("samples_ms", pa.list_(pa.float64())), ("errored_pct", pa.float64()),
-    ("error", pa.float64()), ("reference", pa.string()),
     ("build_s", pa.float64()), ("reason", pa.string()), ("finals", pa.string()),
     ("package_version", pa.string()), ("suite_rev", pa.string()),
     ("recorded_utc", pa.timestamp("us", tz="UTC")),
 ])
 COLUMNS = tuple(SCHEMA.names)
-FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "error", "build_s")
-TEXT_VALUE_COLUMNS = ("reference", "reason", "finals", "package_version", "suite_rev")
+FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s")
+TEXT_VALUE_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
 
 NAN = float("nan")
 HASH_HEX = 16
@@ -68,18 +68,30 @@ LOCK_STALE_S = 300.0
 
 
 def _float(value):
-    """A float value; None and unparsable text are NaN; infinities are refused."""
+    """A float value; None, empty text and "nan" are NaN; infinities and other text are refused."""
     if value is None:
         return NAN
     if isinstance(value, str):
-        try:
-            value = float(value)
-        except ValueError:
+        if value.strip().lower() in ("", "nan"):
             return NAN
+        value = float(value)
     value = float(value)
     if math.isinf(value):
         raise ValueError("infinite float")
     return value
+
+
+def _int(name, value):
+    """An integer value; a float or text is accepted only when it is a whole number."""
+    if isinstance(value, bool):
+        raise ValueError("{0} is a bool".format(name))
+    if isinstance(value, str):
+        value = float(value)
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("{0} {1!r} is not an integer".format(name, value))
+        value = int(value)
+    return int(value)
 
 
 def _text(value):
@@ -113,7 +125,7 @@ def _spec_value(name, kind, value):
     if kind == "float":
         return _float(value)
     if kind == "int":
-        return int(value)
+        return _int(name, value)
     if kind == "json":
         return canonical_json(value)
     text = _text(value)
@@ -169,21 +181,31 @@ def run_id(spec):
     return _hash(spec, SPEC_FIELDS)
 
 
+def group_id(spec):
+    """sha1 of the canonical text of the system and stepping fields (no ensemble, transfers, package or key), first 16 hex; the comparison key across packages and grids."""
+    return _hash(spec, GROUP_FIELDS)
+
+
+def ids(spec):
+    """{trial_id, run_id, group_id} of a spec; trial_id and group_id need every field but transfers and key."""
+    return {name: _hash(spec, names) for name, names in ID_FIELDS.items()}
+
+
 def make_row(**fields):
     """One complete row: the spec as given with its hashes, every value column defaulted (NaN, [], "", now)."""
     unknown = set(fields) - set(COLUMNS)
     if unknown:
         raise ValueError("unknown columns: " + ", ".join(sorted(unknown)))
     row = spec_of(fields)
-    row["run_id"], row["trial_id"] = run_id(row), trial_id(row)
-    for name in ("run_id", "trial_id"):
+    row.update(ids(row))
+    for name in ID_FIELDS:
         given = _text(fields.get(name))
         if given and given != row[name]:
             raise ValueError("{0} {1} does not hash the spec ({2})".format(
                 name, given, row[name]))
     if fields.get("states") is None:
         raise ValueError("states is required")
-    row["states"] = int(fields["states"])
+    row["states"] = _int("states", fields["states"])
     for field in FLOAT_VALUE_COLUMNS:
         row[field] = _float(fields.get(field))
     samples = fields.get("samples_ms")
@@ -375,11 +397,8 @@ class Store:
 
     def load_finals(self, package, key, relative):
         """(traj int32[m], states [m, k] in the stored precision, converged bool[m]) of a finals file by its package-relative path."""
-        return self.load_finals_at("/".join(("key=" + key, "package=" + package, relative)))
-
-    def load_finals_at(self, store_relative):
-        """The same for a store-relative path `key=<k>/package=<pkg>/finals/<id>.parquet`."""
-        table = pq.read_table(os.path.join(self.root, *store_relative.split("/")))
+        table = pq.read_table(os.path.join(self.package_dir(package, key),
+                                           *relative.split("/")))
         names = [c for c in table.column_names if c.startswith("s")]
         names.sort(key=lambda c: int(c[1:]))
         dtype = np.float64 if names and str(table.schema.field(names[0]).type) == "double" \
@@ -399,21 +418,6 @@ class Store:
         if any(math.isfinite(r["min_ms"]) for r in matched):
             return "finite"
         return "nan"
-
-    def covering(self, spec, finals=False):
-        """The row of the spec's run_id; with finals, a finals row matching the spec apart from the grid whose grid contains the spec's. None otherwise."""
-        if not finals:
-            rows = self.rows(run_id=run_id(spec))
-            return rows[0] if rows else None
-        spec = spec_of(spec, FINALS_FIELDS)
-        filters = {name: spec[name] for name in FINALS_FIELDS
-                   if name not in ("grid_max", "n")}
-        candidates = [r for r in self.rows("finals <> ''", **filters)
-                      if grid_contains(r, spec)]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda r: (r["n"] != spec["n"], r["n"]))
-        return candidates[0]
 
     def leg_files(self):
         pattern = os.path.join(self.root, "key=*", "package=*", "results",
@@ -573,8 +577,7 @@ def _cli(argv):
         print(store.clear(**_read_json(args.filters)))
         return 0
     if args.command == "hash":
-        spec = _read_json(args.spec)
-        print(json.dumps({"trial_id": trial_id(spec), "run_id": run_id(spec)}))
+        print(json.dumps(ids(_read_json(args.spec))))
         return 0
     return 1
 

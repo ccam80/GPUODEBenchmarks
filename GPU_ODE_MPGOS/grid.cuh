@@ -39,26 +39,6 @@ inline std::vector<float> GridValues(const std::string& scale, double grid_min, 
 	return out;
 }
 
-// v[index] in double before the cast; the grid_max of a shorter grid that reproduces v[0..index].
-inline double GridPoint(const std::string& scale, double grid_min, double grid_max, int n, int index)
-{
-	if (n < 2)
-		throw std::invalid_argument("a grid needs n >= 2");
-	if (index < 0 || index >= n)
-		throw std::invalid_argument("index outside the grid");
-	if (index == n - 1)
-		return grid_max;
-	if (scale == "linear")
-		return grid_min + index * ((grid_max - grid_min) / (n - 1));
-	if (scale != "log")
-		throw std::invalid_argument("grid_scale '" + scale + "' is not linear or log");
-	if (grid_min <= 0.0 || grid_max <= 0.0)
-		throw std::invalid_argument("a log grid needs grid_min > 0 and grid_max > 0");
-	double a = log10(grid_min);
-	double b = log10(grid_max);
-	return pow(10.0, a + index * ((b - a) / (n - 1)));
-}
-
 // The grid in the run precision T (float or double).
 template <typename T>
 std::vector<T> Grid(const std::string& scale, double grid_min, double grid_max, int n)

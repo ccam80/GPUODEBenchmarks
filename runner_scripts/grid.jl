@@ -27,20 +27,6 @@ function grid_values(scale, grid_min, grid_max, n)
     return Float32.(values)
 end
 
-"v[index] in Float64 before the cast; the grid_max of a shorter grid that reproduces v[0..index]."
-function grid_point(scale, grid_min, grid_max, n, index)
-    scale in GRID_SCALES || throw(ArgumentError("grid_scale '$(scale)' is not linear or log"))
-    n, index = Int(n), Int(index)
-    n >= 2 || throw(ArgumentError("a grid needs n >= 2, got $(n)"))
-    0 <= index < n || throw(ArgumentError("index $(index) is outside 0..$(n - 1)"))
-    lo, hi = Float64(grid_min), Float64(grid_max)
-    index == n - 1 && return hi
-    scale == "linear" && return lo + index * ((hi - lo) / (n - 1))
-    (lo > 0.0 && hi > 0.0) || throw(ArgumentError("a log grid needs grid_min > 0 and grid_max > 0"))
-    a, b = log10(lo), log10(hi)
-    return 10.0^(a + index * ((b - a) / (n - 1)))
-end
-
 "The grid of a run spec in its precision: the Float32 values, widened for float64 runs."
 function grid(spec)
     values = grid_values(spec["grid_scale"], spec["grid_min"], spec["grid_max"], spec["n"])

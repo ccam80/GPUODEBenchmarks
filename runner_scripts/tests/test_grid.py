@@ -1,4 +1,4 @@
-"""grid.py against a numpy reference, the committed tests/grids files, the containment rule, and the Julia and C++ reproductions bit for bit."""
+"""grid.py against a numpy reference, the committed tests/grids files, the 17-digit grid_point prefix rule, and the Julia and C++ reproductions bit for bit."""
 
 import os
 import shutil
@@ -98,41 +98,36 @@ class ReferenceFileTests(unittest.TestCase):
         self.assertEqual(np.load(paths[0]).shape, (64,))
 
 
-class ContainmentTests(unittest.TestCase):
-    def test_the_ne_prefix_grid_is_contained_by_the_131072_grid_and_equals_its_prefix(self):
+class GridPointTests(unittest.TestCase):
+    def test_a_1024_grid_ending_at_the_17_digit_v_1023_reproduces_the_prefix_of_the_131072_grid(self):
         for problem, scale, lo, hi in grid.problem_grids():
-            full = dict(grid_scale=scale, grid_min=lo, grid_max=hi, n=grid.REFERENCE_N,
-                        grid_dtype="float32")
             values = grid.grid_values(scale, lo, hi, grid.REFERENCE_N)
             point = grid.grid_point(scale, lo, hi, grid.REFERENCE_N, 1023)
             self.assertEqual(np.float32(point), values[1023], problem)
-            prefix = dict(full, n=1024, grid_max=point)
-            self.assertTrue(grid.grid_contains(full, prefix), problem)
-            self.assertFalse(grid.grid_contains(prefix, full), problem)
+            # The value a set file carries: the float64 written with 17 digits, read back exactly.
+            written = float(format(point, ".17g"))
+            self.assertEqual(written, point, problem)
+            prefix = dict(grid_scale=scale, grid_min=lo, grid_max=written, n=1024,
+                          grid_dtype="float32", precision="float32")
             np.testing.assert_array_equal(grid.grid(prefix), values[:1024], err_msg=problem)
-        # The float32 point as grid_max is contained but does not reproduce the prefix.
+        # The float32 point widened does not reproduce the prefix; the float64 point is required.
         values = grid.grid_values("linear", 0.0, 21.0, grid.REFERENCE_N)
         widened = dict(grid_scale="linear", grid_min=0.0, grid_max=float(values[1023]),
                        n=1024, grid_dtype="float32")
-        self.assertTrue(grid.grid_contains(dict(widened, n=grid.REFERENCE_N, grid_max=21.0), widened))
         self.assertFalse(np.array_equal(grid.grid(widened), values[:1024]))
+
+    def test_grid_point_returns_the_endpoints_exactly_and_refuses_an_index_off_the_grid(self):
         self.assertEqual(grid.grid_point("linear", 0.0, 21.0, 8, 7), 21.0)
         self.assertEqual(grid.grid_point("linear", 0.0, 21.0, 8, 0), 0.0)
+        self.assertEqual(grid.grid_point("linear", 0.0, 21.0, 8, 3), 9.0)
+        self.assertEqual(grid.grid_point("log", 1e-3, 1.0, 4, 3), 1.0)
+        self.assertEqual(grid.grid_point("log", 1e-3, 1.0, 4, 1), 10.0 ** (-3.0 + 1.0))
         with self.assertRaises(ValueError):
             grid.grid_point("linear", 0.0, 21.0, 8, 8)
-
-    def test_containment_needs_the_same_scale_min_and_dtype(self):
-        full = dict(grid_scale="linear", grid_min=0.0, grid_max=21.0, n=131072,
-                    grid_dtype="float32")
-        same = dict(full)
-        self.assertTrue(grid.grid_contains(full, same))
-        self.assertTrue(grid.grid_equal(full, same))
-        self.assertFalse(grid.grid_contains(full, dict(full, grid_scale="log", grid_min=1e-3)))
-        self.assertFalse(grid.grid_contains(full, dict(full, grid_min=1.0)))
-        self.assertFalse(grid.grid_contains(full, dict(full, grid_max=20.0)))
-        self.assertFalse(grid.grid_contains(full, dict(full, grid_dtype="float64")))
-        self.assertFalse(grid.grid_contains(full, dict(full, n=1024, grid_max=0.5)))
-        self.assertFalse(grid.grid_equal(full, dict(full, n=1024)))
+        with self.assertRaises(ValueError):
+            grid.grid_point("linear", 0.0, 21.0, 8, -1)
+        with self.assertRaises(ValueError):
+            grid.grid_point("log", 0.0, 21.0, 8, 1)
 
 
 class JuliaGridTests(unittest.TestCase):
@@ -175,8 +170,10 @@ class CppGridTests(unittest.TestCase):
         built = nvcc_build(CPP_TEST, exe)
         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
         for problem, scale, lo, hi in grid.problem_grids():
-            proc = subprocess.run([exe, grid.reference_path(problem), scale, repr(lo), repr(hi)],
-                                  capture_output=True, text=True)
+            # The 17-digit v[1023] a set file carries; the binary rebuilds the 1024 prefix from it.
+            point = format(grid.grid_point(scale, lo, hi, grid.REFERENCE_N, 1023), ".17g")
+            proc = subprocess.run([exe, grid.reference_path(problem), scale, repr(lo), repr(hi),
+                                   point], capture_output=True, text=True)
             self.assertEqual(proc.returncode, 0, problem + ": " + proc.stdout + proc.stderr)
             self.assertIn("ok", proc.stdout)
 

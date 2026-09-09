@@ -8,7 +8,7 @@ const STORE_REPO_ROOT = dirname(@__DIR__)
 const STORE_PACKAGES = ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp",
     "julia_gpu", "julia_cpu")
 
-# The run spec in table order; trial_id hashes every field but transfers and key.
+# The run spec in table order; trial_id hashes every field but transfers and key, group_id the system and stepping fields only.
 const STORE_SPEC_FIELDS = ("problem", "system_params", "duration", "precision",
     "parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype",
     "algorithm", "controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains",
@@ -67,18 +67,16 @@ function store_spec(fields, names = STORE_SPEC_FIELDS)
     return Dict{String, Any}(f => fields[f] for f in names)
 end
 
-"One complete store row: the spec fields of a trial or spec Dict with the value columns; store.py hashes run_id and trial_id."
+"One complete store row: the spec fields of a trial or spec Dict with the value columns; store.py hashes run_id, trial_id and group_id."
 function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_pct = NaN,
-        error = NaN, reference = "", build_s = NaN, reason = "", finals = "",
-        package_version = "", suite_rev = "", recorded_utc = nothing)
+        build_s = NaN, reason = "", finals = "", package_version = "", suite_rev = "",
+        recorded_utc = nothing)
     row = store_spec(spec)
     stamp = recorded_utc === nothing ? Dates.now(Dates.UTC) : recorded_utc
     row["states"] = Int(states)
     row["min_ms"] = Float64(min_ms)
     row["samples_ms"] = Float64[samples_ms...]
     row["errored_pct"] = Float64(errored_pct)
-    row["error"] = Float64(error)
-    row["reference"] = String(reference)
     row["build_s"] = Float64(build_s)
     row["reason"] = String(reason)
     row["finals"] = String(finals)
@@ -129,12 +127,12 @@ function store_finals(spec, finals::AbstractMatrix, converged; root = nothing)
     end
 end
 
-"(trial_id, run_id) of a spec, hashed by store.py."
+"(trial_id, run_id, group_id) of a spec, hashed by store.py."
 function store_hash(spec; root = nothing)
     ids = _with_spec_file(spec, STORE_SPEC_FIELDS) do spec_path
         JSON.parse(read(_store_cmd(["hash", spec_path]; root = root), String))
     end
-    return (String(ids["trial_id"]), String(ids["run_id"]))
+    return (String(ids["trial_id"]), String(ids["run_id"]), String(ids["group_id"]))
 end
 
 "\"absent\", \"nan\" or \"finite\" for the row of a run_id (or of a spec's run_id)."
