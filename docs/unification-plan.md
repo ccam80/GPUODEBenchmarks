@@ -40,7 +40,7 @@ One solve, fully described; the store identity and the trial body.
 | stepping | algorithm | string | an algorithm in `algorithms.csv` with a row for the package |
 | stepping | controller | string | `fixed`; `default` (the package's shipped controller for the algorithm); or a name the package recognises (cubie: `i`, `pi`, `pid`, `gustafsson`) |
 | stepping | dt | float64 | the step when `fixed`; dt0 otherwise; NaN = package default |
-| stepping | dt_min, dt_max | float64 | NaN = package default; never pinned by a shipped set |
+| stepping | dt_min, dt_max | float64 | NaN = package default |
 | stepping | atol, rtol | float64 | NaN when `fixed` |
 | stepping | gains | string | canonical JSON of the controller parameters set explicitly; `{}` when none |
 | stepping | newton_atol, newton_rtol | float64 | NaN unless the (package, algorithm) row of `algorithms.csv` has `newton = true` |
