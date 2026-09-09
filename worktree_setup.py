@@ -1,10 +1,8 @@
 """Symlink the main checkout's suite venvs and caches into a worktree.
 
 Symlinks ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
-``generated``; copies ``.claude/settings.local.json``. Junctions are
-never used: ``git worktree remove`` deletes a junction target's contents.
-Env: ``ORCA_WORKTREE_PATH`` (default: this directory), ``ORCA_ROOT_PATH``
-(default: the main checkout).
+``generated``; copies ``.claude/settings.local.json``; aborts on a
+junction. Env: ``ORCA_WORKTREE_PATH``, ``ORCA_ROOT_PATH``.
 """
 
 import os
