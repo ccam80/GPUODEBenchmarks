@@ -9,7 +9,6 @@ import subprocess
 import shutil
 from pathlib import Path
 
-# Plots is required by runner_scripts/plot/*.jl.
 CORE_PACKAGES = ["BenchmarkTools", "CSV", "DataFrames", "StaticArrays", "Plots"]
 
 # Solver sub-libraries the numerical-equivalence suite needs beyond the umbrella.
