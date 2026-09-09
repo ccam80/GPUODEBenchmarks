@@ -122,7 +122,7 @@ def classical_rk4():
     from diffrax import AbstractERK, ButcherTableau
     from diffrax._local_interpolation import ThirdOrderHermitePolynomialInterpolation
 
-    tableau = ButcherTableau(
+    rk4_tableau = ButcherTableau(
         a_lower=(np.array([1 / 2]), np.array([0.0, 1 / 2]), np.array([0.0, 0.0, 1.0])),
         b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6]),
         b_error=np.zeros(4),
@@ -130,7 +130,7 @@ def classical_rk4():
     )
 
     class ClassicalRK4(AbstractERK):
-        tableau: ClassVar[ButcherTableau] = tableau
+        tableau: ClassVar[ButcherTableau] = rk4_tableau
         interpolation_cls: ClassVar[Callable[..., ThirdOrderHermitePolynomialInterpolation]] = \
             ThirdOrderHermitePolynomialInterpolation.from_k
 
@@ -169,9 +169,10 @@ def make_solve(vector_field, y0, duration, algorithm, plan):
 
 
 def retcodes(result):
-    """The Diffrax result message of every trajectory; empty on success."""
+    """The Diffrax result message of every trajectory; empty on success. A vmapped RESULTS item holds one code per trajectory in `_value` and the enumeration keeps its messages by code in `_index_to_message`, the two tables its own `RESULTS[item]` text is printed from."""
     import diffrax
-    return [str(text) for text in np.asarray(diffrax.RESULTS[result]).reshape(-1)]
+    messages = diffrax.RESULTS._index_to_message
+    return [messages[int(code)] for code in np.asarray(result._value).reshape(-1)]
 
 
 def set_cache_dir(path):
