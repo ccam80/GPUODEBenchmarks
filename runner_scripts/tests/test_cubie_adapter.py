@@ -170,6 +170,28 @@ class OptimizeStoreTests(unittest.TestCase):
         with open(adapter.optimize_path("cubie", "k")) as handle:
             self.assertEqual(sum(1 for _ in handle) - 1, 1)
 
+    def test_controller_and_gains_separate_rows_of_one_algorithm(self):
+        result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
+        other = FakeResult(FakeLaunch(256, 1), {"blocksize": 256})
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
+                                 "adaptive", None, result, controller="default",
+                                 gains="{}")
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
+                                 "adaptive", None, other, controller="pi",
+                                 gains='{"integral_gain":0.3}')
+        shipped = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
+                                         "adaptive", 1e-5, controller="default",
+                                         gains="{}")
+        self.assertEqual(shipped["settings"]["blocksize"], 64)
+        tuned = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
+                                       "adaptive", 1e-5, controller="pi",
+                                       gains='{"integral_gain":0.3}')
+        self.assertEqual(tuned["settings"]["blocksize"], 256)
+        self.assertIsNone(adapter.load_optimized(
+            "cubie", "k", self.problem, "tsit5", "adaptive", 1e-5))
+        with open(adapter.optimize_path("cubie", "k")) as handle:
+            self.assertEqual(sum(1 for _ in handle) - 1, 2)
+
     def test_clear_narrows_by_algorithm_and_problem(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         for algorithm, problem in (("tsit5", "lorenz"), ("euler", "lorenz"),
@@ -200,8 +222,8 @@ class OptimizeStoreTests(unittest.TestCase):
 
         class Solver:
             def optimize(self, initial_values, parameters, duration,
-                         verbose):
-                self.seen = (initial_values.shape, duration)
+                         verbose, force=False):
+                self.seen = (initial_values.shape, duration, force)
                 return FakeResult(FakeLaunch(64, None, 2.5),
                                   {"blocksize": 64})
 
@@ -209,9 +231,17 @@ class OptimizeStoreTests(unittest.TestCase):
         row = adapter.optimize_point(
             solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
             "cubie", "k", "tsit5", "fixed", None)
-        self.assertEqual(solver.seen, ((3, 512), self.problem["duration"]))
+        self.assertEqual(solver.seen, ((3, 512), self.problem["duration"], False))
         self.assertEqual(row["n"], "512")
         self.assertEqual(float(row["best_ms"]), 2.5)
+        forced = adapter.optimize_point(
+            solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
+            "cubie", "k", "tsit5", "fixed", None, root=os.path.join(self.tmp, "elsewhere"),
+            force=True)
+        self.assertEqual(solver.seen[2], True)
+        self.assertEqual(forced["n"], "512")
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "elsewhere", "key=k", "package=cubie",
+                                                    "optimize.csv")))
 
 
 if __name__ == "__main__":

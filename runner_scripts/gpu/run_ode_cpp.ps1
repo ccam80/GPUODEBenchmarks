@@ -1,65 +1,52 @@
-# Windows MPGOS runner: enters the Visual Studio developer environment and calls nvcc.
+# run_ode_cpp.ps1 --trials <jsonl> [--floor]: builds the binaries the file needs in the VS developer shell, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
 param(
-    # Exact aliases keep -a, -g and -s unambiguous under prefix matching.
-    [Alias('a')]
-    [ValidateSet('performance', 'work-precision', 'states', 'warm')]
-    [string]$Analysis = 'performance',
-    # A single value is a sweep ceiling (8, 32, ... <= n); a comma list runs exactly those Ns.
-    [Alias('n')]
-    [string]$Nmax = '16777216',
-    [Alias('g')]
-    [string]$Algorithm = 'all',
-    [Alias('s')]
-    [string]$Problem = 'all',
-    [Alias('m')]
-    [ValidateSet('fixed', 'adaptive', 'all')]
-    [string]$Mode = 'all'
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Arguments
 )
 
 $ErrorActionPreference = 'Stop'
 
-if ($Nmax -notmatch '^\d+(,\d+)*$') {
-    Write-Host "-n/--nmax must be a positive integer or a comma list of them, got '$Nmax'"
-    exit 1
-}
-if ($Nmax.Contains(',')) {
-    $NValues = @($Nmax.Split(',') | ForEach-Object { [long]$_ })
-} else {
-    $NValues = @()
-    $next = [long]8
-    while ($next -le [long]$Nmax) {
-        $NValues += $next
-        $next = $next * 4
+$Trials = ''
+$Floor = $false
+for ($i = 0; $i -lt $Arguments.Count; $i++) {
+    switch ($Arguments[$i]) {
+        '--trials' { $i++; $Trials = $Arguments[$i] }
+        '--floor' { $Floor = $true }
+        default { Write-Host "run_ode_cpp.ps1: unknown argument '$($Arguments[$i])'"; exit 1 }
     }
 }
-
-# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive); -g and -m each narrow the pair.
-$Solvers = @()
-foreach ($alg in $Algorithm.Split(',')) {
-    switch ($alg) {
-        'all' { $Solvers = @('RK4', 'RKCK45') }
-        'classical-rk4' { $Solvers += 'RK4' }
-        'cash-karp-54' { $Solvers += 'RKCK45' }
-    }
-}
-if ($Mode -eq 'fixed') { $Solvers = @($Solvers | Where-Object { $_ -eq 'RK4' }) }
-if ($Mode -eq 'adaptive') { $Solvers = @($Solvers | Where-Object { $_ -eq 'RKCK45' }) }
-if ($Solvers.Count -eq 0) {
-    Write-Host "MPGOS runs none of algorithm '$Algorithm' in mode '$Mode'; skipping."
-    exit 0
-}
+if (-not $Trials) { Write-Host 'run_ode_cpp.ps1 --trials <jsonl> [--floor]'; exit 1 }
+$Trials = (Resolve-Path $Trials).Path
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 $env:CUDA_MODULE_LOADING = 'EAGER'
 
 Push-Location (Join-Path $PSScriptRoot '..\..')
 
-$Problems = @(& python runner_scripts\mpgos_problems.py $Problem)
-if ($Problems.Count -eq 0) {
-    Write-Host "MPGOS runs none of the requested problems; skipping."
-    Pop-Location
-    exit 0
+# The suite interpreter runs the store.
+$Python = 'python'
+if (Test-Path 'GPU_ODE_CUBIE\venv\Scripts\python.exe') {
+    $Python = (Resolve-Path 'GPU_ODE_CUBIE\venv\Scripts\python.exe').Path
 }
+
+function Invoke-Listing {
+    param([string[]]$ScriptArgs)
+    $lines = @(& $Python runner_scripts\mpgos_trials.py @ScriptArgs)
+    if ($LASTEXITCODE -ne 0) { Write-Host "mpgos_trials.py $($ScriptArgs -join ' ') failed"; Pop-Location; exit 1 }
+    return $lines
+}
+
+$Context = @{}
+foreach ($line in (Invoke-Listing @('context'))) {
+    $name, $value = $line -split '=', 2
+    $Context[$name] = $value
+}
+$DatasetKey = $Context['key']
+$SrcHash = $Context['source_hash']
+$PackageVersion = $Context['package_version']
+$SuiteRev = $Context['suite_rev']
+$WatchdogExit = [int]$Context['watchdog_exit']
+$CacheDir = "GPU_ODE_MPGOS\build_cache\$DatasetKey"
 
 function Enter-VsEnvironment {
     if (Get-Command cl -ErrorAction SilentlyContinue) {
@@ -77,137 +64,42 @@ function Enter-VsEnvironment {
     Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64' | Out-Null
 }
 
-# Built binaries are cached per source hash, machine and build constants.
-$DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
-
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
-$ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_NO_OVERWRITE -or
-                       $env:BENCH_RESUME_FROM)
-
-# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
-$FloorActive = [bool]($env:BENCH_FLOOR -and $env:BENCH_FLOOR -ne '0')
-
-function Get-SolverMode { param([string]$Solver)
-    if ($Solver -eq 'RK4') { return 'fixed' } else { return 'adaptive' }
-}
-function Get-SolverAlgorithm { param([string]$Solver)
-    if ($Solver -eq 'RK4') { return 'classical-rk4' } else { return 'cash-karp-54' }
-}
-
-# Test-ResumeSkip <times|states|wp> <problem> <solver> [N|states]: true when the store covers the point.
-function Test-ResumeSkip {
-    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N = '')
-    if (-not $ResumeActive) { return $false }
-    $mode = Get-SolverMode $Solver
-    $alg = Get-SolverAlgorithm $Solver
-    if ($Kind -eq 'wp') {
-        $verdict = (& python runner_scripts\resume.py leg cpp $DatasetKey $ProblemName $alg $mode)
-    } else {
-        $verdict = (& python runner_scripts\resume.py point cpp $DatasetKey $Kind $ProblemName $alg $mode $N)
-    }
-    return ("$verdict".Trim() -eq 'skip')
-}
-# The protocol header is generated before the build and hashed with the sources.
-& python runner_scripts\protocol.py --cxx-header GPU_ODE_MPGOS\protocol.h
-if ($LASTEXITCODE -ne 0) { Write-Error "protocol header generation failed" }
-$NWp = [long](& python runner_scripts\protocol.py get ensemble.n_wp)
-$NStates = [long](& python runner_scripts\protocol.py get ensemble.n_states)
-$WatchdogExit = [int](& python runner_scripts\protocol.py get watchdog.exit_code)
-$SourceFiles = @((Resolve-Path "GPU_ODE_MPGOS\Bench.cu").Path,
-    (Resolve-Path "GPU_ODE_MPGOS\protocol.h").Path,
-    (Resolve-Path "GPU_ODE_MPGOS\makefile").Path) +
-    @(Get-ChildItem "GPU_ODE_MPGOS\problems", "GPU_ODE_MPGOS\SourceCodes" -Recurse -File |
-      Sort-Object FullName | ForEach-Object { $_.FullName })
-$Hasher = [System.Security.Cryptography.SHA256]::Create()
-$SrcBytes = [byte[]]@()
-foreach ($f in $SourceFiles) { $SrcBytes += [System.IO.File]::ReadAllBytes($f) }
-$SrcHash = ([System.BitConverter]::ToString($Hasher.ComputeHash($SrcBytes)) -replace '-', '').Substring(0, 12)
-$CacheDir = "GPU_ODE_MPGOS\build_cache\$DatasetKey"
-
-# Mirrors GPU_ODE_MPGOS/Makefile; reuses the cached binary unless -Fresh.
-function Build-Project {
-    param([string]$ProblemName, [string]$Solver, [long]$Nt, [long]$Sd = 0,
-          [switch]$Fresh)
-    $SdTag = if ($Sd -gt 0) { "_SD$Sd" } else { "" }
-    $CachedExe = "$CacheDir\Bench_${ProblemName}_${Solver}_NT$Nt${SdTag}_$SrcHash.exe"
-    if (-not $Fresh -and (Test-Path $CachedExe)) {
-        Copy-Item $CachedExe "GPU_ODE_MPGOS\Bench.exe" -Force
-        Write-Host "Cached build: $(Split-Path $CachedExe -Leaf)"
-        return
-    }
-    if (Test-Path "GPU_ODE_MPGOS\Bench.exe") {
-        Remove-Item "GPU_ODE_MPGOS\Bench.exe" -Force
-    }
-    $SdDefine = if ($Sd -gt 0) { "-DPROBLEM_SD=$Sd" } else { $null }
-    nvcc -o GPU_ODE_MPGOS\Bench.exe GPU_ODE_MPGOS\Bench.cu `
-        -I"GPU_ODE_MPGOS\SourceCodes" -I"GPU_ODE_MPGOS" `
-        "-DPROBLEM_HEADER=\`"problems/$ProblemName.cuh\`"" `
-        "-DSOLVER_CHOICE=$Solver" "-DNT_VALUE=$Nt" $SdDefine `
-        -O3 -std=c++17 --ptxas-options=-v --gpu-architecture=native `
-        -lineinfo -maxrregcount=128
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "nvcc build failed with exit code $LASTEXITCODE"
-    }
-    if (-not $Fresh) {
-        New-Item -ItemType Directory -Force $CacheDir | Out-Null
-        Copy-Item "GPU_ODE_MPGOS\Bench.exe" $CachedExe -Force
-    }
-}
-
-# Set by Invoke-Point: the protocol's watchdog exit is a breach, any other non-zero exit a failed point.
-$script:PointBreached = $false
-$script:PointFailed = $false
-
-function Invoke-Point {
-    param([string]$ProblemName, [string]$Solver, [long]$Nt, [switch]$Wp)
-    Build-Project -ProblemName $ProblemName -Solver $Solver -Nt $Nt
-    if ($Wp) {
-        & "GPU_ODE_MPGOS\Bench.exe" wp
-    } else {
-        & "GPU_ODE_MPGOS\Bench.exe"
-    }
-    $script:PointBreached = ($LASTEXITCODE -eq $WatchdogExit)
-    $script:PointFailed = ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $WatchdogExit)
-    if ($script:PointFailed) {
-        $what = if ($Wp) { "wp" } else { "N=$Nt" }
-        Write-Host "FAILED $ProblemName $(Get-SolverMode $Solver) $(Get-SolverAlgorithm $Solver) ${what}: Bench.exe exit $LASTEXITCODE"
-    }
-}
-
-# Record one NaN point (errored 100%) in the store; --floor leaves a recorded time alone.
-function Add-NanRow {
-    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$Key, [string]$BuildS = '')
-    $mode = Get-SolverMode $Solver
-    $alg = Get-SolverAlgorithm $Solver
-    if ($BuildS) { & python runner_scripts\results.py nan cpp $DatasetKey $Kind $ProblemName $alg $mode $Key $BuildS }
-    else { & python runner_scripts\results.py nan cpp $DatasetKey $Kind $ProblemName $alg $mode $Key }
-}
-
 Enter-VsEnvironment
 
-# Every missing target builds through parallel nvcc straight into the cache.
+# Binaries are cached per source hash, machine and build constants.
+function Get-ExePath {
+    param([string]$ProblemName, [string]$Solver, [string]$Nt, [string]$Sd, [string]$Precision)
+    $sdTag = if ($Sd -ne '-') { "_SD$Sd" } else { '' }
+    return "$CacheDir\Bench_${ProblemName}_${Solver}_NT${Nt}${sdTag}_${Precision}_$SrcHash.exe"
+}
+
+function Get-NvccArgs {
+    param([string]$Exe, [string]$ProblemName, [string]$Solver, [string]$Nt, [string]$Sd, [string]$Precision)
+    $type = if ($Precision -eq 'float64') { 'double' } else { 'float' }
+    $nvccArgs = @('-o', $Exe, 'GPU_ODE_MPGOS\Bench.cu',
+        '-IGPU_ODE_MPGOS\SourceCodes', '-IGPU_ODE_MPGOS',
+        "-DPROBLEM_HEADER=\`"problems/$ProblemName.cuh\`"", "-DSOLVER_CHOICE=$Solver",
+        "-DNT_VALUE=$Nt", "-DPRECISION_TYPE=$type")
+    if ($Sd -ne '-') { $nvccArgs += "-DPROBLEM_SD=$Sd" }
+    $nvccArgs += @('-O3', '-std=c++17', '--ptxas-options=-v',
+        '--gpu-architecture=native', '-lineinfo', '-maxrregcount=128')
+    return $nvccArgs
+}
+
+# Warm targets build in parallel into the cache.
 function Invoke-WarmBuilds {
     param([object[]]$Targets)
     $jobsMax = 8
-    if ($env:BENCH_WARM_JOBS) { $jobsMax = [int]$env:BENCH_WARM_JOBS }
     New-Item -ItemType Directory -Force $CacheDir | Out-Null
     $builds = @()
     foreach ($t in $Targets) {
-        $p, $s, $nt, $sd = $t
-        $sdTag = if ($sd -gt 0) { "_SD$sd" } else { "" }
-        $exe = "$CacheDir\Bench_${p}_${s}_NT$nt${sdTag}_$SrcHash.exe"
+        $exe = Get-ExePath $t.problem $t.solver $t.nt $t.sd $t.precision
         if (Test-Path $exe) { continue }
         while (@($builds | Where-Object { -not $_.Proc.HasExited }).Count -ge $jobsMax) {
             Start-Sleep -Seconds 2
         }
         Write-Host "building $(Split-Path $exe -Leaf)"
-        $nvccArgs = @('-o', $exe, 'GPU_ODE_MPGOS\Bench.cu',
-            '-IGPU_ODE_MPGOS\SourceCodes', '-IGPU_ODE_MPGOS',
-            "-DPROBLEM_HEADER=\`"problems/$p.cuh\`"", "-DSOLVER_CHOICE=$s",
-            "-DNT_VALUE=$nt")
-        if ($sd -gt 0) { $nvccArgs += "-DPROBLEM_SD=$sd" }
-        $nvccArgs += @('-O3', '-std=c++17', '--ptxas-options=-v',
-            '--gpu-architecture=native', '-lineinfo', '-maxrregcount=128')
+        $nvccArgs = Get-NvccArgs $exe $t.problem $t.solver $t.nt $t.sd $t.precision
         $proc = Start-Process nvcc -ArgumentList $nvccArgs -NoNewWindow -PassThru `
             -RedirectStandardOutput "$exe.out" -RedirectStandardError "$exe.err"
         # Caching the handle keeps ExitCode readable after the process ends.
@@ -226,101 +118,108 @@ function Invoke-WarmBuilds {
     Write-Host "MPGOS builds ready ($($builds.Count - $failed.Count) built, $($failed.Count) failed)."
 }
 
-function Get-NtTargets {
-    $targets = @()
-    $nts = @($NValues + $NWp | Sort-Object -Unique)
-    foreach ($p in $Problems) {
-        foreach ($s in $Solvers) {
-            foreach ($nt in $nts) { $targets += , @($p, $s, $nt, [long]0) }
-        }
+# A cold target builds afresh; its wall time is build_s.
+function Invoke-ColdBuild {
+    param([object]$Target)
+    $exe = Get-ExePath $Target.problem $Target.solver $Target.nt $Target.sd $Target.precision
+    New-Item -ItemType Directory -Force $CacheDir | Out-Null
+    Remove-Item $exe -Force -ErrorAction SilentlyContinue
+    Write-Host "cold build $(Split-Path $exe -Leaf)"
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $nvccArgs = Get-NvccArgs $exe $Target.problem $Target.solver $Target.nt $Target.sd $Target.precision
+    # Build output goes to files; only the seconds return.
+    $proc = Start-Process nvcc -ArgumentList $nvccArgs -NoNewWindow -PassThru -Wait `
+        -RedirectStandardOutput "$exe.out" -RedirectStandardError "$exe.err"
+    $seconds = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
+        '{0:F3}', $watch.Elapsed.TotalSeconds)
+    if ($proc.ExitCode -ne 0) {
+        Remove-Item $exe -Force -ErrorAction SilentlyContinue
+        Write-Host "FAILED $(Split-Path $exe -Leaf)"
+        Get-Content "$exe.out", "$exe.err" -ErrorAction SilentlyContinue |
+            Select-Object -Last 6 | ForEach-Object { Write-Host "  $_" }
     }
-    return $targets
+    Remove-Item "$exe.out", "$exe.err" -Force -ErrorAction SilentlyContinue
+    return $seconds
 }
 
-if ($Analysis -eq 'warm') {
-    Invoke-WarmBuilds -Targets @(Get-NtTargets)
-    Pop-Location
-    exit 0
+function ConvertFrom-Row {
+    param([string]$Line, [string[]]$Columns)
+    $cells = $Line -split "`t", $Columns.Count
+    $row = @{}
+    for ($c = 0; $c -lt $Columns.Count; $c++) { $row[$Columns[$c]] = $cells[$c] }
+    return $row
 }
 
-# All binaries compile in parallel before anything is timed.
-if ($Analysis -eq 'performance') {
-    Invoke-WarmBuilds -Targets @(Get-NtTargets)
+$BuildColumns = @('problem', 'solver', 'nt', 'sd', 'precision', 'cold', 'leg')
+$PointColumns = @('trial_id', 'leg', 'ordinal', 'problem', 'solver', 'nt', 'sd', 'precision', 'transfers', 'finals', 'reason')
+
+$Builds = @(Invoke-Listing @('builds', $Trials) | ForEach-Object { ConvertFrom-Row $_ $BuildColumns })
+$Points = @(Invoke-Listing @('points', $Trials) | ForEach-Object { ConvertFrom-Row $_ $PointColumns })
+
+# build_s per leg, from the cold builds.
+$BuildSeconds = @{}
+Invoke-WarmBuilds -Targets @($Builds | Where-Object { $_.cold -ne 'true' })
+foreach ($b in @($Builds | Where-Object { $_.cold -eq 'true' })) {
+    $BuildSeconds[$b.leg] = Invoke-ColdBuild -Target $b
 }
 
-if ($Analysis -eq 'states') {
-    $StatesN = $NStates
-    $Grid = (& python runner_scripts\problems.py --states-grid).Trim() -split ' '
-    foreach ($solver in $Solvers) {
-        $breached = $false
-        $mode = Get-SolverMode $solver
-        $alg = Get-SolverAlgorithm $solver
-        foreach ($n in $Grid) {
-            if (Test-ResumeSkip 'states' 'lorenz96' $solver "$n") {
-                Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
-                continue
-            }
-            Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
-            $Watch = [System.Diagnostics.Stopwatch]::StartNew()
-            Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
-            $BuildS = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
-                "{0:F3}", $Watch.Elapsed.TotalSeconds)
-            # After a breach: keep the build time, NaN the solve.
-            if ($breached) {
-                Add-NanRow 'states' 'lorenz96' $solver "$n" $BuildS
-                Write-Host "WATCHDOG lorenz96 states=$n $mode ${alg}: skipped after breach"
-                continue
-            }
-            & "GPU_ODE_MPGOS\Bench.exe" states $BuildS
-            if ($LASTEXITCODE -eq $WatchdogExit) {
-                $breached = $true
-            } elseif ($LASTEXITCODE -ne 0) {
-                # A failed point is a NaN row with its build time; the grid goes on.
-                Write-Host "FAILED lorenz96 states=$n $mode ${alg}: Bench.exe exit $LASTEXITCODE"
-                Add-NanRow 'states' 'lorenz96' $solver "$n" $BuildS
-            }
-        }
-    }
-    Pop-Location
-    exit 0
+# NaN rows for a point the script could not run.
+function Add-NanRows {
+    param([object]$Point, [string]$Transfers, [string]$Reason)
+    $nanArgs = @('nan', $Trials, $Point.trial_id, $DatasetKey, $Transfers, $Reason)
+    if ($Floor) { $nanArgs += '--floor' }
+    if ($BuildSeconds.ContainsKey($Point.leg)) { $nanArgs += @('--build-s', $BuildSeconds[$Point.leg]) }
+    & $Python runner_scripts\mpgos_trials.py @nanArgs
+    if ($LASTEXITCODE -ne 0) { Write-Host "mpgos_trials.py nan failed for $($Point.trial_id)"; Pop-Location; exit 1 }
+    Write-Host "cpp $($Point.problem) $($Point.leg) ordinal $($Point.ordinal) ${Transfers}: $Reason"
 }
 
-foreach ($problemName in $Problems) {
-    if ($Analysis -eq 'work-precision') {
-        foreach ($solver in $Solvers) {
-            if (Test-ResumeSkip 'wp' $problemName $solver) {
-                Write-Host "-- resume: skipping wp $problemName ($solver) (already covered)"
-                continue
-            }
-            Invoke-Point -ProblemName $problemName -Solver $solver -Nt $NWp -Wp
-        }
+# (leg|transfers) pairs abandoned after a timeout or oom outcome.
+$Abandoned = @{}
+$Outcome = "$Trials.outcome"
+
+foreach ($p in $Points) {
+    $transfers = @($p.transfers -split ',' | Where-Object { $_ -and -not $Abandoned.ContainsKey("$($p.leg)|$_") })
+    if ($transfers.Count -eq 0) { continue }
+    $transfersText = $transfers -join ','
+    if ($p.reason) {
+        Add-NanRows -Point $p -Transfers $transfersText -Reason $p.reason
         continue
     }
-    # NT is a compile-time constant, so every point is a rebuild.
-    foreach ($solver in $Solvers) {
-        $breached = $false
-        $mode = Get-SolverMode $solver
-        $alg = Get-SolverAlgorithm $solver
-        foreach ($a in $NValues) {
-            if (Test-ResumeSkip 'times' $problemName $solver "$a") {
-                Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
-                continue
-            }
-            # A breached leg's larger sizes are recorded as NaN without running.
-            if ($breached) {
-                Add-NanRow 'times' $problemName $solver "$a"
-                Write-Host "WATCHDOG $problemName $mode $alg N=${a}: skipped after breach"
-                continue
-            }
-            Write-Host "No. of trajectories = $a ($problemName, $solver)"
-            $script:PointBreached = $false
-            $script:PointFailed = $false
-            Invoke-Point -ProblemName $problemName -Solver $solver -Nt $a
-            if ($script:PointBreached) { $breached = $true }
-            # A failed point (OOM, launch error) is a NaN row; the sweep goes on.
-            if ($script:PointFailed) { Add-NanRow 'times' $problemName $solver "$a" }
+    $exe = Get-ExePath $p.problem $p.solver $p.nt $p.sd $p.precision
+    if (-not (Test-Path $exe)) {
+        Add-NanRows -Point $p -Transfers $transfersText -Reason "error: BuildError: nvcc failed for $(Split-Path $exe -Leaf)"
+        continue
+    }
+    Remove-Item $Outcome -Force -ErrorAction SilentlyContinue
+    $benchArgs = @('--trials', $Trials, '--trial', $p.trial_id, '--key', $DatasetKey,
+        '--transfers', $transfersText, '--python', $Python, '--package-version', $PackageVersion,
+        '--suite-rev', $SuiteRev, '--outcome', $Outcome)
+    if ($Floor) { $benchArgs += '--floor' }
+    if ($BuildSeconds.ContainsKey($p.leg)) { $benchArgs += @('--build-s', $BuildSeconds[$p.leg]) }
+    Write-Host "cpp $($p.leg) ordinal $($p.ordinal) n=$($p.nt) ($transfersText)"
+    & $exe @benchArgs
+    $code = $LASTEXITCODE
+    if ($code -eq $WatchdogExit) {
+        Pop-Location
+        exit $WatchdogExit
+    }
+    $done = @{}
+    if (Test-Path $Outcome) {
+        foreach ($line in Get-Content $Outcome) {
+            $which, $result = $line -split ' ', 2
+            $done[$which] = $result
+            if ($result -eq 'timeout' -or $result -eq 'oom') { $Abandoned["$($p.leg)|$which"] = $true }
+        }
+    }
+    if ($code -ne 0) {
+        $missing = @($transfers | Where-Object { -not $done.ContainsKey($_) })
+        Write-Host "FAILED $($p.leg) ordinal $($p.ordinal): Bench.exe exit $code"
+        if ($missing.Count -gt 0) {
+            Add-NanRows -Point $p -Transfers ($missing -join ',') -Reason "error: ProcessError: Bench.exe exit $code"
         }
     }
 }
 
 Pop-Location
+exit 0

@@ -5,10 +5,8 @@
 #define PROBLEM_NAME "pleiades"
 #define PROBLEM_SD 28
 #define PROBLEM_NCP 1
-#define PROBLEM_DURATION 3.0
-#define PROBLEM_SWEEP_MIN 0.5
-#define PROBLEM_SWEEP_MAX 2.0
-#define PROBLEM_SWEEP_LOG 0
+// The parameter the ensemble sweeps into cPAR[0].
+#define PROBLEM_PARAMETER "m1"
 
 template <class Precision>
 __forceinline__ __device__ void PerThread_OdeFunction(\

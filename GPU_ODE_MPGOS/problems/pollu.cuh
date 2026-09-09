@@ -5,10 +5,8 @@
 #define PROBLEM_NAME "pollu"
 #define PROBLEM_SD 20
 #define PROBLEM_NCP 1
-#define PROBLEM_DURATION 60.0
-#define PROBLEM_SWEEP_MIN 3.5e-2
-#define PROBLEM_SWEEP_MAX 3.5
-#define PROBLEM_SWEEP_LOG 1
+// The parameter the ensemble sweeps into cPAR[0].
+#define PROBLEM_PARAMETER "k1"
 
 #define POLLU_K2 26.6
 #define POLLU_K3 1.23e4

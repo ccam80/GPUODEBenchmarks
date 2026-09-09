@@ -49,3 +49,6 @@ GPU_ODE_MYOKIT_CUDA/models/generated/
 
 # Trial files written by bench.py plan
 /trials/
+
+# Figures and CSVs written by the analyses
+/plots/
