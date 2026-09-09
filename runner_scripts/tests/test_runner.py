@@ -275,7 +275,7 @@ class LegTests(RunnerCase):
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
 
-    def test_build_compile_and_optimize_run_under_the_watchdog(self):
+    def test_only_the_optimize_line_runs_under_the_watchdog(self):
         table = {"n": 64, "per": "leg"}
         budgets = []
 
@@ -289,7 +289,7 @@ class LegTests(RunnerCase):
         adapter = FakeAdapter()
         status, rows, path = self.run_specs([spec(8, optimize=table)], adapter)
         self.assertEqual(adapter.calls[:3], [("build", 8, False), ("compile", 8, None), ("optimize", 64, None)])
-        self.assertEqual(budgets[:3], [CAP_S * 2.0 + 30.0, CAP_S * 2.0 + 30.0, runner.OPTIMIZE_SECONDS])
+        self.assertEqual(budgets, [runner.OPTIMIZE_SECONDS])
         self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
         with open(path + ".progress") as handle:
             self.assertEqual(json.load(handle)["kind"], "solve")
