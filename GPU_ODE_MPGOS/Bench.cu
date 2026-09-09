@@ -45,10 +45,10 @@ const int NT = NT_VALUE;
 const int SD   = PROBLEM_SD;   // SystemDimension
 const int NCP  = PROBLEM_NCP;  // NumberOfControlParameters
 const int NSP  = 0;     // NumberOfSharedParameters
-const int NISP = 1;     // NumberOfIntegerSharedParameters (run budget)
+const int NISP = 0;     // NumberOfIntegerSharedParameters
 const int NE   = 0;     // NumberOfEvents
 const int NA   = 0;     // NumberOfAccessories
-const int NIA  = 1;     // NumberOfIntegerAccessories (start clock)
+const int NIA  = 0;     // NumberOfIntegerAccessories
 const int NDO  = 0;     // NumberOfPointsOfDenseOutput: nothing reads it, and
                         // storing it is work the other suites do not do
 
@@ -266,10 +266,10 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Deadline well past the soft cap.
+// Deadline 30 s past the soft cap.
 static void ArmWatchdog()
 {
-	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
+	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() + 30.0) * 1000.0);
 }
 
 static void DisarmWatchdog()
@@ -572,13 +572,6 @@ int main(int argc, char* argv[])
 			Scan.SolverOption(RelativeTolerance, c, trial.rtol);
 			Scan.SolverOption(AbsoluteTolerance, c, trial.atol);
 		}
-
-	// Device-side run budget, 1.25 over the host cap; see problems/stubs.cuh.
-	int ClockKHz = 0;
-	cudaDeviceGetAttribute(&ClockKHz, cudaDevAttrClockRate, SelectedDevice);
-	if (ClockKHz <= 0) ClockKHz = 3000000;
-	long long BudgetCycles = (long long)(WatchdogSeconds() * 1.25 * ClockKHz * 1000.0);
-	Scan.SetHost(IntegerSharedParameters, 0, (int)(BudgetCycles >> WATCHDOG_CLOCK_SHIFT));
 
 	std::string finals;
 	for (size_t li = 0; li < o.transfers.size(); li++)

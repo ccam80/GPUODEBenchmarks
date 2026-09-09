@@ -272,6 +272,31 @@ def record_optimized(package, key, problem, algorithm, mode, setting, result,
     return row
 
 
+def optimize_setting(trial):
+    """(mode, setting) of the optimize row a trial records: None on an n or states axis, where one row serves the leg, else the trial's dt or tolerance."""
+    mode = "fixed" if trial["controller"] == "fixed" else "adaptive"
+    if trial["axis"] in ("n", "states"):
+        return mode, None
+    return mode, float(trial["dt"] if mode == "fixed" else trial["atol"])
+
+
+def record_optimize_timeout(trial, key, root=None):
+    """Replace the optimize row of a trial with one labelled timeout and no settings, so the leg runs at the solver's own geometry."""
+    mode, setting = optimize_setting(trial)
+    params = json.loads(trial["system_params"]) if trial["system_params"] else {}
+    path = optimize_path(trial["package"], key, root)
+    ident = _ident(trial["package"], key, trial["problem"], trial["algorithm"], mode, setting,
+                   params.get("states"), trial["controller"], trial["gains"])
+    row = dict(ident, n=str(int(trial["n"])), label="timeout", best_ms="nan", blocksize="",
+               resident_blocks="", settings="",
+               recorded_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    with _Lock(path):
+        rows = [r for r in _load(path) if not _same(r, ident)]
+        rows.append(row)
+        _save(path, rows)
+    return row
+
+
 def optimize_point(solver, problem, initial_values, parameters, package, key,
                    algorithm, mode, setting, states=None, verbose=True,
                    root=None, force=False, controller="", gains=""):
