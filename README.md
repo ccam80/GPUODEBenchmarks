@@ -276,7 +276,7 @@ floating point.
 | `pollu` | 20 | 60 | `k1` over [3.5e-2, 3.5], log | stiff |
 | `ring_modulator` | 15 | 1e-3 | `Cs` over [2e-13, 2e-9], log | stiff |
 | `ring_modulator_index2` | 15 | 1e-3 | `Uin1_amplitude` over [0, 0.5], linear | stiff, index 2 |
-| `nand_gate` | 14 | 80 | `VDD` over [4, 6], linear | implicit DE |
+| `nand_gate` | 14 | 80 | `c9` over [2.5e-5, 1e-4], linear | implicit DE |
 
 Except for the two Lorenz systems, the problems come from Mazzia and
 Magherini's Bari *Test Set for IVP Solvers*, transcribed from its Fortran

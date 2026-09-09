@@ -50,7 +50,7 @@ end
 
 for (name, p, ref) in (("pollu", 0.35, POLLU_REF),
     ("pleiades", 1.0, PLEI_REF),
-    ("nand_gate", 5.0, NAND_REF))
+    ("nand_gate", 0.5e-4, NAND_REF))
     t = @elapsed final = golden_final(name, p)
     err = maximum(abs.(final .- ref))
     println("$(name): max |golden - published| = $(err)  ($(round(t; digits=2)) s/solve)")
@@ -79,7 +79,7 @@ for (name, nstates, p) in (("lorenz96", 32, 8.0), ("pleiades", 28, 1.0),
     for trial in 1:20
         u = randn(rng, nstates) .* 2.0 .+ 0.5
         name == "pollu" && (u = abs.(u) .* 0.05)
-        du64 = system64.rhs(u, [p], 0.3)
+        du64 = reference_rhs(system64, u, [p], 0.3)
         umtk = zeros(Float32, system32.n)
         umtk[system32.golden_index] .= Float32.(u)
         du32 = system32.rhs(SVector{system32.n, Float32}(umtk),
