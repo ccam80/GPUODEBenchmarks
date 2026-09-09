@@ -328,10 +328,6 @@ Done: `test_julia_driver.py` on a fake julia; a tiny-n run on the 4070.
 ### P7 julia_cpu and golden
 Depends on: P3.
 - `GPU_ODE_Julia/bench_ode_cpu.jl` from `ne_diffeq.jl`: trials in, `float32` and `float64` per spec, timings and finals out, `controllers/<problem>.csv` per problem; each finals row carries the final state, `t_final` and the retcode text (empty on `Success`).
-<<<<<<< Updated upstream
-- `julia_systems.jl` is the one system module: every builder takes the element type (`julia_system(problem, T)`), literals and thresholds in `T`, `SMatrix{n,n,T}` mass matrix, `SVector{n,T}` u0; `cpu_problem(system, problem, p)` builds the in-place `ODEProblem` for both precisions; the kernel package registers the Float32 entries. `verify_references.jl` checks the Float64 systems against the published test-set values; `reference_systems.jl`, `generate_golden.jl` and the retcode sidecar are deleted.
-Done: `bench.py run --set golden -s lorenz` reproduces the converted golden finals to float64 roundoff; `golden_grid -p julia_cpu -s lorenz` lands 1024-row finals.
-=======
 - `runner_scripts/julia_systems.jl`, the one system module:
 
 | item | contract |
@@ -348,7 +344,6 @@ Done: `bench.py run --set golden -s lorenz` reproduces the converted golden fina
 | delete | `reference_systems.jl`, `golden/generate_golden.jl`, `golden/retcode_sidecar.jl`, `data/numerical/golden_*_retcodes.csv`, every `include` of `reference_systems.jl` |
 
 Done: `bench.py run --set golden -s lorenz` reproduces the converted golden finals to float64 roundoff; `golden_grid -p julia_cpu -s lorenz` lands 1024-row finals; both test files pass under `julia +1.13`.
->>>>>>> Stashed changes
 
 ### P8 cpp
 Depends on: P3.
