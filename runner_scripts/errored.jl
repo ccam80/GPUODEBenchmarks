@@ -1,13 +1,20 @@
-# Errored-percent column shared by the Julia writers and the plot scripts.
+# The errored-trajectory rule of the result store, for the Julia writers.
 
-include(joinpath(@__DIR__, "protocol.jl"))
+const T_FINAL_RTOL = 1e-4
 
-"Percent of trajectories with a non-finite final state; a device array reduces in place."
-function errored_pct(finals)
-    isempty(finals) && return 0.0
-    bad = mapreduce(u -> any(!isfinite, u) ? 1 : 0, +, finals; init = 0)
-    return 100.0 * bad / length(finals)
+"One flag per trajectory: a non-finite state, a final time off `duration` by more than T_FINAL_RTOL relative, or a non-empty retcode. `states` is n x k, `t_final` and `retcode` have n entries."
+function errored_mask(states, t_final, retcode, duration)
+    n = length(t_final)
+    size(states, 1) == n || throw(ArgumentError("states has one row per t_final"))
+    length(retcode) == n || throw(ArgumentError("retcode has one code per t_final"))
+    d = Float64(duration)
+    return [any(!isfinite, @view(states[i, :])) ||
+            !(abs(Float64(t_final[i]) - d) <= T_FINAL_RTOL * abs(d)) ||
+            !isempty(retcode[i]) for i in 1:n]
 end
 
-"True unless the cell is a number past MAX_ERRORED_PCT."
-within_error_budget(pct) = !(pct isa Real && pct > MAX_ERRORED_PCT)
+"Percent of trajectories errored_mask marks; NaN for an empty ensemble."
+function errored_pct(states, t_final, retcode, duration)
+    mask = errored_mask(states, t_final, retcode, duration)
+    return isempty(mask) ? NaN : 100.0 * count(mask) / length(mask)
+end
