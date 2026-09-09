@@ -143,15 +143,15 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 <runner argv> --trials <path> [--floor]
 ```
 
-1. Reads the JSONL, groups `solve` trials by `leg`, builds once per leg, walks ordinals ascending, times each listed transfer leg with one untimed warm-up and the `[repeats]` schedule of `protocol.toml` (`timed_min_ms` semantics); the soft cap is the trial's `watchdog_s` and the hard exit fires 30 s after it.
+1. Reads the JSONL, groups `solve` trials by `leg`, builds once per leg, walks ordinals ascending, times each listed transfer leg with one untimed warm-up and the `[repeats]` schedule of `protocol.toml` (`timed_min_ms` semantics); the soft cap is the trial's `watchdog_s` and the hard exit fires 30 s after it; an adapter's `reset` runs untimed before every attempt after the first.
 2. Writes `<trials>.progress` (`{"trial_id": ..., "kind": ..., "started_utc": ...}`) before each line, warm and optimize lines included.
 3. Records every finished trial through the store before the next starts.
 4. Builds the grid by the 1.2 formula; rejects a `controller` name it does not recognise with `reason = "error: unknown controller <name>"`.
 5. One abandon rule. Outcomes per (trial, transfers): `ok`, `timeout` (the trial's `watchdog_s` passed, run returned), `oom`, `error`. After `timeout` or `oom` at ordinal k, every higher ordinal of the leg with the same transfers is recorded NaN with `reason = "abandoned: <timeout|oom> at ordinal k"` and not run. `error` records `reason = "error: <Type>: <message[:200]>"` and the leg continues. A `none` leg failing after a good `both` leg marks the `none` row only. OOM is classified by exception type or message: CUDA `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`, torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`.
-6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row. When the progress file names an `optimize` line, the driver records nothing, drops that line and re-invokes the runner, so the leg's solves run at the solver's own geometry.
+6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row. When the progress file names an `optimize` line, the driver records an `optimize.csv` row labelled `timeout`, drops that line and re-invokes the runner, so the leg's solves run at the solver's own geometry.
 7. `errored_pct`: `store.errored_pct` over the trial's finals, `t_final` and `retcode`.
 8. `finals = true`: all n rows through `record_finals` with each trajectory's `t_final` and `retcode`.
-9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves. Build and warm lines run without a cap; an optimize line hard-exits after `[watchdog] optimize_seconds`.
+9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves. Build and compile-only warm lines run without a cap; a warm line that solves hard-exits 30 s after the trial's cap; an optimize line hard-exits after `[watchdog] optimize_seconds`.
 10. `package_version` and `suite_rev` on every row.
 11. Reads `protocol.toml` for `[repeats]` and `[watchdog]` (`seconds`, `exit_code`, `optimize_seconds`); no environment variables.
 12. Applies `dt_min` and `dt_max` only when they are not NaN; a NaN leaves the package's own floor and cap in place.
@@ -310,7 +310,7 @@ Review: no trial field outside 1.4; no runner reads a catalogue; no error or ref
 
 ### P4 runner core and cubie
 Depends on: P3.
-- `runner_scripts/runner.py`: the 1.5 loop on an adapter interface (`build_leg`, `solve`, `finals`, `compile`, `optimize`, `version`).
+- `runner_scripts/runner.py`: the 1.5 loop on an adapter interface (`build_leg`, `solve`, `finals`, `compile`, `optimize`, `version`, optional `reset`).
 - `cubie_bench.py` as that adapter; the controller built from `controller` and `gains`.
 - `test_runner.py` with a fake adapter: every outcome, the abandon rule, finals kept and not kept.
 Done: tests; `bench.py run --set perf,golden_grid -p cubie -s lorenz -n 32` on the 4070 and the rows read back.

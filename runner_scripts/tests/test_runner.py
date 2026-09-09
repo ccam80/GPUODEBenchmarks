@@ -79,6 +79,9 @@ class FakeAdapter:
     def compile(self, leg, trial, values):
         self.calls.append(("compile", trial["n"], None))
 
+    def reset(self, leg, trial, values, transfers):
+        self.calls.append(("reset", trial["n"], transfers))
+
     def optimize(self, leg, trial, values):
         self.calls.append(("optimize", trial["n"], None))
         if self.behaviour.get(("optimize", trial["n"])) == "error":
@@ -171,6 +174,12 @@ class OutcomeTests(RunnerCase):
         self.assertTrue(math.isfinite(rows[(32, "both")]["min_ms"]))
         self.assertNotIn(("solve", 128, "none"), adapter.calls)
         self.assertIn(("solve", 128, "both"), adapter.calls)
+
+    def test_reset_runs_before_every_attempt_after_the_first(self):
+        adapter = FakeAdapter()
+        status, rows, _ = self.run_specs([spec(8, transfers=("none",))], adapter)
+        calls = [c for c in adapter.calls if c[0] in ("solve", "reset")]
+        self.assertEqual(calls, [("solve", 8, "none")] + [("reset", 8, "none"), ("solve", 8, "none")] * 3)
 
     def test_the_trials_own_budget_sets_the_cap(self):
         adapter = FakeAdapter({(32, "none"): "slow"})
