@@ -25,7 +25,6 @@ from bench_key import dataset_key, data_dir
 from jax_systems import build_problem
 from protocol import NEWTON_ATOL, NEWTON_RTOL
 from results import Leg
-from resume import skip_point, skip_wp_leg
 from wp_common import (REPEAT_CAP, TIMING_TOL, errored_pct, parse_bench_args,
                        timed_min_ms)
 
@@ -245,10 +244,6 @@ def run_wp(problem, parameterList):
         # Later settings are slower, so a breach abandons the leg as NaN rows.
         settings = list(settings)
         leg = Leg("jax", DATASET_KEY, "wp", problem, algorithm, mode)
-        if skip_wp_leg(leg, settings):
-            print("-- resume: skipping wp {0} {1} {2} (already covered)"
-                  .format(problem.name, mode, algorithm))
-            return
         for index, setting in enumerate(settings):
             # Parameters are already resident and results stay on device.
             if not bench(make(setting), setting, leg, settings[index:]):
@@ -283,15 +278,7 @@ def run_times(problem):
             main = (make_fixed(problem, algorithm) if mode == "fixed"
                     else make_adaptive(problem, algorithm))
             leg = Leg("jax", DATASET_KEY, "times", problem, algorithm, mode)
-            run_ns = [n for n in NS if not skip_point(leg, n)]
-            if not run_ns:
-                print("-- resume: skipping {0} {1} {2} (already covered)"
-                      .format(problem.name, mode, algorithm))
-                continue
-            if len(run_ns) < len(NS):
-                print("-- resume: {0} {1} {2} runs N={3}".format(
-                    problem.name, mode, algorithm,
-                    ",".join(str(n) for n in run_ns)))
+            run_ns = list(NS)
             for index, n in enumerate(run_ns):
                 parameterList = jnp.asarray(problem.sweep(n))
                 (best_time, best_time_dev, pct, abandon, samples_both,
@@ -336,11 +323,7 @@ def run_states():
                 continue
             leg = Leg("jax", DATASET_KEY, "states", STATES_PROBLEM, algorithm,
                       mode)
-            run_grid = [s for s in grid if not skip_point(leg, n, s)]
-            if not run_grid:
-                print("-- resume: skipping states {0} {1} (already covered)"
-                      .format(mode, algorithm))
-                continue
+            run_grid = list(grid)
             nan = float("nan")
             for index, nstates in enumerate(run_grid):
                 row = states_row(nstates)

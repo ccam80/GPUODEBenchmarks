@@ -23,7 +23,7 @@ SYSTEMS_CODEGEN = (expression = Val(false), eval_expression = true,
     eval_module = @__MODULE__)
 
 # Entries built at precompile time; `sys` is unused and stays out of the image.
-for row in resolve_problems("all", "julia")
+for row in resolve_problems("all", "julia_gpu")
     entry = _ENTRY_BUILDERS[row["problem"]]()
     _ENTRIES[row["problem"]] = Base.structdiff(entry, NamedTuple{(:sys,)})
 end
@@ -33,7 +33,7 @@ const ENTRIES = _ENTRIES
 const WORKLOAD_N = 4
 
 "Every algorithm the timed sweeps or the overlap suite run on the kernel path."
-workload_algorithms() = unique(vcat(supported_algorithms("julia"),
+workload_algorithms() = unique(vcat(supported_algorithms("julia_gpu"),
     [row["algorithm"] for row in overlap_algorithms()]))
 
 "One fixed and one adaptive solve through the shared kernel-path functions."
@@ -57,7 +57,7 @@ end
 @setup_workload begin
     if CUDA.functional()
         @compile_workload begin
-            for row in resolve_problems("all", "julia")
+            for row in resolve_problems("all", "julia_gpu")
                 for algorithm in workload_algorithms()
                     elapsed = @elapsed try
                         _warm_leg(row, algorithm)

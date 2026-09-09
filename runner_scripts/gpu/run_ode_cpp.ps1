@@ -80,13 +80,6 @@ function Enter-VsEnvironment {
 # Built binaries are cached per source hash, machine and build constants.
 $DatasetKey = (& powershell -ExecutionPolicy Bypass -File "runner_scripts\bench_key.ps1").Trim()
 
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
-$ResumeActive = [bool]($env:BENCH_RESUME -or $env:BENCH_NO_OVERWRITE -or
-                       $env:BENCH_RESUME_FROM)
-
-# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
-$FloorActive = [bool]($env:BENCH_FLOOR -and $env:BENCH_FLOOR -ne '0')
-
 function Get-SolverMode { param([string]$Solver)
     if ($Solver -eq 'RK4') { return 'fixed' } else { return 'adaptive' }
 }
@@ -94,19 +87,6 @@ function Get-SolverAlgorithm { param([string]$Solver)
     if ($Solver -eq 'RK4') { return 'classical-rk4' } else { return 'cash-karp-54' }
 }
 
-# Test-ResumeSkip <times|states|wp> <problem> <solver> [N|states]: true when the store covers the point.
-function Test-ResumeSkip {
-    param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$N = '')
-    if (-not $ResumeActive) { return $false }
-    $mode = Get-SolverMode $Solver
-    $alg = Get-SolverAlgorithm $Solver
-    if ($Kind -eq 'wp') {
-        $verdict = (& python runner_scripts\resume.py leg cpp $DatasetKey $ProblemName $alg $mode)
-    } else {
-        $verdict = (& python runner_scripts\resume.py point cpp $DatasetKey $Kind $ProblemName $alg $mode $N)
-    }
-    return ("$verdict".Trim() -eq 'skip')
-}
 # The protocol header is generated before the build and hashed with the sources.
 & python runner_scripts\protocol.py --cxx-header GPU_ODE_MPGOS\protocol.h
 if ($LASTEXITCODE -ne 0) { Write-Error "protocol header generation failed" }
@@ -174,7 +154,7 @@ function Invoke-Point {
     }
 }
 
-# Record one NaN point (errored 100%) in the store; --floor leaves a recorded time alone.
+# Record one NaN point (errored 100%) in the store.
 function Add-NanRow {
     param([string]$Kind, [string]$ProblemName, [string]$Solver, [string]$Key, [string]$BuildS = '')
     $mode = Get-SolverMode $Solver
@@ -256,10 +236,6 @@ if ($Analysis -eq 'states') {
         $mode = Get-SolverMode $solver
         $alg = Get-SolverAlgorithm $solver
         foreach ($n in $Grid) {
-            if (Test-ResumeSkip 'states' 'lorenz96' $solver "$n") {
-                Write-Host "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
-                continue
-            }
             Write-Host "lorenz96 states = $n ($solver, N=$StatesN)"
             $Watch = [System.Diagnostics.Stopwatch]::StartNew()
             Build-Project -ProblemName lorenz96 -Solver $solver -Nt $StatesN -Sd ([long]$n) -Fresh
@@ -288,10 +264,6 @@ if ($Analysis -eq 'states') {
 foreach ($problemName in $Problems) {
     if ($Analysis -eq 'work-precision') {
         foreach ($solver in $Solvers) {
-            if (Test-ResumeSkip 'wp' $problemName $solver) {
-                Write-Host "-- resume: skipping wp $problemName ($solver) (already covered)"
-                continue
-            }
             Invoke-Point -ProblemName $problemName -Solver $solver -Nt $NWp -Wp
         }
         continue
@@ -302,10 +274,6 @@ foreach ($problemName in $Problems) {
         $mode = Get-SolverMode $solver
         $alg = Get-SolverAlgorithm $solver
         foreach ($a in $NValues) {
-            if (Test-ResumeSkip 'times' $problemName $solver "$a") {
-                Write-Host "-- resume: skipping N=$a ($problemName, $solver) (already covered)"
-                continue
-            }
             # A breached leg's larger sizes are recorded as NaN without running.
             if ($breached) {
                 Add-NanRow 'times' $problemName $solver "$a"

@@ -23,7 +23,6 @@ include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "errored.jl"))
 include(joinpath(dirname(@__DIR__), "runner_scripts", "results.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
 const DATASET_KEY = dataset_key()
@@ -57,15 +56,15 @@ end
 requested_mode in ("fixed", "adaptive", "all") ||
     error("--mode takes fixed, adaptive or all, got '$(requested_mode)'")
 const REQUESTED_MODE = requested_mode
-const ALGORITHMS = resolve_algorithms(requested_algorithm, "julia")
-const FIXED_ALGORITHMS = supported_algorithms("julia", "fixed")
-const ADAPTIVE_ALGORITHMS = supported_algorithms("julia", "adaptive")
+const ALGORITHMS = resolve_algorithms(requested_algorithm, "julia_gpu")
+const FIXED_ALGORITHMS = supported_algorithms("julia_gpu", "fixed")
+const ADAPTIVE_ALGORITHMS = supported_algorithms("julia_gpu", "adaptive")
 if isempty(ALGORITHMS)
     println("Julia (DiffEqGPU kernel path) runs none of the requested ",
         "algorithms; skipping.")
     exit(0)
 end
-const PROBLEMS = resolve_problems(requested_problem, "julia")
+const PROBLEMS = resolve_problems(requested_problem, "julia_gpu")
 if isempty(PROBLEMS)
     println("Julia runs none of the requested problems; skipping.")
     exit(0)
@@ -119,22 +118,9 @@ function nan_wp_rows(problem, algorithm, mode, settings)
     end
 end
 
-"True when one N or states point of a julia leg is covered."
-function point_covered(analysis, problem, algorithm, mode, n, states)
-    kind, setting = timing_setting(problem, mode)
-    key = analysis == "states" ? states : n
-    return skip_point(STORE, analysis, problem["problem"], algorithm, mode, key,
-        n, states, kind, setting)
-end
-
 # One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
 function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
         golden, label)
-    if skip_wp_leg(STORE, problem["problem"], algorithm, mode, settings,
-            problem["states"])
-        println("-- resume: skipping wp $(label) (already covered)")
-        return
-    end
     compiled = false
     for (index, setting) in enumerate(settings)
         on_breach = () -> begin
@@ -184,7 +170,7 @@ function run_wp(problem)
     probs_host, probs = build_ensemble(system, prob, problem, N_WP)
 
     for algorithm in ALGORITHMS
-        problem_supports(problem, "julia") || continue
+        problem_supports(problem, "julia_gpu") || continue
         solver = gpu_solver(algorithm)
         label = "$(problem["problem"]) $(algorithm)"
         settings = Dict("fixed" => collect(problem_dts(problem, algorithm)),
@@ -205,18 +191,7 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
     _, setting = timing_setting(problem, mode)
     compiled = false
 
-    run_ns = [n for n in NS
-              if !point_covered("times", problem, algorithm, mode, n,
-                  problem["states"])]
-    if isempty(run_ns)
-        println("-- resume: skipping $(problem["problem"]) $(mode) " *
-                "$(algorithm) (already covered)")
-        return
-    end
-    if length(run_ns) < length(NS)
-        println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
-                "runs N=" * join(run_ns, ","))
-    end
+    run_ns = collect(NS)
 
     for (index, n) in enumerate(run_ns)
         @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
@@ -226,14 +201,11 @@ function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
             setting, problem)
         full_solve = () -> gpu_solve_host(probs_host, prob, solver, mode,
             setting, problem)[1]
-        # NaN rows for every uncovered point this process will no longer reach.
+        # NaN rows for every point this process will no longer reach.
         on_breach = () -> begin
             nan_rows(problem, algorithm, mode, run_ns[index:end])
             for (later_algorithm, later_mode) in later_legs()
-                nan_rows(problem, later_algorithm, later_mode,
-                    [m for m in NS
-                     if !point_covered("times", problem, later_algorithm,
-                         later_mode, m, problem["states"])])
+                nan_rows(problem, later_algorithm, later_mode, collect(NS))
             end
             println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
                     "N=$(n): run never returned")
@@ -318,11 +290,6 @@ function run_states(nstates, n)
         solver = gpu_solver(algorithm)
         for mode in algorithm_modes(algorithm)
             _, setting = timing_setting(row, mode)
-            if point_covered("states", row, algorithm, mode, n, nstates)
-                println("-- resume: skipping states=$(nstates) $(mode) " *
-                        "$(algorithm) (already covered)")
-                continue
-            end
             @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
             samples_none = samples_both = nothing
             t_ms, t_dev_ms, build_s, pct = try
@@ -366,7 +333,7 @@ end
 
 function run_times(problem)
     legs = [(algorithm, mode) for algorithm in ALGORITHMS
-            if problem_supports(problem, "julia")
+            if problem_supports(problem, "julia_gpu")
             for mode in algorithm_modes(algorithm)]
     if isempty(legs)
         println("Julia runs none of the requested algorithms on ",

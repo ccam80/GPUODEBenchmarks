@@ -17,12 +17,7 @@ from algorithms import resolve_algorithms, resolve_modes, supported_for  # noqa:
 from bench_key import dataset_key  # noqa: E402
 from problems import STATES_PROBLEM, resolve_problems  # noqa: E402
 from protocol import STATES_GRID, STATES_N  # noqa: E402
-from results import Leg, wp_settings  # noqa: E402
-from resume import (  # noqa: E402
-    active as resume_active,
-    skip_point,
-    skip_wp_leg,
-)
+from results import Leg  # noqa: E402
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
 
@@ -127,29 +122,16 @@ def _split_mode(argv):
 def _modes_for(algorithm, modes):
     """The modes this algorithm runs under julia among the requested ones, fixed first."""
     return tuple(mode for mode in modes
-                 if algorithm in supported_for("julia", mode))
+                 if algorithm in supported_for("julia_gpu", mode))
 
 
 def _mode_legs(request, problem_request, modes):
     """(problem, algorithm, mode) legs, one process each."""
-    algorithms = resolve_algorithms(request, "julia")
+    algorithms = resolve_algorithms(request, "julia_gpu")
     return [(problem.name, algorithm, mode)
-            for problem in resolve_problems(problem_request, "julia")
+            for problem in resolve_problems(problem_request, "julia_gpu")
             for algorithm in algorithms
             for mode in _modes_for(algorithm, modes)]
-
-
-def _prune_covered(legs, pending):
-    """Drop the (problem, algorithm, mode) legs whose every point is covered."""
-    if not resume_active():
-        return legs
-    kept = []
-    for leg in legs:
-        if pending(*leg):
-            kept.append(leg)
-        else:
-            print(f"-- resume: skipping {' '.join(leg)} (already covered)")
-    return kept
 
 
 def run_performance(argv):
@@ -157,13 +139,8 @@ def run_performance(argv):
     nlist = argv[0]
     request = argv[1] if len(argv) > 1 else "all"
     problem_request = argv[2] if len(argv) > 2 else "all"
-    ns = sorted(int(tok) for tok in nlist.split(","))
 
-    def pending(problem, algorithm, mode):
-        leg = _leg("times", problem, algorithm, mode)
-        return any(not skip_point(leg, n) for n in ns)
-
-    legs = _prune_covered(_mode_legs(request, problem_request, modes), pending)
+    legs = _mode_legs(request, problem_request, modes)
     if not legs:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
               "legs; skipping.")
@@ -185,11 +162,7 @@ def run_wp(argv):
     request = argv[0] if argv else "all"
     problem_request = argv[1] if len(argv) > 1 else "all"
 
-    def pending(problem, algorithm, mode):
-        leg = _leg("wp", problem, algorithm, mode)
-        return not skip_wp_leg(leg, wp_settings(problem, algorithm, mode, "julia"))
-
-    legs = _prune_covered(_mode_legs(request, problem_request, modes), pending)
+    legs = _mode_legs(request, problem_request, modes)
     if not legs:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
               "legs; skipping.")
@@ -217,7 +190,7 @@ def run_states(argv):
     request = argv[0] if argv else "all"
     grid = list(STATES_GRID)
     ensemble = STATES_N
-    algorithms = [name for name in resolve_algorithms(request, "julia")
+    algorithms = [name for name in resolve_algorithms(request, "julia_gpu")
                   if _modes_for(name, modes)]
     if not algorithms:
         print("Julia (DiffEqGPU kernel path) runs none of the requested "
@@ -233,15 +206,6 @@ def run_states(argv):
     lock_path = _lock_env()
     pending = [(nstates, algorithm) for nstates in grid
                for algorithm in algorithms]
-    if resume_active():
-        def covered(nstates, algorithm):
-            return all(skip_point(legs[(mode, algorithm)], ensemble, nstates)
-                       for mode in _modes_for(algorithm, modes))
-        for nstates, algorithm in [pair for pair in pending
-                                   if covered(*pair)]:
-            pending.remove((nstates, algorithm))
-            print(f"-- resume: skipping states={nstates} {algorithm} "
-                  "(already covered)")
     running = {}
 
     def cancel_larger(algorithm, nstates, reason):

@@ -25,14 +25,6 @@ fi
 
 DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
 
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
-RESUME_ACTIVE=""
-[ -n "${BENCH_RESUME:-}${BENCH_NO_OVERWRITE:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
-
-# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
-FLOOR_ACTIVE=""
-case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
-
 mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
 alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
 
@@ -40,20 +32,6 @@ alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-5
 nan_row() {
 	local kind=$1 problem=$2 solver=$3 key=$4 build=${5:-}
 	python3 ./runner_scripts/results.py nan cpp "$DATASET_KEY" "$kind" "$problem" "$(alg_for "$solver")" "$(mode_for "$solver")" "$key" ${build:+"$build"}
-}
-
-# resume_skip <times|states|wp> <problem> <solver> [N|states]: true when the store covers the point.
-resume_skip() {
-	[ -n "$RESUME_ACTIVE" ] || return 1
-	local kind=$1 problem=$2 solver=$3 n=${4:-}
-	local mode alg
-	mode=$(mode_for "$solver")
-	alg=$(alg_for "$solver")
-	if [ "$kind" == "wp" ]; then
-		[ "$(python3 ./runner_scripts/resume.py leg cpp "$DATASET_KEY" "$problem" "$alg" "$mode")" == "skip" ]
-	else
-		[ "$(python3 ./runner_scripts/resume.py point cpp "$DATASET_KEY" "$kind" "$problem" "$alg" "$mode" "$n")" == "skip" ]
-	fi
 }
 
 # The protocol header is generated before the build and hashed with the sources.
@@ -126,10 +104,6 @@ if [ "$ANALYSIS" == "states" ]; then
 		BREACHED=""
 		for n in $GRID
 		do
-			if resume_skip states lorenz96 "$solver" "$n"; then
-				echo "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
-				continue
-			fi
 			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
 			T0=$(date +%s.%N)
 			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
@@ -174,10 +148,6 @@ do
 	if [ "$ANALYSIS" == "work-precision" ]; then
 		for solver in $SOLVERS
 		do
-			if resume_skip wp "$problem" "$solver"; then
-				echo "-- resume: skipping wp $problem ($solver) (already covered)"
-				continue
-			fi
 			build "$problem" "$solver" "$N_WP"
 			# A watchdog breach NaN-fills the wp sweep in-process. Any other failure ends this leg only.
 			rc=0
@@ -193,10 +163,6 @@ do
 		BREACHED=""
 		for a in $NLIST
 		do
-			if resume_skip times "$problem" "$solver" "$a"; then
-				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
-				continue
-			fi
 			# A breached leg's larger sizes are recorded as NaN without running.
 			if [ -n "$BREACHED" ]; then
 				nan_row times "$problem" "$solver" "$a"

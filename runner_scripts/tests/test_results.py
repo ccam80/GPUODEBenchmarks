@@ -1,4 +1,4 @@
-"""The result store: rows replace by identity, --floor keeps the lower time, status drives resume, and every attempt rides in samples_ms."""
+"""The legacy CSV result store: rows replace by identity, floor keeps the lower time, and every attempt rides in samples_ms."""
 
 import csv
 import math
@@ -20,10 +20,6 @@ NAN = float("nan")
 
 class StoreCase(unittest.TestCase):
     def setUp(self):
-        patcher = mock.patch.dict(os.environ)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        os.environ.pop("BENCH_FLOOR", None)
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
@@ -80,13 +76,20 @@ class RecordTests(StoreCase):
     def test_floor_keeps_the_lower_time_and_nan_never_wins(self):
         leg = self.leg()
         leg.record_times(8, 1.5, 0.5, 0.0)
-        os.environ["BENCH_FLOOR"] = "1"
-        leg.record_times(8, 2.5, 0.4, 0.0)
-        leg.record_times(8, NAN, NAN, 100.0)
+
+        def floored(n, both, none):
+            for transfers, value in (("both", both), ("none", none)):
+                row = results.make_row("cubie", "test_key", "times", "lorenz", "tsit5",
+                                       "fixed", "dt", 2.0 ** -10, n, 3,
+                                       transfers=transfers, min_ms=value)
+                results.record(leg.path, row, floor=True)
+
+        floored(8, 2.5, 0.4)
+        floored(8, NAN, NAN)
         rows = results.load(leg.path)
         self.assertEqual([r["min_ms"] for r in rows], ["1.5", "0.4"])
-        leg.record_times(32, NAN, NAN, 100.0)
-        leg.record_times(32, 9.0, 8.0, 0.0)
+        floored(32, NAN, NAN)
+        floored(32, 9.0, 8.0)
         by_n = {(r["n"], r["transfers"]): r["min_ms"]
                 for r in results.load(leg.path)}
         self.assertEqual(by_n[("32", "both")], "9")

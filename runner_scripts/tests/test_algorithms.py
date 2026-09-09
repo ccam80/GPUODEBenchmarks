@@ -26,8 +26,9 @@ class WorkPrecisionMembershipTests(unittest.TestCase):
         self.assertIn("cash-karp-54", adaptive)
         self.assertIn("radau_iia_9", adaptive)
         self.assertNotIn("backwards_euler", adaptive)
-        self.assertEqual(wp_supported_for("julia", "fixed"),
-                         supported_for("julia", "fixed"))
+        self.assertEqual(wp_supported_for("julia_gpu", "fixed"),
+                         supported_for("julia_gpu", "fixed"))
+        self.assertEqual(supported_for("julia"), ())
 
     def test_wp_resolution_and_the_ne_token(self):
         self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie", wp=True),
@@ -50,7 +51,7 @@ class WorkPrecisionMembershipTests(unittest.TestCase):
                          lorenz.ne_dts())
         self.assertEqual(wp_settings(lorenz, "euler", "fixed", "cubie"),
                          lorenz.dts("euler"))
-        self.assertEqual(wp_settings(lorenz, "tsit5", "fixed", "julia"),
+        self.assertEqual(wp_settings(lorenz, "tsit5", "fixed", "julia_gpu"),
                          lorenz.dts("tsit5"))
         self.assertEqual(len(wp_settings(lorenz, "tsit5", "adaptive", "cubie")), 7)
 
@@ -70,6 +71,8 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(ne), 21)
         for row in ne_algorithms():
             self.assertTrue(row["julia_cpu"], row["algorithm"])
+            self.assertIn("julia_cpu", row["fixed"], row["algorithm"])
+            self.assertEqual("julia_cpu" in row["adaptive"], row["ne_adaptive"], row["algorithm"])
         self.assertEqual([row["algorithm"] for row in overlap_algorithms()],
                          ["tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7",
                           "kvaerno5"])
@@ -90,15 +93,17 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_supported_is_the_union_of_the_modes(self):
-        for framework in ("cubie", "julia", "jax", "pytorch", "cpp",
+        for framework in ("cubie", "julia_gpu", "julia_cpu", "jax", "pytorch", "cpp",
                           "myokit_cuda"):
             union = set(supported_for(framework, "fixed"))
             union |= set(supported_for(framework, "adaptive"))
             self.assertEqual(union, set(supported_for(framework)))
 
     def test_the_timed_implicit_set_reaches_cubie(self):
+        # julia_cpu times every ne row; the GPU packages' implicit set is what cubie must reach.
         implicit = [row["algorithm"] for row in load_algorithms()
-                    if row["family"] != "erk" and (row["fixed"] or row["adaptive"])]
+                    if row["family"] != "erk"
+                    and (set(row["fixed"]) | set(row["adaptive"])) - {"julia_cpu"}]
         self.assertTrue(implicit)
         for name in implicit:
             self.assertIn(name, supported_for("cubie"))

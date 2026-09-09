@@ -56,8 +56,10 @@ class RegistryTests(unittest.TestCase):
 
     def test_supports_gates_frameworks(self):
         row = get_problem("lorenz96")
-        self.assertTrue(row.supports("julia"))
+        self.assertTrue(row.supports("julia_gpu"))
+        self.assertTrue(row.supports("julia_cpu"))
         self.assertTrue(row.supports("cubie"))
+        self.assertFalse(row.supports("julia"))
         self.assertFalse(row.supports("nosuchframework"))
 
     def test_bench_args_accept_an_n_list(self):
@@ -79,28 +81,12 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual("warm", analysis)
         self.assertEqual([], ns)
 
-    def test_states_grid_env_override(self):
-        import importlib
-        import os
-
-        import protocol
-        import wp_common
-        os.environ["BENCH_STATES_GRID"] = "16,4,256"
-        try:
-            importlib.reload(protocol)
-            importlib.reload(wp_common)
-            self.assertEqual((4, 16, 256), wp_common.STATES_GRID)
-        finally:
-            del os.environ["BENCH_STATES_GRID"]
-            importlib.reload(protocol)
-            importlib.reload(wp_common)
-
     def test_states_rows_resize_lorenz96(self):
         from problems import states_row
         row = states_row(16)
         self.assertEqual("lorenz96", row.name)
         self.assertEqual(16, row["states"])
-        self.assertTrue(row.supports("julia"))
+        self.assertTrue(row.supports("julia_gpu"))
 
 
 class GridTests(unittest.TestCase):

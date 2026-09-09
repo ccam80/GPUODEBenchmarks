@@ -1,5 +1,5 @@
 #!/bin/bash
-# Forwards to bench.py with the same flags; -p accepts hyphenated package names.
+# Forwards to `bench.py run` with the same flags and the clocks unlocked; -p accepts hyphenated package names.
 cd "$(dirname "$0")" || exit 1
 PASS=()
 while [ $# -gt 0 ]; do
@@ -8,4 +8,4 @@ while [ $# -gt 0 ]; do
         *) PASS+=("$1"); shift;;
     esac
 done
-exec python3 ./bench.py --no-lock-clocks "${PASS[@]}"
+exec python3 ./bench.py run --no-lock-clocks "${PASS[@]}"

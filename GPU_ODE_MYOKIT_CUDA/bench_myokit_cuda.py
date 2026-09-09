@@ -17,7 +17,6 @@ sys.path.insert(0, str(REPO_ROOT / "runner_scripts"))
 from bench_key import data_dir, dataset_key  # noqa: E402
 from protocol import TIMING_DT_K  # noqa: E402
 from results import Leg  # noqa: E402
-from resume import skip_point, skip_wp_leg  # noqa: E402
 from wp_common import (  # noqa: E402
     REPEAT_CAP,
     ensemble_error,
@@ -182,25 +181,13 @@ def run_problem(problem, cell_counts, wp_mode):
     if wp_mode:
         leg = Leg("myokit_cuda", DATASET_KEY, "wp", problem, ALGORITHM,
                   "fixed")
-        if skip_wp_leg(leg, problem.dts(ALGORITHM)):
-            print("-- resume: skipping wp {0} fixed {1} (already covered)"
-                  .format(problem.name, ALGORITHM))
-            return
         model = load_model(problem)
         run_work_precision(model, problem, cell_counts[0], leg)
         return
 
     leg = Leg("myokit_cuda", DATASET_KEY, "times", problem, ALGORITHM,
               "fixed")
-    run_counts = [n for n in cell_counts if not skip_point(leg, n)]
-    if not run_counts:
-        print("-- resume: skipping {0} fixed {1} (already covered)"
-              .format(problem.name, ALGORITHM))
-        return
-    if len(run_counts) < len(cell_counts):
-        print("-- resume: {0} fixed {1} runs N={2}".format(
-            problem.name, ALGORITHM,
-            ",".join(str(n) for n in run_counts)))
+    run_counts = list(cell_counts)
     model = load_model(problem)
     for index, cell_count in enumerate(run_counts):
         sweep = problem.sweep(cell_count, dtype=np.float32)
@@ -304,11 +291,7 @@ def run_states(grid):
     cell_count = STATES_N
     leg = Leg("myokit_cuda", DATASET_KEY, "states", STATES_PROBLEM, ALGORITHM,
               "fixed")
-    run_grid = [s for s in grid if not skip_point(leg, cell_count, s)]
-    if not run_grid:
-        print("-- resume: skipping states fixed {0} (already covered)"
-              .format(ALGORITHM))
-        return
+    run_grid = list(grid)
     for index, nstates in enumerate(run_grid):
         row = states_row(nstates)
         sweep = row.sweep(cell_count, dtype=np.float32)

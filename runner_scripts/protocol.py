@@ -23,10 +23,7 @@ N_MIN = int(_ensemble["n_min"])
 N_STEP = int(_ensemble["n_step"])
 NMAX_DEFAULT = int(_ensemble["nmax_default"])
 
-# BENCH_STATES_GRID (comma list) overrides the states sweep sizes.
-_STATES_ENV = os.environ.get("BENCH_STATES_GRID", "")
-STATES_GRID = (tuple(sorted(int(tok) for tok in _STATES_ENV.split(",")))
-               if _STATES_ENV else tuple(int(s) for s in _ensemble["states_grid"]))
+STATES_GRID = tuple(int(s) for s in _ensemble["states_grid"])
 
 TIMING_DT_K = int(_fixed["timing_k"])
 WP_K = tuple(int(k) for k in _fixed["wp_k"])

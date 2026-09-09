@@ -61,7 +61,7 @@ include(joinpath(REPO_ROOT, "runner_scripts", "bench_key.jl"))
 const DATASET_KEY = dataset_key()
 
 const PROBLEM = get(NE_OPT, "problem", "all")
-const PROBLEMS = resolve_problems(PROBLEM, "julia")
+const PROBLEMS = resolve_problems(PROBLEM, "julia_cpu")
 isempty(PROBLEMS) && error("no problem matches '$(PROBLEM)'")
 
 # Cash-Karp 5(4) and Fehlberg 4(5) tableaus for the generic ExplicitRK

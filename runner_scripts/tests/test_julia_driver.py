@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
                                 "runner_scripts", "gpu"))
 
 import julia_driver  # noqa: E402
-import resume  # noqa: E402
 from problems import get_problem  # noqa: E402
 from protocol import STATES_N  # noqa: E402
 from results import Leg  # noqa: E402
@@ -210,11 +209,6 @@ class PerformanceDriverTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        os.environ.pop("BENCH_RESUME", None)
-        os.environ.pop("BENCH_NO_OVERWRITE", None)
-        os.environ.pop("BENCH_RESUME_FROM", None)
-        resume._reset_cache()
-        self.addCleanup(resume._reset_cache)
         os.environ["BENCH_JULIA_JOBS"] = "2"
 
         self.tmp = tempfile.mkdtemp(prefix="jd_perf_")
@@ -276,23 +270,12 @@ class PerformanceDriverTests(unittest.TestCase):
         # The sibling mode still gets its own process.
         self.assertEqual(len(self.spawned), 2)
 
-    def test_covered_mode_is_pruned_alone(self):
-        os.environ["BENCH_RESUME"] = "1"
+    def test_recorded_legs_run_again(self):
         fixed = self.leg("fixed")
         fixed.record_times(8, 1.0, 2.0, 0.0)
         fixed.record_times(32, 1.0, 2.0, 0.0)
         self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
-        self.assertEqual(self.modes_spawned(), ["adaptive"])
-
-    def test_no_overwrite_retries_the_nan_mode(self):
-        os.environ["BENCH_NO_OVERWRITE"] = "1"
-        fixed, adaptive = self.leg("fixed"), self.leg("adaptive")
-        fixed.record_times(8, 1.0, 2.0, 0.0)
-        fixed.record_times(32, 1.0, 2.0, 0.0)
-        adaptive.record_times(8, 1.0, 2.0, 0.0)
-        adaptive.nan_times([32])
-        self.assertEqual(julia_driver.run_performance(["8,32"]), 0)
-        self.assertEqual(self.modes_spawned(), ["adaptive"])
+        self.assertEqual(sorted(self.modes_spawned()), ["adaptive", "fixed"])
 
 
 if __name__ == "__main__":

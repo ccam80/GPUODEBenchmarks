@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-REM Forwards to bench.py with the same flags; -p accepts hyphenated package names.
+REM Forwards to `bench.py run` with the same flags and the clocks unlocked; -p accepts hyphenated package names.
 pushd "%~dp0"
 set "PASS="
 :parse_loop
@@ -18,7 +18,7 @@ shift
 shift
 goto parse_loop
 :parse_done
-python bench.py --no-lock-clocks !PASS!
+python bench.py run --no-lock-clocks !PASS!
 set "STATUS=!errorlevel!"
 popd
 endlocal & exit /b %STATUS%

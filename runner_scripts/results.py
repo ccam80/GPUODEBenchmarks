@@ -46,10 +46,6 @@ def store_path(package, key, root=None):
     return os.path.join(directory, "results.csv")
 
 
-def floor_enabled():
-    return os.environ.get("BENCH_FLOOR", "") not in ("", "0")
-
-
 def _float(text):
     try:
         return float(text)
@@ -182,9 +178,8 @@ def make_row(package, key, analysis, problem, algorithm, mode, setting_kind,
                 "%Y-%m-%dT%H:%M:%SZ")}
 
 
-def record(path, row, floor=None):
-    """Replace the row with this identity, or under --floor keep whichever has the lower time."""
-    floor = floor_enabled() if floor is None else floor
+def record(path, row, floor=False):
+    """Replace the row with this identity, or under floor keep whichever has the lower time."""
     with _Lock(path):
         rows = load(path)
         replaced = False
@@ -242,7 +237,7 @@ def wp_settings(problem, algorithm, mode, package):
 
 
 class Leg:
-    """One (package, key, analysis, problem, algorithm, mode) writer with the resume checks."""
+    """One (package, key, analysis, problem, algorithm, mode) writer."""
 
     def __init__(self, package, key, analysis, problem, algorithm, mode,
                  root=None):

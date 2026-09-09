@@ -417,65 +417,42 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`bench.py` runs every stage: cubie optimize and warm, the timing, states and
-work-precision sweeps, numerical equivalence, the overlap comparison, plots and
-reports. Every axis (package, analysis, algorithm, problem, mode, N) takes a
-comma list and `--point` retakes single points; the `run_*.sh`/`.bat` scripts
-forward to it. Without `--keep` a run first drops only the store rows it is
-about to record.
+`bench.py` generates trials and drives one runner per package; the analyses
+are separate scripts over the result store. `plan` writes
+`trials/<key>/<package>.jsonl` and prints the counts per package and leg;
+`run` writes the same under `logs/<key>_<stamp>/`, runs each package's runner
+on its file, and after a watchdog hard exit (exit 3) records the abandoned
+ordinals of that leg and re-invokes the runner with the trials that still
+have no row. Every axis takes a comma list; `--for` picks the views (`perf`,
+`wp`, `ne`, `states`, `overlap`), whose trials are deduplicated by identity.
+The `run_*.sh`/`.bat` scripts forward to `bench.py run`.
 
 ```bash
-    $ python3 bench.py                           # everything, nmax = 2^24
-    $ python3 bench.py -n $((2**25))             # larger ceiling
-    $ python3 bench.py -n $((2**23)),$((2**27))  # exact trajectory counts only
-    $ python3 bench.py -a performance            # one analysis
-    $ python3 bench.py -a optimize,warm -p cubie # tune and fill the cubie caches only
-    $ python3 bench.py -p cpp                    # one package
-    $ python3 bench.py -p cubie,julia -g euler,tsit5   # subsets of both
-    $ python3 bench.py --mode adaptive -s pollu  # one mode of one problem
-    $ python3 bench.py --resume                  # skip every point already on disk
-    $ python3 bench.py --no-overwrite            # keep finite results, retry NaN and absent points
-    $ python3 bench.py --resume-from jax         # restart the perf sweep at a package
-    $ python3 bench.py --resume \
-        --resume-from cubie:ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
-                                                 # ...or at an exact (problem, algorithm, mode, N)
-    $ python3 bench.py --floor -s lorenz         # re-run and keep the lower time per point
-    $ python3 bench.py --point times:cubie:lorenz:tsit5:fixed:32768 \
-                       --point wp:julia:pollu:kvaerno3 --point states:cpp:lorenz96:classical-rk4:16
-    $ python3 bench.py --points-file retakes.txt # one point per line
+    $ python3 bench.py plan                          # every view, every package; counts only
+    $ python3 bench.py run                           # everything, nmax = 2^24
+    $ python3 bench.py run -n $((2**25))             # larger ceiling
+    $ python3 bench.py run -n $((2**23)),$((2**27))  # exact trajectory counts only
+    $ python3 bench.py run --for perf,wp -p cubie    # two views of one package
+    $ python3 bench.py run -p cubie,julia_gpu -g euler,tsit5   # subsets of both
+    $ python3 bench.py run --mode adaptive -s pollu  # one mode of one problem
+    $ python3 bench.py run --resume                  # drop trials whose rows are all present
+    $ python3 bench.py run --no-overwrite            # drop trials whose rows are all finite
+    $ python3 bench.py run --floor -s lorenz         # re-run and keep the lower time per row
+    $ python3 bench.py run --point cubie/lorenz/tsit5/fixed/dt=0.0009765625/n=32768/s=3/default
+    $ python3 bench.py run --point julia_gpu/pollu/kvaerno3   # every trial under that path
 ```
 
-A point is `<times|wp|states>:<package>:<problem>:<algorithm>[:<mode>][:<N or
-state count>]`; a run of points replaces only those rows and redraws the plots,
-and a point without a mode re-measures both modes. `JULIA` overrides the
-`julia +1.13` launcher.
-
-`--resume` skips every (problem, algorithm, mode, N) point whose row is
-already in the result store and deletes nothing; NaN rows count as recorded.
-`--no-overwrite` skips only points with a finite recorded time; NaN and
-absent rows rerun, and a rerun point replaces its row. `--keep` gives the
-no-deletion behaviour on its own.
-`--resume-from` places a cursor in the run order (problems.csv order, then
-algorithms.csv order, fixed before adaptive, N ascending) and skips
-everything before it — use it to step over a point that hangs, since a hung
-point leaves no row for `--resume` to skip. `--floor` re-runs the selected
-points (it skips nothing, and implies `--keep`) and merges each result into
-the store by keeping the row with the lower time, per transfer leg, so a
-re-run can only tighten a recorded minimum. Which points re-run comes from the flags that
-already select work (`-s`, `-g`, `-n`). All four flags are also accepted by
-`run_benchmark.sh` / `run_benchmark.bat`, where `--resume-from` starts at
-the problem:
-
-```bash
-    $ bash ./run_benchmark.sh -p cubie --resume     # fill only the gaps
-    $ bash ./run_benchmark.sh -p cubie --resume \
-        --resume-from ring_modulator_index2:rosenbrock23_sciml:adaptive:262144
-```
+A trial id is `<package>/<problem>/<algorithm>/<mode>/<dt|tol>=<setting>/n=<N>/s=<states>/<tier>`
+and `--point` takes an id or any leading path of one. `--resume` drops a
+solve trial when every requested transfers row is in the store (NaN rows
+count); `--no-overwrite` drops it only when those rows are all finite.
+`--floor` reaches the runners, which then keep the lower finite time per row.
+`JULIA` overrides the `julia +1.13` launcher.
 
 **On Windows** the same flags apply:
 
 ```cmd
-    > python bench.py -n 16777216 -a performance,work-precision
+    > python bench.py run -n 16777216 --for perf,wp
 ```
 
 At high trajectory counts some frameworks will exhaust GPU memory. Each

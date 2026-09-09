@@ -16,7 +16,6 @@ from algorithms import supported_for
 from bench_key import dataset_key, data_dir
 from torch_systems import build_problem
 from results import Leg
-from resume import skip_point, skip_wp_leg
 from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
 
 DATASET_KEY = dataset_key()
@@ -111,10 +110,6 @@ def run_wp(problem, parameters):
             continue
         dts = list(problem.dts(algorithm))
         leg = Leg("pytorch", DATASET_KEY, "wp", problem, algorithm, "fixed")
-        if skip_wp_leg(leg, dts):
-            print("-- resume: skipping wp {0} fixed {1} (already covered)"
-                  .format(problem.name, algorithm))
-            continue
         # Later settings are slower, so a breach abandons the leg.
         for index, dt in enumerate(dts):
             solve_dt = make_solve(problem, algorithm, dt)
@@ -159,15 +154,7 @@ def run_times(problem):
             continue
         leg = Leg("pytorch", DATASET_KEY, "times", problem, algorithm,
                   "fixed")
-        run_ns = [n for n in NS if not skip_point(leg, n)]
-        if not run_ns:
-            print("-- resume: skipping {0} fixed {1} (already covered)"
-                  .format(problem.name, algorithm))
-            continue
-        if len(run_ns) < len(NS):
-            print("-- resume: {0} fixed {1} runs N={2}".format(
-                problem.name, algorithm,
-                ",".join(str(n) for n in run_ns)))
+        run_ns = list(NS)
         solve = make_solve(problem, algorithm)
         for index, n in enumerate(run_ns):
             parameters_host = problem.sweep(n, dtype=np.float32)
@@ -255,11 +242,7 @@ def run_states():
     for algorithm in ALGORITHMS:
         leg = Leg("pytorch", DATASET_KEY, "states", STATES_PROBLEM, algorithm,
                   "fixed")
-        run_grid = [s for s in grid if not skip_point(leg, n, s)]
-        if not run_grid:
-            print("-- resume: skipping states fixed {0} (already covered)"
-                  .format(algorithm))
-            continue
+        run_grid = list(grid)
         for index, nstates in enumerate(run_grid):
             row = states_row(nstates)
             solve = make_solve(row, algorithm)

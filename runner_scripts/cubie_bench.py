@@ -17,7 +17,6 @@ from algorithms import supported_for, wp_supported_for
 from bench_key import dataset_key, data_dir
 from cubie_systems import final_states, sweep_parameters
 from results import Leg
-from resume import skip_point, skip_wp_leg
 from wp_common import REPEAT_CAP, errored_pct, parse_bench_args
 
 REPEATS = REPEAT_CAP
@@ -161,10 +160,6 @@ def _run_wp(problem, opts, system, grid):
         leg = Leg(opts["framework"], opts["dataset_key"], "wp", problem,
                   algorithm, mode)
         settings = list(settings)
-        if skip_wp_leg(leg, settings, tier):
-            print(f"-- resume: skipping wp {problem.name} {mode} "
-                  f"{algorithm} [{tier}] (already covered)")
-            return
         breached = False
         ne_finals = []
         for setting in settings:
@@ -264,14 +259,7 @@ def _run_times(problem, opts, system, grid):
                 continue
             leg = Leg(opts["framework"], dataset, "times", problem, algorithm,
                       mode)
-            run_ns = [n for n in ns if not skip_point(leg, n)]
-            if not run_ns:
-                print(f"-- resume: skipping {problem.name} {mode} "
-                      f"{algorithm} (already covered)")
-                continue
-            if len(run_ns) < len(ns):
-                print(f"-- resume: {problem.name} {mode} {algorithm} "
-                      f"runs N={','.join(str(n) for n in run_ns)}")
+            run_ns = list(ns)
             solver = None
             try:
                 solver = _make_solver(opts, system, problem, algorithm, mode)
@@ -520,11 +508,7 @@ def _run_states(opts):
                 continue
             leg = Leg(opts["framework"], opts["dataset_key"], "states",
                       STATES_PROBLEM, algorithm, mode)
-            run_grid = [s for s in grid if not skip_point(leg, n, s)]
-            if not run_grid:
-                print(f"-- resume: skipping states {mode} {algorithm} "
-                      "(already covered)")
-                continue
+            run_grid = list(grid)
             # A device-only breach abandons that column alone.
             device_breached = False
             for index, nstates in enumerate(run_grid):

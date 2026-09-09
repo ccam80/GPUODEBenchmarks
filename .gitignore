@@ -37,8 +37,9 @@ GPU_ODE_MYOKIT_CUDA/generated/
 # Local benchmark result sets
 /data/numerical_equivalence/cubie_pre626_jul16/
 
-# Orchestrator run logs
+# Orchestrator run logs and bench.py plan output
 /logs/
+/trials/
 
 golden_ring_modulator.log*
 
