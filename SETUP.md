@@ -35,9 +35,6 @@ sudo apt install build-essential nvidia-cuda-toolkit python3-venv python3-pip gi
 curl -fsSL https://install.julialang.org | sh -s -- --yes
 ```
 
-Inside WSL2 do not install Linux NVIDIA driver packages; the driver comes
-from Windows through `/usr/lib/wsl/lib`.
-
 ## Packages
 
 ### cubie and cubie_mlir
@@ -63,7 +60,7 @@ cubie is imported.
 python GPU_ODE_JAX/setup_environment.py
 ```
 
-Linux only (WSL2 included); elsewhere the script prints a skip and exits 0.
+Linux only; elsewhere the script prints a skip and exits 0.
 Installs the pinned
 `jax[cuda13]`, Diffrax and Equinox with `pyarrow` and `tzdata`, and fails
 when jax-cuda plugins of two CUDA generations coexist in the venv.
