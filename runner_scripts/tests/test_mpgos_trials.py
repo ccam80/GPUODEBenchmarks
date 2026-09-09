@@ -213,6 +213,7 @@ class CppTrialTests(unittest.TestCase):
         self.assertEqual(fields["atol_nan"], "1")
         self.assertEqual(fields["finals"], "1" if target["finals"] else "0")
         self.assertEqual(fields["cold"], "0")
+        self.assertEqual(float(fields["watchdog_s"]), target["watchdog_s"])
         self.assertEqual(fields["transfers"], "both,none")
         self.assertEqual(fields["lists_none"], "1")
         with open(row_path, encoding="utf-8") as handle:

@@ -28,7 +28,7 @@ CUDA.allowscalar(false)
 
 const WARM_N = 8
 const TRIAL_FLOAT_FIELDS = ("duration", "grid_min", "grid_max", "dt", "dt_min", "dt_max",
-    "atol", "rtol", "newton_atol", "newton_rtol")
+    "atol", "rtol", "newton_atol", "newton_rtol", "watchdog_s")
 const CONTROLLERS = ("fixed", "default")
 
 # ------------------------------------------------------------------ inputs
@@ -182,16 +182,16 @@ function with_gpu_lock(f, path)
     end
 end
 
-"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog; a run past the soft cap is a timeout, an exception an oom or error."
-function timed(f, label)
+"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error."
+function timed(f, label, cap_s)
     on_breach = () -> begin
         println("WATCHDOG $(label): run never returned")
         flush(stdout)
     end
     try
-        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP)
+        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
         isnan(ms) && return Outcome("timeout", NaN, samples,
-            "timeout: run exceeded $(WATCHDOG_SECONDS)s", result)
+            "timeout: run exceeded $(cap_s)s", result)
         return Outcome("ok", ms, samples, "", result)
     catch err
         return failed(classify(err)...)
@@ -221,7 +221,7 @@ function warm_leg(parts, trial, label)
         println("WATCHDOG $(label): warm run never returned")
         flush(stdout)
     end
-    run_watchdogged(on_breach) do
+    run_watchdogged(on_breach; budget_s = trial["watchdog_s"] * 2.0 + 30.0) do
         gpu_solve_device(probs, parts.prob, parts.solver, trial["controller"], trial["dt"],
             trial["atol"], trial["rtol"])
     end
@@ -266,7 +266,7 @@ function run_solve(trial, parts, state, cli, version, rev, key)
                     () -> gpu_solve_device(probs, parts.prob, parts.solver,
                         trial["controller"], trial["dt"], trial["atol"], trial["rtol"])
                 with_gpu_lock(cli.lock) do
-                    timed(solve, "$(label) $(transfers)")
+                    timed(solve, "$(label) $(transfers)", trial["watchdog_s"])
                 end
             end
         end

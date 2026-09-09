@@ -32,7 +32,7 @@ const CONTROLLERS = ("fixed", "default")
 const CONTROLLER_COLUMNS = ("algorithm", "controller", "beta1", "beta2", "qmin", "qmax",
     "gamma", "order")
 const FLOAT_FIELDS = ("duration", "grid_min", "grid_max", "dt", "dt_min", "dt_max", "atol",
-    "rtol", "newton_atol", "newton_rtol")
+    "rtol", "newton_atol", "newton_rtol", "watchdog_s")
 # The solvers' own warnings (dt below eps, instability) are per trajectory; the row's retcodes carry them.
 const QUIET = OrdinaryDiffEqCore.DEVerbosity(OrdinaryDiffEqCore.SciMLLogging.None())
 
@@ -198,13 +198,13 @@ is_oom(err) = root_error(err) isa OutOfMemoryError
 error_reason(err) = (e = root_error(err);
     "error: $(typeof(e).name.name): " * first(sprint(showerror, e), 200))
 
-"(min_ms, samples, result, outcome, reason) of timing f under the watchdog: ok, timeout (the soft cap passed but the run returned), oom or error."
-function time_trial(f, label)
+"(min_ms, samples, result, outcome, reason) of timing f under the watchdog with the trial's cap: ok, timeout (the cap passed but the run returned), oom or error."
+function time_trial(f, label, cap_s)
     on_breach = () -> println("WATCHDOG $(label): run never returned")
     try
-        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP)
+        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
         isnan(ms) || return ms, samples, result, "ok", ""
-        reason = @sprintf("timeout: %.1f s over the %g s cap", samples[end] / 1000, WATCHDOG_SECONDS)
+        reason = @sprintf("timeout: %.1f s over the %g s cap", samples[end] / 1000, cap_s)
         return ms, samples, result, "timeout", reason
     catch err
         is_oom(err) && return NaN, Float64[], nothing, "oom", "oom: " * error_reason(err)[8:end]
@@ -345,7 +345,8 @@ function run_leg(ctx, leg, lines)
                 continue
             end
             ms, samples, result, outcome, why = time_trial(
-                () -> ensemble_solve(system, prob, alg, points, kwargs), "$(label) $(transfers)")
+                () -> ensemble_solve(system, prob, alg, points, kwargs), "$(label) $(transfers)",
+                trial["watchdog_s"])
             pct = NaN
             if result !== nothing
                 finals, t_final, retcode = result

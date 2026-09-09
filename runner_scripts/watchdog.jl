@@ -2,11 +2,10 @@
 
 include(joinpath(@__DIR__, "protocol.jl"))
 
-"Run f() under the watchdog; when it never returns, run on_breach() and hard-exit."
-function run_watchdogged(f, on_breach)
+"Run f() under the watchdog; when it has not returned after budget_s (twice the soft cap plus 30 s), run on_breach() and hard-exit."
+function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS * 2.0 + 30.0)
     finished = Threads.Atomic{Bool}(false)
-    # Margin over the soft cap: only never-returning runs reach the hard exit.
-    timer = Timer(WATCHDOG_SECONDS * 2.0 + 30.0) do _
+    timer = Timer(budget_s) do _
         finished[] && return
         try
             on_breach()
@@ -47,16 +46,16 @@ function repeats_done(timed_s, lo, hi)
     return _median(timed_s) / minimum(timed_s) - 1.0 <= REPEAT_SPREAD
 end
 
-"(ms, samples, result) after one warm-up; ms is NaN when a run breaches, result is the last solve's return value. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."
-function watchdogged_min_ms(f, on_breach, repeats)
+"(ms, samples, result) after one warm-up; ms is NaN when a run breaches cap_s, result is the last solve's return value. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."
+function watchdogged_min_ms(f, on_breach, repeats; cap_s = WATCHDOG_SECONDS)
     samples = Float64[]
     timed = Float64[]
     lo = hi = 0
     result = nothing
     while true
-        elapsed = @elapsed result = run_watchdogged(f, on_breach)
+        elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s * 2.0 + 30.0)
         push!(samples, elapsed * 1000.0)
-        elapsed > WATCHDOG_SECONDS && return (NaN, samples, result)
+        elapsed > cap_s && return (NaN, samples, result)
         length(samples) == 1 && continue   # the warm-up carries the compile
         push!(timed, elapsed)
         length(timed) == 1 && ((lo, hi) = repeat_bounds(timed[1], repeats))

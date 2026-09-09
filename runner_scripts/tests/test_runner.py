@@ -32,7 +32,8 @@ def spec(n=8, transfers=("both", "none"), finals=False, axis="n", build="warm", 
                   grid_dtype="float32", algorithm="tsit5", controller="fixed", dt=2.0 ** -10,
                   dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}", newton_atol=NAN,
                   newton_rtol=NAN, package="cubie", transfers=list(transfers), finals=finals,
-                  axis=axis, build=build, optimize=optimize, set="test", stepping="fixed")
+                  axis=axis, build=build, optimize=optimize, watchdog_s=CAP_S, set="test",
+                  stepping="fixed")
     fields.update(overrides)
     return fields
 
@@ -171,6 +172,17 @@ class OutcomeTests(RunnerCase):
         self.assertNotIn(("solve", 128, "none"), adapter.calls)
         self.assertIn(("solve", 128, "both"), adapter.calls)
 
+    def test_the_trials_own_budget_sets_the_cap(self):
+        adapter = FakeAdapter({(32, "none"): "slow"})
+        status, rows, _ = self.run_specs([spec(8, watchdog_s=1.0), spec(32, watchdog_s=1.0),
+                                          spec(128, watchdog_s=1.0)], adapter)
+        self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
+        self.assertEqual({r["reason"] for r in rows.values()}, {""})
+        adapter = FakeAdapter({(32, "none"): "slow"})
+        status, rows, _ = self.run_specs([spec(32, watchdog_s=CAP_S)], adapter)
+        self.assertEqual(rows[(32, "none")]["reason"][:9], "timeout: ")
+        self.assertIn("over the {0:g}s cap".format(CAP_S), rows[(32, "none")]["reason"])
+
     def test_oom_abandons_like_a_timeout_and_the_other_transfers_continue(self):
         adapter = FakeAdapter({(32, "both"): "oom"})
         status, rows, _ = self.run_specs([spec(8), spec(32), spec(128)], adapter)
@@ -277,7 +289,7 @@ class LegTests(RunnerCase):
         adapter = FakeAdapter()
         status, rows, path = self.run_specs([spec(8, optimize=table)], adapter)
         self.assertEqual(adapter.calls[:3], [("build", 8, False), ("compile", 8, None), ("optimize", 64, None)])
-        self.assertEqual(budgets[:3], [None, None, runner.OPTIMIZE_SECONDS])
+        self.assertEqual(budgets[:3], [CAP_S * 2.0 + 30.0, CAP_S * 2.0 + 30.0, runner.OPTIMIZE_SECONDS])
         self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
         with open(path + ".progress") as handle:
             self.assertEqual(json.load(handle)["kind"], "solve")

@@ -130,11 +130,12 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
 | cold | `true` on the `warm` line of a `build = "cold"` set: fresh cache directory, `build_s` recorded |
+| watchdog_s | seconds one run may take before it is a `timeout`; the set's `watchdog`, default `[watchdog] seconds` |
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
 - A leg is one `warm` line (the cheapest spec), the `optimize` lines of `[set.optimize]`, then the `solve` lines.
 - `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv` and apply to the leg's later solves.
-- Specs with one `trial_id` across sets merge: first set's leg and axis, `transfers` union, `finals` true over false.
+- Specs with one `trial_id` across sets merge: first set's leg and axis, `transfers` union, `finals` true over false, the larger `watchdog_s`.
 
 ### 1.5 Runner contract
 
@@ -142,11 +143,11 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 <runner argv> --trials <path> [--floor]
 ```
 
-1. Reads the JSONL, groups `solve` trials by `leg`, builds once per leg, walks ordinals ascending, times each listed transfer leg with one untimed warm-up and the `[repeats]` schedule of `protocol.toml` (`timed_min_ms` semantics).
+1. Reads the JSONL, groups `solve` trials by `leg`, builds once per leg, walks ordinals ascending, times each listed transfer leg with one untimed warm-up and the `[repeats]` schedule of `protocol.toml` (`timed_min_ms` semantics); the soft cap is the trial's `watchdog_s` and the hard exit fires at twice it plus 30 s.
 2. Writes `<trials>.progress` (`{"trial_id": ..., "kind": ..., "started_utc": ...}`) before each line, warm and optimize lines included.
 3. Records every finished trial through the store before the next starts.
 4. Builds the grid by the 1.2 formula; rejects a `controller` name it does not recognise with `reason = "error: unknown controller <name>"`.
-5. One abandon rule. Outcomes per (trial, transfers): `ok`, `timeout` (soft cap, run returned), `oom`, `error`. After `timeout` or `oom` at ordinal k, every higher ordinal of the leg with the same transfers is recorded NaN with `reason = "abandoned: <timeout|oom> at ordinal k"` and not run. `error` records `reason = "error: <Type>: <message[:200]>"` and the leg continues. A `none` leg failing after a good `both` leg marks the `none` row only. OOM is classified by exception type or message: CUDA `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`, torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`.
+5. One abandon rule. Outcomes per (trial, transfers): `ok`, `timeout` (the trial's `watchdog_s` passed, run returned), `oom`, `error`. After `timeout` or `oom` at ordinal k, every higher ordinal of the leg with the same transfers is recorded NaN with `reason = "abandoned: <timeout|oom> at ordinal k"` and not run. `error` records `reason = "error: <Type>: <message[:200]>"` and the leg continues. A `none` leg failing after a good `both` leg marks the `none` row only. OOM is classified by exception type or message: CUDA `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`, torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`.
 6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row. When the progress file names an `optimize` line, the driver records nothing, drops that line and re-invokes the runner, so the leg's solves run at the solver's own geometry.
 7. `errored_pct`: `store.errored_pct` over the trial's finals, `t_final` and `retcode`.
 8. `finals = true`: all n rows through `record_finals` with each trajectory's `t_final` and `retcode`.
@@ -168,6 +169,7 @@ precision  = "float32"
 finals     = false                 # true: every solve keeps its finals
 transfers  = ["both", "none"]
 build      = "warm"                # or "cold": the warm line carries cold = true
+watchdog   = 120                   # seconds one run may take; default [watchdog] seconds
 
 [set.optimize]                     # optional; without it no optimize lines
 packages = ["cubie", "cubie_mlir"]
@@ -230,10 +232,10 @@ Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and
 | perf | all but julia_cpu | all | default range; n = perf list | the timed algorithms: fixed dt 2^-10; default controller tol 1e-5; cubie packages add `pi` with `dirk_defaults` at tol 1e-5 | cubie packages, 262144, per leg | false; both, none |
 | states | all but julia_cpu | lorenz96 | default range; n = 131072; states 4, 8, 16, 32, 64, 128 | as perf | as perf | false; both, none; build cold |
 | golden_grid | all | all | default range; n = 131072; julia_cpu n = 1024 with per-problem `max` = the float64 `v[1023]` of the 131072-point grid, written out with 17 digits | every algorithm the package runs: fixed dt 2^-k, k 1..13 (euler 8..17); default controller tol 1e-2..1e-8; cubie packages add `matched` and `pi` with `dirk_defaults` over the same tolerances | cubie packages, 262144, per solve | true; none |
-| golden | julia_cpu | all | default range; n = 131072 | `problems.csv golden_algorithm`, default controller, tol = `golden_tol`, dt0 and Newton package default | none | true; none; precision float64 |
+| golden | julia_cpu | all | default range; n = 131072 | `problems.csv golden_algorithm`, default controller, tol = `golden_tol`, dt0 and Newton package default | none | true; none; precision float64; watchdog 86400 |
 
 - Every list, grid and pin is spelled out in the set files.
-- `protocol.toml` keeps `[repeats]` and `[watchdog]` only.
+- `protocol.toml` keeps `[repeats]` and `[watchdog]` only; a set's `watchdog` overrides `[watchdog] seconds` for its trials.
 
 ### 1.7 Catalogues
 

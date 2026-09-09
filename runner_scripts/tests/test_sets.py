@@ -16,6 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import grid  # noqa: E402
+import protocol  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
 import trials  # noqa: E402
@@ -585,6 +586,7 @@ class SchemaTests(unittest.TestCase):
         head = loaded["set"]
         self.assertEqual((head["algorithms"], head["precision"], head["finals"], head["transfers"], head["build"]),
                          ("all", "float32", False, ["both", "none"], "warm"))
+        self.assertEqual(head["watchdog"], protocol.WATCHDOG_SECONDS)
         self.assertEqual(loaded["grid"][0]["parameter"], "default")
         self.assertEqual(loaded["stepping"][0]["newton"], "none")
         self.assertIsNone(head["optimize"])
@@ -593,7 +595,9 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual({s["dt"] for s in specs}, {0.5})
         self.assertTrue(all(np.isnan(s["newton_atol"]) for s in specs))
         self.assertEqual({s["optimize"] for s in specs}, {None})
+        self.assertEqual({s["watchdog_s"] for s in specs}, {protocol.WATCHDOG_SECONDS})
         built = trials.build_trials(specs)
+        self.assertEqual({t["watchdog_s"] for t in built}, {protocol.WATCHDOG_SECONDS})
         self.assertEqual([t["kind"] for t in built].count("optimize"), 0)
         self.assertEqual([t["kind"] for t in built].count("warm"), len(specs))
 
@@ -636,6 +640,7 @@ class SchemaTests(unittest.TestCase):
             "states on a fixed-size problem": self.MINIMAL.replace("n = [8]", "n = [8]\nsystem_params = {states = [4]}"),
             "bad newton": self.MINIMAL + 'newton = "tight"\n',
             "bad pin": self.MINIMAL.replace('dt = [0.5]', 'dt = {half_life = 2}'),
+            "bad watchdog": self.MINIMAL.replace("[set]", "[set]\nwatchdog = 0"),
         }
         for label, text in bad.items():
             self.write(text)
@@ -658,6 +663,38 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual((specs["pollu"]["dt"], specs["pollu"]["dt_min"], specs["pollu"]["dt_max"]),
                          (15.0, 0.25, 30.0))
         self.assertEqual({s["axis"] for s in sets.expand(["s"], KEY, sets_dir=self.tmp)}, {"tol"})
+
+
+class WatchdogBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sets_watchdog_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, name, text):
+        with open(os.path.join(self.tmp, name + ".toml"), "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_the_golden_set_allows_a_day_per_solve(self):
+        self.assertEqual(sets.load_set("golden")["set"]["watchdog"], 86400.0)
+        for name in ("perf", "states", "golden_grid"):
+            self.assertEqual(sets.load_set(name)["set"]["watchdog"], protocol.WATCHDOG_SECONDS)
+        specs = sets.expand(["golden"], KEY, problems=["lorenz"])
+        self.assertEqual({s["watchdog_s"] for s in specs}, {86400.0})
+        self.assertEqual({t["watchdog_s"] for t in trials.build_trials(specs)}, {86400.0})
+
+    def test_a_shared_trial_keeps_the_larger_budget_and_the_file_carries_it(self):
+        base = '[set]\npackages = ["jax"]\nproblems = ["lorenz"]\nalgorithms = ["euler"]\n{0}[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n'
+        self.write("short", base.format("watchdog = 60\n"))
+        self.write("long", base.format("watchdog = 600\n"))
+        specs = sets.expand(["short", "long"], KEY, sets_dir=self.tmp)
+        built = trials.build_trials(specs)
+        self.assertEqual([t["kind"] for t in built], ["warm", "solve"])
+        self.assertEqual({t["watchdog_s"] for t in built}, {600.0})
+        path = trials.write_jsonl(os.path.join(self.tmp, "jax.jsonl"), built)
+        back = trials.read_jsonl(path)
+        self.assertEqual([t["watchdog_s"] for t in back], [600.0, 600.0])
+        with open(path, encoding="utf-8") as handle:
+            self.assertIn('"watchdog_s": 600.0', handle.readline())
 
 
 class TrialFileTests(unittest.TestCase):

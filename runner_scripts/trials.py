@@ -4,11 +4,13 @@ import json
 import math
 import os
 
+from protocol import WATCHDOG_SECONDS
 from store import TRIAL_FIELDS, trial_id
 
 KINDS = ("solve", "warm", "optimize")
 AXES = ("n", "dt", "tol", "states")
-TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal", "cold")
+TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal", "cold",
+                             "watchdog_s")
 TRANSFERS_ORDER = ("both", "none")
 LEG_FIELDS = ("problem", "system_params", "algorithm", "controller", "precision")
 
@@ -33,7 +35,7 @@ def ordinal_key(spec):
             _states(spec))
 
 
-def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False):
+def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False, watchdog_s=None):
     record = {field: spec[field] for field in TRIAL_FIELDS}
     record["trial_id"] = trial_id(spec)
     record["kind"] = kind
@@ -43,17 +45,24 @@ def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False):
     record["axis"] = axis
     record["ordinal"] = int(ordinal)
     record["cold"] = bool(cold)
+    record["watchdog_s"] = float(_budget(spec) if watchdog_s is None else watchdog_s)
     return record
+
+
+def _budget(spec):
+    """The spec's watchdog budget in seconds; the protocol's when the spec carries none."""
+    return float(spec.get("watchdog_s", WATCHDOG_SECONDS))
 
 
 def _optimize_record(entry, leg, axis, ordinal):
     table = entry["optimize"]
     n = entry["spec"]["n"] if table["n"] == "solve" else int(table["n"])
-    return _record(dict(entry["spec"], n=n), "optimize", [], False, leg, axis, ordinal)
+    return _record(dict(entry["spec"], n=n), "optimize", [], False, leg, axis, ordinal,
+                   watchdog_s=entry["watchdog_s"])
 
 
 def build_trials(specs):
-    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins); per package leg, a warm line (cold when the set builds cold), optimize lines once per leg or before every solve as the set's optimize table says, then the solves in cost order."""
+    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins, the larger watchdog budget); per package leg, a warm line (cold when the set builds cold), optimize lines once per leg or before every solve as the set's optimize table says, then the solves in cost order."""
     merged = {}
     order = []
     for spec in specs:
@@ -62,10 +71,12 @@ def build_trials(specs):
             entry = merged[ident]
             entry["transfers"] |= set(spec["transfers"])
             entry["finals"] = entry["finals"] or bool(spec["finals"])
+            entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
             continue
         merged[ident] = {"spec": spec, "transfers": set(spec["transfers"]),
                          "finals": bool(spec["finals"]), "axis": spec["axis"],
                          "build": spec["build"], "optimize": spec["optimize"],
+                         "watchdog_s": _budget(spec),
                          "leg": leg_name(spec, spec["axis"])}
         order.append(ident)
     # A leg name repeats across packages; each package's trial file holds its own legs.
@@ -79,7 +90,7 @@ def build_trials(specs):
         first = entries[0]
         axis = first["axis"]
         trials.append(_record(first["spec"], "warm", [], False, leg, axis, 0,
-                              cold=first["build"] == "cold"))
+                              cold=first["build"] == "cold", watchdog_s=first["watchdog_s"]))
         if first["optimize"] is not None and first["optimize"]["per"] == "leg":
             trials.append(_optimize_record(first, leg, axis, 0))
         for ordinal, entry in enumerate(entries):
@@ -87,7 +98,7 @@ def build_trials(specs):
                 trials.append(_optimize_record(entry, leg, axis, ordinal))
             transfers = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
             trials.append(_record(entry["spec"], "solve", transfers, entry["finals"], leg,
-                                  axis, ordinal))
+                                  axis, ordinal, watchdog_s=entry["watchdog_s"]))
     return trials
 
 
@@ -127,6 +138,8 @@ def read_jsonl(path):
                           "rtol", "newton_atol", "newton_rtol"):
                 if record.get(field) is None:
                     record[field] = float("nan")
+            if record.get("watchdog_s") is None:
+                record["watchdog_s"] = WATCHDOG_SECONDS
             trials.append(record)
     return trials
 
