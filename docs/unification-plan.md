@@ -1,9 +1,9 @@
 # Unification plan
 
-One entry point expands named sets into fully explicit run specs, one runner
-per package executes them, one store holds one row per executed spec, and
-analyses select rows by expanding the same sets. Every packet is built and
-reviewed against section 1.
+- `bench.py` expands named sets into run specs (1.6).
+- One runner per package executes a trial file (1.4, 1.5).
+- The store holds one row per executed spec (1.2, 1.3).
+- Analyses select rows by expanding the same sets (1.8).
 
 ## 1. Contracts
 
@@ -23,13 +23,11 @@ reviewed against section 1.
 | julia_gpu | DiffEqGPU version from `Manifest.toml` |
 | julia_cpu | OrdinaryDiffEq version from `Manifest.toml` |
 
-`suite_rev` is `git rev-parse --short HEAD`, suffixed `-dirty` when tracked
-files differ.
+`suite_rev`: `git rev-parse --short HEAD`, `-dirty` appended when tracked files differ.
 
 ### 1.2 Run spec
 
-A run spec is the complete description of one solve. Its fields are the store
-identity and the trial body; nothing in it names a benchmark type.
+One solve, fully described; the store identity and the trial body.
 
 | group | column | type | values |
 |---|---|---|---|
@@ -52,8 +50,7 @@ identity and the trial body; nothing in it names a benchmark type.
 | conditions | transfers | string | `both` or `none` |
 | conditions | package, key | string | the executing package and machine |
 
-Grid values, identical in every language, tested against a numpy reference
-file at n = 131072 per problem:
+Grid values (every language; tested against a numpy reference at n = 131072):
 
 ```
 linear: v[i] = grid_min + i * ((grid_max - grid_min) / (n - 1)) in float64, v[n-1] = grid_max
@@ -61,14 +58,10 @@ log:    v[i] = 10 ** (log10(grid_min) + i * ((log10(grid_max) - log10(grid_min))
 then cast to grid_dtype; float64 runs use the cast values widened back
 ```
 
-Identity hashes, both `sha1` over the canonical JSON of the named fields in
-the order listed above, floats as `%.17g`, NaN as `"nan"`, first 16 hex:
-
+Hashes: `sha1` of the canonical JSON of the fields in table order, floats `%.17g`, NaN `"nan"`, first 16 hex.
 - `trial_id`: every spec field except `transfers` and `key`.
-- `run_id`: every spec field. The replace key of the store.
-
-Two specs are the same when their hashes are equal; floats are compared
-exactly, so set expansion must produce values by one formula.
+- `run_id`: every spec field; the store's replace key.
+- Equal hashes mean the same spec; floats compare exactly.
 
 ### 1.3 Store
 
@@ -122,14 +115,12 @@ python store.py clear   <filter.json>
 python store.py hash    <spec.json>                        # prints trial_id and run_id
 ```
 
-`results.jl` serialises rows with JSON.jl and calls the CLI; `Bench.cu` calls
-the CLI. The suite interpreter is `GPU_ODE_CUBIE/venv` with `pyarrow` and
-`duckdb`, exposed as `launch.suite_python()`.
+- `results.jl` serialises rows with JSON.jl and calls the CLI; `Bench.cu` calls the CLI.
+- Suite interpreter: `GPU_ODE_CUBIE/venv` with `pyarrow` and `duckdb`, `launch.suite_python()`.
 
 ### 1.4 Trials
 
-One JSONL file per package; a runner takes that path and nothing else. One
-line per trial: every spec field of 1.2 except `transfers` and `key`, plus:
+One JSONL file per package, the runner's only input; one line per trial: the 1.2 fields except `transfers` and `key`, plus:
 
 | field | values |
 |---|---|
@@ -142,9 +133,8 @@ line per trial: every spec field of 1.2 except `transfers` and `key`, plus:
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
 
-Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states`
-ascending. `warm` trials are never recorded. `optimize` trials exist for cubie
-packages and record to `optimize.csv`.
+- Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
+- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv`.
 
 ### 1.5 Runner contract
 
@@ -189,12 +179,11 @@ packages and record to `optimize.csv`.
    (`axis = states`) are never warmed; their cold `build_s` is the measurement.
 10. `package_version` and `suite_rev` on every row.
 
-Runners read `protocol.toml` for `[repeats]` and `[watchdog]` only, and no
-environment variable for resume or floor.
+11. Reads `protocol.toml` for `[repeats]` and `[watchdog]` only; no environment variables.
 
 ### 1.6 Sets and the entry point
 
-A set is a TOML file under `sets/` that expands to run specs. Schema:
+A set is a TOML file under `sets/` that expands to run specs:
 
 ```toml
 [set]
@@ -258,10 +247,10 @@ Expansion, in `runner_scripts/sets.py`:
    row's grid must equal the trial's grid, or contain it (same scale and min,
    larger n, trial `grid_max` float32-equal to the reference `v[n-1]`).
 
-Reuse rule (`Store.covering`): a `numerical` trial is covered, and not
-emitted, when a row with `finals` exists whose spec equals the trial's except
-for the grid, and whose grid contains the trial's grid as in (7). A `timed`
-trial is covered by any row of the same `run_id` per requested transfers.
+8. Reuse (`Store.covering`): a `numerical` trial is not emitted when a row
+   with `finals` has the trial's spec apart from the grid and a grid containing
+   the trial's as in (7); a `timed` trial is covered by a row of its `run_id`
+   per requested transfers.
 
 ```
 bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
@@ -269,16 +258,12 @@ bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
                   [--resume | --no-overwrite] [--floor] [--cooldown S] [clock flags]
 ```
 
-`-p -s -g --mode --controller -n --tol --dt` narrow the expanded specs; `-n`
-also replaces the `n` list of every grid whose file value is the perf list.
-`--resume` drops trials whose every requested transfers row exists;
-`--no-overwrite` drops those whose rows are all finite. `plan` writes
-`trials/<key>/<package>.jsonl` and prints counts per package and leg; `run`
-writes the same under `logs/<key>_<stamp>/`, drives the runners per 1.5 (6),
-keeps the clock guard, manifest and summary, and never invokes an analysis.
+- `-p -s -g --mode --controller -n --tol --dt` narrow the expanded specs; `-n` replaces the perf `n` list.
+- `--resume` drops trials whose every requested transfers row exists; `--no-overwrite` those whose rows are all finite.
+- `plan` writes `trials/<key>/<package>.jsonl` and prints counts per package and leg.
+- `run` writes the same under `logs/<key>_<stamp>/`, drives runners per 1.5 (6), keeps the clock guard, manifest and summary; no analysis.
 
-The shipped sets, all with `precision = "float32"`, `build = "warm"` and the
-1.5 Newton and pin values unless stated:
+Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and `tol` adaptive, `dt0 = duration * 2^-10`, `dt_min = duration * 1e-6`, `dt_max` none, unless stated):
 
 | set | packages | problems | algorithms | grid | stepping | role, transfers |
 |---|---|---|---|---|---|---|
@@ -290,28 +275,19 @@ The shipped sets, all with `precision = "float32"`, `build = "warm"` and the
 | overlap | cubie, cubie_mlir, julia_gpu | all | `tsit5, rosenbrock23_sciml, kvaerno3, kvaerno5, vern7` | perf grid; wp grid; ne grid | fixed dt 2^-10 and default controller tol 1e-8 on the perf grid; wp steppings on the wp grid; ne steppings on the ne grid; cubie adds `pi` with `dirk_defaults` | perf and wp timed, ne numerical; both, none |
 | golden | julia_cpu | all | `problems.csv golden_algorithm` per problem | default range; n = 131072 | default controller, tol = `golden_tol`, dt0, dt_min, dt_max package default | numerical; none; precision float64 |
 
-The default ne and wp `dt` and `tol` lists, the perf `n` list and the pins live
-in the set files, spelled out. `protocol.toml` keeps `[repeats]`, `[watchdog]`
-and `[optimize]` only.
+- Every list, grid and pin is spelled out in the set files.
+- `protocol.toml` keeps `[repeats]`, `[watchdog]` and `[optimize]` only.
 
 ### 1.7 Catalogues
 
-`problems.csv`: `problem, display, states, duration, sweep_parameter,
-sweep_min, sweep_max, sweep_scale, golden_algorithm, golden_tol, frameworks`,
-read by `sets.py` and by nothing under a runner.
-
-`algorithms.csv`: `algorithm, display, family, order, fixed, adaptive`
-(capability per package), read by `sets.py`. The Julia constructor columns move
-to `runner_scripts/julia_algorithms.csv`, read by the Julia adapters.
-
-Runners map `problem` to their own system modules and `algorithm` to their own
-solver tables; every other quantity comes from the trial.
+- `problems.csv`: `problem, display, states, duration, sweep_parameter, sweep_min, sweep_max, sweep_scale, golden_algorithm, golden_tol, frameworks`; read by `sets.py` only.
+- `algorithms.csv`: `algorithm, display, family, order, fixed, adaptive` (capability per package); read by `sets.py` only.
+- `runner_scripts/julia_algorithms.csv`: the Julia constructor columns; read by the Julia adapters.
+- Runners map `problem` to their system modules and `algorithm` to their solver tables; everything else comes from the trial.
 
 ### 1.8 Analyses
 
-Each analysis under `analyses/` takes `--set <name>` (repeatable), expands it
-with `sets.py` under every key present, selects the rows whose `trial_id`
-matches, and reads finals where it needs them:
+Each script under `analyses/` takes `--set <name>` (repeatable), expands it with `sets.py` under every key, selects rows by `trial_id`, reads finals as needed:
 
 | script | set | output |
 |---|---|---|
@@ -321,14 +297,14 @@ matches, and reads finals where it needs them:
 | `overlap.py` | overlap | cubie packages against julia_gpu per setting; report markdown |
 | `pairwise.py` | pairwise | finals across packages per problem |
 
-Rows with `errored_pct > 10` are dropped where the column is a number. Absent
-`errored_pct`, `reason`, `samples_ms`, `finals`, `package_version` never raise.
-Output under `plots/<key>/<problem>/`.
+- Rows with `errored_pct > 10` are dropped where the column is a number.
+- Absent `errored_pct`, `reason`, `samples_ms`, `finals`, `package_version` never raise.
+- Output under `plots/<key>/<problem>/`.
 
 ## 2. Packets
 
-One worktree, one branch off `main`, one PR per packet. "Done" is the
-acceptance line; "Review" is what the PR is read against.
+- One worktree, one branch off `main`, one PR per packet.
+- "Done" is the acceptance line; "Review" is what the PR is read against.
 - A packet replaces what it touches: no compatibility shim, no dual path.
 - `main` may not run between packets.
 
