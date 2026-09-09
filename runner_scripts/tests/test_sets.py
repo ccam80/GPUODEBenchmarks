@@ -220,7 +220,9 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
         self.assertEqual({s["finals"] for s in specs}, {True})
         self.assertEqual({s["axis"] for s in specs}, {"dt", "tol"})
-        self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default", "pi"})
+        tables = [p for p in PROBLEMS if sets.controllers_table(KEY, p, DATA)]
+        self.assertEqual({s["stepping"] for s in specs},
+                         {"fixed", "default", "pi"} | ({"matched"} if tables else set()))
         loaded = sets.load_set("golden_grid")
         expected = {}
         for package in loaded["set"]["packages"]:
