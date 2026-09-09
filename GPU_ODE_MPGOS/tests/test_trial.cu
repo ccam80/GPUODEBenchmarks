@@ -75,6 +75,7 @@ int main(int argc, char** argv)
 		std::printf("atol_nan=%d\n", std::isnan(t.atol) ? 1 : 0);
 		std::printf("finals=%d\n", t.finals ? 1 : 0);
 		std::printf("cold=%d\n", t.cold ? 1 : 0);
+		std::printf("watchdog_s=%.17g\n", t.watchdog_s);
 		std::printf("transfers=%s\n", t.transfers.size() == 2 ? (t.transfers[0] + "," + t.transfers[1]).c_str()
 		                                                     : (t.transfers.empty() ? "" : t.transfers[0].c_str()));
 		std::printf("lists_none=%d\n", t.Lists("none") ? 1 : 0);

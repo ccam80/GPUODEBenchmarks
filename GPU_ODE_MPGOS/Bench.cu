@@ -210,9 +210,12 @@ static void WriteProgress(const Options& o)
 
 // ------------------------------------------------------------------ repeats
 
+// The trial's soft cap; the protocol value until main reads the trial.
+static double WatchdogCapS = PROTOCOL_WATCHDOG_SECONDS;
+
 static double WatchdogSeconds()
 {
-	return PROTOCOL_WATCHDOG_SECONDS;
+	return WatchdogCapS;
 }
 
 // Repeat floor and ceiling from the first timed run's seconds, per the protocol schedule.
@@ -511,6 +514,8 @@ int main(int argc, char* argv[])
 		return 2;
 	}
 	const Trial& trial = *found;
+	if (trial.watchdog_s > 0.0)
+		WatchdogCapS = trial.watchdog_s;
 	WriteProgress(o);
 	std::string mismatch = BinaryMismatch(trial);
 	if (!mismatch.empty())

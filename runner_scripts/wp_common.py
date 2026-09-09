@@ -64,9 +64,10 @@ def repeats_done(timed_s, floor, ceiling):
     return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
 
 
-def timed_min_ms(run, repeats, on_breach=None, setup=None):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged. setup() runs untimed before every attempt after the first."""
+def timed_min_ms(run, repeats, on_breach=None, setup=None, cap_s=None):
+    """(best_ms, result, samples) after one warm-up; best_ms None on a breach of cap_s (default WATCHDOG_SECONDS). samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged at twice the cap plus 30 s. setup() runs untimed before every attempt after the first."""
     import timeit
+    cap = WATCHDOG_SECONDS if cap_s is None else float(cap_s)
     samples = []
     timed = []
     floor = ceiling = None
@@ -75,10 +76,10 @@ def timed_min_ms(run, repeats, on_breach=None, setup=None):
             setup()
         elapsed = timeit.default_timer()
         result = (run() if on_breach is None
-                  else run_watchdogged(run, on_breach))
+                  else run_watchdogged(run, on_breach, cap * 2.0 + 30.0))
         elapsed = timeit.default_timer() - elapsed
         samples.append(elapsed * 1000.0)
-        if elapsed > WATCHDOG_SECONDS:
+        if elapsed > cap:
             return None, result, samples
         if len(samples) == 1:
             continue                     # the warm-up carries the compile

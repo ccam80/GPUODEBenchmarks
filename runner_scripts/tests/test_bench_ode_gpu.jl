@@ -19,8 +19,8 @@ function load_helpers()
     module Dates
         using Dates: now, UTC, format
     end
-    watchdogged_min_ms(f, on_breach, repeats) = (1.5, [2.0, 1.5], f())
-    run_watchdogged(f, on_breach) = f()
+    watchdogged_min_ms(f, on_breach, repeats; cap_s = 120.0) = (1.5, [2.0, 1.5], f())
+    run_watchdogged(f, on_breach; budget_s = 270.0) = f()
     mkpidlock(path; kwargs...) = nothing
     const STORE_PYTHON = Ref("")
     """
@@ -38,7 +38,8 @@ function trial(; overrides...)
         "dt_max" => NaN, "atol" => NaN, "rtol" => NaN, "gains" => "{}", "newton_atol" => NaN,
         "newton_rtol" => NaN, "package" => "julia_gpu", "trial_id" => "0123456789abcdef",
         "kind" => "solve", "finals" => false, "transfers" => ["both", "none"],
-        "leg" => "lorenz/{}/tsit5/fixed/float32/n", "axis" => "n", "ordinal" => 0, "cold" => false)
+        "leg" => "lorenz/{}/tsit5/fixed/float32/n", "axis" => "n", "ordinal" => 0, "cold" => false,
+        "watchdog_s" => 120.0)
     for (name, value) in overrides
         record[String(name)] = value
     end
@@ -72,6 +73,7 @@ end
         @test isnan(back[1]["dt"]) && back[1]["atol"] == 1e-5 && back[1]["transfers"] == []
         @test back[2]["dt"] == 0.5 && isnan(back[2]["atol"])
         @test back[3]["n"] == 32 && isnan(back[3]["dt_min"])
+        @test back[1]["watchdog_s"] == 120.0
         legs = by_leg(back)
         @test [leg for (leg, _) in legs] == ["lorenz/{}/tsit5/fixed/float32/n", "b"]
         @test length(legs[1][2]) == 2 && length(legs[2][2]) == 1
@@ -116,9 +118,9 @@ end
         kind, reason = classify(ArgumentError("bad " * "x"^300))
         @test kind == "error" && startswith(reason, "error: ArgumentError: ArgumentError: bad ")
         @test length(reason) <= length("error: ArgumentError: ") + 200
-        ok = timed(() -> (1, 2), "leg")
+        ok = timed(() -> (1, 2), "leg", 120.0)
         @test ok.kind == "ok" && ok.result == (1, 2) && ok.min_ms == 1.5 && ok.samples == [2.0, 1.5]
-        bad = timed(() -> error("boom"), "leg")
+        bad = timed(() -> error("boom"), "leg", 120.0)
         @test bad.kind == "error" && bad.reason == "error: ErrorException: boom" && isnan(bad.min_ms)
     end
 

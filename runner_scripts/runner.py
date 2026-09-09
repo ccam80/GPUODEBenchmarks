@@ -34,11 +34,17 @@ def classify(exc):
     return "error"
 
 
-def failure_reason(outcome, exc=None, elapsed_s=None):
+def failure_reason(outcome, exc=None, elapsed_s=None, cap_s=None):
     """The reason text of a failed (trial, transfers): 'timeout: <s>s over the <cap>s cap', or '<oom|error>: <Type>: <message>'."""
     if outcome == "timeout":
-        return "timeout: {0:.1f}s over the {1:g}s cap".format(elapsed_s, WATCHDOG_SECONDS)
+        cap = WATCHDOG_SECONDS if cap_s is None else cap_s
+        return "timeout: {0:.1f}s over the {1:g}s cap".format(elapsed_s, cap)
     return "{0}: {1}: {2}".format(outcome, type(exc).__name__, str(exc)[:MESSAGE_CHARS])
+
+
+def budget_of(trial):
+    """The trial's watchdog soft cap in seconds."""
+    return float(trial.get("watchdog_s", WATCHDOG_SECONDS))
 
 
 def abandon_reason(history, transfers, ordinal):
@@ -126,7 +132,8 @@ class Runner:
                   flush=True)
 
         try:
-            best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach)
+            best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach,
+                                                 cap_s=budget_of(trial))
         except Exception as exc:  # noqa: BLE001 - every failure is a row
             return classify(exc), NAN, [], None, exc, NAN
         if best is None:
@@ -164,7 +171,7 @@ class Runner:
                     print("FINALS {0}: {1}: {2}".format(label(trial), type(finals_exc).__name__,
                                                         finals_exc), flush=True)
             result = None
-            reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed)
+            reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed, budget_of(trial))
             self.record(trial, transfers, leg.states, min_ms=best, samples_ms=samples,
                         errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason)
             if outcome == "ok":
@@ -192,12 +199,13 @@ class Runner:
                     # The first line builds the leg; a warm line also compiles, and a cold one is timed as build_s.
                     cold = trial["kind"] == "warm" and bool(trial["cold"])
                     started = timeit.default_timer()
+                    budget = budget_of(trial) * 2.0 + 30.0
                     try:
                         leg = watchdogged(lambda: self.adapter.build_leg(trial, cold),
-                                          "build " + name)
+                                          "build " + name, budget)
                         if trial["kind"] == "warm":
                             watchdogged(lambda: self.adapter.compile(leg, trial, grid_mod.grid(trial)),
-                                        "compile " + name)
+                                        "compile " + name, budget)
                     except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
                         reason = failure_reason(classify(exc), exc)
                         self.record_failed_leg(solves, reason, leg.states if leg else None)

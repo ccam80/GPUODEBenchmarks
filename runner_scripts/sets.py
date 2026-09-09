@@ -8,6 +8,7 @@ import tomllib
 
 from algorithms import algorithm_names, load_algorithms
 from problems import load_problems
+from protocol import WATCHDOG_SECONDS
 from store import PACKAGES, canonical_json
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +18,7 @@ NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
-            "optimize")
+            "optimize", "watchdog")
 OPTIMIZE_KEYS = ("packages", "n", "per")
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
@@ -29,7 +30,7 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "axis", "build", "optimize", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "axis", "build", "optimize", "watchdog_s", "set", "stepping")
 
 
 class SetError(ValueError):
@@ -103,6 +104,11 @@ def load_set(name, sets_dir=SETS_DIR):
         raise SetError(path + ": transfers must list both and/or none")
     if head["build"] not in ("warm", "cold"):
         raise SetError(path + ": build must be warm or cold")
+    head.setdefault("watchdog", WATCHDOG_SECONDS)
+    watchdog = head["watchdog"]
+    if isinstance(watchdog, bool) or not isinstance(watchdog, (int, float)) or not watchdog > 0:
+        raise SetError(path + ": watchdog must be a positive number of seconds")
+    head["watchdog"] = float(watchdog)
     optimize = head.get("optimize")
     if optimize is not None:
         where = path + " [set.optimize]"
@@ -437,6 +443,7 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["axis"] = axis
                                         spec["build"] = head["build"]
                                         spec["optimize"] = _optimize_for(head["optimize"], package)
+                                        spec["watchdog_s"] = head["watchdog"]
                                         spec["set"] = loaded["name"]
                                         spec["stepping"] = stepping["controller"]
                                         specs.append(spec)

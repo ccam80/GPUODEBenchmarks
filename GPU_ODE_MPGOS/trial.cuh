@@ -208,6 +208,7 @@ struct Trial
 	std::string problem, system_params, precision, parameter, grid_scale, grid_dtype;
 	std::string algorithm, controller, gains, package;
 	double duration, grid_min, grid_max, dt, dt_min, dt_max, atol, rtol, newton_atol, newton_rtol;
+	double watchdog_s;
 	long long n;
 	int ordinal;
 	bool finals, cold;
@@ -272,6 +273,7 @@ inline Trial ParseTrial(const std::string& line)
 	t.ordinal = (int)NumberField(t.raw, "ordinal");
 	t.finals = BoolField(t.raw, "finals");
 	t.cold = BoolField(t.raw, "cold");
+	t.watchdog_s = NumberField(t.raw, "watchdog_s");
 	t.transfers = Field(t.raw, "transfers").items;
 	t.problem = TextField(t.raw, "problem");
 	t.system_params = TextField(t.raw, "system_params");
