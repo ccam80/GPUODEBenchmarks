@@ -36,7 +36,7 @@ def lorenz96(states, n=8):
 
 
 class DeviceArray:
-    """A device buffer stand-in wrapping a host array."""
+    """A device buffer stand-in wrapping a host array, with cupy's copy, item assignment and get."""
 
     def __init__(self, host):
         self.host = np.array(host, dtype=np.float32)
@@ -44,6 +44,15 @@ class DeviceArray:
     @property
     def shape(self):
         return self.host.shape
+
+    def copy(self):
+        return DeviceArray(self.host)
+
+    def __setitem__(self, index, value):
+        self.host[index] = value.host if isinstance(value, DeviceArray) else value
+
+    def get(self):
+        return self.host.copy()
 
 
 class FakeModel:
@@ -82,15 +91,11 @@ class FakeModel:
 
     def to_device(self, initial_states, diffusion_values):
         self.launches.append(("upload", int(initial_states.shape[1])))
-        return (DeviceArray(initial_states), DeviceArray(diffusion_values),
-                DeviceArray(np.empty_like(initial_states)))
+        return DeviceArray(initial_states), DeviceArray(diffusion_values)
 
-    def to_host(self, device_states):
-        return device_states.host.T
-
-    def solve_on_device(self, dt, step_count, device_initial, device_diffusion, device_states):
-        self.launches.append(("device", int(device_initial.shape[1]), dt, step_count))
-        device_states.host[...] = self._integrate(dt, step_count, device_initial.host, device_diffusion.host)
+    def solve_on_device(self, dt, step_count, device_states, device_diffusion):
+        self.launches.append(("device", int(device_states.shape[1]), dt, step_count))
+        device_states.host[...] = self._integrate(dt, step_count, device_states.host, device_diffusion.host)
         return device_states
 
 
@@ -209,18 +214,25 @@ class LegTests(unittest.TestCase):
         self.assertEqual(leg.model.launches[-1], ("host", 4, 2.0 ** -11, 2048))
         leg.close()
 
-    def test_device_solves_upload_once_per_n_and_leave_the_result_resident(self):
+    def test_device_solves_upload_once_per_n_and_reset_restores_the_resident_states(self):
         leg = self.adapter.build_leg(trial(n=4))
         record = trial(n=4)
-        first = self.adapter.solve(leg, record, self.values(record), "none")
-        second = self.adapter.solve(leg, record, self.values(record), "none")
+        values = self.values(record)
+        first = self.adapter.solve(leg, record, values, "none")
+        self.adapter.reset(leg, record, values, "none")
+        second = self.adapter.solve(leg, record, values, "none")
         self.assertEqual(leg.model.launches, [("upload", 4), ("device", 4, 2.0 ** -10, 1024),
                                               ("device", 4, 2.0 ** -10, 1024)])
         self.assertIsInstance(first, DeviceArray)
         self.assertIs(second, first)
         finals, t_final, retcode = self.adapter.finals(leg, second)
         self.assertEqual(finals.shape, (4, 3))
+        # The kernel integrates in place; reset put the initial states back, so the second run repeats the first.
         self.assertEqual(list(finals[:, 0]), [0.0, 7.0, 14.0, 21.0])
+        self.adapter.reset(leg, record, values, "both")
+        self.adapter.solve(leg, record, values, "none")
+        self.assertEqual(list(self.adapter.finals(leg, second)[0][:, 0]), [0.0, 14.0, 28.0, 42.0])
+        self.assertEqual(len(leg.model.launches), 4)
         bigger = trial(n=8)
         self.adapter.solve(leg, bigger, self.values(bigger), "none")
         self.assertEqual(leg.model.launches[-2:], [("upload", 8), ("device", 8, 2.0 ** -10, 1024)])

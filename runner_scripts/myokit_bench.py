@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The myokit_cuda adapter for runner.py: a leg is one compiled Myokit CUDA model, its CellML picked or generated for the trial's problem and state count (compiled into a fresh CuPy kernel cache when cold); a solve runs the generated forward-Euler kernel for the trial's step count through host arrays (`both`) or on the resident device inputs (`none`). The exported kernel is Euler in float32 at a fixed step, so `fixed` is the one controller a trial may name."""
+"""The myokit_cuda adapter for runner.py: a leg is one compiled Myokit CUDA model, its CellML picked or generated for the trial's problem and state count (compiled into a fresh CuPy kernel cache when cold); a solve runs the generated forward-Euler kernel for the trial's step count through host arrays (`both`) or on the resident device inputs (`none`), which the kernel integrates in place and `reset` restores before each repeat. The exported kernel is Euler in float32 at a fixed step, so `fixed` is the one controller a trial may name."""
 
 import json
 import math
@@ -180,6 +180,7 @@ class Leg:
         self.initial = None
         self.resident_n = None
         self.resident = None
+        self.resident_initial = None
         if cold:
             self.cache = cold_cache()
         try:
@@ -210,24 +211,32 @@ class Leg:
                                 diffusion_values=values)
 
     def device_solve(self, trial, values):
-        """One solve on the resident inputs, uploaded when they are not this grid's; the final states stay on the device."""
+        """One solve on the resident inputs, uploaded when they are not this grid's; the kernel integrates the resident states in place and they stay on the device."""
         n = int(values.shape[0])
         if self.resident_n != n:
             self.resident = None
+            self.resident_initial = None
             self.resident = self.model.to_device(self.initial_states(n),
                                                  np.ascontiguousarray(values, dtype=np.float32))
+            self.resident_initial = self.resident[0].copy()
             self.resident_n = n
         return self.model.solve_on_device(float(trial["dt"]), step_count(self.duration, trial["dt"]),
                                           *self.resident)
 
+    def restore(self, n):
+        """Put the initial states back into the resident buffer of this n, on the device."""
+        if self.resident_n == n and self.resident is not None:
+            self.resident[0][...] = self.resident_initial
+
     def finals(self, result):
         """(finals, t_final, retcode) of a host or device result."""
         if not isinstance(result, np.ndarray):
-            result = self.model.to_host(result)
+            result = result.get().T
         return finals_of(result, self.duration)
 
     def close(self):
         self.resident = None
+        self.resident_initial = None
         self.initial = None
         self.model = None
         if self.cache is not None:
@@ -264,6 +273,11 @@ class MyokitAdapter:
         if transfers == "both":
             return leg.host_solve(trial, values)
         return leg.device_solve(trial, values)
+
+    def reset(self, leg, trial, values, transfers):
+        """Before a repeated resident solve, put the initial states back; a host solve uploads its own."""
+        if transfers == "none":
+            leg.restore(int(values.shape[0]))
 
     def finals(self, leg, result):
         return leg.finals(result)

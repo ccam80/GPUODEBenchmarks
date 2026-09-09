@@ -16,7 +16,6 @@ _LAUNCH_KERNEL = r"""
 
 extern "C" __global__
 void myokit_cuda_integrate(
-    const Real *initial_states,
     Real *states,
     const Real *diffusion_current,
     const int cell_count,
@@ -31,7 +30,7 @@ void myokit_cuda_integrate(
     Real state[NDIM];
     for (int state_index = 0; state_index < NDIM; ++state_index) {
         state[state_index] =
-            initial_states[state_index * cell_count + cell];
+            states[state_index * cell_count + cell];
     }
 
     const Real input = diffusion_current[cell];
@@ -226,8 +225,9 @@ class MyokitCudaModel:
     ):
         """Run a fixed number of generated forward-Euler steps.
 
-        The returned host array has shape ``(cells, states)``; the kernel is
-        compiled at construction, not here.
+        The returned host array has shape ``(cells, states)``.  Compilation
+        happens when the object is constructed and is therefore separable
+        from timed calls to this method.
         """
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError("dt must be finite and positive")
@@ -271,39 +271,8 @@ class MyokitCudaModel:
                 (cell_count,),
             )
 
-        device_initial = self._cupy.asarray(host_states)
+        device_states = self._cupy.asarray(host_states)
         device_diffusion = self._cupy.asarray(host_diffusion)
-        device_states = self._cupy.empty_like(device_initial)
-        self._launch(dt, step_count, device_initial, device_diffusion,
-                     device_states)
-        return self.to_host(device_states)
-
-    def to_device(self, initial_states, diffusion_values):
-        """Upload the inputs and allocate the output: ``(device_initial, device_diffusion, device_states)``."""
-        host_states = _validate_float32(initial_states, "initial_states")
-        cell_count = host_states.shape[1]
-        host_diffusion = _validate_float32(
-            diffusion_values, "diffusion_values", (cell_count,)
-        )
-        device_initial = self._cupy.asarray(host_states)
-        return (device_initial,
-                self._cupy.asarray(host_diffusion),
-                self._cupy.empty_like(device_initial))
-
-    def to_host(self, device_states):
-        """The ``(cells, states)`` host array of a device result."""
-        return self._cupy.asnumpy(device_states).T
-
-    def solve_on_device(self, dt, step_count, device_initial, device_diffusion,
-                        device_states):
-        """Run the kernel on resident arrays; ``device_states`` receives the final states and is returned."""
-        self._launch(dt, step_count, device_initial, device_diffusion,
-                     device_states)
-        return device_states
-
-    def _launch(self, dt, step_count, device_initial, device_diffusion,
-                device_states):
-        cell_count = int(device_initial.shape[1])
         grid_size = (
             (cell_count + self.block_size - 1) // self.block_size
         )
@@ -311,7 +280,6 @@ class MyokitCudaModel:
             (grid_size,),
             (self.block_size,),
             (
-                device_initial,
                 device_states,
                 device_diffusion,
                 np.int32(cell_count),
@@ -320,3 +288,38 @@ class MyokitCudaModel:
             ),
         )
         self._cupy.cuda.get_current_stream().synchronize()
+        return self._cupy.asnumpy(device_states).T
+
+    def to_device(self, initial_states, diffusion_values):
+        """Upload the inputs once, for timing runs that exclude transfers."""
+        host_states = _validate_float32(initial_states, "initial_states")
+        cell_count = host_states.shape[1]
+        host_diffusion = _validate_float32(
+            diffusion_values, "diffusion_values", (cell_count,)
+        )
+        return (self._cupy.asarray(host_states),
+                self._cupy.asarray(host_diffusion))
+
+    def solve_on_device(self, dt, step_count, device_states, device_diffusion):
+        """Run the kernel on resident arrays with neither transfer.
+
+        ``device_states`` is integrated in place and returned; callers timing
+        repeated runs should restore it between them.
+        """
+        cell_count = int(device_states.shape[1])
+        grid_size = (
+            (cell_count + self.block_size - 1) // self.block_size
+        )
+        self._kernel(
+            (grid_size,),
+            (self.block_size,),
+            (
+                device_states,
+                device_diffusion,
+                np.int32(cell_count),
+                np.float32(dt),
+                np.int32(step_count),
+            ),
+        )
+        self._cupy.cuda.get_current_stream().synchronize()
+        return device_states
