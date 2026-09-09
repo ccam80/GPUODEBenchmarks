@@ -1,8 +1,9 @@
-"""Link the main checkout's suite venvs and caches into a worktree.
+"""Symlink the main checkout's suite venvs and caches into a worktree.
 
-Links ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
-``generated``; copies ``.claude/settings.local.json``. Env:
-``ORCA_WORKTREE_PATH`` (default: this directory), ``ORCA_ROOT_PATH``
+Symlinks ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
+``generated``; copies ``.claude/settings.local.json``. Junctions are
+never used: ``git worktree remove`` deletes a junction target's contents.
+Env: ``ORCA_WORKTREE_PATH`` (default: this directory), ``ORCA_ROOT_PATH``
 (default: the main checkout).
 """
 
@@ -42,17 +43,16 @@ def root_path(worktree):
 
 
 def link_directory(target, link):
-    """Directory symlink, or a junction where Windows refuses symlinks."""
+    """Directory symlink; on Windows this needs Developer Mode."""
     link.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.symlink(target, link, target_is_directory=True)
-        return "symlink"
-    except OSError:
-        if os.name != "nt":
-            raise
-    subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
-                   check=True, capture_output=True)
-    return "junction"
+    except OSError as error:
+        if os.name == "nt":
+            raise SystemExit(
+                f"cannot symlink {link}: {error}; enable Windows Developer "
+                "Mode (Settings > System > For developers) and rerun")
+        raise
 
 
 def share_directories(root, worktree):
@@ -63,11 +63,15 @@ def share_directories(root, worktree):
             print(f"absent     {relative} (not built in {root})")
             continue
         target = source.resolve()
+        if os.path.isjunction(link):
+            raise SystemExit(
+                f"{link} is a junction; replace it with a symlink before "
+                f"continuing, or git worktree remove will delete {target}")
         if link.is_symlink() or link.exists():
             print(f"exists     {relative}")
             continue
-        kind = link_directory(target, link)
-        print(f"{kind:<10} {relative} -> {target}")
+        link_directory(target, link)
+        print(f"symlink    {relative} -> {target}")
 
 
 def copy_local_files(root, worktree):
