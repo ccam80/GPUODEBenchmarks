@@ -1,10 +1,6 @@
-# Shared dataset-key helper for the Julia benchmark writer.
-#
-# Produces a key "<os>_<gpu>" identifying the current machine so benchmark output
-# files can be additively populated across machines. The GPU name comes from
-# nvidia-smi (the single source of truth shared by every framework) and is
-# sanitised identically everywhere: tokenise on non-alphanumeric characters, drop
-# the "NVIDIA"/"GeForce" vendor words, and join the rest with '-'.
+# The dataset key "<os>_<gpu>" of this machine, as bench_key.py computes it: the GPU
+# name from nvidia-smi, tokenised on non-alphanumeric characters, the "NVIDIA"/"GeForce"
+# vendor words dropped, the rest joined with '-'.
 # e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
 
 function _gpu_name_raw()
@@ -34,23 +30,3 @@ end
 
 "Return \"<os>_<gpu>\" for this machine."
 dataset_key() = string(_os_key(), "_", _sanitize_gpu(_gpu_name_raw()))
-
-"Directory holding one machine's files for a package and problem; creates it."
-function data_dir(repo_root, package, key = dataset_key(), problem = nothing)
-    d = joinpath(repo_root, "data", package, key)
-    if problem !== nothing
-        d = joinpath(d, problem isa AbstractDict ? problem["problem"] : problem)
-    end
-    mkpath(d)
-    return d
-end
-
-"Directory holding one group's plots and reports; creates it."
-function group_dir(repo_root, group, problem = nothing)
-    d = joinpath(repo_root, "plots", group)
-    if problem !== nothing
-        d = joinpath(d, problem isa AbstractDict ? problem["problem"] : problem)
-    end
-    mkpath(d)
-    return d
-end
