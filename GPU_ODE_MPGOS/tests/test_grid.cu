@@ -1,5 +1,4 @@
-// test_grid <file.npy> <scale> <grid_min> <grid_max> [<v1023>]: exit 0 when grid.cuh matches the npy bit for bit (and, given the
-// 17-digit double v[1023], when the 1024-point grid ending there reproduces the first 1024 points), else print mismatches and exit 1.
+// test_grid <file.npy> <scale> <grid_min> <grid_max> [<v1023>]: exit 0 when grid.cuh matches the npy bit for bit and the 1024-point grid ending at v1023 matches the prefix, else exit 1.
 
 #include <cstdint>
 #include <cstdio>
