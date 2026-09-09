@@ -289,12 +289,9 @@ Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and
 
 Two scripts under `analyses/`; each takes `--set <name>` (repeatable), expands it with `sets.py` under every key, and selects rows by `trial_id`:
 
-| script | output |
-|---|---|
-| `timing.py --x n\|error\|states` | `min_ms` against the axis, one figure per (key, problem, algorithm, controller, transfers), one series per package; `--x states` adds `build_s` |
-| `agreement.py` | per trial spec, `error` and the finals RMS difference across every package that ran it, against the golden row where one exists; CSV and figures per (key, problem) |
-
-Set to invocation: perf `timing --x n`; wp `timing --x error`; states `timing --x states`; ne, pairwise, overlap `agreement` (overlap also `timing --x n` and `--x error`).
+- `timing.py --x n|error|states`: `min_ms` against the axis per (key, problem, algorithm, controller, transfers), one series per package; `--x states` adds `build_s`.
+- `agreement.py`: per trial spec, `error` and the finals RMS difference across the packages that ran it, against the golden row where one exists; CSV and figures per (key, problem).
+- perf `timing --x n`; wp `timing --x error`; states `timing --x states`; ne, pairwise, overlap `agreement`; overlap also `timing --x n` and `--x error`.
 
 - Rows with `errored_pct > 10` are dropped where the column is a number.
 - Absent `errored_pct`, `reason`, `samples_ms`, `finals`, `package_version` never raise.
