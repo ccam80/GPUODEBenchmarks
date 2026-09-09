@@ -272,8 +272,8 @@ NAND_STATES = {"y1": 5.0, "y2": 5.0, "y3": -2.5, "y4": -2.5, "y5": 5.0,
                "y14": -2.5}
 
 NAND_CONSTANTS = {
-    "rgs": 4.0, "rgd": 4.0, "rbs": 10.0, "rbd": 10.0, "cgs": 0.6e-4,
-    "cgd": 0.6e-4, "cbd": 2.4e-5, "c9": 0.5e-4, "delta": 0.2e-1,
+    "VDD": 5.0, "rgs": 4.0, "rgd": 4.0, "rbs": 10.0, "rbd": 10.0,
+    "cgs": 0.6e-4, "cgd": 0.6e-4, "cbd": 2.4e-5, "delta": 0.2e-1,
     "curis": 1.0e-14, "vth": 25.85, "vbb": -2.5, "phib": 0.87,
     "vt0d": -2.43, "cgammad": 0.2, "phid": 1.28, "betad": 5.35e-4,
     "vt0e": 0.2, "cgammae": 0.035, "phie": 1.01, "betaep": 1.748e-3,
@@ -333,12 +333,12 @@ NAND_EQUATIONS = """
 
 
 def _nand_gate(problem, precision, name):
-    """Index-0 implicit DE; the swept supply voltage is VDD."""
+    """Index-0 implicit DE; the swept load capacitance is c9."""
     import cubie as qb
     system = qb.create_ODE_system(
         NAND_EQUATIONS,
         states=dict(NAND_STATES),
-        parameters={"VDD": 5.0},
+        parameters={"c9": 0.5e-4},
         constants=dict(NAND_CONSTANTS),
         name=name,
         precision=precision,

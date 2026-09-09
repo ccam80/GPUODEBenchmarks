@@ -13,14 +13,17 @@ function lorenz_reference(u, p, t)
     du1 = 10.0 * (u[2] - u[1])
     du2 = u[1] * (p[1] - u[3]) - u[2]
     du3 = u[1] * u[2] - (8.0 / 3.0) * u[3]
-    return [du1, du2, du3]
+    return SVector(du1, du2, du3)
 end
 
 "Lorenz 96 with cyclic coupling, sized by u; the swept forcing F is p[1]."
-function lorenz96_reference(u, p, t)
+function lorenz96_reference!(du, u, p, t)
     n = length(u)
-    return [(u[mod1(i + 1, n)] - u[mod1(i - 2, n)]) * u[mod1(i - 1, n)] -
-            u[i] + p[1] for i in 1:n]
+    @inbounds for i in 1:n
+        du[i] = (u[mod1(i + 1, n)] - u[mod1(i - 2, n)]) * u[mod1(i - 1, n)] -
+                u[i] + p[1]
+    end
+    return nothing
 end
 
 # Uniform state 8 with x1 perturbed to 9.
@@ -28,12 +31,11 @@ lorenz96_u0(n) = [i == 1 ? 9.0 : 8.0 for i in 1:n]
 
 # Pleiades (Test Set for IVP Solvers, celestial mechanics): u = (x, y, x', y').
 "Seven-body planar gravitation with masses (m1, 2, ..., 7); the swept m1 is p[1]."
-function pleiades_reference(u, p, t)
-    du = zeros(28)
-    for i in 1:14
+function pleiades_reference!(du, u, p, t)
+    @inbounds for i in 1:14
         du[i] = u[i + 14]
     end
-    for i in 1:7
+    @inbounds for i in 1:7
         sumx = 0.0
         sumy = 0.0
         for j in 1:7
@@ -47,7 +49,7 @@ function pleiades_reference(u, p, t)
         du[i + 14] = sumx
         du[i + 21] = sumy
     end
-    return du
+    return nothing
 end
 
 const PLEIADES_U0 = [3.0, 3.0, -1.0, -3.0, 2.0, -2.0, 2.0,
@@ -88,7 +90,7 @@ function pollu_reference(u, p, t)
     r23 = k[23] * u[1] * u[4]
     r24 = k[24] * u[19] * u[1]
     r25 = k[25] * u[20]
-    return [
+    return SVector(
         -r1 - r10 - r14 - r23 - r24 + r2 + r3 + r9 + r11 + r12 + r22 + r25,
         -r2 - r3 - r9 - r12 + r1 + r21,
         -r15 + r1 + r17 + r19 + r22,
@@ -109,8 +111,10 @@ function pollu_reference(u, p, t)
         r20,
         -r21 - r22 - r24 + r23 + r25,
         -r25 + r24,
-    ]
+    )
 end
+
+pollu_reference!(du, u, p, t) = (du .= pollu_reference(SVector{20}(u), p, t); nothing)
 
 const POLLU_U0 = [0.0, 0.2, 0.0, 0.04, 0.0, 0.0, 0.1, 0.3, 0.01, 0.0,
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.007, 0.0, 0.0, 0.0]
@@ -171,6 +175,9 @@ function ring_modulator_reference(u, p, t)
         1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     return du .* scale
 end
+
+ring_modulator_reference!(du, u, p, t) =
+    (du .= ring_modulator_reference(SVector{15}(u), p, t); nothing)
 
 "Index-2 form: Cs = 0 leaves rows 3 to 6 as residuals; the swept Uin1 amplitude is p[1]."
 function ring_modulator_index2_reference!(du, u, p, t)
@@ -252,22 +259,23 @@ function nand_ids(ned, vds, vgs, vbs, vgd, vbd)
     return zero(vds)
 end
 
-"Right-hand side f(y, t) of the NAND network equation; the swept VDD is p[1]."
-function nand_rhs(u, p, t)
-    vdd = p[1]
+const NAND_VDD = 5.0
+
+"Right-hand side f(y, t) of the NAND network equation."
+function nand_rhs(u, t)
     v1, v1d = nand_pulse(t, 5.0, 5.0, 5.0, 5.0, 20.0)
     v2, v2d = nand_pulse(t, 15.0, 5.0, 15.0, 5.0, 40.0)
     ids1 = nand_ids(1, u[2] - u[1], u[5] - u[1], u[3] - u[5], u[5] - u[2],
-        u[4] - vdd)
+        u[4] - NAND_VDD)
     ids2 = nand_ids(2, u[7] - u[6], v1 - u[6], u[8] - u[10], v1 - u[7],
         u[9] - u[5])
     ids3 = nand_ids(2, u[12] - u[11], v2 - u[11], u[13], v2 - u[12],
         u[14] - u[10])
-    return [
+    return SVector(
         -(u[1] - u[5]) / NAND_RGS - ids1,
-        -(u[2] - vdd) / NAND_RGD + ids1,
+        -(u[2] - NAND_VDD) / NAND_RGD + ids1,
         -(u[3] - NAND_VBB) / NAND_RBS + nand_ibdbs(u[3] - u[5]),
-        -(u[4] - NAND_VBB) / NAND_RBD + nand_ibdbs(u[4] - vdd),
+        -(u[4] - NAND_VBB) / NAND_RBD + nand_ibdbs(u[4] - NAND_VDD),
         -(u[5] - u[1]) / NAND_RGS - nand_ibdbs(u[3] - u[5]) -
         (u[5] - u[7]) / NAND_RGD - nand_ibdbs(u[9] - u[5]),
         NAND_CGS * v1d - (u[6] - u[10]) / NAND_RGS - ids2,
@@ -280,69 +288,61 @@ function nand_rhs(u, p, t)
         NAND_CGD * v2d - (u[12] - u[10]) / NAND_RGD + ids3,
         -(u[13] - NAND_VBB) / NAND_RBS + nand_ibdbs(u[13]),
         -(u[14] - NAND_VBB) / NAND_RBD + nand_ibdbs(u[14] - u[10]),
-    ]
+    )
 end
 
-"Voltage-dependent capacitance matrix C(y); the swept VDD is p[1]."
+"Voltage-dependent capacitance matrix C(y); the swept load capacitance c9 is p[1]."
 function nand_capacitance(u, p)
-    vdd = p[1]
-    c = zeros(eltype(u), 14, 14)
+    c9 = p[1]
     cb35 = nand_cbdbs(u[3] - u[5])
+    cb4 = nand_cbdbs(u[4] - NAND_VDD)
     cb95 = nand_cbdbs(u[9] - u[5])
     cb810 = nand_cbdbs(u[8] - u[10])
+    cb13 = nand_cbdbs(u[13])
     cb1410 = nand_cbdbs(u[14] - u[10])
-    c[1, 1] = NAND_CGS
-    c[1, 5] = -NAND_CGS
-    c[2, 2] = NAND_CGD
-    c[2, 5] = -NAND_CGD
-    c[3, 3] = cb35
-    c[3, 5] = -cb35
-    c[4, 4] = nand_cbdbs(u[4] - vdd)
-    c[5, 1] = -NAND_CGS
-    c[5, 2] = -NAND_CGD
-    c[5, 3] = -cb35
-    c[5, 5] = NAND_CGS + NAND_CGD + cb35 + cb95 + NAND_C9
-    c[5, 9] = -cb95
-    c[6, 6] = NAND_CGS
-    c[7, 7] = NAND_CGD
-    c[8, 8] = cb810
-    c[8, 10] = -cb810
-    c[9, 5] = -cb95
-    c[9, 9] = cb95
-    c[10, 8] = -cb810
-    c[10, 10] = cb810 + cb1410 + NAND_C9
-    c[10, 14] = -cb1410
-    c[11, 11] = NAND_CGS
-    c[12, 12] = NAND_CGD
-    c[13, 13] = nand_cbdbs(u[13])
-    c[14, 10] = -cb1410
-    c[14, 14] = cb1410
-    return c
+    z = zero(cb35)
+    return @SMatrix [
+        NAND_CGS z z z -NAND_CGS z z z z z z z z z
+        z NAND_CGD z z -NAND_CGD z z z z z z z z z
+        z z cb35 z -cb35 z z z z z z z z z
+        z z z cb4 z z z z z z z z z z
+        -NAND_CGS -NAND_CGD -cb35 z (NAND_CGS + NAND_CGD + cb35 + cb95 + c9) z z z -cb95 z z z z z
+        z z z z z NAND_CGS z z z z z z z z
+        z z z z z z NAND_CGD z z z z z z z
+        z z z z z z z cb810 z -cb810 z z z z
+        z z z z -cb95 z z z cb95 z z z z z
+        z z z z z z z -cb810 z (cb810 + cb1410 + c9) z z z -cb1410
+        z z z z z z z z z z NAND_CGS z z z
+        z z z z z z z z z z z NAND_CGD z z
+        z z z z z z z z z z z z cb13 z
+        z z z z z z z z z -cb1410 z z z cb1410
+    ]
 end
 
 "Fully implicit residual C(y) y' - f(y, t) for DFBDF."
 function nand_residual!(res, du, u, p, t)
-    res .= nand_capacitance(u, p) * du .- nand_rhs(u, p, t)
+    us = SVector{14}(u)
+    res .= nand_capacitance(us, p) * SVector{14}(du) .- nand_rhs(us, t)
     return nothing
 end
 
-"Consistent y'(0) for a swept VDD: C(y0) y0' = f(y0, 0)."
-nand_du0(p) = nand_capacitance(NAND_U0, p) \ nand_rhs(NAND_U0, p, 0.0)
+"y'(0) solving C(y0) y0' = f(y0, 0)."
+nand_du0(p) = Vector(nand_capacitance(NAND_U0, p) \ nand_rhs(NAND_U0, 0.0))
 
 const NAND_U0 = [5.0, 5.0, NAND_VBB, NAND_VBB, 5.0, 3.62385, 5.0, NAND_VBB,
     NAND_VBB, 3.62385, 0.0, 3.62385, NAND_VBB, NAND_VBB]
 
 const REFERENCE_SYSTEMS = Dict{String, Any}(
-    "lorenz" => (rhs = lorenz_reference, u0 = [1.0, 0.0, 0.0],
+    "lorenz" => (rhs = lorenz_reference, u0 = SVector(1.0, 0.0, 0.0),
         mass_matrix = nothing),
-    "lorenz96" => (rhs = lorenz96_reference, u0 = lorenz96_u0(32),
+    "lorenz96" => (rhs = lorenz96_reference!, u0 = lorenz96_u0(32),
         mass_matrix = nothing),
-    "lorenz96_20" => (rhs = lorenz96_reference, u0 = lorenz96_u0(20),
+    "lorenz96_20" => (rhs = lorenz96_reference!, u0 = lorenz96_u0(20),
         mass_matrix = nothing),
-    "pleiades" => (rhs = pleiades_reference, u0 = PLEIADES_U0,
+    "pleiades" => (rhs = pleiades_reference!, u0 = PLEIADES_U0,
         mass_matrix = nothing),
-    "pollu" => (rhs = pollu_reference, u0 = POLLU_U0, mass_matrix = nothing),
-    "ring_modulator" => (rhs = ring_modulator_reference, u0 = RM_U0,
+    "pollu" => (rhs = pollu_reference!, u0 = POLLU_U0, mass_matrix = nothing),
+    "ring_modulator" => (rhs = ring_modulator_reference!, u0 = zeros(15),
         mass_matrix = nothing),
     # A mass matrix needs the mutating form, so this one keeps a plain vector.
     "ring_modulator_index2" => (rhs = ring_modulator_index2_reference!,
@@ -368,6 +368,14 @@ function reference_solver(name)
     name == "RadauIIA9" && return RadauIIA9()
     name == "DFBDF" && return DFBDF()
     error("unknown golden algorithm '$(name)'")
+end
+
+"f(u, p, t) of a reference whether it is written in-place or out-of-place."
+function reference_rhs(system, u, p, t)
+    hasmethod(system.rhs, NTuple{4, Any}) || return system.rhs(u, p, t)
+    du = similar(u)
+    system.rhs(du, u, p, t)
+    return du
 end
 
 "Reference problem instance for one swept value; ODE or fully implicit DAE."

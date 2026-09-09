@@ -48,28 +48,23 @@ function _build_entry(raw; u0map, golden_vars, consistent_u0 = false)
     index = _golden_index(sys, golden_vars)
     any(isnothing, index) && error("golden variable missing from unknowns")
     u0_for = consistent_u0 ?
-             _consistent_u0(rhs, u0, findall(iszero, diag(mm)), n) :
+             _consistent_u0(rhs, jac, u0, findall(iszero, diag(mm)), n) :
              (p -> u0)
     return (sys = sys, n = n, rhs = rhs, rhs! = rhs!, jac = jac, jac! = jac!,
         tgrad = tgrad, mass_matrix = mass_matrix, u0 = u0, u0_for = u0_for,
         golden_index = SVector{length(index), Int}(index))
 end
 
-"Per-parameter u0 with the algebraic unknowns solved from their (linear) rows."
-function _consistent_u0(rhs, u0, zidx, n)
-    m = length(zidx)
+"Per-parameter u0 with the algebraic unknowns solved by one Newton step; the algebraic rows are linear in them."
+function _consistent_u0(rhs, jac, u0, zidx, n)
+    jac === nothing && error("a consistent u0 needs the symbolic Jacobian")
     function u0_for(pval)
         p = SVector{1, Float64}(Float64(pval))
-        base = Vector{Float64}(u0)
-        function residual(z)
-            u = copy(base)
-            u[zidx] .= z
-            return Float64.(rhs(SVector{n, Float64}(u), p, 0.0))[zidx]
-        end
-        g0 = residual(zeros(m))
-        A = reduce(hcat, [residual([j == k ? 1.0 : 0.0 for k in 1:m]) .- g0
-                          for j in 1:m])
-        base[zidx] .= A \ (-g0)
+        u = SVector{n, Float64}(u0)
+        A = Matrix(jac(u, p, 0.0))[zidx, zidx]
+        g = Vector(rhs(u, p, 0.0))[zidx]
+        base = Vector{Float64}(u)
+        base[zidx] .-= A \ g
         return SVector{n, Float32}(Float32.(base))
     end
     return u0_for
@@ -322,16 +317,16 @@ _nand_ids2(vds, vgs, vbs, vgd, vbd) = ifelse(vds > 0.0f0,
         _nand_gdsm(vds, vgd, vbd, 0.2f0, 0.035f0, 1.01f0, 1.748f-4), 0.0f0))
 
 function _nand_gate_entry()
-    @parameters VDD = 5.0f0
+    @parameters c9 = 0.5f-4
     @variables (y(t))[1:14]
     ys = collect(y)
+    VDD = 5.0f0
     rgs = 4.0f0
     rgd = 4.0f0
     rbs = 10.0f0
     rbd = 10.0f0
     cgs = 0.6f-4
     cgd = 0.6f-4
-    c9 = 0.5f-4
     vbb = -2.5f0
     v1, v1d = _nand_pulse(5.0f0, 5.0f0, 5.0f0, 5.0f0, 20.0f0)
     v2, v2d = _nand_pulse(15.0f0, 5.0f0, 15.0f0, 5.0f0, 40.0f0)
