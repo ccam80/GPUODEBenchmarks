@@ -1,4 +1,4 @@
-# Finals of every package at every fixed step (implicit families only) and tolerance on the 131072-point grid; julia_cpu runs the 1024-point prefix, whose endpoint is the float64 v[1023] of the full grid written with 17 digits.
+# Finals of every package at every fixed step and tolerance on the 131072-point grid; julia_cpu runs the 1024-point prefix, whose endpoint is the float64 v[1023] of the full grid written with 17 digits. Every step-size pin is left to the package.
 
 [set]
 packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu"]
@@ -44,9 +44,16 @@ nand_gate = {max = 2.5585369761427013e-05}
 
 [[stepping]]
 packages = "all"
-algorithms = ["rosenbrock23_sciml", "kvaerno3", "radau_iia_5", "backwards_euler", "crank_nicolson", "trapezoidal_dirk", "implicit_midpoint", "sdirk_2_2", "l_stable_sdirk_4", "radau_iia_3", "radau_iia_9", "ros3p", "rodas3p", "kvaerno5"]
+algorithms = ["classical-rk4", "tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "radau_iia_5", "bogacki-shampine-32", "dormand-prince-54", "fehlberg-45", "dormand-prince-853", "vern7", "backwards_euler", "crank_nicolson", "trapezoidal_dirk", "implicit_midpoint", "sdirk_2_2", "l_stable_sdirk_4", "radau_iia_3", "radau_iia_9", "ros3p", "rodas3p", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12, -13]}
+newton = {atol = 1.0e-6, rtol = 1.0e-6}
+
+[[stepping]]
+packages = "all"
+algorithms = ["euler"]
+controller = "fixed"
+dt = {duration_times_2_pow = [-8, -9, -10, -11, -12, -13, -14, -15, -16, -17]}
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
@@ -55,7 +62,7 @@ algorithms = "all"
 controller = "default"
 tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
 dt0 = {duration_times_2_pow = -10}
-dt_min = {duration_times = 1.0e-6}
+dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = {}
@@ -66,7 +73,7 @@ algorithms = "all"
 controller = "matched"
 tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
 dt0 = {duration_times_2_pow = -10}
-dt_min = {duration_times = 1.0e-6}
+dt_min = "none"
 dt_max = "none"
 newton = "tol"
 
@@ -76,7 +83,7 @@ algorithms = "all"
 controller = "pi"
 tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
 dt0 = {duration_times_2_pow = -10}
-dt_min = {duration_times = 1.0e-6}
+dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = "dirk_defaults"

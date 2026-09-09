@@ -25,7 +25,7 @@ system_params = {states = [4, 8, 16, 32, 64, 128]}
 
 [[stepping]]
 packages = "all"
-algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "kvaerno5"]
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-10]}
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
@@ -36,7 +36,7 @@ algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7"
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
-dt_min = {duration_times = 1.0e-6}
+dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = {}
@@ -47,7 +47,7 @@ algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7"
 controller = "pi"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
-dt_min = {duration_times = 1.0e-6}
+dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = "dirk_defaults"

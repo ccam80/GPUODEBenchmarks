@@ -6,7 +6,7 @@ import os
 import sys
 import tomllib
 
-from algorithms import KINDS, load_algorithms
+from algorithms import algorithm_names, load_algorithms
 from problems import load_problems
 from store import PACKAGES, canonical_json
 
@@ -15,8 +15,6 @@ SETS_DIR = os.path.join(REPO_ROOT, "sets")
 
 NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
-# Packages with a Newton tolerance setting; the rest carry NaN on implicit rows.
-NEWTON_PACKAGES = ("cubie", "cubie_mlir", "jax", "julia_cpu")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
             "optimize")
@@ -81,7 +79,7 @@ def load_set(name, sets_dir=SETS_DIR):
         data = tomllib.load(handle)
     _check_keys(data, ("set", "grid", "stepping"), path)
     problems = [row.name for row in load_problems()]
-    algorithms = [row.name for row in load_algorithms()]
+    algorithms = algorithm_names()
     head = dict(data.get("set", {}))
     _check_keys(head, SET_KEYS, path + " [set]")
     head.setdefault("packages", list(PACKAGES))
@@ -256,22 +254,19 @@ def _narrow(names, requested):
 
 
 class _Algorithm(dict):
-    """A golden-algorithm pseudo row: a name with no catalogue family or order."""
+    """A golden-algorithm pseudo row: a name with no catalogue family, order or newton capability."""
 
     @property
     def name(self):
         return self["algorithm"]
 
-    @property
-    def implicit(self):
-        return None
-
 
 def _algorithms(package, kind, head, stepping, problem, catalogue):
-    """The algorithm rows a package runs for a stepping kind, narrowed by the set and the stepping."""
+    """The package's (package, algorithm) rows with the stepping kind true, narrowed by the set and the stepping."""
     for level in (head["algorithms"], stepping["algorithms"]):
         if level == GOLDEN_ALGORITHM:
-            return [_Algorithm(algorithm=problem["golden_algorithm"], family=None, order=None)]
+            return [_Algorithm(algorithm=problem["golden_algorithm"], family=None, order=None,
+                               newton=None)]
     rows = [row for row in catalogue if row.supports(package, kind)]
     for level in (head["algorithms"], stepping["algorithms"]):
         if level != "all":
@@ -331,14 +326,14 @@ def _controller(stepping, package, algorithm, problem, key, root, where):
     return token, dict(gains)
 
 
-def _newton(stepping, package, algorithm, tol, where):
-    """(newton_atol, newton_rtol): NaN for explicit algorithms and packages without the setting."""
+def _newton(stepping, algorithm, tol, where):
+    """(newton_atol, newton_rtol): NaN unless the (package, algorithm) row has newton = true."""
     newton = stepping["newton"]
     if newton == "none":
         return NAN, NAN
-    if algorithm.implicit is None:
+    if algorithm["newton"] is None:
         raise SetError(where + ": newton needs a catalogue algorithm")
-    if not algorithm.implicit or package not in NEWTON_PACKAGES:
+    if not algorithm["newton"]:
         return NAN, NAN
     if newton == "tol":
         if tol is None:
@@ -355,7 +350,7 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
     out = []
     if stepping["controller"] == "fixed":
         for dt in _scaled_list(stepping["dt"], duration, where + " dt"):
-            atol, rtol = _newton(stepping, package, algorithm, None, where)
+            atol, rtol = _newton(stepping, algorithm, None, where)
             out.append({"controller": "fixed", "dt": dt, "dt_min": NAN, "dt_max": NAN,
                         "atol": NAN, "rtol": NAN, "gains": canonical_json({}),
                         "newton_atol": atol, "newton_rtol": rtol})
@@ -374,7 +369,7 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
     dt_max = _pin(stepping["dt_max"], duration, where + " dt_max")
     for tol in tols:
         tol = float(tol)
-        atol, rtol = _newton(stepping, package, algorithm, tol, where)
+        atol, rtol = _newton(stepping, algorithm, tol, where)
         out.append({"controller": controller, "dt": dt0, "dt_min": dt_min, "dt_max": dt_max,
                     "atol": tol, "rtol": tol, "gains": canonical_json(gains),
                     "newton_atol": atol, "newton_rtol": rtol})

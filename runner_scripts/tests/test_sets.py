@@ -19,7 +19,7 @@ import grid  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
 import trials  # noqa: E402
-from algorithms import load_algorithms  # noqa: E402
+from algorithms import algorithm_facts, load_algorithms  # noqa: E402
 from problems import load_problems  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 DATA = os.path.join(ROOT, "data")
@@ -27,7 +27,9 @@ OPTIMIZE_N = 262144
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
 
-ALGORITHMS = {row.name: row for row in load_algorithms()}
+# One catalogue row per (package, algorithm); the facts an algorithm's rows share.
+ROWS = load_algorithms()
+FACTS = {name: algorithm_facts(name) for name in {row.name for row in ROWS}}
 PROBLEMS = {row.name: row for row in load_problems()}
 
 
@@ -44,7 +46,20 @@ def kind_counts(trial_list, package):
 
 
 def capable(package, kind):
-    return [row for row in ALGORITHMS.values() if row.supports(package, kind)]
+    return [row for row in ROWS if row.supports(package, kind)]
+
+
+def families(algorithm, kind):
+    """The package families, cubie and cubie_mlir counted once and julia_cpu untimed, running an algorithm in a stepping kind."""
+    return {"cubie" if r.package in ("cubie", "cubie_mlir") else r.package
+            for r in ROWS if r.name == algorithm and r[kind] and r.package != "julia_cpu"}
+
+
+def stepping_values(stepping):
+    """How many dt or tolerance values one stepping spells out."""
+    if stepping["controller"] == "fixed":
+        return len(stepping["dt"]["duration_times_2_pow"])
+    return len(stepping["tol"])
 
 
 def pi_algorithms(package, names=None):
@@ -92,7 +107,7 @@ def stepping_algorithms(loaded, index, package, problem):
         return pi_algorithms(package, names)
     if stepping["controller"] == "matched":
         return matched_algorithms(package, names, problem)
-    return [ALGORITHMS[n] for n in names]
+    return [r for r in capable(package, kind) if r.name in names]
 
 
 def leg_count(loaded, package, problem):
@@ -121,19 +136,20 @@ class ShippedSetTests(unittest.TestCase):
         expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 1536, "cubie_mlir": 1536, "jax": 360, "pytorch": 180,
-                                    "myokit_cuda": 36, "cpp": 120, "julia_gpu": 864})
-        # Every timed algorithm is run by cubie and at least one other package family, or by two others.
-        for spec in specs:
-            kind = "fixed" if spec["controller"] == "fixed" else "adaptive"
-            families = {"cubie" if p in ("cubie", "cubie_mlir") else p
-                        for p in ALGORITHMS[spec["algorithm"]][kind] if p != "julia_cpu"}
-            self.assertGreaterEqual(len(families), 2, (spec["algorithm"], kind))
+        self.assertEqual(expected, {"cubie": 1632, "cubie_mlir": 1632, "jax": 360, "pytorch": 180,
+                                    "myokit_cuda": 36, "cpp": 120, "julia_gpu": 960})
+        # The timed algorithms are exactly those two package families run in the stepping kind.
+        timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
+                 "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]}
+        for kind, names in timed.items():
+            self.assertEqual(sorted(names), sorted(n for n in FACTS if len(families(n, kind)) >= 2), kind)
+            self.assertEqual(sorted({s["algorithm"] for s in specs
+                                     if (s["controller"] == "fixed") == (kind == "fixed")}), sorted(names))
         built = self.trials["perf"]
         self.assertEqual(dict(solve_counts(built)), expected)
-        self.assertEqual(kind_counts(built, "cubie"), {"solve": 1536, "warm": 128, "optimize": 128})
+        self.assertEqual(kind_counts(built, "cubie"), {"solve": 1632, "warm": 136, "optimize": 136})
         self.assertEqual(kind_counts(built, "jax"), {"solve": 360, "warm": 30})
-        self.assertEqual(kind_counts(built, "julia_gpu"), {"solve": 864, "warm": 72})
+        self.assertEqual(kind_counts(built, "julia_gpu"), {"solve": 960, "warm": 80})
         self.assertEqual({t["cold"] for t in built}, {False})
         # One optimize per leg at the set's n, right after the warm line.
         cubie = [t for t in built if t["package"] == "cubie"]
@@ -153,28 +169,37 @@ class ShippedSetTests(unittest.TestCase):
         default = {s["algorithm"]: s for s in lorenz if s["controller"] == "default"}
         self.assertEqual((default["kvaerno3"]["atol"], default["kvaerno3"]["rtol"]), (1e-5, 1e-5))
         self.assertEqual(default["kvaerno3"]["dt"], 2.0 ** -10)
-        self.assertEqual(default["kvaerno3"]["dt_min"], 1e-6)
+        # No shipped set pins the step floor or cap.
+        self.assertTrue(np.isnan(default["kvaerno3"]["dt_min"]))
         self.assertTrue(np.isnan(default["kvaerno3"]["dt_max"]))
         self.assertEqual(default["kvaerno3"]["newton_atol"], 1e-5)
         self.assertTrue(np.isnan(default["tsit5"]["newton_atol"]))
         pollu = [s for s in specs if s["problem"] == "pollu" and s["package"] == "cubie"
                  and s["controller"] == "default" and s["algorithm"] == "kvaerno3"][0]
         self.assertEqual(pollu["dt"], 60.0 * 2.0 ** -10)
-        self.assertEqual(pollu["dt_min"], 60.0 * 1e-6)
+        self.assertTrue(np.isnan(pollu["dt_min"]))
         self.assertEqual((pollu["parameter"], pollu["grid_scale"], pollu["grid_min"], pollu["grid_max"]),
                          ("k1", "log", 3.5e-2, 3.5))
         self.assertEqual(pollu["system_params"], "{}")
         lorenz96 = [s for s in specs if s["problem"] == "lorenz96"][0]
         self.assertEqual(lorenz96["system_params"], '{"states":32}')
-        # A package without the Newton setting carries NaN on its implicit rows.
+        # Newton tolerances follow the catalogue's newton column: julia_gpu's kvaerno3 row is false, jax's true.
         julia = [s for s in specs if s["package"] == "julia_gpu" and s["algorithm"] == "kvaerno3"
                  and s["problem"] == "lorenz" and s["n"] == 8]
         self.assertEqual(len(julia), 2)
         self.assertTrue(all(np.isnan(s["newton_atol"]) for s in julia))
-        # jax has it.
         jax = [s for s in specs if s["package"] == "jax" and s["algorithm"] == "kvaerno3"
                and s["problem"] == "lorenz" and s["n"] == 8 and s["controller"] == "fixed"][0]
         self.assertEqual(jax["newton_atol"], 1e-6)
+        for spec in specs:
+            row = [r for r in ROWS if r.package == spec["package"] and r.name == spec["algorithm"]][0]
+            self.assertEqual(np.isnan(spec["newton_atol"]), not row["newton"], (spec["package"], spec["algorithm"]))
+            self.assertEqual(np.isnan(spec["newton_rtol"]), not row["newton"], (spec["package"], spec["algorithm"]))
+
+    def test_no_shipped_set_pins_dt_min_or_dt_max(self):
+        for name, specs in self.expanded.items():
+            for field in ("dt_min", "dt_max"):
+                self.assertTrue(all(np.isnan(s[field]) for s in specs), (name, field))
 
     def test_perf_pi_stepping_skips_the_shipped_dirk_controller(self):
         specs = [s for s in self.expanded["perf"] if s["stepping"] == "pi" and s["problem"] == "lorenz"
@@ -205,11 +230,11 @@ class ShippedSetTests(unittest.TestCase):
         self.assertNotIn("julia_cpu", loaded["set"]["packages"])
         expected = {package: leg_count(loaded, package, "lorenz96") * 6 for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected["cubie"], 96)
-        self.assertEqual(expected["julia_gpu"], 54)
+        self.assertEqual(expected["cubie"], 102)
+        self.assertEqual(expected["julia_gpu"], 60)
         built = self.trials["states"]
         # Cold builds: every leg is one warm line flagged cold, the optimize line, one solve.
-        self.assertEqual(kind_counts(built, "cubie"), {"solve": 96, "warm": 96, "optimize": 96})
+        self.assertEqual(kind_counts(built, "cubie"), {"solve": 102, "warm": 102, "optimize": 102})
         self.assertEqual(kind_counts(built, "jax"), {"solve": 36, "warm": 36})
         self.assertEqual({t["cold"] for t in built if t["kind"] == "warm"}, {True})
         self.assertEqual({t["cold"] for t in built if t["kind"] != "warm"}, {False})
@@ -229,32 +254,37 @@ class ShippedSetTests(unittest.TestCase):
             count = 0
             for problem in problems_of(package):
                 for index, stepping in enumerate(loaded["stepping"]):
-                    values = 13 if stepping["controller"] == "fixed" else len(TOLS)
-                    count += len(stepping_algorithms(loaded, index, package, problem.name)) * values
-            if count:
-                expected[package] = count
+                    count += len(stepping_algorithms(loaded, index, package, problem.name)) * stepping_values(stepping)
+            expected[package] = count
         self.assertEqual(dict(by_package_kind(specs)), expected)
         # The cubie counts grow with the julia_cpu controller tables under data/; the others are fixed.
-        self.assertEqual({p: expected[p] for p in ("jax", "cpp", "julia_gpu", "julia_cpu")},
-                         {"jax": 135, "cpp": 35, "julia_gpu": 592, "julia_cpu": 2464})
+        self.assertEqual({p: expected[p] for p in ("jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu")},
+                         {"jax": 315, "pytorch": 180, "myokit_cuda": 30, "cpp": 100, "julia_gpu": 800,
+                          "julia_cpu": 3192})
         matched = sum(1 for s in specs if s["stepping"] == "matched" and s["package"] == "cubie")
-        self.assertEqual(expected["cubie"], 3192 + matched)
-        # No explicit algorithm at a fixed step, so the fixed-only explicit packages have no rows.
-        self.assertEqual({ALGORITHMS[s["algorithm"]]["family"] for s in specs if s["controller"] == "fixed"},
-                         {"dirk", "firk", "rosenbrock", "implicit"})
-        for absent in ("pytorch", "myokit_cuda"):
-            self.assertNotIn(absent, expected)
+        self.assertEqual(expected["cubie"], 4104 + matched)
+        # Every algorithm a package runs at a fixed step is stepped: the two fixed steppings together name them all.
+        fixed_named = set(loaded["stepping"][0]["algorithms"]) | set(loaded["stepping"][1]["algorithms"])
+        self.assertEqual(fixed_named, set(FACTS))
+        for package in loaded["set"]["packages"]:
+            self.assertEqual({s["algorithm"] for s in specs if s["package"] == package and s["controller"] == "fixed"},
+                             {r.name for r in capable(package, "fixed")}, package)
         kvaerno3 = sorted({s["dt"] for s in specs if s["algorithm"] == "kvaerno3" and s["problem"] == "lorenz"
                            and s["controller"] == "fixed"})
         self.assertEqual(kvaerno3, [2.0 ** -k for k in range(13, 0, -1)])
+        # euler alone steps 2^-8 .. 2^-17.
+        euler = sorted({s["dt"] for s in specs if s["algorithm"] == "euler" and s["problem"] == "lorenz"})
+        self.assertEqual(euler, [2.0 ** -k for k in range(17, 7, -1)])
+        self.assertEqual({s["controller"] for s in specs if s["algorithm"] == "euler"}, {"fixed"})
         self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
         built = self.trials["golden_grid"]
         cubie = kind_counts(built, "cubie")
         self.assertEqual(cubie["solve"], cubie["optimize"])
         # One warm line per leg; a matched entry resolving to pi shares the pi stepping's leg.
         self.assertEqual(cubie["warm"], len({t["leg"] for t in built if t["package"] == "cubie"}))
-        self.assertGreaterEqual(cubie["warm"], 360)
-        self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 2464, "warm": 256})
+        self.assertGreaterEqual(cubie["warm"], 8 * (23 + 17 + 14))
+        self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 3192, "warm": 8 * (21 + 18)})
+        self.assertEqual(kind_counts(built, "pytorch"), {"solve": 180, "warm": 15})
 
     def test_golden_grid_optimizes_before_every_solve(self):
         built = [t for t in self.trials["golden_grid"] if t["package"] == "cubie" and t["problem"] == "lorenz"]
@@ -417,8 +447,8 @@ newton = "tol"
         for spec in specs:
             self.assertEqual(spec["controller"], "pi")
             gains = json.loads(spec["gains"])
-            self.assertEqual(gains["integral_gain"], 0.3 * 4 / ALGORITHMS[spec["algorithm"]]["order"])
-            self.assertEqual(gains["proportional_gain"], 0.4 * 4 / ALGORITHMS[spec["algorithm"]]["order"])
+            self.assertEqual(gains["integral_gain"], 0.3 * 4 / FACTS[spec["algorithm"]]["order"])
+            self.assertEqual(gains["proportional_gain"], 0.4 * 4 / FACTS[spec["algorithm"]]["order"])
             self.assertEqual(spec["stepping"], "pi")
 
     def test_explicit_gains_and_a_named_controller_pass_through(self):
@@ -426,6 +456,20 @@ newton = "tol"
         specs = sets.expand(["g"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
         self.assertEqual(len(specs), 1)
         self.assertEqual((specs[0]["controller"], specs[0]["gains"]), ("pid", '{"ki":0.4,"kp":0.7}'))
+
+    def test_newton_resolves_from_the_catalogue_column(self):
+        # The same stepping asks for newton = "tol"; the (package, algorithm) row decides who gets it.
+        text = self.ADAPTIVE.format(controller="default", gains="").replace('["cubie"]', '["cubie", "julia_gpu", "jax"]')
+        self.write_set("nw", text)
+        specs = sets.expand(["nw"], KEY, self.root, algorithms=["kvaerno3", "tsit5"], sets_dir=self.sets_dir)
+        by_key = {(s["package"], s["algorithm"]): s for s in specs}
+        self.assertEqual(set(by_key), {("cubie", "kvaerno3"), ("cubie", "tsit5"), ("julia_gpu", "kvaerno3"),
+                                       ("julia_gpu", "tsit5"), ("jax", "kvaerno3"), ("jax", "tsit5")})
+        self.assertEqual((by_key[("cubie", "kvaerno3")]["newton_atol"], by_key[("jax", "kvaerno3")]["newton_rtol"]),
+                         (1e-5, 1e-5))
+        for pair in (("julia_gpu", "kvaerno3"), ("cubie", "tsit5"), ("julia_gpu", "tsit5"), ("jax", "tsit5")):
+            self.assertTrue(np.isnan(by_key[pair]["newton_atol"]), pair)
+            self.assertTrue(np.isnan(by_key[pair]["newton_rtol"]), pair)
 
     def test_matched_and_dirk_defaults_are_cubie_only(self):
         text = self.ADAPTIVE.format(controller="matched", gains="").replace('["cubie"]', '["jax"]')
