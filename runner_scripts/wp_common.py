@@ -4,10 +4,7 @@ import os
 import sys
 import threading
 
-import numpy as np
-
-from protocol import (REPEAT_CAP, REPEAT_SCHEDULE, REPEAT_SPREAD,  # noqa: F401
-                      WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
+from protocol import REPEAT_SCHEDULE, REPEAT_SPREAD, WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS
 
 
 def run_watchdogged(run, on_breach, budget_s=None):
@@ -34,17 +31,6 @@ def run_watchdogged(run, on_breach, budget_s=None):
     finally:
         finished.set()
         timer.cancel()
-
-
-def errored_pct(finals):
-    """Percent of trajectories (rows) with a non-finite final state."""
-    a = np.asarray(finals)
-    if a.size == 0:
-        return 0.0
-    bad = ~np.isfinite(a)
-    if bad.ndim > 1:
-        bad = bad.any(axis=tuple(range(1, bad.ndim)))
-    return 100.0 * float(bad.sum()) / float(bad.size)
 
 
 def repeat_bounds(first_s, cap):

@@ -31,11 +31,10 @@ class PythonViewTests(unittest.TestCase):
         self.assertEqual(protocol.WATCHDOG_EXIT_CODE, 3)
         self.assertEqual(protocol.WATCHDOG_SECONDS, float(protocol.get("watchdog.seconds")))
 
-    def test_wp_common_reexports_the_timing_constants(self):
-        self.assertEqual(wp_common.REPEAT_SCHEDULE, protocol.REPEAT_SCHEDULE)
+    def test_wp_common_holds_the_timing_helpers_only(self):
         self.assertEqual(wp_common.WATCHDOG_SECONDS, protocol.WATCHDOG_SECONDS)
-        self.assertFalse(hasattr(wp_common, "parse_bench_args"))
-        self.assertFalse(hasattr(wp_common, "load_golden"))
+        public = {name for name in dir(wp_common) if not name.startswith("_") and callable(getattr(wp_common, name))}
+        self.assertEqual(public, {"run_watchdogged", "repeat_bounds", "repeats_done", "timed_min_ms"})
 
     def test_no_environment_override(self):
         env = dict(os.environ, BENCH_WATCHDOG_SECONDS="1")
