@@ -125,12 +125,12 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 | leg | `<problem>/<system_params>/<algorithm>/<controller>/<precision>/<axis>` |
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
-| cold | `true` on the `warm` line of a cold-built set: fresh cache directory, `build_s` recorded; `false` otherwise |
+| cold | `true` on the `warm` line of a `build = "cold"` set: fresh cache directory, `build_s` recorded |
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
-- Every leg starts with one `warm` line (build only, the leg's cheapest spec), then the `optimize` lines its set's `[set.optimize]` table asks for, then the `solve` lines.
-- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv` and apply to the solves that follow in the leg.
-- Specs sharing a `trial_id` across sets merge: the first set's leg and axis stay, `transfers` union, `finals` true over false.
+- A leg is one `warm` line (the cheapest spec), the `optimize` lines of `[set.optimize]`, then the `solve` lines.
+- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv` and apply to the leg's later solves.
+- Specs with one `trial_id` across sets merge: first set's leg and axis, `transfers` union, `finals` true over false.
 
 ### 1.5 Runner contract
 
@@ -217,7 +217,7 @@ bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
 - `plan` writes `trials/<key>/<package>.jsonl` and prints counts per package and leg.
 - `run` writes the same under `logs/<key>_<stamp>/`, drives runners per 1.5 (6), keeps the clock guard, manifest and summary; no analysis.
 
-Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and `tol` adaptive, `dt0 = duration * 2^-10`, `dt_min = duration * 1e-6`, `dt_max` none, unless stated). The timed algorithms are the ones two package families run (cubie and cubie_mlir count as one, julia_cpu is not timed): fixed euler, classical-rk4, tsit5, rosenbrock23_sciml, kvaerno3, kvaerno5; adaptive tsit5, cash-karp-54, rosenbrock23_sciml, kvaerno3, vern7, kvaerno5.
+Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and `tol` adaptive, `dt0 = duration * 2^-10`, `dt_min = duration * 1e-6`, `dt_max` none, unless stated). Timed algorithms, those two package families run (cubie and cubie_mlir one family, julia_cpu untimed): fixed euler, classical-rk4, tsit5, rosenbrock23_sciml, kvaerno3, kvaerno5; adaptive tsit5, cash-karp-54, rosenbrock23_sciml, kvaerno3, vern7, kvaerno5.
 
 | set | packages | problems | grid | stepping | optimize | finals, transfers |
 |---|---|---|---|---|---|---|
