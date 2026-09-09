@@ -91,7 +91,8 @@ end
 function write_progress(path, trial)
     stamp = Dates.format(Dates.now(Dates.UTC), "yyyy-mm-ddTHH:MM:SS") * "Z"
     open(path, "w") do io
-        JSON.print(io, Dict("trial_id" => trial["trial_id"], "started_utc" => stamp))
+        JSON.print(io, Dict("trial_id" => trial["trial_id"], "kind" => trial["kind"],
+            "started_utc" => stamp))
     end
 end
 
@@ -122,20 +123,21 @@ function trial_states(trial)
     return Int(get_problem(trial["problem"])["states"])
 end
 
-"The compiled system of a trial: the precompiled entry when it matches the construction parameters, else built now; a cold leg always builds now."
+"The Float32 system of a trial: the compiled entry when it matches the construction parameters, else built now; a cold leg always builds now."
 function trial_system(trial, cold)
     problem = trial["problem"]
     params = JSON.parse(trial["system_params"])
     states = haskey(params, "states") ? Int(params["states"]) : 0
-    if !cold && haskey(_ENTRIES, problem) && (states == 0 || _ENTRIES[problem].n == states)
-        return _ENTRIES[problem]
-    end
-    if states > 0 && haskey(_SIZED_BUILDERS, problem)
-        return _SIZED_BUILDERS[problem](states)
-    end
     haskey(_ENTRY_BUILDERS, problem) ||
         error("no ModelingToolkit definition for problem '$(problem)'")
-    system = _ENTRY_BUILDERS[problem]()
+    if !cold && haskey(_ENTRIES, (problem, Float32)) &&
+       (states == 0 || _ENTRIES[(problem, Float32)].n == states)
+        return _ENTRIES[(problem, Float32)]
+    end
+    if states > 0 && startswith(problem, "lorenz96")
+        return _lorenz96_entry(Float32, states)
+    end
+    system = cold ? _ENTRY_BUILDERS[problem](Float32) : julia_system(problem, Float32)
     (states == 0 || system.n == states) ||
         error("$(problem) has $(system.n) states, not $(states)")
     return system
@@ -196,10 +198,11 @@ function timed(f, label)
     end
 end
 
-"Per leg: the transfers already abandoned (with the reason) and the cold build time."
+"Per leg: the transfers already abandoned (with the reason), the cold build time and the build failure's reason when it did not build."
 mutable struct LegState
     abandoned::Dict{String, String}
     build_s::Float64
+    failure::String
 end
 
 "The abandon rule: after a timeout or oom at ordinal k, every higher ordinal of the leg with the same transfers is recorded abandoned instead of run."
@@ -241,7 +244,8 @@ function run_solve(trial, parts, state, cli, version, rev, key)
         elseif rejection !== nothing
             failed("error", rejection)
         elseif parts === nothing
-            failed("error", "error: the leg's system, problem or solver could not be built")
+            failed("error", isempty(state.failure) ?
+                "error: the leg's system, problem or solver could not be built" : state.failure)
         else
             if ensemble === nothing && ensemble_failure === nothing
                 try
@@ -272,13 +276,17 @@ function run_solve(trial, parts, state, cli, version, rev, key)
         println("$(label) $(transfers): $(outcome.min_ms) ms $(outcome.reason)")
         flush(stdout)
     end
-    pct = result === nothing ? NaN :
-          errored_pct(result[2][end, :], result[1][end, :], duration)
+    pct = NaN
     finals = ""
-    if trial["finals"] && result !== nothing
+    if result !== nothing
+        # The kernel path reports no retcode; a failed trajectory shows in its state or final time.
         m = final_states(parts.system, Array(result[2][end, :]))
         t_final = Float64.(Array(result[1][end, :]))
-        finals = store_finals(merge(trial, Dict("key" => key)), m, t_final)
+        retcode = fill("", size(m, 1))
+        pct = errored_pct(m, t_final, retcode, duration)
+        if trial["finals"]
+            finals = store_finals(merge(trial, Dict("key" => key)), m, t_final; retcode)
+        end
     end
     states = parts === nothing ? trial_states(trial) : parts.system.n
     rows = [store_row(merge(trial, Dict("transfers" => transfers, "key" => key));
@@ -301,7 +309,7 @@ end
 function run_leg(leg, trials, cli, version, rev, key, progress_path)
     warm = findfirst(t -> t["kind"] == "warm", trials)
     cold = warm !== nothing && trials[warm]["cold"] == true
-    state = LegState(Dict{String, String}(), NaN)
+    state = LegState(Dict{String, String}(), NaN, "")
     parts = nothing
     built = false
     for trial in trials
@@ -322,7 +330,8 @@ function run_leg(leg, trials, cli, version, rev, key, progress_path)
                         parts = leg_parts(trial, cold)
                         kind == "warm" && warm_leg(parts, trial, leg)
                     catch err
-                        println("$(leg): build failed: $(classify(err)[2])")
+                        state.failure = classify(err)[2]
+                        println("$(leg): build failed: $(state.failure)")
                     end
                 end
             end

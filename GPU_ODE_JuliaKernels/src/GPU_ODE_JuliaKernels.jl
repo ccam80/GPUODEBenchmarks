@@ -22,10 +22,10 @@ Base.include_dependency(JULIA_ALGORITHMS_CSV)
 SYSTEMS_CODEGEN = (expression = Val(false), eval_expression = true,
     eval_module = @__MODULE__)
 
-# Entries built at precompile time; `sys` is unused and stays out of the image.
+# Float32 entries built at precompile time; `sys` is unused and stays out of the image.
 for row in resolve_problems("all", "julia_gpu")
-    entry = _ENTRY_BUILDERS[row["problem"]]()
-    _ENTRIES[row["problem"]] = Base.structdiff(entry, NamedTuple{(:sys,)})
+    entry = _ENTRY_BUILDERS[row["problem"]](Float32)
+    _ENTRIES[(row["problem"], Float32)] = Base.structdiff(entry, NamedTuple{(:sys,)})
 end
 const ENTRIES = _ENTRIES
 
@@ -36,7 +36,7 @@ const WORKLOAD_TOL = 1.0f-5
 "One fixed and one adaptive solve through the shared kernel-path functions."
 function _warm_leg(row, algorithm)
     solver = gpu_solver(algorithm)
-    system = ENTRIES[row["problem"]]
+    system = ENTRIES[(row["problem"], Float32)]
     # Kernels specialize on types, so a zero-step tspan warms them in bounded time.
     prob = remake(build_prob(system, row["duration"]), tspan = (0.0f0, 0.0f0))
     probs_host, probs = build_ensemble(system, prob,

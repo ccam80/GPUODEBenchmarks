@@ -97,7 +97,7 @@ end
     end
 
     @testset "the abandon rule marks one transfers leg from the failing ordinal on" begin
-        state = LegState(Dict{String, String}(), NaN)
+        state = LegState(Dict{String, String}(), NaN, "")
         abandon!(state, "both", failed("error", "error: x"), 2)
         @test isempty(state.abandoned)
         abandon!(state, "none", failed("timeout", "timeout: run exceeded 120.0s"), 2)

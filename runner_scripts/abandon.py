@@ -39,7 +39,7 @@ def remaining(data, key, trial_list, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """Record the leg's ordinals from the one the progress file names as abandoned (every requested transfers row still absent); returns the trials still without a row, or None when the progress file names no trial."""
+    """Record the leg's ordinals from the one the progress file names as abandoned (every requested transfers row still absent); returns the trials still without a row, or None when the progress file names no trial. A hard exit on an optimize line records nothing and drops that line, so the leg's solves run at the solver's own geometry."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -48,6 +48,10 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
         current = []
     if not current:
         return None
+    kind = progress.get("kind")
+    if kind == "optimize":
+        return [t for t in remaining(data, key, trial_list)
+                if not (t["kind"] == "optimize" and t["trial_id"] == progress["trial_id"])]
     current.sort(key=lambda t: t["kind"] != "solve")
     leg, ordinal = current[0]["leg"], current[0]["ordinal"]
     reason = "abandoned: hard-exit at ordinal {0}".format(ordinal)
