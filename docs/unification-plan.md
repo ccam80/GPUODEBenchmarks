@@ -287,15 +287,14 @@ Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and
 
 ### 1.8 Analyses
 
-Each script under `analyses/` takes `--set <name>` (repeatable), expands it with `sets.py` under every key, selects rows by `trial_id`, reads finals as needed:
+Two scripts under `analyses/`; each takes `--set <name>` (repeatable), expands it with `sets.py` under every key, and selects rows by `trial_id`:
 
-| script | set | output |
-|---|---|---|
-| `times.py` | perf, states | time vs n per (key, problem, algorithm, controller, transfers); time and `build_s` vs states |
-| `wp.py` | wp | error vs time per (key, problem, algorithm) |
-| `ne.py` | ne | cubie packages against julia_cpu per setting, both scored against the golden row |
-| `overlap.py` | overlap | cubie packages against julia_gpu per setting; report markdown |
-| `pairwise.py` | pairwise | finals across packages per problem |
+| script | output |
+|---|---|
+| `timing.py --x n\|error\|states` | `min_ms` against the axis, one figure per (key, problem, algorithm, controller, transfers), one series per package; `--x states` adds `build_s` |
+| `agreement.py` | per trial spec, `error` and the finals RMS difference across every package that ran it, against the golden row where one exists; CSV and figures per (key, problem) |
+
+Set to invocation: perf `timing --x n`; wp `timing --x error`; states `timing --x states`; ne, pairwise, overlap `agreement` (overlap also `timing --x n` and `--x error`).
 
 - Rows with `errored_pct > 10` are dropped where the column is a number.
 - Absent `errored_pct`, `reason`, `samples_ms`, `finals`, `package_version` never raise.
@@ -381,7 +380,7 @@ Done: a tiny-n run on Windows lands rows; the Linux script mirrors it.
 
 ### P9 analyses
 Depends on: P2, P3.
-`analyses/` per 1.8 on `sets.py`. Delete `runner_scripts/plot/*.jl`, `compare_numerical_equivalence.py`, `compare_numerical_results.py`, `run_cubie_julia_overlap.py`, `runner_scripts/cubie_julia_overlap/`, `run_numerical_equivalence.*`, `ne_common.py`.
+`analyses/timing.py` and `analyses/agreement.py` on `sets.py`. Delete `runner_scripts/plot/*.jl`, `compare_numerical_equivalence.py`, `compare_numerical_results.py`, `run_cubie_julia_overlap.py`, `runner_scripts/cubie_julia_overlap/`, `run_numerical_equivalence.*`, `ne_common.py`.
 Done: every script runs on the converted data and writes figures.
 
 ### P10 docs and tests
