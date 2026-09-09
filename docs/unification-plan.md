@@ -175,8 +175,7 @@ taking the larger `finals`:
 | states | packages listing lorenz96 | membership | sweep; timing setting | `n_states` | both, none | 0 |
 | overlap | cubie, cubie_mlir, julia_gpu | rows with `julia_gpu` | sweep at timing dt and `overlap_tol` over the N list; prefix on `ne_dts` and `TOLS` | N list; `n_wp` | both, none | 1024 on the prefix trials |
 
-Prefix trials below `n_wp` exist for julia_cpu only; every GPU package's NE
-finals are the first 1024 rows of its `n_wp` solves.
+Prefix trials below `n_wp` exist for julia_cpu only.
 
 Tiers: cubie NE adaptive trials get `default` plus `matched` when
 `controllers/<problem>.csv` from julia_cpu holds constants that differ from the
