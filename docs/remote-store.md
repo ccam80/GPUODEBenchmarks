@@ -18,7 +18,7 @@ A key names one machine (`runner_scripts/bench_key.py`); two machines never shar
 
 The Linux box is `chris-linux-dual` on the tailnet (100.106.157.54, user `cca79`); the tree is `/srv/gpuode/data`, owned by `cca79`, and sshd admits `cca79` from tailnet addresses (100.64.0.0/10) by key only. On every other machine `box` is its name both as a `Host` in `~/.ssh/config` and as the sftp rclone remote `box:`, so `box:/srv/gpuode/data` names the tree for rclone and rsync alike; `GPUODE_STORE_REMOTE` overrides it.
 
-On the box, once, as root (the drop-in keeps password logins off and restricts the listener to the tailnet without a firewall change):
+On the box, once, as root:
 
 ```
 apt-get install -y openssh-server
@@ -35,7 +35,7 @@ On each other machine: `rclone` on `PATH` (Windows: `winget install Rclone.Rclon
 rclone config create box sftp host chris-linux-dual user cca79 key_file ~/.ssh/id_ed25519 known_hosts_file ~/.ssh/known_hosts
 ```
 
-and in `~/.ssh/config` a `Host box` with `HostName chris-linux-dual`, `User cca79` and the same key; `ssh box true` once records the host key that rclone then checks.
+and in `~/.ssh/config` a `Host box` with `HostName chris-linux-dual`, `User cca79` and the same key; run `ssh box true` once to record the host key.
 
 ## Sync
 

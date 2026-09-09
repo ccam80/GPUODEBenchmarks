@@ -4,7 +4,7 @@
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
 --resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
-After the runners a run pushes this key to the remote store and pulls the others (runner_scripts/sync.py); --no-sync skips it, and an unconfigured remote is reported, not an error.
+run ends with a store sync (runner_scripts/sync.py): push this key, pull the others; --no-sync skips it; no remote configured means no sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed sync.
 """
 

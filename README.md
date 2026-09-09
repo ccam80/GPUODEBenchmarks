@@ -75,9 +75,8 @@ python analyses/timing.py --x error  --set golden_grid  # min_ms against error
 python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 ```
 
-The shared tree lives on the Linux box: a run pushes its own key there and
-pulls the other keys when it ends, and `python runner_scripts/sync.py pull`
-does the same before an analysis (`docs/remote-store.md`).
+A run ends by syncing with the shared tree on the Linux box; pull before an
+analysis with `python runner_scripts/sync.py pull` (`docs/remote-store.md`).
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
 and write figures and CSVs under `plots/<key>/<problem>/`. An error is the RMS
