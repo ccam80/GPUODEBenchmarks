@@ -89,14 +89,15 @@ def main():
 
     venv_uv = venv_path / "bin" / "uv"
 
-    # One resolve for the whole stack, so diffrax cannot pull a different jax.
+    # One resolve for the whole stack, so diffrax cannot pull a different jax;
+    # pyarrow and tzdata because the runner records UTC timestamps through the result store.
     print(f"Installing {jax_spec}, diffrax {DIFFRAX_VERSION}, "
           f"equinox {EQUINOX_VERSION}...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         jax_spec,
                         f"diffrax=={DIFFRAX_VERSION}",
                         f"equinox=={EQUINOX_VERSION}",
-                        "numpy", "scipy"]):
+                        "numpy", "scipy", "pyarrow", "tzdata"]):
         print("Failed to install the JAX stack")
         return 1
 

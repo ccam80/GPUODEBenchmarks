@@ -45,6 +45,10 @@ class StaticContractTests(unittest.TestCase):
         source = MODULE._LAUNCH_KERNEL
         self.assertIn("iterate_euler_cu(dt, state, input", source)
         self.assertIn("diffusion_current[cell]", source)
+        # The kernel reads the initial states and writes the final ones elsewhere, so resident inputs survive a run.
+        self.assertIn("const Real *initial_states", source)
+        self.assertIn("initial_states[state_index * cell_count + cell]", source)
+        self.assertIn("states[state_index * cell_count + cell] =", source)
         self.assertNotIn("dx =", source)
         self.assertNotIn("dy =", source)
         self.assertNotIn("dz =", source)

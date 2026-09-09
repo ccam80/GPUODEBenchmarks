@@ -26,8 +26,8 @@ TORCHDIFFEQ_URL = (
     "@4f4524f719a619c9bd65b722e5f7bf699ff75f62"
 )
 
-# The solver internals bench_torchdiffeq.py subclasses, and a fixed-step
-# odeint under torch.vmap on CUDA.
+# The solver internals runner_scripts/torch_bench.py subclasses, and a
+# fixed-step odeint under torch.vmap on CUDA.
 VMAP_CHECK = """
 import torch
 from torchdiffeq import odeint
@@ -197,6 +197,11 @@ def main():
 
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "scipy"]):
         print("Failed to install scipy")
+        return 1
+
+    # The runner records UTC timestamps through the result store.
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python), "pyarrow", "tzdata"]):
+        print("Failed to install pyarrow and tzdata")
         return 1
 
     # Install custom torchdiffeq fork with vmap support
