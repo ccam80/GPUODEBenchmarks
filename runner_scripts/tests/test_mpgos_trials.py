@@ -61,12 +61,11 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual({b["precision"] for b in builds}, {"float32"})
         self.assertEqual({b["solver"] for b in builds}, {"RK4", "RKCK45"})
-        # perf and golden_grid share their lorenz binaries at n = 8 and 32; the states set builds lorenz96 per state count.
         lorenz = [b for b in builds if b["problem"] == "lorenz"]
         self.assertEqual(sorted((b["solver"], b["nt"]) for b in lorenz),
                          [("RK4", 8), ("RK4", 32), ("RKCK45", 8), ("RKCK45", 32)])
         self.assertTrue(all(b["sd"] == "-" and not b["cold"] for b in lorenz))
-        # The states set builds lorenz96 cold per state count, except 32 states: that trial merged into perf's warm n leg, which came first.
+        # 32 states merged into perf's warm n leg.
         states = [b for b in builds if b["problem"] == "lorenz96" and b["cold"]]
         self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 64, 128])
         for b in states:
@@ -95,7 +94,7 @@ class ListingTests(unittest.TestCase):
         self.assertIn("both,none", {p["transfers"] for p in points})
         self.assertIn("none", {p["transfers"] for p in points})
         self.assertTrue(any(p["finals"] for p in points))
-        # The golden_grid dt leg runs its steps on the one n = 8 binary; its 2^-10 step merged into perf's n leg, which came first.
+        # The 2^-10 step merged into perf's n leg.
         dt_leg = [p for p in points if p["leg"].endswith("/dt") and p["nt"] == 8 and p["solver"] == "RK4"]
         self.assertEqual(len(dt_leg), 12)
         self.assertEqual([p["ordinal"] for p in dt_leg], list(range(12)))
@@ -233,7 +232,6 @@ class CppTrialTests(unittest.TestCase):
             finals_spec = json.load(handle)
         self.assertEqual(set(finals_spec), set(store.FINALS_FIELDS))
         self.assertEqual(store.trial_id(finals_spec), target["trial_id"])
-        # A states trial names its state count.
         states_list = trials.build_trials([spec(problem="lorenz96", parameter="F", grid_max=16.0,
                                                 system_params='{"states":64}', finals=True)])
         trials.write_jsonl(path, states_list)

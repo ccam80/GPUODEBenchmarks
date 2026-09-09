@@ -1,5 +1,5 @@
 #!/bin/bash
-# Linux MPGOS runner: run_ode_cpp.sh --trials <jsonl> [--floor]. Builds every binary the trial file needs with nvcc, then runs its solve trials in file order through GPU_ODE_MPGOS/Bench.exe, which records each one through the store. Exit 0 when the loop finished, the watchdog exit code when a trial never returned, 1 otherwise.
+# run_ode_cpp.sh --trials <jsonl> [--floor]: builds the binaries the file needs, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
 set -e
 
 TRIALS=""
@@ -19,7 +19,7 @@ export CUDA_MODULE_LOADING=EAGER
 
 cd "$(dirname "$0")/../.."
 
-# The suite interpreter carries pyarrow and duckdb for the store.
+# The suite interpreter runs the store.
 PYTHON=python3
 if [ -x GPU_ODE_CUBIE/venv/bin/python3 ]; then PYTHON="$PWD/GPU_ODE_CUBIE/venv/bin/python3"; fi
 
@@ -75,7 +75,7 @@ mkdir -p "$CACHE_DIR"
 BUILDS="$("$PYTHON" runner_scripts/mpgos_trials.py builds "$TRIALS")"
 POINTS="$("$PYTHON" runner_scripts/mpgos_trials.py points "$TRIALS")"
 
-# Every missing warm target builds in parallel; cold targets build serially and time the leg's build_s.
+# Warm targets build in parallel; cold targets build serially and time build_s.
 JOBS=8
 while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
 	[ -z "$problem" ] && continue
@@ -100,7 +100,7 @@ nan_rows() {
 	echo "cpp $leg $transfers: $reason"
 }
 
-# (leg|transfers) pairs a timeout or out-of-memory outcome abandoned; Bench.exe recorded their rows.
+# (leg|transfers) pairs abandoned after a timeout or oom outcome.
 declare -A ABANDONED
 OUTCOME="$TRIALS.outcome"
 
@@ -130,7 +130,6 @@ while IFS=$'\t' read -r trial_id leg ordinal problem solver nt sd precision tran
 	rc=0
 	"$exe" "${bench_args[@]}" || rc=$?
 	if [ "$rc" -eq "$WATCHDOG_EXIT" ]; then
-		# The driver records the abandoned rows from the progress file and re-invokes this script.
 		exit "$WATCHDOG_EXIT"
 	fi
 	done_legs=""

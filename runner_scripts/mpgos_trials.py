@@ -1,4 +1,4 @@
-"""The MPGOS side of a trial file for run_ode_cpp.ps1 and .sh: `context` prints the run key, source hash, package version, suite revision and watchdog exit code (and refreshes protocol.h); `builds <trials>` lists the binaries the file needs; `points <trials>` lists its solve trials in run order; `nan <trials> <trial_id> <key> <transfers,...> <reason> [--floor] [--build-s S]` records rows for a point the scripts could not run."""
+"""MPGOS trial-file helper for run_ode_cpp.ps1 and .sh: `context` prints key, source hash, package_version, suite_rev and the watchdog exit code; `builds <trials>` lists binaries; `points <trials>` lists solve trials in run order; `nan <trials> <trial_id> <key> <transfers,...> <reason> [--floor] [--build-s S]` records NaN rows."""
 
 import argparse
 import hashlib
@@ -21,7 +21,7 @@ MPGOS_DIR = os.path.join(REPO_ROOT, "GPU_ODE_MPGOS")
 PROBLEMS_DIR = os.path.join(MPGOS_DIR, "problems")
 PROTOCOL_HEADER = os.path.join(MPGOS_DIR, "protocol.h")
 
-# The MPGOS solver each algorithm maps to; anything else is a point the package cannot run.
+# Algorithm to MPGOS solver.
 SOLVERS = {"classical-rk4": "RK4", "cash-karp-54": "RKCK45"}
 PRECISION_TYPES = {"float32": "float", "float64": "double"}
 HASH_HEX = 12
@@ -32,7 +32,7 @@ POINT_COLUMNS = ("trial_id", "leg", "ordinal", "problem", "solver", "nt", "sd", 
 
 
 def source_files():
-    """Every file the binaries are built from, sorted: Bench.cu, the headers beside it, the makefile, the problems and the MPGOS sources."""
+    """The source files, sorted."""
     paths = [os.path.join(MPGOS_DIR, name) for name in ("Bench.cu", "grid.cuh", "trial.cuh",
                                                         "protocol.h", "makefile")]
     for folder in ("problems", "SourceCodes"):
@@ -107,7 +107,7 @@ def build_key(trial):
 
 
 def builds(trial_list):
-    """One row per binary, in first appearance: the build key, whether a cold warm line asks for it (its leg named), and the legs' first appearance otherwise."""
+    """One row per binary in first appearance, cold when a cold warm line asks for it, with that leg."""
     rows = {}
     for trial in trial_list:
         if trial["kind"] not in ("warm", "solve") or unrunnable(trial):
@@ -125,7 +125,7 @@ def builds(trial_list):
 
 
 def points(trial_list):
-    """The solve trials in file order with their build key, transfers, finals flag and the reason the package cannot run them ('' when it can)."""
+    """The solve trials in file order with build key, transfers, finals and the reason they cannot run ('' when they can)."""
     out = []
     for trial in trial_list:
         if trial["kind"] != "solve":
@@ -172,7 +172,7 @@ def _print_table(rows, columns):
 
 
 def context():
-    """The scripts' constants after protocol.h is refreshed, as key=value lines."""
+    """The scripts' constants; refreshes protocol.h."""
     protocol.write_cxx_header(PROTOCOL_HEADER)
     src_hash = source_hash()
     return {"key": dataset_key(), "source_hash": src_hash,

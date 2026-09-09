@@ -1,4 +1,4 @@
-// Trial records for Bench.cu: one JSONL line per trial as bench.py writes it, read into a Trial, and the store row text Bench.cu records through runner_scripts/store.py. Host code only.
+// Trial lines read into a Trial and the store row text Bench.cu records; host code only.
 #pragma once
 
 #include <cctype>
@@ -20,7 +20,7 @@ static const char* const TRIAL_FIELDS[] = {
 	"newton_atol", "newton_rtol", "package"};
 static const int TRIAL_FIELD_COUNT = sizeof(TRIAL_FIELDS) / sizeof(TRIAL_FIELDS[0]);
 
-// One JSON value of a flat trial object: scalars decoded, arrays and objects kept as raw text (arrays of scalars also itemised).
+// One JSON value: scalars decoded, arrays and objects kept as raw text, scalar arrays also itemised.
 struct JsonValue
 {
 	enum Kind { String, Number, Bool, Null, Array, Object };
@@ -164,7 +164,6 @@ private:
 				SkipSpace();
 				if (Peek() == '[' || Peek() == '{')
 				{
-					// Nested containers are never itemised; the raw text still records them.
 					Pos = start;
 					value.items.clear();
 					value.text = ReadRaw();
@@ -201,7 +200,7 @@ private:
 	}
 };
 
-// A trial line: the spec fields typed, the trial bookkeeping, and the raw object for row emission.
+// A trial line: typed fields plus the raw object for row emission.
 struct Trial
 {
 	JsonObject raw;
@@ -356,7 +355,7 @@ inline std::string RawField(const Trial& trial, const std::string& name)
 	return value.text;
 }
 
-// The spec fields of a trial as JSON members, with `transfers` and `key` appended when given.
+// The spec fields as JSON members, transfers and key appended when given.
 inline std::string SpecMembers(const Trial& trial, const std::string& transfers, const std::string& key)
 {
 	std::string out;
@@ -390,7 +389,7 @@ struct RowValues
 	std::string suite_rev;
 };
 
-// One store row as JSON: the trial's spec fields, transfers, key, then the value columns.
+// One store row as JSON.
 inline std::string RowText(const Trial& trial, const std::string& transfers, const std::string& key,
                            const RowValues& values)
 {

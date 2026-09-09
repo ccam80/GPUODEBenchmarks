@@ -1,4 +1,4 @@
-// test_trial <trials.jsonl> <trial_id> <key> <row.json> <spec.json>: reads the trial file with trial.cuh, prints the parsed fields of one trial as key=value lines, writes its store row and finals spec, and checks the reader on escaped and null values. Exit 0 on success, 1 on a failed check, 2 on a usage or read error.
+// test_trial <trials.jsonl> <trial_id> <key> <row.json> <spec.json>: prints one trial's fields as key=value lines, writes its row and finals spec, checks the reader; exit 1 on a failed check, 2 on a usage or read error.
 
 #include <cmath>
 #include <cstdio>
@@ -20,7 +20,7 @@ static void Check(bool condition, const std::string& what)
 	}
 }
 
-// Escapes, unicode, null, arrays, nested objects and numbers all read back.
+// Reader checks on a hand-written object.
 static void ReaderChecks()
 {
 	std::string line = "{\"a\": \"q\\\"\\\\\\u00e9\\n\", \"b\": null, \"c\": [\"x\", \"y\"], \"d\": true, "

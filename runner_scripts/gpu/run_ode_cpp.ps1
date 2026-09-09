@@ -1,4 +1,4 @@
-# Windows MPGOS runner: run_ode_cpp.ps1 --trials <jsonl> [--floor]. Builds every binary the trial file needs inside the Visual Studio developer environment, then runs its solve trials in file order through GPU_ODE_MPGOS\Bench.exe, which records each one through the store. Exit 0 when the loop finished, the watchdog exit code when a trial never returned, 1 otherwise.
+# run_ode_cpp.ps1 --trials <jsonl> [--floor]: builds the binaries the file needs in the VS developer shell, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Arguments
@@ -23,7 +23,7 @@ $env:CUDA_MODULE_LOADING = 'EAGER'
 
 Push-Location (Join-Path $PSScriptRoot '..\..')
 
-# The suite interpreter carries pyarrow and duckdb for the store.
+# The suite interpreter runs the store.
 $Python = 'python'
 if (Test-Path 'GPU_ODE_CUBIE\venv\Scripts\python.exe') {
     $Python = (Resolve-Path 'GPU_ODE_CUBIE\venv\Scripts\python.exe').Path
@@ -86,7 +86,7 @@ function Get-NvccArgs {
     return $nvccArgs
 }
 
-# Every missing warm target builds through parallel nvcc straight into the cache.
+# Warm targets build in parallel into the cache.
 function Invoke-WarmBuilds {
     param([object[]]$Targets)
     $jobsMax = 8
@@ -118,7 +118,7 @@ function Invoke-WarmBuilds {
     Write-Host "MPGOS builds ready ($($builds.Count - $failed.Count) built, $($failed.Count) failed)."
 }
 
-# A cold target builds afresh, serially, and its wall time is the leg's build_s.
+# A cold target builds afresh; its wall time is build_s.
 function Invoke-ColdBuild {
     param([object]$Target)
     $exe = Get-ExePath $Target.problem $Target.solver $Target.nt $Target.sd $Target.precision
@@ -127,7 +127,7 @@ function Invoke-ColdBuild {
     Write-Host "cold build $(Split-Path $exe -Leaf)"
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $nvccArgs = Get-NvccArgs $exe $Target.problem $Target.solver $Target.nt $Target.sd $Target.precision
-    # nvcc's output goes to files so only the seconds come back from this function.
+    # Build output goes to files; only the seconds return.
     $proc = Start-Process nvcc -ArgumentList $nvccArgs -NoNewWindow -PassThru -Wait `
         -RedirectStandardOutput "$exe.out" -RedirectStandardError "$exe.err"
     $seconds = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture,
@@ -163,7 +163,7 @@ foreach ($b in @($Builds | Where-Object { $_.cold -eq 'true' })) {
     $BuildSeconds[$b.leg] = Invoke-ColdBuild -Target $b
 }
 
-# Record NaN rows for a point the script could not run.
+# NaN rows for a point the script could not run.
 function Add-NanRows {
     param([object]$Point, [string]$Transfers, [string]$Reason)
     $nanArgs = @('nan', $Trials, $Point.trial_id, $DatasetKey, $Transfers, $Reason)
@@ -174,7 +174,7 @@ function Add-NanRows {
     Write-Host "cpp $($Point.problem) $($Point.leg) ordinal $($Point.ordinal) ${Transfers}: $Reason"
 }
 
-# (leg, transfers) pairs a timeout or out-of-memory outcome abandoned; Bench.exe recorded their rows.
+# (leg|transfers) pairs abandoned after a timeout or oom outcome.
 $Abandoned = @{}
 $Outcome = "$Trials.outcome"
 
@@ -201,7 +201,6 @@ foreach ($p in $Points) {
     & $exe @benchArgs
     $code = $LASTEXITCODE
     if ($code -eq $WatchdogExit) {
-        # The driver records the abandoned rows from the progress file and re-invokes this script.
         Pop-Location
         exit $WatchdogExit
     }

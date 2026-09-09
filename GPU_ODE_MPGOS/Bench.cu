@@ -1,5 +1,4 @@
-// One MPGOS trial: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none --python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]
-// The trial's problem, algorithm, trajectory count, state count and precision are compile-time constants; the binary refuses a trial it was not built for.
+// One MPGOS trial per process: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none --python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]; problem, algorithm, n, states and precision are build constants.
 #include <iostream>
 #include <vector>
 #include <string>
@@ -119,7 +118,7 @@ static Options ParseOptions(int argc, char* argv[])
 
 // ----------------------------------------------------------------- store CLI
 
-// Run a command line; on Windows the whole line is wrapped in quotes so cmd keeps the quoted program path.
+// Run a command line; cmd needs the whole line quoted when the program path is quoted.
 static int Shell(const std::string& command)
 {
 #ifdef _WIN32
@@ -142,7 +141,7 @@ static void WriteText(const std::string& path, const std::string& text)
 	out << text;
 }
 
-// Rows through `store.py record`; a failed record is fatal because the row would be lost.
+// Rows through store.py record; a failed record exits.
 static void RecordRows(const Options& o, const std::vector<std::string>& rows)
 {
 	if (rows.empty()) return;
@@ -162,7 +161,7 @@ static void RecordRows(const Options& o, const std::vector<std::string>& rows)
 	}
 }
 
-// Finals through `store.py finals`: every trajectory's final state, final time and an empty retcode (MPGOS reports none).
+// Finals through store.py finals: final state and time per trajectory, empty retcode.
 static std::string RecordFinals(const Options& o, const Trial& trial, Solver& Scan)
 {
 	std::string csv = o.trials + ".cpp_finals.csv";
@@ -195,12 +194,11 @@ static std::string RecordFinals(const Options& o, const Trial& trial, Solver& Sc
 		std::cerr << "store.py finals failed (" << status << "): " << command << std::endl;
 		exit(2);
 	}
-	// The CSV is n rows of every state; the parquet file now holds them.
 	std::remove(csv.c_str());
 	return "finals/" + trial.trial_id + ".parquet";
 }
 
-// `<trials>.progress`: the trial under way, for the driver's hard-exit bookkeeping.
+// <trials>.progress names the trial under way.
 static void WriteProgress(const Options& o)
 {
 	time_t now = time(NULL);
@@ -255,7 +253,7 @@ static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling
 
 // ----------------------------------------------------------------- watchdog
 
-// A hung kernel can only be stopped by process exit; the driver records the abandoned rows after exit 3.
+// A hung kernel ends with process exit 3; the driver records the abandoned rows.
 static std::atomic<long long> WatchdogDeadlineMs(0);   // 0 = disarmed
 static std::string WatchdogLabel;
 
@@ -265,7 +263,7 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Margin over the soft cap, so a run that returns late is a timeout row, not a hard exit.
+// Deadline well past the soft cap.
 static void ArmWatchdog()
 {
 	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
@@ -342,7 +340,7 @@ void FillSolverObject(Solver& Scan, const std::vector<PRECISION>& Values, PRECIS
 	}
 }
 
-// Time one transfers leg: `both` is h2d, kernel and the ActualState d2h; `none` the kernel alone after an untimed h2d. One untimed warm-up, then the protocol repeat schedule.
+// Time one transfers leg (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule.
 static LegResult TimeLeg(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both)
 {
 	LegResult result;
@@ -396,7 +394,7 @@ static LegResult TimeLeg(Solver& Scan, const std::vector<PRECISION>& Values, PRE
 	return result;
 }
 
-// Percent of trajectories the store's errored_mask flags: a non-finite state, or a final time off the duration by over 1e-4 relative. MPGOS reports no retcode.
+// Percent of trajectories store.errored_mask flags: a non-finite state or a final time off the duration by over 1e-4 relative.
 static double ErroredPct(Solver& Scan, double Duration)
 {
 	int Bad = 0;
@@ -428,7 +426,7 @@ static RowValues BaseValues(const Options& o)
 	return v;
 }
 
-// NaN rows for every higher ordinal of the leg that lists these transfers: they are not run.
+// NaN rows for every higher ordinal of the leg that lists these transfers.
 static std::vector<std::string> AbandonRows(const Options& o, const std::vector<Trial>& trials,
                                             const Trial& mine, const std::string& transfers, Outcome why)
 {
@@ -458,7 +456,7 @@ struct OutcomeLog
 	}
 };
 
-// Rows with one reason for every requested transfers leg, recorded and logged; the trial ran nothing.
+// Record one reason for every requested transfers leg.
 static int FailAll(const Options& o, const std::vector<Trial>& trials, const Trial& trial, OutcomeLog& log,
                    const std::string& reason, Outcome outcome)
 {
@@ -556,7 +554,7 @@ int main(int argc, char* argv[])
 	Solver& Scan = *ScanPtr;
 
 	Scan.SolverOption(ThreadsPerBlock, 32);
-	// The fixed step, or dt0 when the trial pins one; NaN leaves the package default.
+	// NaN leaves the package default.
 	if (!std::isnan(trial.dt))
 		Scan.SolverOption(InitialTimeStep, trial.dt);
 	if (!std::isnan(trial.dt_min))

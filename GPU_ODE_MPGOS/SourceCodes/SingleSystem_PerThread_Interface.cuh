@@ -1337,7 +1337,7 @@ DataType* AllocateDeviceMemory(size_t N)
 	
 	Error = cudaMalloc((void**)&MemoryAddressInDevice, N * sizeof(DataType));
     
-	// Thrown rather than exited so Bench.cu records the failure (out of memory or otherwise) as the trial's row.
+	// Throws so the caller records the failure.
 	if (Error != cudaSuccess)
 		throw std::runtime_error(std::string("cudaMalloc: ") + cudaGetErrorName(Error) + ": "
 		                         + cudaGetErrorString(Error));
