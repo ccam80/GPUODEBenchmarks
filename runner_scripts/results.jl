@@ -106,16 +106,19 @@ function _with_spec_file(f, spec, names)
     end
 end
 
-"Write the finals file of a trial (finals is n x states in grid order, converged one flag per row); returns finals/<trial_id>.parquet relative to the package dir."
-function store_finals(spec, finals::AbstractMatrix, converged; root = nothing)
-    size(finals, 1) == length(converged) ||
-        throw(ArgumentError("converged has one flag per finals row"))
+"Write the finals file of a trial (finals is n x states in grid order, t_final each trajectory's final time, retcode the package's failure code text, empty on success); returns finals/<trial_id>.parquet relative to the package dir."
+function store_finals(spec, finals::AbstractMatrix, t_final; retcode = nothing, root = nothing)
+    size(finals, 1) == length(t_final) ||
+        throw(ArgumentError("t_final has one time per finals row"))
+    codes = retcode === nothing ? fill("", size(finals, 1)) : string.(retcode)
+    length(codes) == size(finals, 1) ||
+        throw(ArgumentError("retcode has one code per finals row"))
     csv_path = tempname() * ".csv"
     open(csv_path, "w") do io
-        println(io, join(vcat(["traj"], ["s$(k)" for k in 1:size(finals, 2)], ["converged"]), ","))
+        println(io, join(vcat(["traj"], ["s$(k)" for k in 1:size(finals, 2)], ["t_final", "retcode"]), ","))
         for (index, row) in enumerate(eachrow(finals))
-            println(io, join(vcat([string(index - 1)],
-                [repr(Float64(v)) for v in row], [converged[index] ? "1" : "0"]), ","))
+            println(io, join(vcat([string(index - 1)], [repr(Float64(v)) for v in row],
+                [repr(Float64(t_final[index])), codes[index]]), ","))
         end
     end
     try

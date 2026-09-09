@@ -1,2 +1,0 @@
-framework,algorithm,phase,mode,tier,n,setting_kind,setting,error_type,message
-julia,rosenbrock23_sciml,performance,fixed,fixed,8,dt,0.0009765625,Watchdog,run never returned within 120.0 s

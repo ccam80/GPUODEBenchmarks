@@ -63,6 +63,7 @@ TEXT_VALUE_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
 
 NAN = float("nan")
 HASH_HEX = 16
+T_FINAL_RTOL = 1e-4
 LOCK_TIMEOUT_S = 120.0
 LOCK_STALE_S = 300.0
 
@@ -320,6 +321,23 @@ def finals_name(spec):
     return "finals/" + trial_id(spec) + ".parquet"
 
 
+def errored_mask(states, t_final, retcode, duration):
+    """bool[m]: a non-finite state, a final time off duration by more than T_FINAL_RTOL, or a non-empty retcode."""
+    states = np.asarray(states)
+    t_final = np.asarray(t_final, dtype=np.float64).reshape(-1)
+    bad_state = ~np.isfinite(states).all(axis=1) if states.ndim == 2 \
+        else np.zeros(t_final.shape[0], dtype=bool)
+    short = ~(np.abs(t_final - float(duration)) <= T_FINAL_RTOL * abs(float(duration)))
+    coded = np.array([bool(_text(code)) for code in retcode], dtype=bool)
+    return bad_state | short | coded
+
+
+def errored_pct(states, t_final, retcode, duration):
+    """Percent of trajectories errored_mask marks."""
+    mask = errored_mask(states, t_final, retcode, duration)
+    return 100.0 * float(mask.sum()) / mask.shape[0] if mask.shape[0] else NAN
+
+
 class Store:
     """The parquet tree under root; `data` by default."""
 
@@ -370,8 +388,8 @@ class Store:
                 self._write_leg(path, existing)
         return standing
 
-    def record_finals(self, spec, finals, converged):
-        """Write finals/<trial_id>.parquet of a trial (all n rows, the run precision); returns the path relative to the package dir."""
+    def record_finals(self, spec, finals, t_final, retcode=None):
+        """Write finals/<trial_id>.parquet of a trial: all n rows in the run precision, each trajectory's final time and the package's failure code text (empty on success or when it reports none); returns the path relative to the package dir."""
         ident = spec_of(spec, FINALS_FIELDS)
         dtype = np.float64 if ident["precision"] == "float64" else np.float32
         states = np.asarray(finals, dtype=dtype)
@@ -380,15 +398,21 @@ class Store:
         if states.shape[0] != ident["n"]:
             raise ValueError("finals has {0} rows for n = {1}".format(
                 states.shape[0], ident["n"]))
-        converged = np.asarray(converged, dtype=bool).reshape(-1)
-        if converged.shape[0] != states.shape[0]:
-            raise ValueError("converged has one flag per finals row")
+        t_final = np.asarray(t_final, dtype=np.float64).reshape(-1)
+        if t_final.shape[0] != states.shape[0]:
+            raise ValueError("t_final has one time per finals row")
+        if retcode is None:
+            retcode = [""] * states.shape[0]
+        retcode = [_text(code) for code in retcode]
+        if len(retcode) != states.shape[0]:
+            raise ValueError("retcode has one code per finals row")
         columns = {"traj": pa.array(np.arange(states.shape[0], dtype=np.int32),
                                     pa.int32())}
         arrow_type = pa.float64() if dtype is np.float64 else pa.float32()
         for k in range(states.shape[1]):
             columns["s{0}".format(k + 1)] = pa.array(states[:, k], arrow_type)
-        columns["converged"] = pa.array(converged, pa.bool_())
+        columns["t_final"] = pa.array(t_final, pa.float64())
+        columns["retcode"] = pa.array(retcode, pa.string())
         relative = finals_name(ident)
         _write_parquet(os.path.join(self.package_dir(ident["package"], ident["key"]),
                                     *relative.split("/")),
@@ -396,17 +420,18 @@ class Store:
         return relative
 
     def load_finals(self, package, key, relative):
-        """(traj int32[m], states [m, k] in the stored precision, converged bool[m]) of a finals file by its package-relative path."""
+        """(traj int32[m], states [m, k] in the stored precision, t_final float64[m], retcode str[m]) of a finals file by its package-relative path."""
         table = pq.read_table(os.path.join(self.package_dir(package, key),
                                            *relative.split("/")))
-        names = [c for c in table.column_names if c.startswith("s")]
+        names = [c for c in table.column_names if c[0] == "s" and c[1:].isdigit()]
         names.sort(key=lambda c: int(c[1:]))
         dtype = np.float64 if names and str(table.schema.field(names[0]).type) == "double" \
             else np.float32
         states = np.column_stack([table.column(c).to_numpy() for c in names]) \
             if names else np.zeros((table.num_rows, 0), dtype)
         return (table.column("traj").to_numpy(), states.astype(dtype),
-                table.column("converged").to_numpy())
+                table.column("t_final").to_numpy(),
+                np.asarray(table.column("retcode").to_pylist(), dtype=object))
 
     def status(self, run):
         """'absent', 'nan' or 'finite' for the row of a run_id (or of a spec's run_id)."""
@@ -516,17 +541,17 @@ def _read_json(path):
 
 
 def _read_finals_csv(path):
-    """(finals, converged) from a CSV with header s1..sk,converged and an optional traj column."""
+    """(finals, t_final, retcode) from a CSV with header s1..sk,t_final and optional traj and retcode columns."""
     with open(path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        names = [c for c in reader.fieldnames if c.startswith("s")]
+        names = [c for c in reader.fieldnames if c[0] == "s" and c[1:].isdigit()]
         names.sort(key=lambda c: int(c[1:]))
-        finals, converged = [], []
+        finals, t_final, retcode = [], [], []
         for record in reader:
             finals.append([float(record[c]) for c in names])
-            converged.append(record["converged"].strip().lower()
-                             in ("1", "true", "t", "yes"))
-    return finals, converged
+            t_final.append(_float(record["t_final"]))
+            retcode.append(record.get("retcode") or "")
+    return finals, t_final, retcode
 
 
 def _cli(argv):
@@ -558,8 +583,8 @@ def _cli(argv):
         store.record_batch(rows, floor=args.floor)
         return 0
     if args.command == "finals":
-        finals, converged = _read_finals_csv(args.finals)
-        print(store.record_finals(_read_json(args.spec), finals, converged))
+        finals, t_final, retcode = _read_finals_csv(args.finals)
+        print(store.record_finals(_read_json(args.spec), finals, t_final, retcode))
         return 0
     if args.command == "status":
         print(store.status(args.run_id))

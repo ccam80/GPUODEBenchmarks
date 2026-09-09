@@ -378,21 +378,24 @@ class FinalsTests(StoreCase):
     def test_finals_round_trip_named_by_trial_id_in_float32(self):
         trial = spec(**adaptive(), n=4)
         finals = np.arange(12, dtype=np.float64).reshape(4, 3) / 7
-        converged = [True, True, False, True]
-        relative = self.store.record_finals(trial, finals, converged)
+        t_final = [1.0, 1.0, 0.25, 1.0]
+        retcode = ["", "", "MaxIters", ""]
+        relative = self.store.record_finals(trial, finals, t_final, retcode)
         self.assertEqual(relative, "finals/" + store.trial_id(trial) + ".parquet")
         path = os.path.join(self.tmp, "key=" + KEY, "package=cubie", "finals",
                             relative.split("/")[1])
         table = pq.read_table(path)
-        self.assertEqual(table.column_names, ["traj", "s1", "s2", "s3", "converged"])
+        self.assertEqual(table.column_names, ["traj", "s1", "s2", "s3", "t_final", "retcode"])
         self.assertEqual(str(table.schema.field("traj").type), "int32")
         self.assertEqual(str(table.schema.field("s1").type), "float")
-        self.assertEqual(str(table.schema.field("converged").type), "bool")
-        traj, states, ok = self.store.load_finals("cubie", KEY, relative)
+        self.assertEqual(str(table.schema.field("t_final").type), "double")
+        self.assertEqual(str(table.schema.field("retcode").type), "string")
+        traj, states, times, codes = self.store.load_finals("cubie", KEY, relative)
         self.assertEqual(list(traj), [0, 1, 2, 3])
         self.assertEqual(states.dtype, np.float32)
         np.testing.assert_array_equal(states, finals.astype(np.float32))
-        self.assertEqual(list(ok), converged)
+        self.assertEqual(list(times), t_final)
+        self.assertEqual(list(codes), retcode)
         # The row points at the file by that relative path; both transfer legs share it.
         for transfers in ("both", "none"):
             standing = self.store.record(dict(trial, transfers=transfers, states=3,
@@ -404,26 +407,41 @@ class FinalsTests(StoreCase):
     def test_float64_runs_keep_float64_finals(self):
         trial = spec(precision="float64", n=2, package="julia_cpu")
         finals = [[1.0 + 1e-12, 2.0, 3.0], [0.1, 0.2, 0.3]]
-        relative = self.store.record_finals(trial, finals, [True, False])
+        relative = self.store.record_finals(trial, finals, [1.0, NAN])
         table = pq.read_table(os.path.join(self.tmp, "key=" + KEY, "package=julia_cpu",
                                            *relative.split("/")))
         self.assertEqual(str(table.schema.field("s1").type), "double")
-        traj, states, ok = self.store.load_finals("julia_cpu", KEY, relative)
+        traj, states, times, codes = self.store.load_finals("julia_cpu", KEY, relative)
         self.assertEqual(states.dtype, np.float64)
         self.assertEqual(states[0, 0], 1.0 + 1e-12)
+        self.assertEqual(times[0], 1.0)
+        self.assertTrue(math.isnan(times[1]))
+        self.assertEqual(list(codes), ["", ""])
         self.assertNotEqual(store.trial_id(trial), store.trial_id(spec(n=2, package="julia_cpu")))
+
+    def test_errored_pct_counts_non_finite_short_and_coded_rows(self):
+        states = np.array([[1.0, 2.0], [NAN, 2.0], [1.0, 2.0], [1.0, 2.0], [1.0, 2.0]])
+        t_final = [1.0, 1.0, 0.5, NAN, 1.0 - 5e-5]
+        retcode = ["", "", "", "", ""]
+        self.assertEqual(list(store.errored_mask(states, t_final, retcode, 1.0)),
+                         [False, True, True, True, False])
+        self.assertEqual(store.errored_pct(states, t_final, retcode, 1.0), 60.0)
+        self.assertEqual(store.errored_pct(states, [1.0] * 5, ["", "", "MaxIters", "", ""], 1.0),
+                         40.0)
 
     def test_finals_carry_all_n_rows_and_one_flag_each(self):
         trial = spec(n=2)
         with self.assertRaises(ValueError):
-            self.store.record_finals(trial, [[1.0, 2.0, 3.0]], [True])
+            self.store.record_finals(trial, [[1.0, 2.0, 3.0]], [1.0])
         with self.assertRaises(ValueError):
-            self.store.record_finals(trial, [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]], [True])
+            self.store.record_finals(trial, [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]], [1.0])
+        with self.assertRaises(ValueError):
+            self.store.record_finals(trial, [[1.0, 2.0, 3.0]] * 2, [1.0, 1.0], [""])
         with self.assertRaises(ValueError):
             self.store.record_finals({k: v for k, v in trial.items() if k != "key"},
-                                     [[1.0, 2.0, 3.0]] * 2, [True, False])
+                                     [[1.0, 2.0, 3.0]] * 2, [1.0, 1.0])
         loose = {k: v for k, v in trial.items() if k != "transfers"}
-        self.assertEqual(self.store.record_finals(loose, [[1.0, 2.0, 3.0]] * 2, [True, False]),
+        self.assertEqual(self.store.record_finals(loose, [[1.0, 2.0, 3.0]] * 2, [1.0, 1.0]),
                          "finals/" + store.trial_id(trial) + ".parquet")
 
 
@@ -434,9 +452,9 @@ class FinalsTests(StoreCase):
         point = grid.grid_point("linear", 0.0, 21.0, 131072, 1023)
         prefix = spec(**adaptive(), n=1024, grid_max=float(format(point, ".17g")),
                       package="cubie", precision="float64", transfers="both")
-        relative = self.store.record_finals(golden, np.zeros((131072, 3)), np.ones(131072, bool))
+        relative = self.store.record_finals(golden, np.zeros((131072, 3)), np.ones(131072))
         self.store.record(dict(golden, states=3, finals=relative, reason="untimed"))
-        short = self.store.record_finals(prefix, np.zeros((1024, 3)), np.ones(1024, bool))
+        short = self.store.record_finals(prefix, np.zeros((1024, 3)), np.ones(1024))
         self.store.record(dict(prefix, states=3, min_ms=1.0, finals=short))
         rows = sorted(self.store.rows(group_id=store.group_id(golden)), key=lambda r: r["n"])
         self.assertEqual([(r["package"], r["n"]) for r in rows],
@@ -542,12 +560,15 @@ class CliTests(StoreCase):
                                "group_id": store.group_id(trial)})
         csv_path = os.path.join(self.tmp, "finals.csv")
         with open(csv_path, "w") as handle:
-            handle.write("traj,s1,s2,s3,converged\n0,1.5,2.5,3.5,1\n1,0.1,0.2,0.3,0\n")
+            handle.write("traj,s1,s2,s3,t_final,retcode\n0,1.5,2.5,3.5,1.0,\n"
+                         "1,0.1,0.2,0.3,nan,Unstable\n")
         relative = self.run_cli("finals", spec_path, csv_path).strip()
         self.assertEqual(relative, "finals/" + ids["trial_id"] + ".parquet")
-        traj, states, ok = self.store.load_finals("cubie", KEY, relative)
+        traj, states, times, codes = self.store.load_finals("cubie", KEY, relative)
         np.testing.assert_allclose(states, [[1.5, 2.5, 3.5], [0.1, 0.2, 0.3]], rtol=1e-6)
-        self.assertEqual(list(ok), [True, False])
+        self.assertEqual(times[0], 1.0)
+        self.assertTrue(math.isnan(times[1]))
+        self.assertEqual(list(codes), ["", "Unstable"])
         self.assertEqual(self.run_cli("status", ids["run_id"]).strip(), "absent")
         self.run_cli("record", "-", stdin=json.dumps(
             [dict(trial, states=3, min_ms=2.0, finals=relative)]))

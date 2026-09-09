@@ -101,16 +101,20 @@ end
 
     @testset "finals land as finals/<trial_id>.parquet and the row points at them" begin
         finals = Float32[1.5 2.5 3.5; 0.1 0.2 0.3; 1.0 2.0 3.0; 4.0 5.0 6.0]
-        relative = store_finals(none, finals, [true, false, true, true]; root = root)
+        t_final = [1.0, 0.5, 1.0, NaN]
+        relative = store_finals(none, finals, t_final; root = root)
         trial_id = store_hash(none; root = root)[1]
         @test relative == "finals/" * trial_id * ".parquet"
         @test isfile(joinpath(root, "key=" * KEY, "package=julia_gpu", "finals", trial_id * ".parquet"))
         store_record(store_row(none; states = 3, min_ms = 8.0, finals = relative); root = root)
         back = query_rows("SELECT finals FROM results WHERE transfers = 'none'", root)
         @test back[1]["finals"] == relative
-        @test_throws ArgumentError store_finals(none, finals, [true]; root = root)
+        @test_throws ArgumentError store_finals(none, finals, [1.0]; root = root)
+        @test store_finals(none, finals, t_final;
+            retcode = ["", "MaxIters", "", ""], root = root) == relative
+        @test_throws ArgumentError store_finals(none, finals, t_final; retcode = [""], root = root)
         # All n rows are required.
-        @test_throws ProcessFailedException store_finals(none, finals[1:2, :], [true, false]; root = root)
+        @test_throws ProcessFailedException store_finals(none, finals[1:2, :], [1.0, 1.0]; root = root)
     end
 
     @testset "specs outside the store vocabulary are refused" begin
