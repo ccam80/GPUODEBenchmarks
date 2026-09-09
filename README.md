@@ -392,7 +392,7 @@ natural form and ModelingToolkit compiles it to fourteen node potentials
 plus eight derivative states behind a constant singular mass matrix, so its
 `frameworks` column is `cubie|cubie_mlir|julia`; the remaining frameworks
 have no formulation for that left-hand side. The Float64 golden integrates
-it as a fully implicit DFBDF `DAEProblem` with tstops on the pulse corners.
+that mass-matrix form with RadauIIA5.
 Golden references are Float64 solves under each problem's
 `golden_algorithm` at its `golden_tol`, checked against the published
 test-set values by `runner_scripts/golden/verify_references.jl`.

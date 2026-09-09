@@ -52,3 +52,9 @@ function julia_constructor(name, package)
     isempty(expr) && error("no $(package) constructor for '$(name)'")
     return expr
 end
+
+"The solver instance of an algorithm for a package, its constructor evaluated in the including module with `T` bound to the element type for the tableau builders."
+function julia_solver(name, package, ::Type{T} = Float32) where {T}
+    expr = Meta.parse(julia_constructor(name, package))
+    return Base.eval(@__MODULE__, :(let T = $T; $expr end))
+end

@@ -22,10 +22,10 @@ Base.include_dependency(ALGORITHMS_CSV)
 SYSTEMS_CODEGEN = (expression = Val(false), eval_expression = true,
     eval_module = @__MODULE__)
 
-# Entries built at precompile time; `sys` is unused and stays out of the image.
+# Float32 entries built at precompile time; `sys` is unused and stays out of the image.
 for row in resolve_problems("all", "julia")
-    entry = _ENTRY_BUILDERS[row["problem"]]()
-    _ENTRIES[row["problem"]] = Base.structdiff(entry, NamedTuple{(:sys,)})
+    entry = _ENTRY_BUILDERS[row["problem"]](Float32)
+    _ENTRIES[(row["problem"], Float32)] = Base.structdiff(entry, NamedTuple{(:sys,)})
 end
 const ENTRIES = _ENTRIES
 
