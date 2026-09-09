@@ -1,9 +1,5 @@
-# The golden configurations against the published Test Set values and against
-# each other, every Float32 system against its Float64 twin, and the
-# allocation-free right-hand sides.
-#
+# Golden configurations against the published Test Set values and each other, Float32 systems against their Float64 twins, and rhs! allocations; tests/test_julia_systems.jl includes it and asserts verify_references().
 # Usage: julia --project=. runner_scripts/golden/verify_references.jl   (exit 1 when a check fails)
-# tests/test_julia_systems.jl includes this file and asserts every check of verify_references().
 
 using LinearAlgebra
 using Printf
@@ -76,7 +72,7 @@ function _unknown_permutation(system64, system32)
     return [findfirst(==(name), names32) for name in string.(unknowns(system64.sys))]
 end
 
-"Worst relative deviation of the Float32 right-hand side from the Float64 one at RHS_TRIALS Float32-representable states around the consistent u0, 30% into the integration window, scaled by max(|du|, 1). Both sides see the same numbers, so the figure is the arithmetic and literal rounding alone."
+"Worst relative deviation of the Float32 right-hand side from the Float64 one at RHS_TRIALS Float32-representable states around the consistent u0, 30% into the window, scaled by max(|du|, 1)."
 function rhs_twin_deviation(name)
     row = get_problem(name)
     system64 = julia_system(name, Float64)

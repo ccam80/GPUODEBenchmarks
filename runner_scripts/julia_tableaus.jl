@@ -1,8 +1,4 @@
-# Cash-Karp 5(4) and Fehlberg 4(5) tableaus for OrdinaryDiffEq's generic
-# ExplicitRK stepper, entered as rationals (Cash & Karp 1990; Fehlberg, NASA TR
-# R-315 1969) and built in the run's element type. Both propagate the 5th-order
-# weights, matching cubie's cash-karp-54 / fehlberg-45 tableaus coefficient for
-# coefficient. julia_algorithms.csv names them with `T` bound by julia_solver.
+# Cash-Karp 5(4) and Fehlberg 4(5) tableaus (Cash & Karp 1990; Fehlberg, NASA TR R-315) for OrdinaryDiffEq's ExplicitRK, built in the run's element type; both propagate the 5th-order weights like cubie's tableaus.
 
 import DiffEqBase
 

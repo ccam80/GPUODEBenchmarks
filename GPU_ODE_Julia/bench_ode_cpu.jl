@@ -1,14 +1,5 @@
-# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a
-# trial file. Each leg builds its system and solver once, in the trial's
-# element type; each solve line is timed per requested transfers (a CPU solve
-# moves nothing, so every transfers entry times the same call), its finals are
-# kept when the line asks, and every adaptive leg's resolved step controller is
-# merged into controllers/<problem>.csv under the run key.
-#
+# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a trial file, one system and solver per leg in the trial's element type; every transfers entry times the same call, finals land when asked, and each adaptive leg's resolved controller goes to controllers/<problem>.csv under the run key.
 #   julia -t auto --project=. GPU_ODE_Julia/bench_ode_cpu.jl --trials <path> [--floor]
-#
-# Exit 0 once every trial was walked; the watchdog hard-exits with
-# protocol.toml's exit code when a solve never returns.
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK, OrdinaryDiffEqExplicitRK
@@ -252,7 +243,7 @@ function export_controller(ctx, trial, prob, alg, ::Type{T}) where {T}
         "qmin" => field(basic, :qmin), "qmax" => field(basic, :qmax),
         "gamma" => field(basic, :gamma), "order" => string(OrdinaryDiffEqCore.alg_order(alg)))
     path = controllers_path(ctx, trial["problem"])
-    # The other algorithms' rows stay; a table written under the older cubie_alias header is carried over.
+    # Other algorithms' rows stay; an algorithm or cubie_alias column names them.
     kept = Dict{String, String}[]
     if isfile(path)
         lines = filter(!isempty, strip.(readlines(path)))

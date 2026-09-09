@@ -1,8 +1,4 @@
-# ModelingToolkit system definitions, one per problem, built in a chosen
-# element type: the raw equations compile through mtkcompile and every numeric
-# artifact (rhs, jacobian, tgrad, mass matrix, orderings) is generated from the
-# compiled system. Include problems.jl first; the lorenz96 builders take their
-# default size from the catalogue.
+# ModelingToolkit system definitions, one per problem, compiled and code-generated in a chosen element type; include problems.jl first (the lorenz96 builders read their default size from it).
 
 using LinearAlgebra
 using StaticArrays
@@ -34,8 +30,7 @@ function _build_entry(raw, ::Type{T}; u0map, golden_vars, consistent_u0 = false)
     n = length(unknowns(sys))
     rhs, rhs! = ModelingToolkit.generate_rhs(sys; SYSTEMS_CODEGEN...)
     jac, jac! = ModelingToolkit.generate_jacobian(sys; SYSTEMS_CODEGEN...)
-    # A piecewise input pulse can defeat the symbolic time derivative; the
-    # Rosenbrock kernels fall back to finite differences when it is nothing.
+    # A piecewise input pulse can defeat the symbolic time derivative; nothing means finite differences.
     tgrad = try
         ModelingToolkit.generate_tgrad(sys; SYSTEMS_CODEGEN...)[1]
     catch
