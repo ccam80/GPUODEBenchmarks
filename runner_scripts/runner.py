@@ -12,8 +12,8 @@ import grid as grid_mod
 import store as store_mod
 import trials as trials_mod
 from bench_key import dataset_key
-from protocol import REPEAT_CAP, WATCHDOG_SECONDS
-from wp_common import timed_min_ms
+from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, WATCHDOG_SECONDS
+from wp_common import run_watchdogged, timed_min_ms
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_ROOT = os.path.join(REPO_ROOT, "data")
@@ -58,10 +58,19 @@ def legs_of(trial_list):
 
 
 def write_progress(path, trial):
+    """<trials>.progress: the trial under way, its kind and the start time."""
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"trial_id": trial["trial_id"],
+        json.dump({"trial_id": trial["trial_id"], "kind": trial["kind"],
                    "started_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
                   handle)
+
+
+def watchdogged(run, what, budget_s=None):
+    """run() under the watchdog's hard exit: the default budget, or budget_s seconds."""
+    def breach():
+        print("WATCHDOG hard exit: {0} never returned".format(what), flush=True)
+
+    return run_watchdogged(run, breach, budget_s)
 
 
 def label(trial, transfers=None):
@@ -184,9 +193,11 @@ class Runner:
                     cold = trial["kind"] == "warm" and bool(trial["cold"])
                     started = timeit.default_timer()
                     try:
-                        leg = self.adapter.build_leg(trial, cold)
+                        leg = watchdogged(lambda: self.adapter.build_leg(trial, cold),
+                                          "build " + name)
                         if trial["kind"] == "warm":
-                            self.adapter.compile(leg, trial, grid_mod.grid(trial))
+                            watchdogged(lambda: self.adapter.compile(leg, trial, grid_mod.grid(trial)),
+                                        "compile " + name)
                     except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
                         reason = failure_reason(classify(exc), exc)
                         self.record_failed_leg(solves, reason, leg.states if leg else None)
@@ -197,8 +208,13 @@ class Runner:
                 if trial["kind"] == "warm":
                     continue
                 if trial["kind"] == "optimize":
+                    # Past OPTIMIZE_SECONDS the watchdog hard-exits; the driver drops this line and re-runs the leg's solves.
+                    started = timeit.default_timer()
                     try:
-                        self.adapter.optimize(leg, trial, grid_mod.grid(trial))
+                        watchdogged(lambda: self.adapter.optimize(leg, trial, grid_mod.grid(trial)),
+                                    "optimize " + label(trial), OPTIMIZE_SECONDS)
+                        print("optimized {0} in {1:.1f}s".format(
+                            label(trial), timeit.default_timer() - started), flush=True)
                     except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
                         print("OPTIMIZE {0} failed: {1}".format(
                             label(trial), failure_reason(classify(exc), exc)), flush=True)

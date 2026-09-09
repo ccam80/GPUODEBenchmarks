@@ -10,8 +10,8 @@ from protocol import (REPEAT_CAP, REPEAT_SCHEDULE, REPEAT_SPREAD,  # noqa: F401
                       WATCHDOG_EXIT_CODE, WATCHDOG_SECONDS)
 
 
-def run_watchdogged(run, on_breach):
-    """Run run(); when it never returns, run on_breach() and hard-exit with WATCHDOG_EXIT_CODE, as watchdog.jl does."""
+def run_watchdogged(run, on_breach, budget_s=None):
+    """Run run(); when it has not returned after budget_s (default: twice the soft cap plus 30 s), run on_breach() and hard-exit with WATCHDOG_EXIT_CODE, as watchdog.jl does."""
     finished = threading.Event()
 
     def fire():
@@ -26,7 +26,7 @@ def run_watchdogged(run, on_breach):
             os._exit(WATCHDOG_EXIT_CODE)
 
     # Margin over the soft cap: only never-returning runs reach the hard exit.
-    timer = threading.Timer(WATCHDOG_SECONDS * 2.0 + 30.0, fire)
+    timer = threading.Timer(WATCHDOG_SECONDS * 2.0 + 30.0 if budget_s is None else budget_s, fire)
     timer.daemon = True
     timer.start()
     try:

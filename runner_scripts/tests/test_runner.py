@@ -263,6 +263,25 @@ class LegTests(RunnerCase):
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
 
+    def test_build_compile_and_optimize_run_under_the_watchdog(self):
+        table = {"n": 64, "per": "leg"}
+        budgets = []
+
+        def recording(run, on_breach, budget_s=None):
+            budgets.append(budget_s)
+            return run()
+
+        saved = runner.run_watchdogged
+        runner.run_watchdogged = recording
+        self.addCleanup(setattr, runner, "run_watchdogged", saved)
+        adapter = FakeAdapter()
+        status, rows, path = self.run_specs([spec(8, optimize=table)], adapter)
+        self.assertEqual(adapter.calls[:3], [("build", 8, False), ("compile", 8, None), ("optimize", 64, None)])
+        self.assertEqual(budgets[:3], [None, None, runner.OPTIMIZE_SECONDS])
+        self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
+        with open(path + ".progress") as handle:
+            self.assertEqual(json.load(handle)["kind"], "solve")
+
     def test_legs_are_built_once_each_in_file_order(self):
         adapter = FakeAdapter()
         specs = [spec(8), spec(32), spec(8, algorithm="euler"), spec(32, algorithm="euler")]
