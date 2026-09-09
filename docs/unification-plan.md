@@ -199,7 +199,8 @@ build      = "warm"                # or "cold": no warm trials, build_s recorded
 parameter = "default"              # problems.csv sweep_parameter, or a name
 scale = "default"                  # problems.csv sweep_scale, linear, log
 min = "default"                    # problems.csv sweep_min, or a float
-max = "default"                    # problems.csv sweep_max, a float, or {grid_n = 131072, index = 1023}
+max = "default"                    # problems.csv sweep_max, or a float
+problems = {lorenz = {max = 0.16389...}}   # per-problem overrides of any grid field
 n = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 system_params = {}                 # or {states = [4, 8, 16, 32, 64, 128]}: one grid per value
 
@@ -225,8 +226,8 @@ Expansion, in `runner_scripts/sets.py`:
    (`problems.csv frameworks`) × algorithms the package can run with the
    stepping's controller kind (`algorithms.csv fixed` / `adaptive`) × grids
    × steppings.
-2. `default` grid fields resolve from `problems.csv`; `{grid_n, index}` resolves
-   `max` to `v[index]` of the `grid_n`-point default grid by the 1.2 formula.
+2. `default` grid fields resolve from `problems.csv`; a `problems` table
+   overrides fields per problem with literal floats.
 3. `duration_times_2_pow = k` resolves to `duration * 2**k`;
    `duration_times = f` to `duration * f`.
 4. `controller = "matched"` (cubie packages only) reads
@@ -270,7 +271,7 @@ Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and
 | perf | all | all | all | default range; n = perf list | fixed dt 2^-10; default controller tol 1e-5 | timed; both, none |
 | pairwise | all | all | all | default range; n = 32768 | as perf | numerical; both, none |
 | wp | all | all | all | default range; n = 131072 | fixed dt 2^-k, k 4..13 (euler 8..17); default controller tol 1e-2..1e-8 | timed; none |
-| ne | cubie, cubie_mlir, julia_cpu | all | `backwards_euler, crank_nicolson, trapezoidal_dirk, implicit_midpoint, sdirk_2_2, l_stable_sdirk_4, kvaerno3, kvaerno5, radau_iia_3, radau_iia_5, radau_iia_9, ros3p, rodas3p, rosenbrock23_sciml` fixed; those plus `tsit5, cash-karp-54, bogacki-shampine-32, dormand-prince-54, fehlberg-45, dormand-prince-853, vern7` adaptive | n = 1024, max = {grid_n = 131072, index = 1023} | fixed dt 2^-k, k 1..13; default controller and matched, tol 1e-2..1e-8 | numerical; none |
+| ne | cubie, cubie_mlir, julia_cpu | all | `backwards_euler, crank_nicolson, trapezoidal_dirk, implicit_midpoint, sdirk_2_2, l_stable_sdirk_4, kvaerno3, kvaerno5, radau_iia_3, radau_iia_5, radau_iia_9, ros3p, rodas3p, rosenbrock23_sciml` fixed; those plus `tsit5, cash-karp-54, bogacki-shampine-32, dormand-prince-54, fehlberg-45, dormand-prince-853, vern7` adaptive | n = 1024; per-problem `max` = the float64 `v[1023]` of the 131072-point default grid, written out with 17 digits | fixed dt 2^-k, k 1..13; default controller and matched, tol 1e-2..1e-8 | numerical; none |
 | states | packages implementing lorenz96 | lorenz96 | all | default range; n = 131072; states 4, 8, 16, 32, 64, 128 | as perf | timed; both, none; build cold |
 | overlap | cubie, cubie_mlir, julia_gpu | all | `tsit5, rosenbrock23_sciml, kvaerno3, kvaerno5, vern7` | perf grid; wp grid; ne grid | fixed dt 2^-10 and default controller tol 1e-8 on the perf grid; wp steppings on the wp grid; ne steppings on the ne grid; cubie adds `pi` with `dirk_defaults` | perf and wp timed, ne numerical; both, none |
 | golden | julia_cpu | all | `problems.csv golden_algorithm` per problem | default range; n = 131072 | default controller, tol = `golden_tol`, dt0, dt_min, dt_max package default | numerical; none; precision float64 |
@@ -305,8 +306,8 @@ Each script under `analyses/` takes `--set <name>` (repeatable), expands it with
 
 - One worktree, one branch off `main`, one PR per packet.
 - "Done" is the acceptance line; "Review" is what the PR is read against.
-- A packet replaces what it touches: no compatibility shim, no dual path.
-- `main` may not run between packets.
+- A packet replaces what it touches: no shim, no dual path; `main` may not run between packets.
+- Code documentation describes the code and never names this document, a packet, a section or a phase.
 
 ### P1 store and grid
 Depends on: nothing.
@@ -329,13 +330,13 @@ Depends on: P1.
 | explicit rows | newton NaN |
 | `problem`, `states` | `system_params = {"states": states}` for lorenz96, `{}` otherwise; `duration`, `parameter`, `grid_scale`, `grid_min`, `grid_max` from `problems.csv`; `grid_dtype = float32` |
 | `data/numerical_equivalence/julia` | julia_cpu rows, `n = 1024`, `grid_max = v[1023]` of the 131072 grid, finals kept, `reason = untimed`; `controller_constants.csv` to `controllers/<problem>.csv` |
-| `data/numerical/golden_*` | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol`, dt fields NaN, `n = 131072`, finals kept, `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
+| `data/numerical/golden_*` | julia_cpu rows, `precision = float64`, `algorithm = golden_algorithm`, `atol = rtol = golden_tol` (ring_modulator: `RadauIIA9`, `1e-13`), dt fields NaN, `n = 131072`, finals kept, `converged` false on the retcode sidecar rows, key `windows_RTX-4070-SUPER`, `reason = untimed` |
 | overlap `julia_timings.csv` tiers `fixed`, `julia` | `controller = fixed` / `default`; `golden_rmse` to `error`; `errored_pct` from the metrics counts |
 | `data/numerical/<key>/<problem>/{jax,pytorch,myokit_cuda}.csv` | finals on the n = 32768 rows: jax tsit5 fixed, pytorch classical-rk4 fixed, myokit_cuda euler fixed |
 | `julia` | `julia_gpu` |
 | rows meeting by `run_id` | the row with samples wins, then the later `recorded_utc`; NaN and empty values fill from the loser |
 
-Dropped: every `cpp` row and `mpgos*.csv`; wp rows with `transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap `numerical` phase, failures and derived tables.
+Dropped: every `cpp` row and `mpgos*.csv`; every `nand_gate` row outside the golden; wp rows with `transfers != none`; jax `kvaerno3` rows; `julia_*.csv` finals; the overlap `numerical` phase, failures and derived tables.
 Done: DuckDB counts per (key, package) equal the script's counts; every converted perf, wp, ne and golden row hashes to the `run_id` `sets.py` produces for it.
 Review: no row invented; the mapping and drop counts reproduced in the PR body.
 
@@ -346,7 +347,7 @@ Depends on: P1.
 - `bench.py`: the 1.6 CLI, run loop, exit-3 handling; `launch.py` runner registry.
 - `algorithms.csv` and `problems.csv` per 1.7; `julia_algorithms.csv`.
 - Delete `resume.py`, `resume.jl`, `wp_common.parse_bench_args`, the `BENCH_*` environment contract, and every `protocol.toml` table but `[repeats]`, `[watchdog]`, `[optimize]`.
-Done: `test_sets.py` covers every shipped set's expansion counts, the grid_n max, matched and pi resolution, merge, reference assignment, reuse against a scratch store, the narrowing flags; `bench.py plan --set perf` prints counts.
+Done: `test_sets.py` covers every shipped set's expansion counts, the ne grid's containment in the 131072 grid, matched and pi resolution, merge, reference assignment, reuse against a scratch store, the narrowing flags; `bench.py plan --set perf` prints counts.
 Review: no trial field outside 1.4; no runner reads a catalogue.
 
 ### P4 runner core and cubie
@@ -390,7 +391,7 @@ README to about 100 wrapped lines; `SETUP.md`; this document reduced to section 
 
 ### P11 smoke and reruns
 Depends on: P10.
-`bench.py run --set perf,wp,ne,states,overlap -n 128` on the 4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; `ne` for julia_cpu on nand_gate and ring_modulator_index2; `golden` where a problem's converted golden is absent; cubie and cubie_mlir in full.
+`bench.py run --set perf,wp,ne,states,overlap -n 128` on the 4070 for every package; then per key: `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` (WSL); `pairwise` for julia_gpu; every set on `nand_gate`; `ne` for julia_cpu on ring_modulator_index2; cubie and cubie_mlir in full.
 
 ## 3. Schedule
 
