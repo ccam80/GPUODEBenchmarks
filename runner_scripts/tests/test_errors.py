@@ -100,8 +100,7 @@ class CompareTests(ErrorsCase):
         np.testing.assert_array_equal(values, grid.grid(golden_spec())[:N_SWEEP])
         self.assertEqual(states.dtype, np.float64)
         self.assertEqual(int(errored.sum()), 12)
-        # 1024 pairs less the 12 the sweep flags and the golden's trajectory 12: 1011 rows, 3 states,
-        # of which 512 - 13 carry the D offset in state 1.
+        # 1011 unflagged pairs of 3 states; 512 - 13 of them carry the D offset in state 1.
         expected = math.sqrt((512 - 13) * D * D / (1011 * 3))
         self.assertAlmostEqual(errs.compare(sweep, golden), expected, places=15)
         self.assertAlmostEqual(errs.compare(golden, sweep), expected, places=15)

@@ -732,30 +732,24 @@ prefix.
 
 ## Analyses
 
-Every error is computed offline from the finals the runners keep; no runner
-sees a golden. The golden of a problem is the julia_cpu float64 row with
-finals of the same problem, construction parameters and duration, under any
-key (the `golden` set). Two scripts read the store, both under the suite
-interpreter (`GPU_ODE_CUBIE/venv`), each selecting rows by set or by a SQL
-predicate over the spec columns; a selection names steppings and packages,
-and every row of those under every key comes along whatever its grid:
+Errors are computed offline from finals. The golden of a problem is the
+julia_cpu float64 finals row of the same problem, construction parameters and
+duration under any key. Both scripts run under `GPU_ODE_CUBIE/venv` and select
+rows by set or by a SQL predicate over the spec columns; every row of the
+selected steppings and packages under every key comes along, whatever its grid:
 
 ```bash
-python analyses/timing.py --x n      --set perf                  # min_ms against n
-python analyses/timing.py --x states --set states                # min_ms and cold build against states
-python analyses/timing.py --x error  --set golden_grid           # min_ms against error: work-precision
-python analyses/agreement.py --set golden_grid                   # errors and package-pair differences
+python analyses/timing.py --x n      --set perf         # min_ms against n
+python analyses/timing.py --x states --set states       # min_ms and cold build against states
+python analyses/timing.py --x error  --set golden_grid  # min_ms against error
+python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 python analyses/timing.py --x n --where "problem = 'lorenz' AND algorithm = 'tsit5'"
 ```
 
-`timing.py` writes one figure per (key, problem, transfers, stepping) with
-one series per package, and the CSV of its points beside it; `--x error`
-scores each row's finals against the golden, `--x states` adds a panel of
-`build_s`. `agreement.py` writes, per (key, problem), `agreement.csv` (each
-trial's error), `agreement_pairs.csv` (the difference between every pair of
-packages that ran the same stepping) and one figure per leg. A comparison
-rebuilds both grids, pairs trajectories by exact float32 parameter value and
-takes the RMS over every state of the difference over the trajectories
-neither side flags as errored. Rows whose `errored_pct` is above 10 are
-dropped, and rows without a time from the timing axes. Output lands under
-`plots/<key>/<problem>/`.
+`timing.py`: one figure and CSV per (key, problem, transfers, stepping), one
+series per package. `agreement.py`: per (key, problem), `agreement.csv`,
+`agreement_pairs.csv` and one figure per leg. A comparison pairs trajectories
+by exact float32 parameter value and takes the RMS over every state of the
+difference over the trajectories neither side flags as errored. Rows with
+`errored_pct` above 10 are dropped, untimed rows too on the timing axes.
+Output: `plots/<key>/<problem>/`.

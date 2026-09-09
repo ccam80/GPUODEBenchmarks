@@ -1,6 +1,6 @@
 """timing.py --x n|error|states (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-min_ms against the axis, one figure per (key, problem, transfers, stepping) with one series per package, from the rows a set or a SQL predicate selects (the ensemble fields ignored, under every key). The axis column is the one field the figure lets vary: n; the state count of system_params; or, for --x error, the swept dt or tolerance, each row's error computed against the golden from its finals. --x states adds a build_s panel. Rows whose errored_pct is a number above 10 are dropped, and rows without a time; a figure whose rows share one axis value is skipped and counted. Figures and their CSVs land under plots/<key>/<problem>/.
+min_ms against the axis: one figure and CSV per (key, problem, transfers, stepping) under plots/<key>/<problem>/, one series per package. The figure lets one field vary: n, the states of system_params, or the swept dt/tolerance with each row scored against the golden. --x states adds a build_s panel. Dropped: errored_pct above 10, no time, figures with one axis value.
 """
 
 import math

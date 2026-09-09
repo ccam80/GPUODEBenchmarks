@@ -1,6 +1,6 @@
 """agreement.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-Per stepping (group_id), the error of every package that ran it against the golden and the difference between every pair of packages, both computed from finals paired by exact float32 grid value; from the rows a set or a SQL predicate selects (the ensemble fields ignored, under every key). Rows whose errored_pct is a number above 10 are dropped. Per (key, problem): agreement.csv (one row per trial with finals), agreement_pairs.csv (one row per package pair) and one figure per leg, error and pairwise difference against the swept dt or tolerance, under plots/<key>/<problem>/.
+Per stepping, each package's error against the golden and the difference between every package pair, from finals paired by grid value. Per (key, problem) under plots/<key>/<problem>/: agreement.csv (one row per trial), agreement_pairs.csv (one row per pair) and one figure per leg against the swept dt/tolerance. Rows with errored_pct above 10 are dropped.
 """
 
 import math
