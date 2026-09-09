@@ -251,7 +251,9 @@ class ShippedSetTests(unittest.TestCase):
         built = self.trials["golden_grid"]
         cubie = kind_counts(built, "cubie")
         self.assertEqual(cubie["solve"], cubie["optimize"])
-        self.assertEqual(cubie["warm"], 360 + matched // len(TOLS))
+        # One warm line per leg; a matched entry resolving to pi shares the pi stepping's leg.
+        self.assertEqual(cubie["warm"], len({t["leg"] for t in built if t["package"] == "cubie"}))
+        self.assertGreaterEqual(cubie["warm"], 360)
         self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 2464, "warm": 256})
 
     def test_golden_grid_optimizes_before_every_solve(self):
