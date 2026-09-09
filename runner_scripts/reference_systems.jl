@@ -6,7 +6,6 @@ using StaticArrays
 using OrdinaryDiffEqFIRK
 # DFBDF integrates the fully implicit NAND gate.
 using OrdinaryDiffEqBDF
-using LinearSolve: LUFactorization
 using SciMLBase: ODEProblem, ODEFunction, DAEProblem
 
 "Lorenz with the exact Float64 constants; the swept rho is p[1]."
@@ -177,6 +176,9 @@ function ring_modulator_reference(u, p, t)
     return du .* scale
 end
 
+ring_modulator_reference!(du, u, p, t) =
+    (du .= ring_modulator_reference(SVector{15}(u), p, t); nothing)
+
 "Index-2 form: Cs = 0 leaves rows 3 to 6 as residuals; the swept Uin1 amplitude is p[1]."
 function ring_modulator_index2_reference!(du, u, p, t)
     du .= ring_modulator_rhs(u, 0.0, p[1], t)
@@ -340,7 +342,7 @@ const REFERENCE_SYSTEMS = Dict{String, Any}(
     "pleiades" => (rhs = pleiades_reference!, u0 = PLEIADES_U0,
         mass_matrix = nothing),
     "pollu" => (rhs = pollu_reference!, u0 = POLLU_U0, mass_matrix = nothing),
-    "ring_modulator" => (rhs = ring_modulator_reference, u0 = RM_U0,
+    "ring_modulator" => (rhs = ring_modulator_reference!, u0 = zeros(15),
         mass_matrix = nothing),
     # A mass matrix needs the mutating form, so this one keeps a plain vector.
     "ring_modulator_index2" => (rhs = ring_modulator_index2_reference!,
@@ -363,7 +365,7 @@ function reference_solver(name)
     name == "Vern9" && return Vern9()
     name == "Rodas5P" && return Rodas5P()
     name == "RadauIIA5" && return RadauIIA5()
-    name == "RadauIIA9" && return RadauIIA9(linsolve = LUFactorization())
+    name == "RadauIIA9" && return RadauIIA9()
     name == "DFBDF" && return DFBDF()
     error("unknown golden algorithm '$(name)'")
 end
