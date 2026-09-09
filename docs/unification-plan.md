@@ -328,8 +328,27 @@ Done: `test_julia_driver.py` on a fake julia; a tiny-n run on the 4070.
 ### P7 julia_cpu and golden
 Depends on: P3.
 - `GPU_ODE_Julia/bench_ode_cpu.jl` from `ne_diffeq.jl`: trials in, `float32` and `float64` per spec, timings and finals out, `controllers/<problem>.csv` per problem; each finals row carries the final state, `t_final` and the retcode text (empty on `Success`).
+<<<<<<< Updated upstream
 - `julia_systems.jl` is the one system module: every builder takes the element type (`julia_system(problem, T)`), literals and thresholds in `T`, `SMatrix{n,n,T}` mass matrix, `SVector{n,T}` u0; `cpu_problem(system, problem, p)` builds the in-place `ODEProblem` for both precisions; the kernel package registers the Float32 entries. `verify_references.jl` checks the Float64 systems against the published test-set values; `reference_systems.jl`, `generate_golden.jl` and the retcode sidecar are deleted.
 Done: `bench.py run --set golden -s lorenz` reproduces the converted golden finals to float64 roundoff; `golden_grid -p julia_cpu -s lorenz` lands 1024-row finals.
+=======
+- `runner_scripts/julia_systems.jl`, the one system module:
+
+| item | contract |
+|---|---|
+| builders | `_<problem>_entry(::Type{T})` (`_lorenz96_entry(::Type{T}, n)`), `_build_entry(raw, ::Type{T}; u0map, golden_vars, consistent_u0 = false)`; literal helpers take `T` first |
+| element type | literals `T(x)`, `ifelse` thresholds `zero(T)`, `@parameters` defaults `T(x)`; mass matrix `SMatrix{n,n,T}`, u0 `SVector{n,T}`; `_consistent_u0` Newton in Float64; `generate_jacobian` failure is an error; `mtkcompile(raw; split = false)` |
+| registry | `_ENTRIES::Dict{Tuple{String, DataType}, Any}`; `julia_system(problem, ::Type{T} = Float32)` |
+| `cpu_problem(system, problem, p)` | `T = eltype(system.u0)`; `ODEFunction{true}(system.rhs!; jac = system.jac!)` plus `mass_matrix = Matrix{T}(system.mass_matrix)` when present; `ODEProblem{true}(f, Vector{T}(system.u0_for(T(p))), (zero(T), T(duration)), T[p])` |
+| solve kwargs | `abstol`, `reltol`, the trial's `dt`, `dtmin`, `dtmax` when not NaN, `save_everystep = false`, `save_start = false`, `dense = false`, `maxiters = 10^8`, `verbose` off, no tstops |
+| finals row | `sol.u[end][system.golden_index]`, `t_final = sol.t[end]`, `retcode = string(sol.retcode)` unless `Success` |
+| `GPU_ODE_JuliaKernels` | `_ENTRIES[(name, Float32)] = Base.structdiff(_ENTRY_BUILDERS[name](Float32), NamedTuple{(:sys,)})` |
+| `golden/verify_references.jl` | `julia_system(name, Float64)` through `cpu_problem` at the catalogue's golden algorithm and tolerance: pollu k1 = 0.35 vs `POLLU_REF` 1e-13; pleiades m1 = 1.0 vs `PLEI_REF` 1e-10; nand_gate c9 = 5e-5 vs `NAND_REF` 1e-8; ring_modulator Cs = 2e-12 vs Test Set II-3 at t = 1e-3, 1e-8; lorenz96 F = 8 Vern9 vs RadauIIA5 1e-7; Float32 rhs vs Float64 rhs at 20 random states 1e-5 relative; `@allocated rhs!` 0 after one call |
+| `tests/test_julia_systems.jl` | per problem and element type: entry builds, `eltype(u0) == T`, `mass_matrix` `nothing` or `SMatrix{n,n,T}`, `rhs!` 0 B, algebraic rows of `rhs!` at `u0_for(sweep_min)` below 1e-12 Float64 and 1e-6 Float32, `golden_index` is `states` distinct indices in `1:n`; runs `verify_references.jl` |
+| delete | `reference_systems.jl`, `golden/generate_golden.jl`, `golden/retcode_sidecar.jl`, `data/numerical/golden_*_retcodes.csv`, every `include` of `reference_systems.jl` |
+
+Done: `bench.py run --set golden -s lorenz` reproduces the converted golden finals to float64 roundoff; `golden_grid -p julia_cpu -s lorenz` lands 1024-row finals; both test files pass under `julia +1.13`.
+>>>>>>> Stashed changes
 
 ### P8 cpp
 Depends on: P3.
