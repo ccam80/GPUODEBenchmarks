@@ -23,7 +23,7 @@ On the box, once, as root:
 ```
 apt-get install -y openssh-server
 printf 'PubkeyAuthentication yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers cca79@100.64.0.0/10 cca79@127.0.0.1\n' > /etc/ssh/sshd_config.d/10-gpuode.conf
-sshd -t && systemctl enable --now ssh && systemctl restart ssh
+mkdir -p /run/sshd && sshd -t && systemctl enable --now ssh && systemctl restart ssh
 mkdir -p /srv/gpuode/data && chown -R cca79:cca79 /srv/gpuode
 ```
 
