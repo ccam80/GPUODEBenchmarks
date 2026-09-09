@@ -16,7 +16,7 @@ Packages: cubie, cubie_mlir, jax (WSL), pytorch, myokit_cuda, cpp, julia_gpu, ju
 python runner_scripts/store.py query "SELECT package, count(*) AS rows, sum(CASE WHEN isnan(min_ms) THEN 1 ELSE 0 END) AS failed FROM results WHERE n = 128 GROUP BY 1"
 ```
 
-Fix every `reason` and rerun the package with `--no-overwrite` before step 2.
+A `reason` naming a controller, precision or algorithm the package does not run is a correct row; a `reason` carrying an exception from the suite's own code is a defect: fix it and rerun that package with `--no-overwrite` before step 2.
 
 ## 2. Reruns per key
 
