@@ -480,13 +480,16 @@ newton = "tol"
 
 
 class MergeAndNarrowTests(unittest.TestCase):
+    """Merge, ordinals and narrowing against an empty data root, so no controllers table resolves a matched stepping."""
+
     def setUp(self):
         import cubie_adapter
         for name in ("default_controller", "pi_tier_controller"):
             original = getattr(cubie_adapter, name)
             setattr(cubie_adapter, name, getattr(FakeControllers, name))
             self.addCleanup(setattr, cubie_adapter, name, original)
-        self.root = DATA
+        self.root = tempfile.mkdtemp(prefix="sets_narrow_")
+        self.addCleanup(shutil.rmtree, self.root, True)
 
     def test_a_trial_shared_by_two_sets_merges_transfers_and_finals(self):
         specs = sets.expand(["perf", "golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"])
