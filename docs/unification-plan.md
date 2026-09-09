@@ -130,7 +130,7 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
 | cold | `true` on the `warm` line of a `build = "cold"` set: fresh cache directory, `build_s` recorded |
-| watchdog_s | seconds one run may take before it is a `timeout`; the set's `watchdog`, default `[watchdog] seconds` |
+| watchdog_s | the soft cap in seconds: the set's `watchdog`, else `[watchdog] seconds` |
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
 - A leg is one `warm` line (the cheapest spec), the `optimize` lines of `[set.optimize]`, then the `solve` lines.
