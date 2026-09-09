@@ -19,9 +19,7 @@ specs as one JSONL trial file per package and hands each file to that
 package's runner, which builds once per leg, times every trial after one
 untimed warm-up, and records one row per (spec, transfers) in the parquet
 store under `data/`. The analyses compute every error offline from the
-finals files. The spec columns and their hashes, the store schema, the trial
-file, the runner rules and the set schema are in `runner_scripts/store.py`,
-`trials.py`, `runner.py` and `sets.py`.
+finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`.
 
 ## Setup
 
