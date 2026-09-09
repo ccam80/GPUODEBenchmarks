@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ]
+"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
 --resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
-Exit 0 when every runner finished; 1 on a runner failure or clock drift.
+After the runners a run pushes this key to the remote store and pulls the others (runner_scripts/sync.py); --no-sync skips it, and an unconfigured remote is reported, not an error.
+Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed sync.
 """
 
 import argparse
@@ -39,6 +40,7 @@ _under_suite_python()
 
 import sets  # noqa: E402
 import store  # noqa: E402
+import sync  # noqa: E402
 import trials as trials_mod  # noqa: E402
 from abandon import abandon_after_hard_exit, run_ids  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
@@ -83,6 +85,7 @@ def parse_args(argv):
     p.add_argument("--lock-clocks", default="")
     p.add_argument("--no-lock-clocks", action="store_true")
     p.add_argument("--clock-tolerance", type=int, default=None)
+    p.add_argument("--no-sync", action="store_true")
     p.add_argument("-h", "--help", action="store_true")
     args = p.parse_args(argv)
     if args.help:
@@ -386,7 +389,24 @@ def main(argv=None):
         for path in paths.values():
             print(os.path.relpath(path, ROOT))
         return 0
-    return Run(args, plan).execute()
+    run = Run(args, plan)
+    code = run.execute()
+    return max(code, sync_store(run.key, skip=args.no_sync))
+
+
+def sync_store(key, root=DATA_DIR, skip=False):
+    """Push this key and pull the others after a run; 0 when done or skipped, the sync's exit code otherwise."""
+    if skip:
+        print("Store sync : skipped (--no-sync)")
+        return 0
+    reason = sync.unavailable()
+    if reason:
+        print("Store sync : skipped, " + reason)
+        return 0
+    print("Store sync : " + sync.remote_default(), flush=True)
+    code = sync.run("sync", root, key)
+    print("Store sync : " + ("done" if code == 0 else "FAILED (exit {0})".format(code)))
+    return 1 if code else 0
 
 
 if __name__ == "__main__":
