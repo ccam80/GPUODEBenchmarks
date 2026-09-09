@@ -10,4 +10,4 @@ spread = 0.02
 seconds = 120
 exit_code = 3
 # Hard-exit budget of an optimize line; the leg's solves then run at the solver's own geometry.
-optimize_seconds = 1800
+optimize_seconds = 300
