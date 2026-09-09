@@ -1,35 +1,71 @@
-"""Cubie sweep legs: the device leg reuses the host leg's resident inputs, and each leg's failure lands in its own column."""
+"""The cubie adapter: Solver keywords from a trial, gains applied after construction, a leg's stepping updates and resident inputs, finals with status codes, the optimize rows, cold cache roots, and the version string."""
 
 import math
 import os
+import shutil
 import sys
 import tempfile
-import types
 import unittest
 
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "cubie_julia_overlap"))
 
 import cubie_bench  # noqa: E402
-import cubie_worker  # noqa: E402
-from problems import get_problem  # noqa: E402
+import cubie_adapter  # noqa: E402
+import store  # noqa: E402
+
+KEY = "windows_RTX-4070-SUPER"
+NAN = float("nan")
+NAMES = ("x", "y", "z")
+
+
+def trial(n=8, kind="solve", transfers=("both", "none"), finals=False, axis="n", ordinal=0,
+          cold=False, **overrides):
+    """A trial record: lorenz, fixed tsit5 at dt 2^-10, cubie."""
+    fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
+                  parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
+                  grid_dtype="float32", algorithm="tsit5", controller="fixed", dt=2.0 ** -10,
+                  dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}", newton_atol=NAN,
+                  newton_rtol=NAN, package="cubie")
+    fields.update(overrides)
+    fields["trial_id"] = store.trial_id(fields)
+    fields.update(kind=kind, finals=finals, transfers=list(transfers), axis=axis,
+                  ordinal=ordinal, cold=cold,
+                  leg="/".join([fields["problem"], fields["system_params"], fields["algorithm"],
+                                fields["controller"], fields["precision"], axis]))
+    return fields
+
+
+def adaptive(**overrides):
+    fields = dict(controller="default", dt=2.0 ** -10, atol=1e-5, rtol=1e-5)
+    fields.update(overrides)
+    return fields
+
+
+class FakeIndices:
+    def __init__(self, names):
+        self.index_map = list(names)
+
+
+class FakeSystem:
+    """Three named states and no observables."""
+
+    def __init__(self):
+        self.indices = type("I", (), {})()
+        self.indices.states = FakeIndices(NAMES)
+        self.sizes = type("S", (), {"observables": 0})()
 
 
 class FakeDeviceArray:
     def __init__(self, host):
         self.shape = host.shape
-        self.dtype = host.dtype
 
 
 class FakeStream:
-    def __init__(self):
-        self.synchronised = 0
-
     def synchronize(self):
-        self.synchronised += 1
+        pass
 
 
 class FakeDeviceResult:
@@ -38,342 +74,298 @@ class FakeDeviceResult:
 
 
 class FakeSolution:
-    def __init__(self, n):
-        self.finals = np.full((n, 3), float(n), dtype=np.float32)
+    """state (time, variables, runs) with one save; status codes per run."""
+
+    def __init__(self, n, codes=None):
+        self.state = np.zeros((1, len(NAMES), n), dtype=np.float32)
+        self.state[0] = np.arange(len(NAMES) * n, dtype=np.float32).reshape(len(NAMES), n)
+        self.status_codes = np.zeros(n, dtype=np.int32) if codes is None else np.asarray(codes, np.int32)
+
+
+class FakeLaunch:
+    def __init__(self):
+        self.blocksize, self.resident_blocks, self.best_ms = 128, 2, 1.5
+        self.label = "state=shared @bs128 x2"
+
+
+class FakeOptimizeResult:
+    def __init__(self):
+        self.best = FakeLaunch()
+        self.applied_settings = {"blocksize": 128, "state_location": "shared"}
 
 
 class FakeSolver:
-    """A host solve uploads into per-size resident buffers; a device solve must be given those buffers back."""
+    """Records its construction keywords, updates, compiles, optimizes and solves; a device solve needs the resident inputs of the last host solve."""
 
-    def __init__(self, chunk_at=None, host_fail_at=None):
+    made = []
+
+    def __init__(self, system, **kwargs):
+        self.system = system
+        self.kwargs = kwargs
+        self.updates = []
         self.calls = []
-        self.chunk_at = chunk_at
-        self.host_fail_at = host_fail_at
-        self.closed = False
+        self.compiled = []
+        self.optimized = []
         self.resident = None
-        self.chunked = False
-        self.last_n = None
-        self.device_results = []
+        self.closed = False
+        self.codes = None
+        FakeSolver.made.append(self)
+
+    def update(self, updates):
+        self.updates.append(dict(updates))
+
+    def build_grid(self, initial_values, parameters):
+        values = next(iter(parameters.values()))
+        n = len(values)
+        initials = np.zeros((len(initial_values), n), np.float32)
+        params = np.asarray(values, np.float32).reshape(1, n)
+        return initials, params
+
+    def compile(self, initial_values, parameters, duration):
+        self.compiled.append((initial_values.shape[1], duration))
+
+    def optimize(self, initial_values, parameters, duration, verbose, force=False):
+        self.optimized.append((initial_values.shape[1], duration, force))
+        return FakeOptimizeResult()
 
     def solve(self, initial_values, parameters, duration, on_device=False):
         n = initial_values.shape[1]
         self.calls.append((n, on_device))
         if on_device:
-            if self.resident is None or (
-                    initial_values is not self.resident[0]
-                    or parameters is not self.resident[1]):
-                raise AssertionError("device leg was not given the "
-                                     "solver's resident inputs")
-            result = FakeDeviceResult()
-            self.device_results.append(result)
-            return result
-        if isinstance(initial_values, FakeDeviceArray):
-            raise AssertionError("host leg was given device arrays")
-        if self.host_fail_at is not None and n == self.host_fail_at:
-            raise MemoryError("allocating bytes")
-        if self.last_n != n:
-            self.resident = (FakeDeviceArray(initial_values),
-                             FakeDeviceArray(parameters))
-        self.last_n = n
-        self.chunked = self.chunk_at is not None and n >= self.chunk_at
-        return FakeSolution(n)
-
-    def _resident_input(self, index):
-        if self.chunked:
-            raise ValueError("The device buffer holds one chunk of the "
-                             "last run")
-        return self.resident[index]
+            if self.resident is None or initial_values is not self.resident[0]:
+                raise AssertionError("device solve without the resident inputs")
+            return FakeDeviceResult()
+        self.resident = (FakeDeviceArray(initial_values), FakeDeviceArray(parameters))
+        return FakeSolution(n, self.codes)
 
     @property
     def device_initial_values(self):
-        return self._resident_input(0)
+        return self.resident[0]
 
     @property
     def device_parameters(self):
-        return self._resident_input(1)
-
-    def build_grid(self, initial_values, parameters):
-        n = len(next(iter(parameters.values())))
-        return (np.zeros((len(initial_values), n), np.float32),
-                np.zeros((1, n), np.float32))
+        return self.resident[1]
 
     def close(self):
         self.closed = True
 
 
-def grid(solver, n):
-    return np.zeros((3, n), np.float32), np.zeros((1, n), np.float32)
-
-
-def read_rows(analysis):
-    """{n or states: [t_both, t_none, (build_s,) errored_pct]} from the CUBIE test store."""
-    import results
-    rows = {}
-    for row in results.load(results.store_path("cubie", "test_key")):
-        if row["analysis"] != analysis:
-            continue
-        key = int(row["states"] if analysis == "states" else row["n"])
-        entry = rows.setdefault(key, {})
-        entry[row["transfers"]] = float(row["min_ms"])
-        entry["build_s"] = float(row["build_s"])
-        entry["errored_pct"] = float(row["errored_pct"])
-    out = {}
-    for key, entry in rows.items():
-        values = [entry.get("both", float("nan")),
-                  entry.get("none", float("nan"))]
-        if analysis == "states":
-            values.append(entry["build_s"])
-        values.append(entry["errored_pct"])
-        out[key] = values
-    return out
-
-
-def sample_legs(analysis="times"):
-    """{(n, transfers): attempt count} for the rows of the CUBIE test store that carry attempts."""
-    import results
-    counts = {}
-    for row in results.load(results.store_path("cubie", "test_key")):
-        if row["analysis"] != analysis:
-            continue
-        attempts = results.samples_of(row)
-        if attempts:
-            counts[(int(row["n"]), row["transfers"])] = len(attempts)
-    return counts
-
-
-class SweepCase(unittest.TestCase):
+class AdapterCase(unittest.TestCase):
     def setUp(self):
-        self.cwd = os.getcwd()
-        self.tmp = tempfile.mkdtemp()
-        os.chdir(self.tmp)
-        adapter = cubie_bench.adapter
-        self.saved = (adapter.make_solver, adapter.build_system,
-                      adapter.optimize_point, adapter.load_optimized,
-                      cubie_bench._device_leg, cubie_bench.final_states)
-        cubie_bench.final_states = (
-            lambda system, solution, problem: solution.finals)
-        # The states sweep optimises each size; the fake solver has no kernels.
-        adapter.optimize_point = lambda *args, **kwargs: {"label": "fake"}
-        adapter.load_optimized = lambda *args, **kwargs: None
+        self.tmp = tempfile.mkdtemp(prefix="cubie_bench_test_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = os.path.join(self.tmp, "data")
+        self.saved = cubie_adapter.build_system
+        cubie_adapter.build_system = self.fake_build_system
+        self.addCleanup(setattr, cubie_adapter, "build_system", self.saved)
+        self.built = []
+        FakeSolver.made = []
+        self.adapter = cubie_bench.CubieAdapter("cubie", KEY, self.root, solver_class=FakeSolver)
 
-    def tearDown(self):
-        adapter = cubie_bench.adapter
-        (adapter.make_solver, adapter.build_system, adapter.optimize_point,
-         adapter.load_optimized, cubie_bench._device_leg,
-         cubie_bench.final_states) = self.saved
-        os.chdir(self.cwd)
+    def fake_build_system(self, problem, package, precision=None, states=None):
+        self.built.append((problem.name, problem["states"], package, precision, states))
+        return FakeSystem(), {name: 0.0 for name in NAMES}
 
-    def opts(self, ns):
-        return {"ns": ns, "algorithms": ["classical-rk4"],
-                "fixed": ["classical-rk4"], "adaptive": [],
-                "framework": "cubie", "dataset_key": "test_key",
-                "numerical_tag": "cubie"}
-
-    def run_times(self, solver, ns):
-        cubie_bench.adapter.make_solver = (
-            lambda system, problem, algorithm, mode, setting=None, **kw: solver)
-        problem = get_problem("lorenz")
-        cubie_bench._run_times(problem, self.opts(ns), object(), grid)
-        return read_rows("times"), sample_legs("times")
+    def values(self, n):
+        import grid
+        return grid.grid(trial(n))
 
 
-class TestTimesResidency(SweepCase):
-    def test_device_leg_reuses_the_host_legs_inputs(self):
-        solver = FakeSolver()
-        rows, legs = self.run_times(solver, [1024, 4096])
-        device = [n for n, on_device in solver.calls if on_device]
-        self.assertEqual(sorted(set(device)), [1024, 4096])
-        # Every device solve synchronised its own result stream.
-        self.assertTrue(solver.device_results)
-        self.assertTrue(all(result.stream.synchronised == 1
-                            for result in solver.device_results))
-        for n in (1024, 4096):
-            self.assertTrue(all(math.isfinite(v) for v in rows[n]))
-            self.assertIn((n, "both"), legs)
-            self.assertIn((n, "none"), legs)
+class KeywordTests(unittest.TestCase):
+    def test_a_fixed_stepping_sets_the_controller_and_the_step(self):
+        self.assertEqual(cubie_bench.stepping_kwargs(trial()),
+                         {"step_controller": "fixed", "dt": 2.0 ** -10})
+        self.assertEqual(cubie_bench.stepping_kwargs(trial(dt=NAN)), {"step_controller": "fixed"})
 
-    def test_finals_are_saved_from_the_host_leg(self):
-        rows, _ = self.run_times(FakeSolver(), [32768])
-        path = os.path.join("data", "numerical", "test_key", "lorenz",
-                            "cubie_unadaptive.csv")
-        saved = np.loadtxt(path, delimiter=",")
-        self.assertEqual(saved.shape, (32768, 3))
-        self.assertTrue(np.all(saved == 32768.0))
+    def test_an_adaptive_stepping_sets_tolerances_and_only_finite_pins(self):
+        self.assertEqual(cubie_bench.stepping_kwargs(trial(**adaptive())),
+                         {"atol": 1e-5, "rtol": 1e-5, "dt": 2.0 ** -10})
+        self.assertEqual(cubie_bench.stepping_kwargs(trial(**adaptive(dt=NAN, dt_min=1e-7, dt_max=0.5))),
+                         {"atol": 1e-5, "rtol": 1e-5, "dt_min": 1e-7, "dt_max": 0.5})
+        named = cubie_bench.stepping_kwargs(trial(**adaptive(controller="pi")))
+        self.assertEqual(named["step_controller"], "pi")
+        # Newton tolerances reach the solver only when the trial carries them.
+        newton = cubie_bench.stepping_kwargs(trial(algorithm="kvaerno3", newton_atol=1e-6, newton_rtol=1e-6))
+        self.assertEqual(newton, {"step_controller": "fixed", "dt": 2.0 ** -10,
+                                  "newton_atol": 1e-6, "newton_rtol": 1e-6})
+        self.assertNotIn("newton_atol", cubie_bench.stepping_kwargs(trial(algorithm="kvaerno3")))
 
+    def test_make_solver_passes_the_algorithm_and_applies_gains_after_construction(self):
+        FakeSolver.made = []
+        gains = '{"integral_gain":0.3,"proportional_gain":0.4,"safety":0.9}'
+        solver = cubie_bench.make_solver(FakeSystem(), trial(**adaptive(controller="pi", gains=gains)),
+                                         solver_class=FakeSolver)
+        self.assertEqual(solver.kwargs["algorithm"], "tsit5")
+        self.assertEqual(solver.kwargs["save_every"], 1.0)
+        self.assertEqual(solver.kwargs["output_types"], ["state"])
+        self.assertIsNone(solver.kwargs["time_logging_level"])
+        self.assertEqual(solver.kwargs["step_controller"], "pi")
+        self.assertEqual(solver.updates, [{"integral_gain": 0.3, "proportional_gain": 0.4, "safety": 0.9}])
+        plain = cubie_bench.make_solver(FakeSystem(), trial(), solver_class=FakeSolver)
+        self.assertEqual(plain.updates, [])
 
-class TestTimesLegIsolation(SweepCase):
-    def test_chunked_host_leg_keeps_its_number(self):
-        solver = FakeSolver(chunk_at=4096)
-        rows, legs = self.run_times(solver, [1024, 4096, 16384])
-        self.assertTrue(all(math.isfinite(rows[n][0])
-                            for n in (1024, 4096, 16384)))
-        self.assertTrue(math.isfinite(rows[1024][1]))
-        self.assertTrue(math.isnan(rows[4096][1]))
-        self.assertTrue(math.isnan(rows[16384][1]))
-        # The chunked sizes never launch a device solve.
-        device = [n for n, on_device in solver.calls if on_device]
-        self.assertEqual(device, [1024] * len(device))
-        self.assertIn((1024, "none"), legs)
-        self.assertNotIn((4096, "none"), legs)
-        self.assertIn((16384, "both"), legs)
+    def test_optimize_setting_is_per_leg_on_n_and_states_axes(self):
+        self.assertEqual(cubie_bench.optimize_setting(trial(axis="n")), ("fixed", None))
+        self.assertEqual(cubie_bench.optimize_setting(trial(axis="states")), ("fixed", None))
+        self.assertEqual(cubie_bench.optimize_setting(trial(axis="dt")), ("fixed", 2.0 ** -10))
+        self.assertEqual(cubie_bench.optimize_setting(trial(axis="tol", **adaptive())), ("adaptive", 1e-5))
 
-    def test_device_breach_abandons_only_the_device_column(self):
-        attempted = []
-
-        def breaching_leg(solver, duration, repeats):
-            attempted.append(solver.last_n)
-            if solver.last_n >= 4096:
-                return None, [1.0]
-            return 5.0, [1.0, 5.0]
-
-        cubie_bench._device_leg = breaching_leg
-        solver = FakeSolver()
-        rows, _ = self.run_times(solver, [1024, 4096, 16384])
-        self.assertEqual(attempted, [1024, 4096])
-        self.assertTrue(all(math.isfinite(rows[n][0])
-                            for n in (1024, 4096, 16384)))
-        self.assertEqual(rows[1024][1], 5.0)
-        self.assertTrue(math.isnan(rows[4096][1]))
-        self.assertTrue(math.isnan(rows[16384][1]))
-
-    def test_host_failure_skips_the_device_leg_and_continues(self):
-        solver = FakeSolver(host_fail_at=4096)
-        rows, _ = self.run_times(solver, [1024, 4096, 16384])
-        self.assertTrue(all(math.isnan(v) for v in rows[4096][:-1]))
-        self.assertEqual(100.0, rows[4096][-1])
-        self.assertTrue(all(math.isfinite(v) for v in rows[16384]))
-        self.assertFalse(any(n == 4096 and on_device
-                             for n, on_device in solver.calls))
+    def test_controllers_version_and_states(self):
+        import importlib.metadata
+        self.assertEqual(cubie_bench.CONTROLLERS, ("fixed", "default", "i", "pi", "pid", "gustafsson"))
+        version = importlib.metadata.version("cubie")
+        self.assertEqual(cubie_bench.CubieAdapter("cubie", KEY, "data").version(), version + "+numba-cuda")
+        self.assertEqual(cubie_bench.CubieAdapter("cubie_mlir", KEY, "data").version(), version + "+mlir")
+        adapter = cubie_bench.CubieAdapter("cubie", KEY, "data")
+        self.assertEqual(adapter.states(trial()), 3)
+        self.assertEqual(adapter.states(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
+                                              grid_max=16.0)), 8)
+        self.assertEqual(adapter.states(trial(problem="pollu", parameter="k1", grid_scale="log",
+                                              grid_min=3.5e-2, grid_max=3.5, duration=60.0)), 20)
 
 
-class TestStatesLegIsolation(SweepCase):
-    def test_chunked_host_leg_keeps_host_time_and_build_time(self):
-        solvers = {}
+class LegTests(AdapterCase):
+    def test_build_leg_sizes_the_system_from_system_params(self):
+        leg = self.adapter.build_leg(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
+                                           grid_max=16.0))
+        self.assertEqual(self.built, [("lorenz96", 8, "cubie", np.float32, 8)])
+        self.assertEqual(leg.states, 8)
+        leg.close()
+        leg = self.adapter.build_leg(trial(precision="float64"))
+        self.assertEqual(self.built[-1], ("lorenz", 3, "cubie", np.float64, None))
+        self.assertEqual(leg.states, 3)
+        self.assertEqual(leg.precision, np.float64)
+        leg.close()
+        self.assertTrue(all(s.closed for s in FakeSolver.made))
 
-        def make_solver(system, row, algorithm, mode, setting=None, **kw):
-            solver = FakeSolver(chunk_at=1)   # every host leg chunks
-            solvers[row["states"]] = solver
-            return solver
+    def test_compile_builds_the_grid_at_the_trials_n(self):
+        leg = self.adapter.build_leg(trial(n=8, kind="warm"))
+        self.adapter.compile(leg, trial(n=8, kind="warm"), self.values(8))
+        self.assertEqual(leg.solver.compiled, [(8, 1.0)])
+        leg.close()
 
-        cubie_bench.adapter.make_solver = make_solver
-        cubie_bench.adapter.build_system = (
-            lambda problem, package, precision=None, states=None:
-            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
-        opts = self.opts([4, 8])
-        cubie_bench._run_states(opts)
-        rows = read_rows("states")
-        for nstates in (4, 8):
-            t_ms, t_dev, build_s, pct = rows[nstates]
-            self.assertTrue(math.isfinite(t_ms))
-            self.assertTrue(math.isnan(t_dev))
-            self.assertTrue(math.isfinite(build_s))
-            self.assertTrue(solvers[nstates].closed)
+    def test_a_changed_stepping_updates_the_solver_and_drops_the_resident_inputs(self):
+        first = trial(dt=2.0 ** -10, axis="dt")
+        leg = self.adapter.build_leg(first)
+        self.adapter.solve(leg, first, self.values(8), "both")
+        self.adapter.solve(leg, first, self.values(8), "none")
+        self.assertEqual(leg.solver.updates, [])
+        self.assertEqual(leg.solver.calls, [(8, False), (8, True)])
+        second = trial(dt=2.0 ** -11, axis="dt", ordinal=1)
+        self.adapter.solve(leg, second, self.values(8), "none")
+        self.assertEqual(leg.solver.updates, [{"step_controller": "fixed", "dt": 2.0 ** -11}])
+        # The update dropped the resident inputs, so the device solve uploaded through a host solve.
+        self.assertEqual(leg.solver.calls[2:], [(8, False), (8, True)])
+        # A changed controller or gains rebuilds the solver so no earlier gain lingers.
+        old = leg.solver
+        third = trial(**adaptive(controller="pi", gains='{"integral_gain":0.3}'), axis="tol")
+        self.adapter.solve(leg, third, self.values(8), "both")
+        self.assertTrue(old.closed)
+        self.assertIsNot(leg.solver, old)
+        self.assertEqual(len(FakeSolver.made), 2)
+        self.assertEqual(leg.solver.kwargs["step_controller"], "pi")
+        self.assertEqual(leg.solver.kwargs["atol"], 1e-5)
+        self.assertEqual(leg.solver.updates, [{"integral_gain": 0.3}])
+        self.assertEqual(leg.solver.calls, [(8, False)])
+        fourth = trial(**adaptive(controller="pi", gains='{"integral_gain":0.3}', atol=1e-6, rtol=1e-6),
+                       axis="tol", ordinal=1)
+        self.adapter.solve(leg, fourth, self.values(8), "both")
+        self.assertEqual(len(FakeSolver.made), 2)
+        self.assertEqual(leg.solver.updates[-1], {"atol": 1e-6, "rtol": 1e-6, "dt": 2.0 ** -10,
+                                                  "step_controller": "pi"})
+        leg.close()
 
-    def test_device_leg_reuses_each_sizes_inputs(self):
-        solvers = {}
+    def test_device_solves_reuse_the_host_solves_inputs_per_n(self):
+        leg = self.adapter.build_leg(trial(n=8))
+        self.adapter.solve(leg, trial(n=8), self.values(8), "both")
+        self.adapter.solve(leg, trial(n=8), self.values(8), "none")
+        self.adapter.solve(leg, trial(n=8), self.values(8), "none")
+        self.adapter.solve(leg, trial(n=32, ordinal=1), self.values(32), "none")
+        self.assertEqual(leg.solver.calls, [(8, False), (8, True), (8, True), (32, False), (32, True)])
+        self.assertEqual(leg.grid_n, 32)
+        leg.close()
 
-        def make_solver(system, row, algorithm, mode, setting=None, **kw):
-            solver = FakeSolver()
-            solvers[row["states"]] = solver
-            return solver
+    def test_finals_carry_the_status_flags_and_the_duration_of_clean_runs(self):
+        leg = self.adapter.build_leg(trial(n=4))
+        leg.solver.codes = [0, 8, 0, 2 | 256]
+        result = self.adapter.solve(leg, trial(n=4), self.values(4), "both")
+        finals, t_final, retcode = self.adapter.finals(leg, result)
+        self.assertEqual(finals.shape, (4, 3))
+        self.assertEqual(finals.dtype, np.float32)
+        self.assertEqual(list(finals[:, 0]), [0.0, 1.0, 2.0, 3.0])
+        self.assertEqual(list(finals[:, 2]), [8.0, 9.0, 10.0, 11.0])
+        self.assertEqual(retcode, ["", "STEP_TOO_SMALL", "", "MAX_NEWTON_ITERATIONS_EXCEEDED|NEWTON_DIVERGENCE"])
+        self.assertEqual(t_final[0], 1.0)
+        self.assertTrue(math.isnan(t_final[1]))
+        self.assertEqual(store.errored_pct(finals, t_final, retcode, 1.0), 50.0)
+        # A device solve hands back the host result its inputs came from.
+        device = self.adapter.solve(leg, trial(n=4), self.values(4), "none")
+        self.assertIs(device, result)
+        leg.close()
 
-        cubie_bench.adapter.make_solver = make_solver
-        cubie_bench.adapter.build_system = (
-            lambda problem, package, precision=None, states=None:
-            (object(), {"x{0}".format(i): 8.0 for i in range(1, states + 1)}))
-        cubie_bench._run_states(self.opts([4, 8]))
-        rows = read_rows("states")
-        for nstates in (4, 8):
-            self.assertTrue(all(math.isfinite(v) for v in rows[nstates]))
-            self.assertTrue(any(on_device
-                                for _, on_device in solvers[nstates].calls))
-
-
-class TestWorkPrecisionNe(SweepCase):
-    def setUp(self):
-        super().setUp()
-        import wp_common
-        self.saved_golden = wp_common.load_golden
-        wp_common.load_golden = lambda problem: np.zeros((131072, 3))
-
-    def tearDown(self):
-        import wp_common
-        wp_common.load_golden = self.saved_golden
-        super().tearDown()
-
-    def run_wp(self, algorithms, fixed, adaptive):
-        self.solvers = []
-
-        def make_solver(system, problem, algorithm, mode, setting=None, **kw):
-            self.solvers.append(FakeSolver())
-            return self.solvers[-1]
-
-        cubie_bench.adapter.make_solver = make_solver
-        opts = dict(self.opts([131072]), algorithms=algorithms, fixed=(),
-                    adaptive=(), wp_fixed=fixed, wp_adaptive=adaptive)
-        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
-        import results
-        return [row for row in results.load(results.store_path("cubie", "test_key"))
-                if row["analysis"] == "wp"]
-
-    def test_a_wp_point_is_timed_on_the_resident_inputs(self):
-        rows = self.run_wp(["euler"], ("euler",), ())
-        self.assertTrue(rows)
-        self.assertTrue(all(row["transfers"] == "none" for row in rows))
-        self.assertTrue(all(math.isfinite(float(row["min_ms"])) for row in rows))
-        for solver in self.solvers:
-            # One untimed host solve for the finals, then only device solves.
-            self.assertEqual([on_device for _, on_device in solver.calls][:2],
-                             [False, True])
-            self.assertTrue(all(on_device for _, on_device in solver.calls[1:]))
-
-    def test_an_ne_leg_times_the_ne_grid_and_writes_its_finals(self):
-        from protocol import N_NE
-        from problems import get_problem as problem_row
-        rows = self.run_wp(["backwards_euler"], ("backwards_euler",), ())
-        dts = problem_row("lorenz").ne_dts()
-        self.assertEqual(len(rows), len(dts))
-        self.assertTrue(all(row["tier"] == "default" for row in rows))
-        path = os.path.join("data", "numerical_equivalence", "cubie", "test_key",
-                            "lorenz", "backwards_euler.csv")
-        self.assertTrue(os.path.isfile(path))
-        # The MLIR package writes beside, never over, the numba-cuda files.
-        opts = dict(self.opts([131072]), algorithms=["backwards_euler"], fixed=(),
-                    adaptive=(), wp_fixed=("backwards_euler",), wp_adaptive=(),
-                    framework="cubie_mlir")
-        cubie_bench._run_wp(get_problem("lorenz"), opts, object(), grid)
-        self.assertTrue(os.path.isfile(os.path.join(
-            "data", "numerical_equivalence", "cubie_mlir", "test_key", "lorenz",
-            "backwards_euler.csv")))
+    def test_optimize_records_the_winner_per_leg_or_per_setting(self):
+        line = trial(n=64, kind="optimize", transfers=(), axis="n")
+        leg = self.adapter.build_leg(trial(n=8))
+        self.adapter.optimize(leg, line, self.values(64))
+        self.assertEqual(leg.solver.optimized, [(64, 1.0, True)])
+        tuned = cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -13,
+                                             root=self.root, controller="fixed", gains="{}")
+        self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
+        self.assertEqual(tuned["resident_blocks"], 2)
+        leg.close()
+        tol_line = trial(n=64, kind="optimize", transfers=(), axis="tol", **adaptive(atol=1e-4, rtol=1e-4))
+        leg = self.adapter.build_leg(trial(axis="tol", **adaptive(atol=1e-4, rtol=1e-4)))
+        self.adapter.optimize(leg, tol_line, self.values(64))
+        self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
+                                                          root=self.root, controller="default", gains="{}"))
+        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-5,
+                                                       root=self.root, controller="default", gains="{}"))
+        # The controller and gains keep one algorithm's legs apart in the record.
+        pi_line = trial(n=64, kind="optimize", transfers=(), axis="tol",
+                        **adaptive(atol=1e-4, rtol=1e-4, controller="pi", gains='{"integral_gain":0.3}'))
+        self.adapter.optimize(leg, pi_line, self.values(64))
+        self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
+                                                          root=self.root, controller="default", gains="{}"))
+        self.assertIsNotNone(cubie_adapter.load_optimized(
+            "cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4, root=self.root, controller="pi",
+            gains='{"integral_gain":0.3}'))
+        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
+                                                       root=self.root, controller="pi", gains="{}"))
+        path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
         with open(path) as handle:
             lines = handle.read().splitlines()
-        self.assertEqual(lines[0], "dt,traj,s1,s2,s3")
-        self.assertEqual(len(lines) - 1, N_NE * len(dts))
+        self.assertEqual(len(lines) - 1, 3)
+        self.assertTrue(lines[0].startswith("package,key,problem,algorithm,mode,controller,gains,"))
+        leg.close()
 
-    def test_a_timed_only_leg_writes_no_ne_file(self):
-        rows = self.run_wp(["euler"], ("euler",), ())
-        self.assertEqual(len(rows), 10)
-        self.assertFalse(os.path.exists(os.path.join("data", "numerical_equivalence")))
+    def test_a_cold_leg_builds_in_a_fresh_cache_root_and_restores_it(self):
+        from cubie.cache_root import get_cache_root_override
+        before = get_cache_root_override()
+        leg = self.adapter.build_leg(trial(kind="warm", cold=True), cold=True)
+        override = get_cache_root_override()
+        self.assertIsNotNone(override)
+        self.assertNotEqual(override, before)
+        self.assertTrue(os.path.isdir(str(override)))
+        self.assertEqual(str(override), leg.cache_dir)
+        leg.close()
+        self.assertEqual(get_cache_root_override(), before)
+        self.assertFalse(os.path.isdir(str(override)))
+        warm = self.adapter.build_leg(trial(kind="warm"), cold=False)
+        self.assertIsNone(warm.cache_dir)
+        self.assertEqual(get_cache_root_override(), before)
+        warm.close()
 
+    def test_a_failed_cold_build_restores_the_cache_root(self):
+        from cubie.cache_root import get_cache_root_override
 
-class TestWorkerDeviceLeg(unittest.TestCase):
-    def test_samples_reuse_the_resident_inputs(self):
-        solver = FakeSolver()
-        initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 1.0)
-        samples = cubie_worker.time_device_leg(solver, 1.0, 20)
-        self.assertEqual(len(samples), 20)
-        self.assertEqual(len(solver.device_results), 20)
-        self.assertTrue(all(result.stream.synchronised == 1
-                            for result in solver.device_results))
+        def broken(*args, **kwargs):
+            raise RuntimeError("codegen failed")
 
-    def test_chunked_host_leg_raises_before_any_device_solve(self):
-        solver = FakeSolver(chunk_at=1)
-        initials, parameters = grid(solver, 256)
-        solver.solve(initials, parameters, 1.0)
-        with self.assertRaises(ValueError):
-            cubie_worker.time_device_leg(solver, 1.0, 20)
-        self.assertEqual(solver.device_results, [])
+        cubie_adapter.build_system = broken
+        before = get_cache_root_override()
+        with self.assertRaises(RuntimeError):
+            self.adapter.build_leg(trial(kind="warm", cold=True), cold=True)
+        self.assertEqual(get_cache_root_override(), before)
 
 
 if __name__ == "__main__":

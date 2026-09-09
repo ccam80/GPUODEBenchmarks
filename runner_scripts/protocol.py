@@ -22,6 +22,7 @@ REPEAT_SPREAD = float(_repeats["spread"])
 
 WATCHDOG_SECONDS = float(_watchdog["seconds"])
 WATCHDOG_EXIT_CODE = int(_watchdog["exit_code"])
+OPTIMIZE_SECONDS = float(_watchdog["optimize_seconds"])
 
 
 def get(path):
