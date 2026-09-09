@@ -1,27 +1,10 @@
 #!/usr/bin/env python3
-"""The benchmark entry point: sets expand to trial files, one per package, and the runners execute them.
+"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ]
 
-Usage:
-  bench.py plan --set perf                     write trials/<key>/<package>.jsonl and print counts
-  bench.py run  --set perf,golden_grid         run every package's trials under logs/<key>_<stamp>/
-  bench.py run  --set perf -p cubie -s lorenz -n 32
-  bench.py run  --set golden_grid -p cubie_mlir --mode adaptive --controller matched --tol 1e-5
-  bench.py run  --set perf --resume            skip trials whose every transfers row exists
-
-  plan | run      write the trial files; run also drives the runners
-  --set           comma list of names under sets/ (perf, states, golden_grid, golden)
-  -p, --package   comma list of packages; -s, --problem  problems; -g, --algorithm  algorithms
-  --mode          fixed | adaptive
-  --controller    comma list: a spec's controller (fixed, default, pi, ...) or the set's token (matched)
-  -n              comma list of trajectory counts; replaces every grid's n list
-  --tol           comma list of tolerances kept (adaptive specs); --dt  comma list of steps kept (fixed specs)
-  --resume        drop trials whose every requested transfers row exists
-  --no-overwrite  drop trials whose rows are all finite
-  --floor         runners keep the lower finite time per row
-  --cooldown      seconds between packages (default 15)
-  --allow-unknown-gpu, --lock-clocks SM[,MEM], --no-lock-clocks, --clock-tolerance MHZ
-
-Exit code: 0 when every runner finished its trials, 1 otherwise. Clock drift during a runner also fails the run.
+plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
+-p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
+--resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
+Exit 0 when every runner finished; 1 on a runner failure or clock drift.
 """
 
 import argparse

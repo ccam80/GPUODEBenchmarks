@@ -11,12 +11,7 @@ from protocol import (REPEAT_CAP, REPEAT_SCHEDULE, REPEAT_SPREAD,  # noqa: F401
 
 
 def run_watchdogged(run, on_breach):
-    """Run run(); when it never returns, run on_breach() and hard-exit.
-
-    The soft cap in timed_min_ms only sees a run that comes back, so a solve
-    that never returns needs this. Mirrors run_watchdogged in
-    runner_scripts/watchdog.jl.
-    """
+    """Run run(); when it never returns, run on_breach() and hard-exit with WATCHDOG_EXIT_CODE, as watchdog.jl does."""
     finished = threading.Event()
 
     def fire():

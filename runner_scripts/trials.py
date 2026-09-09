@@ -57,15 +57,7 @@ def _stepping_key(spec):
 
 
 def build_trials(specs, optimize_n=OPTIMIZE_N, per_point_families=OPTIMIZE_PER_POINT_FAMILIES):
-    """Trial records from expanded specs.
-
-    Specs sharing a trial_id merge: the first keeps its leg and axis, transfers
-    union in timing order, finals true over false. Legs are walked in first
-    appearance; solve trials take ordinals from ordinal_key. A warm-built leg
-    gets one warm trial with its cheapest spec; an optimize package's leg gets
-    one optimize trial per stepping for the per-point families and one per leg
-    otherwise, at optimize_n. Legs on the states axis get neither.
-    """
+    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins); per package leg, solves take cost ordinals, a warm-built leg adds one warm trial, an optimize package adds optimize trials at optimize_n (per stepping for per_point_families, else per leg); states legs add neither."""
     merged = {}
     order = []
     for spec in specs:
