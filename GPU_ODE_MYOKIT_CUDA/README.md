@@ -15,19 +15,17 @@ python GPU_ODE_MYOKIT_CUDA/setup_environment.py
 The setup detects CUDA 12 or 13 from `nvcc` (falling back to `nvidia-smi`)
 and installs the matching `cupy-cuda12x` or `cupy-cuda13x` wheel.
 
-The runner consumes a trial file written by `bench.py`; from the repository
-root:
+Run it through `bench.py`:
 
 ```text
 python bench.py run --set perf -p myokit_cuda
 ```
 
-or directly, with a trial file already planned:
+or on a planned trial file (`venv/bin/python` on Linux):
 
 ```text
 GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py --trials trials/<key>/myokit_cuda.jsonl
 ```
 
-On Linux, use `venv/bin/python`. Myokit's CUDA exporter implements forward
-Euler in float32 only, so a trial naming another algorithm, precision or
-controller lands as a failed row with that reason.
+The kernel is fixed-step forward Euler in float32; any other algorithm,
+precision or controller records a failed row.

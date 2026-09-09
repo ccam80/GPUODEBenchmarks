@@ -226,10 +226,8 @@ class MyokitCudaModel:
     ):
         """Run a fixed number of generated forward-Euler steps.
 
-        The returned host array has shape ``(cells, states)``.  Compilation
-        happens when the object is constructed and is therefore separable
-        from timed calls to this method.  The inputs are uploaded, the
-        final states written to a separate device buffer and copied back.
+        The returned host array has shape ``(cells, states)``; the kernel is
+        compiled at construction, not here.
         """
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError("dt must be finite and positive")
@@ -281,13 +279,7 @@ class MyokitCudaModel:
         return self.to_host(device_states)
 
     def to_device(self, initial_states, diffusion_values):
-        """Upload the inputs once and allocate the output beside them, for
-        timing runs that exclude transfers.
-
-        Returns ``(device_initial, device_diffusion, device_states)``; the
-        kernel reads the first two and writes the third, so repeated runs
-        need no restore.
-        """
+        """Upload the inputs and allocate the output: ``(device_initial, device_diffusion, device_states)``."""
         host_states = _validate_float32(initial_states, "initial_states")
         cell_count = host_states.shape[1]
         host_diffusion = _validate_float32(
@@ -304,11 +296,7 @@ class MyokitCudaModel:
 
     def solve_on_device(self, dt, step_count, device_initial, device_diffusion,
                         device_states):
-        """Run the kernel on resident arrays with neither transfer.
-
-        ``device_initial`` is read, ``device_states`` is overwritten with the
-        final states and returned.
-        """
+        """Run the kernel on resident arrays; ``device_states`` receives the final states and is returned."""
         self._launch(dt, step_count, device_initial, device_diffusion,
                      device_states)
         return device_states

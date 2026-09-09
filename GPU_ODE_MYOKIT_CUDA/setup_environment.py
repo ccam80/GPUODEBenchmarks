@@ -49,7 +49,7 @@ def main():
 
     requirements = script_dir / "requirements.txt"
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
-    # pyarrow and tzdata: the runner records UTC timestamps through the result store.
+    # pyarrow and tzdata serve the result store.
     run(
         [
             str(python),
