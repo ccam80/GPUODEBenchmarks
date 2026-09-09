@@ -1,10 +1,10 @@
+// One MPGOS trial: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none --python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]
+// The trial's problem, algorithm, trajectory count, state count and precision are compile-time constants; the binary refuses a trial it was not built for.
 #include <iostream>
-#include <iomanip>
 #include <vector>
 #include <string>
 #include <fstream>
 
-// Build with -DPROBLEM_HEADER=\"problems/lorenz.cuh\" -DSOLVER_CHOICE=RK4 -DNT_VALUE=32768.
 #ifndef PROBLEM_HEADER
 	#error "define PROBLEM_HEADER, e.g. -DPROBLEM_HEADER=\"problems/lorenz.cuh\""
 #endif
@@ -14,20 +14,34 @@
 #ifndef NT_VALUE
 	#define NT_VALUE 8388608
 #endif
+#ifndef PRECISION_TYPE
+	#define PRECISION_TYPE float
+#endif
 
 #include PROBLEM_HEADER
 #include "problems/stubs.cuh"
 #include "SingleSystem_PerThread_Interface.cuh"
-// Generated from runner_scripts/protocol.toml by the launcher before every build.
+// Generated from runner_scripts/protocol.toml by protocol.py before every build.
 #include "protocol.h"
+#include "grid.cuh"
+#include "trial.cuh"
 
-#define PI 3.14159265358979323846
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <sstream>
+#include <stdexcept>
+#include <thread>
 
 using namespace std;
 
 // Solver Configuration
 #define SOLVER SOLVER_CHOICE
-#define PRECISION float  // float, double
+typedef PRECISION_TYPE PRECISION;
 const int NT = NT_VALUE;
 const int SD   = PROBLEM_SD;   // SystemDimension
 const int NCP  = PROBLEM_NCP;  // NumberOfControlParameters
@@ -36,112 +50,171 @@ const int NISP = 1;     // NumberOfIntegerSharedParameters (run budget)
 const int NE   = 0;     // NumberOfEvents
 const int NA   = 0;     // NumberOfAccessories
 const int NIA  = 1;     // NumberOfIntegerAccessories (start clock)
-const int NDO  = 0;      // NumberOfPointsOfDenseOutput: nothing reads it, and
-                         // storing it is work the other suites do not do
+const int NDO  = 0;     // NumberOfPointsOfDenseOutput: nothing reads it, and
+                        // storing it is work the other suites do not do
 
-const PRECISION DURATION = (PRECISION)PROBLEM_DURATION;
-// The N sweep steps duration * 2^-timing_k.
-const PRECISION TIMING_DT = (PRECISION)(PROBLEM_DURATION * pow(2.0, -PROTOCOL_TIMING_K));
+typedef ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> Solver;
 
-void Linspace(vector<PRECISION>&, PRECISION, PRECISION, int);
-void Logspace(vector<PRECISION>&, PRECISION, PRECISION, int);
-void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, const vector<PRECISION>&, int);
-void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
-void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>&, int);
+static const bool FixedSolver = (SOLVER == RK4);
+static const char* const SolverAlgorithm = FixedSolver ? "classical-rk4" : "cash-karp-54";
+static const char* const BuiltPrecision = (sizeof(PRECISION) == 8) ? "float64" : "float32";
+static const int WatchdogExitCode = PROTOCOL_WATCHDOG_EXIT_CODE;
 
-#include <algorithm>
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <functional>
-#include <mutex>
-#include <sstream>
-#include <thread>
+// ------------------------------------------------------------------ options
 
-// Dataset key "<os>_<gpu>" from nvidia-smi, sanitised as in runner_scripts/bench_key.*.
-static std::string DatasetKey()
+struct Options
 {
-	static std::string cached;
-	static bool done = false;
-	if (done) return cached;
+	std::string trials, trial_id, key, python, package_version, suite_rev, outcome;
+	std::vector<std::string> transfers;
+	bool floor;
+	double build_s;
+	Options() : floor(false), build_s(std::nan("")) {}
+};
 
-#ifdef _WIN32
-	std::string os = "windows";
-#elif defined(__APPLE__)
-	std::string os = "macos";
-#else
-	std::string os = "linux";
-#endif
+static void Usage()
+{
+	std::cerr << "usage: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none "
+	             "--python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]"
+	          << std::endl;
+	exit(2);
+}
 
-	std::string raw;
-#ifdef _WIN32
-	FILE* pipe = _popen("nvidia-smi --query-gpu=name --format=csv,noheader", "r");
-#else
-	FILE* pipe = popen("nvidia-smi --query-gpu=name --format=csv,noheader", "r");
-#endif
-	if (pipe)
+static Options ParseOptions(int argc, char* argv[])
+{
+	Options o;
+	for (int i = 1; i < argc; i++)
 	{
-		char buf[256];
-		std::string captured;
-		if (fgets(buf, sizeof(buf), pipe)) captured = buf;
-#ifdef _WIN32
-		int rc = _pclose(pipe);
-#else
-		int rc = pclose(pipe);
-#endif
-		// Only a successful nvidia-smi names the GPU; anything else is "unknown-gpu".
-		if (rc == 0) raw = captured;
-	}
-
-	std::string gpu, tok;
-	for (size_t i = 0; i <= raw.size(); ++i)
-	{
-		char c = (i < raw.size()) ? raw[i] : '\0';
-		if (std::isalnum((unsigned char)c))
+		std::string flag = argv[i];
+		if (flag == "--floor") { o.floor = true; continue; }
+		if (i + 1 >= argc) Usage();
+		std::string value = argv[++i];
+		if (flag == "--trials") o.trials = value;
+		else if (flag == "--trial") o.trial_id = value;
+		else if (flag == "--key") o.key = value;
+		else if (flag == "--python") o.python = value;
+		else if (flag == "--package-version") o.package_version = value;
+		else if (flag == "--suite-rev") o.suite_rev = value;
+		else if (flag == "--outcome") o.outcome = value;
+		else if (flag == "--build-s") o.build_s = std::strtod(value.c_str(), NULL);
+		else if (flag == "--transfers")
 		{
-			tok += c;
+			std::stringstream parts(value);
+			std::string item;
+			while (std::getline(parts, item, ','))
+				if (!item.empty()) o.transfers.push_back(item);
 		}
-		else
+		else Usage();
+	}
+	if (o.trials.empty() || o.trial_id.empty() || o.key.empty() || o.python.empty()
+		|| o.outcome.empty() || o.transfers.empty())
+		Usage();
+	for (size_t i = 0; i < o.transfers.size(); i++)
+		if (o.transfers[i] != "both" && o.transfers[i] != "none")
 		{
-			if (!tok.empty() && tok != "NVIDIA" && tok != "GeForce")
+			std::cerr << "transfers must be both or none, got " << o.transfers[i] << std::endl;
+			exit(2);
+		}
+	return o;
+}
+
+// ----------------------------------------------------------------- store CLI
+
+// Run a command line; on Windows the whole line is wrapped in quotes so cmd keeps the quoted program path.
+static int Shell(const std::string& command)
+{
+#ifdef _WIN32
+	return system(("\"" + command + "\"").c_str());
+#else
+	return system(command.c_str());
+#endif
+}
+
+static std::string Quote(const std::string& text)
+{
+	return "\"" + text + "\"";
+}
+
+static void WriteText(const std::string& path, const std::string& text)
+{
+	std::ofstream out(path.c_str(), std::ios::binary);
+	if (!out)
+		throw std::runtime_error("cannot write " + path);
+	out << text;
+}
+
+// Rows through `store.py record`; a failed record is fatal because the row would be lost.
+static void RecordRows(const Options& o, const std::vector<std::string>& rows)
+{
+	if (rows.empty()) return;
+	std::string text = "[";
+	for (size_t i = 0; i < rows.size(); i++)
+		text += (i ? ",\n" : "\n") + rows[i];
+	text += "\n]\n";
+	std::string path = o.trials + ".cpp_rows.json";
+	WriteText(path, text);
+	std::string command = Quote(o.python) + " runner_scripts/store.py record " + Quote(path);
+	if (o.floor) command += " --floor";
+	int status = Shell(command);
+	if (status != 0)
+	{
+		std::cerr << "store.py record failed (" << status << "): " << command << std::endl;
+		exit(2);
+	}
+}
+
+// Finals through `store.py finals`: every trajectory's final state, final time and an empty retcode (MPGOS reports none).
+static std::string RecordFinals(const Options& o, const Trial& trial, Solver& Scan)
+{
+	std::string csv = o.trials + ".cpp_finals.csv";
+	std::string spec = o.trials + ".cpp_finals_spec.json";
+	{
+		std::ofstream out(csv.c_str(), std::ios::binary);
+		if (!out)
+			throw std::runtime_error("cannot write " + csv);
+		for (int c = 0; c < SD; c++)
+			out << "s" << (c + 1) << ",";
+		out << "t_final,retcode\n";
+		const char* format = (sizeof(PRECISION) == 8) ? "%.17g" : "%.9g";
+		char buf[40];
+		for (int tid = 0; tid < NT; tid++)
+		{
+			for (int c = 0; c < SD; c++)
 			{
-				if (!gpu.empty()) gpu += "-";
-				gpu += tok;
+				snprintf(buf, sizeof(buf), format, (double)Scan.GetHost<PRECISION>(tid, ActualState, c));
+				out << buf << ",";
 			}
-			tok.clear();
+			snprintf(buf, sizeof(buf), "%.17g", (double)Scan.GetHost<PRECISION>(tid, ActualTime));
+			out << buf << ",\n";
 		}
 	}
-	if (gpu.empty()) gpu = "unknown-gpu";
-
-	cached = os + "_" + gpu;
-	done = true;
-	return cached;
+	WriteText(spec, FinalsSpecText(trial, o.key) + "\n");
+	std::string command = Quote(o.python) + " runner_scripts/store.py finals " + Quote(spec) + " " + Quote(csv);
+	int status = Shell(command);
+	if (status != 0)
+	{
+		std::cerr << "store.py finals failed (" << status << "): " << command << std::endl;
+		exit(2);
+	}
+	// The CSV is n rows of every state; the parquet file now holds them.
+	std::remove(csv.c_str());
+	return "finals/" + trial.trial_id + ".parquet";
 }
 
-// Directory holding this machine's files for a package and problem; creates it.
-static std::string DataDir(const std::string& package)
+// `<trials>.progress`: the trial under way, for the driver's hard-exit bookkeeping.
+static void WriteProgress(const Options& o)
 {
-	std::string dir = "./data/" + package + "/" + DatasetKey() + "/" + PROBLEM_NAME;
-#ifdef _WIN32
-	// cmd needs backslashes and creates intermediate directories itself.
-	std::string win = dir;
-	std::replace(win.begin(), win.end(), '/', '\\');
-	system(("if not exist \"" + win + "\" mkdir \"" + win + "\"").c_str());
-#else
-	system(("mkdir -p \"" + dir + "\"").c_str());
-#endif
-	return dir + "/";
+	time_t now = time(NULL);
+	char stamp[32];
+	strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+	WriteText(o.trials + ".progress",
+	          "{\"trial_id\": " + JsonString(o.trial_id) + ", \"started_utc\": \"" + stamp + "\"}\n");
 }
 
-// Per-run wall-clock watchdog; a hung kernel can only be stopped by process exit.
+// ------------------------------------------------------------------ repeats
+
 static double WatchdogSeconds()
 {
-	const char* env = std::getenv("BENCH_WATCHDOG_SECONDS");
-	return env ? atof(env) : PROTOCOL_WATCHDOG_SECONDS;
+	return PROTOCOL_WATCHDOG_SECONDS;
 }
 
 // Repeat floor and ceiling from the first timed run's seconds, per the protocol schedule.
@@ -180,85 +253,11 @@ static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling
 	return MedianMs(Timed) / Min - 1.0 <= PROTOCOL_REPEAT_SPREAD;
 }
 
-// The token as a double; nan when it does not parse.
-static double ParseTime(const std::string& Token)
-{
-	const char* Start = Token.c_str();
-	char* End = NULL;
-	double Value = strtod(Start, &End);
-	return (End == Start) ? std::nan("") : Value;
-}
+// ----------------------------------------------------------------- watchdog
 
-static std::string Fmt(double Value)
-{
-	if (std::isnan(Value)) return "nan";
-	char Text[32];
-	snprintf(Text, sizeof(Text), "%.10g", Value);
-	return Text;
-}
-
-// One store row through runner_scripts/results.py; Samples is every attempt in ms, warm-up first.
-static void RecordResult(const std::string& Analysis, const std::string& Mode,
-                         const std::string& Algorithm, const std::string& SettingKind,
-                         double Setting, int N, int States, const std::string& Transfers,
-                         double MinMs, const std::vector<double>* Samples,
-                         double ErroredPercent, double Err, double BuildS)
-{
-#ifdef _WIN32
-	const char* Python = "python";
-#else
-	const char* Python = "python3";
-#endif
-	std::ostringstream Cmd;
-	Cmd << Python << " runner_scripts/results.py record cpp " << DatasetKey()
-	    << " " << Analysis << " " << PROBLEM_NAME << " " << Algorithm << " " << Mode
-	    << " " << SettingKind << " " << Fmt(Setting) << " " << N << " " << States
-	    << " default " << Transfers << " min_ms=" << Fmt(MinMs)
-	    << " errored_pct=" << Fmt(ErroredPercent) << " error=" << Fmt(Err)
-	    << " build_s=" << Fmt(BuildS);
-	if (Samples && !Samples->empty())
-	{
-		Cmd << " samples=";
-		for (size_t i = 0; i < Samples->size(); ++i)
-			Cmd << (i ? ";" : "") << Fmt((*Samples)[i]);
-	}
-	int Status = system(Cmd.str().c_str());
-	if (Status != 0)
-		std::cerr << "results.py record failed (" << Status << "): " << Cmd.str() << std::endl;
-}
-
-// Percent of trajectories whose final state is not finite; mirrors errored_pct in runner_scripts/wp_common.py.
-template<class SolverT>
-static double ErroredPct(SolverT& Solver, int Threads, int States)
-{
-	int Bad = 0;
-	for (int tid = 0; tid < Threads; ++tid)
-	{
-		for (int c = 0; c < States; ++c)
-		{
-			if (!std::isfinite((double) Solver.template GetHost<PRECISION>(
-					tid, ActualState, c)))
-			{
-				++Bad;
-				break;
-			}
-		}
-	}
-	return 100.0 * (double) Bad / (double) Threads;
-}
-
-// Breach exit code from the protocol; the runner NaN-fills the leg's remaining sizes.
-static const int WatchdogExitCode = PROTOCOL_WATCHDOG_EXIT_CODE;
-
-// Mode and algorithm names for the store and watchdog messages.
-static const char* ModeName      = (SOLVER == RK4) ? "fixed" : "adaptive";
-static const char* AlgorithmName = (SOLVER == RK4) ? "classical-rk4"
-                                                   : "cash-karp-54";
-static bool StatesRun = false;   // set in main; states rows are SD-keyed
-
-static std::mutex WatchdogLock;
-static std::function<void()> WatchdogRecord;
+// A hung kernel can only be stopped by process exit; the driver records the abandoned rows after exit 3.
 static std::atomic<long long> WatchdogDeadlineMs(0);   // 0 = disarmed
+static std::string WatchdogLabel;
 
 static long long NowMs()
 {
@@ -266,11 +265,9 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Arm with the NaN rows to record if the run never returns; margin over the soft cap.
-static void ArmWatchdog(std::function<void()> record)
+// Margin over the soft cap, so a run that returns late is a timeout row, not a hard exit.
+static void ArmWatchdog()
 {
-	std::lock_guard<std::mutex> hold(WatchdogLock);
-	WatchdogRecord = record;
 	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
 }
 
@@ -286,59 +283,291 @@ static void WatchdogMain()
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		long long deadline = WatchdogDeadlineMs;
 		if (deadline == 0 || NowMs() < deadline) continue;
-		std::lock_guard<std::mutex> hold(WatchdogLock);
-		if (WatchdogRecord) WatchdogRecord();
-		std::cout << "WATCHDOG " << PROBLEM_NAME;
-		if (StatesRun) std::cout << " states=" << SD;
-		std::cout << " " << ModeName << " " << AlgorithmName << " N=" << NT
-		          << ": run never returned" << std::endl;
+		std::cout << "WATCHDOG " << WatchdogLabel << ": run never returned" << std::endl;
 		std::_Exit(WatchdogExitCode);
 	}
 }
 
-int main(int argc, char *argv[])
+// ------------------------------------------------------------------- solve
+
+enum Outcome { Ok, Timeout, Oom, Error };
+
+static const char* OutcomeName(Outcome outcome)
 {
-	int NumberOfProblems = NT;
-	int BlockSize        = 32;
+	switch (outcome)
+	{
+		case Ok: return "ok";
+		case Timeout: return "timeout";
+		case Oom: return "oom";
+		default: return "error";
+	}
+}
 
-	// `<exe> states <build_s>` writes an SD-keyed row with the build time.
-	bool StatesMode = (argc > 1 && string(argv[1]) == string("states"));
-	string StatesBuild = (StatesMode && argc > 2) ? string(argv[2])
-	                                              : string("nan");
-	StatesRun = StatesMode;
+struct LegResult
+{
+	Outcome outcome;
+	double min_ms;
+	std::vector<double> samples;
+	std::string reason;
+	LegResult() : outcome(Ok), min_ms(std::nan("")) {}
+};
 
+static bool IsOom(const std::string& name, const std::string& message)
+{
+	std::string lower = message;
+	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+	return name == "cudaErrorMemoryAllocation" || lower.find("out of memory") != std::string::npos;
+}
+
+// error: <Type>: <message[:200]>, or oom: <Type>: <message> when the message names memory.
+static std::string FailureReason(const std::string& type, const std::string& message, Outcome& outcome)
+{
+	outcome = IsOom(type, message) ? Oom : Error;
+	return std::string(outcome == Oom ? "oom: " : "error: ") + type + ": " + message.substr(0, 200);
+}
+
+void FillSolverObject(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration)
+{
+	PRECISION X0[SD];
+	ProblemInitialState<PRECISION>(X0);
+	for (int k = 0; k < NT; k++)
+	{
+		Scan.SetHost(k, TimeDomain, 0, (PRECISION)0);
+		Scan.SetHost(k, TimeDomain, 1, Duration);
+		// Solve() continues from ActualTime, so reset it to re-integrate from t=0.
+		Scan.SetHost(k, ActualTime, (PRECISION)0);
+		for (int c = 0; c < SD; c++)
+			Scan.SetHost(k, ActualState, c, X0[c]);
+		Scan.SetHost(k, ControlParameters, 0, Values[k]);
+	}
+}
+
+// Time one transfers leg: `both` is h2d, kernel and the ActualState d2h; `none` the kernel alone after an untimed h2d. One untimed warm-up, then the protocol repeat schedule.
+static LegResult TimeLeg(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both)
+{
+	LegResult result;
+	std::vector<double> Timed;
+	int Floor = 0, Ceiling = 0;
+	const double CapMs = WatchdogSeconds() * 1000.0;
+	for (int r = 0; ; r++)
+	{
+		FillSolverObject(Scan, Values, Duration);
+		if (!Both)
+			Scan.SynchroniseFromHostToDevice(All);
+
+		ArmWatchdog();
+		auto T0 = std::chrono::steady_clock::now();
+		if (Both)
+			Scan.SynchroniseFromHostToDevice(All);
+		Scan.Solve();
+		Scan.InsertSynchronisationPoint();
+		Scan.SynchroniseSolver();
+		if (Both)
+			Scan.SynchroniseFromDeviceToHost(ActualState);
+		Scan.SynchroniseDevice();
+		auto T1 = std::chrono::steady_clock::now();
+		DisarmWatchdog();
+
+		cudaError_t err = cudaGetLastError();
+		if (err != cudaSuccess)
+		{
+			result.reason = FailureReason(cudaGetErrorName(err), cudaGetErrorString(err), result.outcome);
+			result.min_ms = std::nan("");
+			return result;
+		}
+
+		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
+		result.samples.push_back(Ms);
+		if (Ms > CapMs)
+		{
+			result.outcome = Timeout;
+			result.min_ms = std::nan("");
+			char text[96];
+			snprintf(text, sizeof(text), "timeout: %.1f ms exceeded the %g s cap", Ms, WatchdogSeconds());
+			result.reason = text;
+			return result;
+		}
+		if (r == 0) continue;   // r == 0 is warm-up
+		Timed.push_back(Ms);
+		if (std::isnan(result.min_ms) || Ms < result.min_ms) result.min_ms = Ms;
+		if (r == 1) RepeatBounds(Timed[0], PROTOCOL_REPEAT_CAP, Floor, Ceiling);
+		if (RepeatsDone(Timed, Floor, Ceiling)) break;
+	}
+	return result;
+}
+
+// Percent of trajectories the store's errored_mask flags: a non-finite state, or a final time off the duration by over 1e-4 relative. MPGOS reports no retcode.
+static double ErroredPct(Solver& Scan, double Duration)
+{
+	int Bad = 0;
+	for (int tid = 0; tid < NT; ++tid)
+	{
+		bool bad = false;
+		for (int c = 0; c < SD && !bad; ++c)
+			if (!std::isfinite((double) Scan.GetHost<PRECISION>(tid, ActualState, c)))
+				bad = true;
+		double t = (double) Scan.GetHost<PRECISION>(tid, ActualTime);
+		if (!(std::fabs(t - Duration) <= 1e-4 * std::fabs(Duration)))
+			bad = true;
+		if (bad) ++Bad;
+	}
+	return 100.0 * (double) Bad / (double) NT;
+}
+
+// --------------------------------------------------------------------- rows
+
+static RowValues BaseValues(const Options& o)
+{
+	RowValues v;
+	v.states = SD;
+	v.min_ms = std::nan("");
+	v.errored_pct = std::nan("");
+	v.build_s = o.build_s;
+	v.package_version = o.package_version;
+	v.suite_rev = o.suite_rev;
+	return v;
+}
+
+// NaN rows for every higher ordinal of the leg that lists these transfers: they are not run.
+static std::vector<std::string> AbandonRows(const Options& o, const std::vector<Trial>& trials,
+                                            const Trial& mine, const std::string& transfers, Outcome why)
+{
+	std::vector<std::string> rows;
+	RowValues v = BaseValues(o);
+	v.reason = std::string("abandoned: ") + OutcomeName(why) + " at ordinal " + std::to_string(mine.ordinal);
+	for (size_t i = 0; i < trials.size(); i++)
+	{
+		const Trial& t = trials[i];
+		if (t.kind != "solve" || t.leg != mine.leg || t.ordinal <= mine.ordinal || !t.Lists(transfers))
+			continue;
+		rows.push_back(RowText(t, transfers, o.key, v));
+	}
+	return rows;
+}
+
+struct OutcomeLog
+{
+	std::string path;
+	std::vector<std::string> lines;
+	void Add(const std::string& transfers, Outcome outcome)
+	{
+		lines.push_back(transfers + " " + OutcomeName(outcome));
+		std::string text;
+		for (size_t i = 0; i < lines.size(); i++) text += lines[i] + "\n";
+		WriteText(path, text);
+	}
+};
+
+// Rows with one reason for every requested transfers leg, recorded and logged; the trial ran nothing.
+static int FailAll(const Options& o, const std::vector<Trial>& trials, const Trial& trial, OutcomeLog& log,
+                   const std::string& reason, Outcome outcome)
+{
+	std::vector<std::string> rows;
+	RowValues v = BaseValues(o);
+	v.reason = reason;
+	for (size_t i = 0; i < o.transfers.size(); i++)
+	{
+		rows.push_back(RowText(trial, o.transfers[i], o.key, v));
+		if (outcome == Oom || outcome == Timeout)
+		{
+			std::vector<std::string> more = AbandonRows(o, trials, trial, o.transfers[i], outcome);
+			rows.insert(rows.end(), more.begin(), more.end());
+		}
+	}
+	RecordRows(o, rows);
+	for (size_t i = 0; i < o.transfers.size(); i++)
+		log.Add(o.transfers[i], outcome);
+	std::cout << "cpp " << trial.problem << " " << trial.algorithm << " " << trial.controller
+	          << " n=" << trial.n << ": " << reason << std::endl;
+	return 0;
+}
+
+// The trial this binary was built for, or an explanation of the mismatch.
+static std::string BinaryMismatch(const Trial& trial)
+{
+	if (trial.problem != PROBLEM_NAME)
+		return "built for " PROBLEM_NAME ", trial is " + trial.problem;
+	if (trial.n != NT)
+		return "built for n = " + std::to_string(NT) + ", trial has n = " + std::to_string(trial.n);
+	if (trial.algorithm != SolverAlgorithm)
+		return std::string("built for ") + SolverAlgorithm + ", trial is " + trial.algorithm;
+	if (trial.precision != BuiltPrecision)
+		return std::string("built for ") + BuiltPrecision + ", trial is " + trial.precision;
+	int states = trial.StatesParam();
+	if (states >= 0 && states != SD)
+		return "built for " + std::to_string(SD) + " states, trial has " + std::to_string(states);
+	return "";
+}
+
+int main(int argc, char* argv[])
+{
+	Options o = ParseOptions(argc, argv);
+	std::vector<Trial> trials = ReadTrials(o.trials);
+	const Trial* found = NULL;
+	for (size_t i = 0; i < trials.size(); i++)
+		if (trials[i].kind == "solve" && trials[i].trial_id == o.trial_id)
+			found = &trials[i];
+	if (!found)
+	{
+		std::cerr << "no solve trial " << o.trial_id << " in " << o.trials << std::endl;
+		return 2;
+	}
+	const Trial& trial = *found;
+	WriteProgress(o);
+	std::string mismatch = BinaryMismatch(trial);
+	if (!mismatch.empty())
+	{
+		std::cerr << "Bench.exe " << mismatch << std::endl;
+		return 2;
+	}
+
+	OutcomeLog log;
+	log.path = o.outcome;
+	WatchdogLabel = std::string(PROBLEM_NAME) + " " + SolverAlgorithm + " n=" + std::to_string(NT);
 	std::thread(WatchdogMain).detach();
 
-	ListCUDADevices();
+	if (trial.parameter != PROBLEM_PARAMETER)
+		return FailAll(o, trials, trial, log, std::string("error: ValueError: ") + PROBLEM_NAME
+			+ " sweeps " + PROBLEM_PARAMETER + ", not " + trial.parameter, Error);
+	if (trial.controller != "fixed" && trial.controller != "default")
+		return FailAll(o, trials, trial, log, "error: unknown controller " + trial.controller, Error);
+	if (FixedSolver != (trial.controller == "fixed"))
+		return FailAll(o, trials, trial, log, std::string("error: ValueError: ") + SolverAlgorithm
+			+ " runs under controller " + (FixedSolver ? "fixed" : "default") + ", not "
+			+ trial.controller, Error);
+	if (FixedSolver && !(trial.dt > 0.0))
+		return FailAll(o, trials, trial, log, "error: ValueError: a fixed step needs dt > 0", Error);
 
-	int MajorRevision  = 3;
-	int MinorRevision  = 5;
-	int SelectedDevice = SelectDeviceByClosestRevision(MajorRevision, MinorRevision);
+	std::vector<PRECISION> Values = Grid<PRECISION>(trial.grid_scale, trial.grid_min, trial.grid_max, NT);
+	const PRECISION Duration = (PRECISION)trial.duration;
 
-	PrintPropertiesOfSpecificDevice(SelectedDevice);
+	int SelectedDevice = SelectDeviceByClosestRevision(3, 5);
+	Solver* ScanPtr = NULL;
+	try
+	{
+		ScanPtr = new Solver(SelectedDevice);
+	}
+	catch (const std::exception& e)
+	{
+		Outcome outcome;
+		std::string reason = FailureReason("RuntimeError", e.what(), outcome);
+		return FailAll(o, trials, trial, log, reason, outcome);
+	}
+	Solver& Scan = *ScanPtr;
 
-
-	int NumberOfParameters_R = NumberOfProblems;
-	PRECISION R_RangeLower = (PRECISION)PROBLEM_SWEEP_MIN;
-    PRECISION R_RangeUpper = (PRECISION)PROBLEM_SWEEP_MAX;
-		vector<PRECISION> Parameters_R_Values(NumberOfParameters_R,0);
-#if PROBLEM_SWEEP_LOG
-		Logspace(Parameters_R_Values, R_RangeLower, R_RangeUpper, NumberOfParameters_R);
-#else
-		Linspace(Parameters_R_Values, R_RangeLower, R_RangeUpper, NumberOfParameters_R);
-#endif
-
-
-	ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION> Scan(SelectedDevice);
-
-	Scan.SolverOption(ThreadsPerBlock, BlockSize);
-	Scan.SolverOption(InitialTimeStep, TIMING_DT);
-	// Adaptive N-sweep tolerance.
-	if (SOLVER != RK4)
+	Scan.SolverOption(ThreadsPerBlock, 32);
+	// The fixed step, or dt0 when the trial pins one; NaN leaves the package default.
+	if (!std::isnan(trial.dt))
+		Scan.SolverOption(InitialTimeStep, trial.dt);
+	if (!std::isnan(trial.dt_min))
+		Scan.SolverOption(MinimumTimeStep, trial.dt_min);
+	if (!std::isnan(trial.dt_max))
+		Scan.SolverOption(MaximumTimeStep, trial.dt_max);
+	if (!FixedSolver)
 		for (int c = 0; c < SD; c++)
 		{
-			Scan.SolverOption(RelativeTolerance, c, PROTOCOL_TIMING_TOL);
-			Scan.SolverOption(AbsoluteTolerance, c, PROTOCOL_TIMING_TOL);
+			Scan.SolverOption(RelativeTolerance, c, trial.rtol);
+			Scan.SolverOption(AbsoluteTolerance, c, trial.atol);
 		}
 
 	// Device-side run budget, 1.25 over the host cap; see problems/stubs.cuh.
@@ -348,363 +577,42 @@ int main(int argc, char *argv[])
 	long long BudgetCycles = (long long)(WatchdogSeconds() * 1.25 * ClockKHz * 1000.0);
 	Scan.SetHost(IntegerSharedParameters, 0, (int)(BudgetCycles >> WATCHDOG_CLOCK_SHIFT));
 
-	// `<exe> wp` sweeps step size (RK4) or tolerance (RKCK45) over the protocol grids.
-	if (argc > 1 && string(argv[1]) == string("wp"))
+	std::string finals;
+	for (size_t li = 0; li < o.transfers.size(); li++)
 	{
-		vector< vector<double> > golden(NT, vector<double>(SD, 0.0));
+		const std::string& transfers = o.transfers[li];
+		LegResult leg = TimeLeg(Scan, Values, Duration, transfers == "both");
+		RowValues v = BaseValues(o);
+		v.min_ms = leg.min_ms;
+		v.samples_ms = leg.samples;
+		v.reason = leg.reason;
+		std::vector<std::string> rows;
+		if (leg.outcome == Ok)
 		{
-			string gpath = "./data/numerical/golden_" + string(PROBLEM_NAME) + "_"
-				+ std::to_string(PROTOCOL_N_WP) + ".csv";
-			ifstream gf(gpath.c_str());
-			if (!gf)
-			{
-				cerr << gpath << " missing - run "
-				        "runner_scripts/golden/generate_golden.jl first" << endl;
-				return 1;
-			}
-			char comma;
-			for (int i = 0; i < NT; i++)
-				for (int c = 0; c < SD; c++)
-				{
-					gf >> golden[i][c];
-					if (c + 1 < SD) gf >> comma;
-				}
+			// Untimed full d2h for the final states and times of every trajectory.
+			Scan.SynchroniseFromDeviceToHost(All);
+			Scan.SynchroniseDevice();
+			v.errored_pct = ErroredPct(Scan, trial.duration);
+			if (trial.finals && finals.empty())
+				finals = RecordFinals(o, trial, Scan);
+			v.finals = finals;
 		}
-
-		const bool FixedMode = (SOLVER == RK4);
-		vector<double> Settings;
-		if (FixedMode)
-			for (int k = PROTOCOL_WP_K_LO; k <= PROTOCOL_WP_K_HI; k++)
-				Settings.push_back(PROBLEM_DURATION * pow(2.0, -k));
+		rows.push_back(RowText(trial, transfers, o.key, v));
+		if (leg.outcome == Timeout || leg.outcome == Oom)
+		{
+			std::vector<std::string> more = AbandonRows(o, trials, trial, transfers, leg.outcome);
+			rows.insert(rows.end(), more.begin(), more.end());
+		}
+		RecordRows(o, rows);
+		log.Add(transfers, leg.outcome);
+		std::cout << "cpp " << trial.problem << " " << trial.algorithm << " " << trial.controller
+		          << " n=" << NT << " " << transfers << ": ";
+		if (leg.outcome == Ok)
+			std::cout << leg.min_ms << " ms over " << leg.samples.size() - 1 << " timed runs, errored "
+			          << v.errored_pct << "%" << std::endl;
 		else
-			for (int k = PROTOCOL_TOL_K_LO; k <= PROTOCOL_TOL_K_HI; k++)
-				Settings.push_back(pow(10.0, -k));
-
-		// The store carries the cubie-vocabulary algorithm name.
-		string Mode = ModeName;
-		string Algorithm = AlgorithmName;
-		const std::string SettingKind = FixedMode ? "dt" : "tol";
-		// NaN rows for the settings from si on, for a breach or a hard exit.
-		auto NanFrom = [&](size_t si) {
-			for (size_t sj = si; sj < Settings.size(); sj++)
-				RecordResult("wp", Mode, Algorithm, SettingKind, Settings[sj], NT, SD,
-					"none", std::nan(""), NULL, 100.0, std::nan(""), std::nan(""));
-		};
-
-		// Repeat ceiling; the count follows the first timed run's duration.
-		const int Repeats = PROTOCOL_REPEAT_CAP;
-		for (size_t si = 0; si < Settings.size(); si++)
-		{
-			double Setting = Settings[si];
-			Scan.SolverOption(InitialTimeStep, FixedMode ? Setting : (double)TIMING_DT);
-			if (!FixedMode)
-			{
-				for (int c = 0; c < SD; c++)
-				{
-					Scan.SolverOption(RelativeTolerance, c, Setting);
-					Scan.SolverOption(AbsoluteTolerance, c, Setting);
-				}
-			}
-
-			bool Breached = false;
-			double BestMs = 1.0e300;
-			std::vector<double> WpSamples;
-			std::vector<double> WpTimed;
-			int WpFloor = 0, WpCeiling = 0;
-			for (int r = 0; ; r++)
-			{
-				// Reset states/time domain: Solve() advances in place.
-				FillSolverObject(Scan, Parameters_R_Values, NT);
-				Scan.SynchroniseFromHostToDevice(All);
-
-				// Kernel only is timed; a hard exit NaN-fills this and every later setting.
-				ArmWatchdog([&, si]() { NanFrom(si); });
-				auto T0 = std::chrono::steady_clock::now();
-				Scan.Solve();
-				Scan.InsertSynchronisationPoint();
-				Scan.SynchroniseSolver();
-				Scan.SynchroniseDevice();
-				auto T1 = std::chrono::steady_clock::now();
-				DisarmWatchdog();
-				// ActualState only: All would also copy the NDO dense-output registers.
-				Scan.SynchroniseFromDeviceToHost(ActualState);
-				Scan.SynchroniseDevice();
-
-				cudaError_t WpErr = cudaGetLastError();
-				if (WpErr != cudaSuccess)
-				{
-					cerr << "CUDA launch error: " << cudaGetErrorString(WpErr) << endl;
-					cerr << "No wp row recorded for setting = " << Setting << "." << endl;
-					return 1;
-				}
-
-				double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-				WpSamples.push_back(Ms);
-				if (Ms > WatchdogSeconds() * 1000.0) { Breached = true; break; }
-				if (r == 0) continue;   // r == 0 is warm-up
-				WpTimed.push_back(Ms);
-				if (Ms < BestMs) BestMs = Ms;
-				if (r == 1) RepeatBounds(WpTimed[0], Repeats, WpFloor, WpCeiling);
-				if (RepeatsDone(WpTimed, WpFloor, WpCeiling)) break;
-			}
-			if (Breached)
-			{
-				NanFrom(si);
-				cout << "WATCHDOG " << PROBLEM_NAME << " " << Mode << " "
-				     << Algorithm << " wp setting=" << Setting
-				     << ": run exceeded the cap" << endl;
-				break;
-			}
-
-			double Sum2 = 0.0;
-			for (int i = 0; i < NT; i++)
-				for (int c = 0; c < SD; c++)
-				{
-					double D = (double)Scan.GetHost<PRECISION>(i, ActualState, c) - golden[i][c];
-					Sum2 += D*D;
-				}
-			double Err = sqrt(Sum2 / (NT * (double)SD));
-			const double WpErroredPct = ErroredPct(Scan, NT, SD);
-
-			RecordResult("wp", Mode, Algorithm, SettingKind, Setting, NT, SD, "none",
-				BestMs, &WpSamples, WpErroredPct, Err, std::nan(""));
-			cout << "wp " << Mode << " setting=" << Setting << ": " << BestMs
-			     << " ms, err=" << scientific << Err << fixed
-			     << ", errored=" << WpErroredPct << "%" << endl;
-		}
-
-		cout << "wp sweep finished!" << endl;
-		return 0;
+			std::cout << leg.reason << std::endl;
 	}
-
-	// Repeat ceiling; the count per leg follows its first timed run.
-	const int TimingRepeats = PROTOCOL_REPEAT_CAP;
-
-	const std::string TimesAnalysis = StatesMode ? "states" : "times";
-	const std::string TimesMode = ModeName;
-	const std::string TimesAlgorithm = AlgorithmName;
-	const std::string TimesSettingKind = (SOLVER == RK4) ? "dt" : "tol";
-	const double TimesSetting = (SOLVER == RK4) ? (double)TIMING_DT
-	                                            : (double)PROTOCOL_TIMING_TOL;
-	const double BuildS = ParseTime(StatesBuild);
-	// Both transfer legs of this point, NaN-timed, for a breach or a hard exit.
-	auto RecordNan = [&]() {
-		RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
-			TimesSetting, NT, SD, "both", std::nan(""), NULL, 100.0, std::nan(""), BuildS);
-		RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
-			TimesSetting, NT, SD, "none", std::nan(""), NULL, 100.0, std::nan(""), BuildS);
-	};
-	bool TimesBreached = false;
-
-	// Device-only timing: the untimed h2d resets the in-place solver state.
-	double ElapsedDeviceMs = 1.0e300;
-	std::vector<double> DeviceSamples;
-	std::vector<double> DeviceTimed;
-	int DeviceFloor = 0, DeviceCeiling = 0;
-	for (int r = 0; ; r++)
-	{
-		FillSolverObject(Scan, Parameters_R_Values, NT);
-		Scan.SynchroniseFromHostToDevice(All);
-
-		ArmWatchdog(RecordNan);
-		auto T0 = std::chrono::steady_clock::now();
-		Scan.Solve();
-		Scan.InsertSynchronisationPoint();
-		Scan.SynchroniseSolver();
-		Scan.SynchroniseDevice();
-		auto T1 = std::chrono::steady_clock::now();
-		DisarmWatchdog();
-
-		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-		DeviceSamples.push_back(Ms);
-		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
-		if (r == 0) continue;   // r == 0 is warm-up
-		DeviceTimed.push_back(Ms);
-		if (Ms < ElapsedDeviceMs) ElapsedDeviceMs = Ms;
-		if (r == 1) RepeatBounds(DeviceTimed[0], TimingRepeats, DeviceFloor,
-			DeviceCeiling);
-		if (RepeatsDone(DeviceTimed, DeviceFloor, DeviceCeiling)) break;
-	}
-
-	// End-to-end timing: h2d, kernel, ActualState d2h.
-	double ElapsedMs = 1.0e300;
-	std::vector<double> EndToEndSamples;
-	std::vector<double> EndToEndTimed;
-	int EndToEndFloor = 0, EndToEndCeiling = 0;
-	for (int r = 0; !TimesBreached; r++)
-	{
-		FillSolverObject(Scan, Parameters_R_Values, NT);
-
-		ArmWatchdog(RecordNan);
-		auto T0 = std::chrono::steady_clock::now();
-		Scan.SynchroniseFromHostToDevice(All);
-		Scan.Solve();
-		Scan.InsertSynchronisationPoint();
-		Scan.SynchroniseSolver();
-		Scan.SynchroniseFromDeviceToHost(ActualState);
-		Scan.SynchroniseDevice();
-		auto T1 = std::chrono::steady_clock::now();
-		DisarmWatchdog();
-
-		double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
-		EndToEndSamples.push_back(Ms);
-		if (Ms > WatchdogSeconds() * 1000.0) { TimesBreached = true; break; }
-		if (r == 0) continue;   // r == 0 is warm-up
-		EndToEndTimed.push_back(Ms);
-		if (Ms < ElapsedMs) ElapsedMs = Ms;
-		if (r == 1) RepeatBounds(EndToEndTimed[0], TimingRepeats,
-			EndToEndFloor, EndToEndCeiling);
-		if (RepeatsDone(EndToEndTimed, EndToEndFloor, EndToEndCeiling)) break;
-	}
-
-	if (TimesBreached)
-	{
-		RecordNan();
-		cout << "WATCHDOG " << PROBLEM_NAME;
-		if (StatesMode) cout << " states=" << SD;
-		cout << " " << TimesMode << " " << TimesAlgorithm << " N=" << NT
-		     << ": run exceeded the cap" << endl;
-		return WatchdogExitCode;
-	}
-
-	// Untimed full d2h for the ActualTime print and SaveData.
-	Scan.SynchroniseFromDeviceToHost(All);
-	Scan.SynchroniseDevice();
-		// Check for kernel launch errors
-	cudaError_t _lastErr = cudaGetLastError();
-	if (_lastErr != cudaSuccess) {
-		std::cerr << "CUDA launch error: " << cudaGetErrorString(_lastErr) << std::endl;
-		std::cerr << "No timing recorded for NT = " << NT << "." << std::endl;
-		return 1;
-	}
-	const double ErroredPercent = ErroredPct(Scan, NT, SD);
-	std::cout << Scan.GetHost<PRECISION>(0, ActualTime) << std::endl;
-	cout << "Total simulation time:           " << ElapsedMs << "ms" << endl;
-	cout << "Device-only time (no h2d/d2h):   " << ElapsedDeviceMs << "ms" << endl;
-	cout << "Ensemble size:                   " << NT << endl << endl;
-
-
-	RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
-		TimesSetting, NT, SD, "both", ElapsedMs, &EndToEndSamples, ErroredPercent,
-		std::nan(""), BuildS);
-	RecordResult(TimesAnalysis, TimesMode, TimesAlgorithm, TimesSettingKind,
-		TimesSetting, NT, SD, "none", ElapsedDeviceMs, &DeviceSamples, ErroredPercent,
-		std::nan(""), BuildS);
-
-	//SaveData(Scan, NT);
-
-	// Save numerical data for 32768-trajectory run
-	if (NT == 32768 && !StatesMode) {
-		SaveNumericalData(Scan, NT);
-		SaveData(Scan, NT);
-		// save per-trajectory step counts (total steps, rejected steps)
-	}
-
-	cout << "Test finished!" << endl;
-}
-
-// AUXILIARY FUNCTION -----------------------------------------------------------------------------
-
-void Linspace(vector<PRECISION>& x, PRECISION B, PRECISION E, int N)
-{
-    PRECISION Increment;
-
-	x[0]   = B;
-
-	if ( N>1 )
-	{
-		x[N-1] = E;
-		Increment = (E-B)/(N-1);
-
-		for (int i=1; i<N-1; i++)
-		{
-			x[i] = B + i*Increment;
-		}
-	}
-}
-
-// Geometric grid, matching problems.py for a log-scaled sweep.
-void Logspace(vector<PRECISION>& x, PRECISION B, PRECISION E, int N)
-{
-	x[0] = B;
-
-	if ( N>1 )
-	{
-		x[N-1] = E;
-		double LogB = log10((double)B);
-		double Increment = (log10((double)E) - LogB)/(N-1);
-
-		for (int i=1; i<N-1; i++)
-		{
-			x[i] = (PRECISION)pow(10.0, LogB + i*Increment);
-		}
-	}
-}
-
-void FillSolverObject(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& Solver, const vector<PRECISION>& R_Values, int NumberOfThreads)
-{
-	PRECISION X0[SD];
-	ProblemInitialState<PRECISION>(X0);
-
-	int ProblemNumber = 0;
-	for (int k=0; k<NumberOfThreads; k++)
-	{
-		Solver.SetHost(ProblemNumber, TimeDomain,  0, 0 );
-		Solver.SetHost(ProblemNumber, TimeDomain,  1, DURATION );
-		// Solve() continues from ActualTime, so reset it to re-integrate from t=0.
-		Solver.SetHost(ProblemNumber, ActualTime, 0 );
-
-		for (int c=0; c<SD; c++)
-			Solver.SetHost(ProblemNumber, ActualState, c, X0[c] );
-
-		Solver.SetHost(ProblemNumber, ControlParameters, 0, R_Values[k] );
-
-		ProblemNumber++;
-	}
-}
-
-void SaveData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& Solver, int NumberOfThreads)
-{
-	ofstream DataFile;
-	// Create directory if it doesn't exist (assumes unix-like system)
-	DataFile.open ( (DataDir("numerical") + "mpgos_internalsave.csv").c_str() );
-
-	int Width = 18;
-	DataFile.precision(10);
-	DataFile.flags(ios::scientific);
-
-	for (int tid=0; tid<NumberOfThreads; tid++)
-	{
-		DataFile.width(Width); DataFile << Solver.GetHost<PRECISION>(tid, ControlParameters, 0) << ',';
-		for (int c=0; c<SD; c++)
-		{
-			DataFile.width(Width); DataFile << Solver.GetHost<PRECISION>(tid, ActualState, c);
-			if (c + 1 < SD) DataFile << ',';
-		}
-		DataFile << '\n';
-	}
-
-	DataFile.close();
-}
-
-void SaveNumericalData(ProblemSolver<NT,SD,NCP,NSP,NISP,NE,NA,NIA,NDO,SOLVER,PRECISION>& Solver, int NumberOfThreads)
-{
-	ofstream DataFile;
-	// Create directory if it doesn't exist (assumes unix-like system)
-	DataFile.open ( (DataDir("numerical") + "mpgos.csv").c_str() );
-
-	DataFile.precision(10);
-	DataFile.flags(ios::scientific);
-
-	for (int tid=0; tid<NumberOfThreads; tid++)
-	{
-		for (int c=0; c<SD; c++)
-		{
-			DataFile << Solver.GetHost<PRECISION>(tid, ActualState, c);
-			if (c + 1 < SD) DataFile << ',';
-		}
-		DataFile << '\n';
-	}
-
-	DataFile.close();
+	delete ScanPtr;
+	return 0;
 }

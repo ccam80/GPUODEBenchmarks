@@ -1,0 +1,249 @@
+"""mpgos_trials.py: the builds and points of a cpp trial file, the reasons for trials the package cannot run, NaN rows through the store, the context lines, and trial.cuh reading a trial file bit for bit."""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, HERE)
+
+import mpgos_trials  # noqa: E402
+import sets  # noqa: E402
+import store  # noqa: E402
+import trials  # noqa: E402
+from test_grid import nvcc_build  # noqa: E402
+
+REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
+KEY = "windows_RTX-4070-SUPER"
+NAN = float("nan")
+CPP_TEST = os.path.join(REPO_ROOT, "GPU_ODE_MPGOS", "tests", "test_trial.cu")
+SCRIPT = os.path.join(os.path.dirname(HERE), "mpgos_trials.py")
+
+
+def cpp_trials(names, problems=None, n=(8, 32), root=None):
+    """The cpp trials of the named sets at the given n list."""
+    specs = sets.expand(list(names), KEY, root or os.path.join(REPO_ROOT, "data"), packages=["cpp"],
+                        problems=problems, n=list(n))
+    return [t for t in trials.build_trials(specs) if t["package"] == "cpp"]
+
+
+def spec(**overrides):
+    fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
+                  parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=8,
+                  grid_dtype="float32", algorithm="classical-rk4", controller="fixed",
+                  dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}",
+                  newton_atol=NAN, newton_rtol=NAN, package="cpp", transfers=["both", "none"],
+                  finals=False, axis="n", build="warm", optimize=None)
+    fields.update(overrides)
+    return fields
+
+
+class ListingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mpgos_trials_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, trial_list):
+        path = os.path.join(self.tmp, "cpp.jsonl")
+        trials.write_jsonl(path, trial_list)
+        return path
+
+    def test_builds_are_one_binary_per_problem_solver_n_states_and_precision(self):
+        trial_list = cpp_trials(["perf", "golden_grid", "states"])
+        builds = mpgos_trials.builds(trial_list)
+        keys = [(b["problem"], b["solver"], b["nt"], b["sd"], b["precision"]) for b in builds]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual({b["precision"] for b in builds}, {"float32"})
+        self.assertEqual({b["solver"] for b in builds}, {"RK4", "RKCK45"})
+        # perf and golden_grid share their lorenz binaries at n = 8 and 32; the states set builds lorenz96 per state count.
+        lorenz = [b for b in builds if b["problem"] == "lorenz"]
+        self.assertEqual(sorted((b["solver"], b["nt"]) for b in lorenz),
+                         [("RK4", 8), ("RK4", 32), ("RKCK45", 8), ("RKCK45", 32)])
+        self.assertTrue(all(b["sd"] == "-" and not b["cold"] for b in lorenz))
+        # The states set builds lorenz96 cold per state count, except 32 states: that trial merged into perf's warm n leg, which came first.
+        states = [b for b in builds if b["problem"] == "lorenz96" and b["cold"]]
+        self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 64, 128])
+        for b in states:
+            self.assertIn('{"states":' + b["sd"] + "}", b["leg"])
+            self.assertTrue(b["leg"].endswith("/states"))
+        merged = [b for b in builds if b["problem"] == "lorenz96" and b["sd"] == "32"]
+        self.assertEqual(len(merged), 4)
+        self.assertTrue(all(not b["cold"] and b["leg"].endswith("/n") for b in merged))
+        # Every solve trial has a build.
+        for t in trial_list:
+            if t["kind"] == "solve":
+                self.assertIn(mpgos_trials.build_key(t), keys, t["leg"])
+
+    def test_points_follow_the_file_order_with_the_build_key_transfers_and_finals(self):
+        trial_list = cpp_trials(["perf", "golden_grid"], problems=["lorenz"])
+        points = mpgos_trials.points(trial_list)
+        solves = [t for t in trial_list if t["kind"] == "solve"]
+        self.assertEqual([p["trial_id"] for p in points], [t["trial_id"] for t in solves])
+        self.assertEqual([p["ordinal"] for p in points], [t["ordinal"] for t in solves])
+        for p, t in zip(points, solves):
+            self.assertEqual(p["solver"], "RK4" if t["algorithm"] == "classical-rk4" else "RKCK45")
+            self.assertEqual(p["nt"], t["n"])
+            self.assertEqual(p["transfers"], ",".join(t["transfers"]))
+            self.assertEqual(p["finals"], t["finals"])
+            self.assertEqual(p["reason"], "")
+        self.assertIn("both,none", {p["transfers"] for p in points})
+        self.assertIn("none", {p["transfers"] for p in points})
+        self.assertTrue(any(p["finals"] for p in points))
+        # The golden_grid dt leg runs its steps on the one n = 8 binary; its 2^-10 step merged into perf's n leg, which came first.
+        dt_leg = [p for p in points if p["leg"].endswith("/dt") and p["nt"] == 8 and p["solver"] == "RK4"]
+        self.assertEqual(len(dt_leg), 12)
+        self.assertEqual([p["ordinal"] for p in dt_leg], list(range(12)))
+        n_leg = [p for p in points if p["leg"].endswith("/n") and p["nt"] == 8 and p["solver"] == "RK4"]
+        self.assertEqual(len(n_leg), 1)
+        self.assertEqual((n_leg[0]["transfers"], n_leg[0]["finals"]), ("both,none", True))
+
+    def test_trials_the_package_cannot_run_carry_a_reason_and_no_build(self):
+        trial_list = trials.build_trials([
+            spec(algorithm="tsit5", controller="fixed"),
+            spec(problem="nand_gate", parameter="c9", grid_min=2.5e-5, grid_max=1e-4, duration=80.0),
+            spec(precision="float64"),
+        ])
+        points = mpgos_trials.points(trial_list)
+        self.assertEqual([p["reason"] for p in points],
+                         ["error: ValueError: cpp has no solver for tsit5",
+                          "error: ValueError: cpp has no problem header for nand_gate", ""])
+        self.assertEqual(points[0]["solver"], "-")
+        builds = mpgos_trials.builds(trial_list)
+        self.assertEqual(len(builds), 1)
+        self.assertEqual((builds[0]["problem"], builds[0]["solver"], builds[0]["precision"]),
+                         ("lorenz", "RK4", "float64"))
+
+    def test_states_come_from_system_params_or_the_problem_header(self):
+        self.assertEqual(mpgos_trials.header_states("lorenz"), 3)
+        self.assertEqual(mpgos_trials.header_states("lorenz96"), 32)
+        self.assertEqual(mpgos_trials.header_states("pleiades"), 28)
+        self.assertIsNone(mpgos_trials.header_states("nand_gate"))
+        self.assertEqual(mpgos_trials.states_of(spec()), 3)
+        self.assertEqual(mpgos_trials.states_of(spec(problem="lorenz96", system_params='{"states":64}')), 64)
+        self.assertEqual(mpgos_trials.build_key(spec(problem="lorenz96", system_params='{"states":64}'))[3], "64")
+
+    def test_nan_rows_record_the_reason_states_build_s_and_versions(self):
+        root = os.path.join(self.tmp, "data")
+        trial_list = trials.build_trials([spec(), spec(problem="lorenz96", parameter="F",
+                                                       grid_max=16.0, system_params='{"states":64}')])
+        path = self.write(trial_list)
+        solves = [t for t in trial_list if t["kind"] == "solve"]
+        rows = mpgos_trials.nan_rows(trial_list, solves[0]["trial_id"], KEY, ["both", "none"],
+                                     "error: BuildError: nvcc failed", build_s="1.250",
+                                     src_hash="abcdef123456", suite_rev="deadbeef")
+        self.assertEqual([r["transfers"] for r in rows], ["both", "none"])
+        self.assertEqual(rows[0]["states"], 3)
+        self.assertEqual(rows[0]["build_s"], 1.25)
+        self.assertTrue(rows[0]["package_version"].startswith("abcdef123456+nvcc"))
+        self.assertEqual(rows[0]["suite_rev"], "deadbeef")
+        with self.assertRaises(ValueError):
+            mpgos_trials.nan_rows(trial_list, "0000000000000000", KEY, ["both"], "x")
+        proc = subprocess.run([sys.executable, SCRIPT, "--root", root, "nan", path, solves[1]["trial_id"],
+                               KEY, "none", "error: ProcessError: Bench.exe exit 1"],
+                              capture_output=True, text=True, cwd=REPO_ROOT)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        stored = store.Store(root).rows(package="cpp")
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]["states"], 64)
+        self.assertEqual(stored[0]["transfers"], "none")
+        self.assertEqual(stored[0]["reason"], "error: ProcessError: Bench.exe exit 1")
+        self.assertTrue(stored[0]["min_ms"] != stored[0]["min_ms"])
+        self.assertEqual(stored[0]["run_id"], store.run_id(dict(solves[1], transfers="none", key=KEY)))
+
+    def test_the_cli_prints_tab_separated_builds_and_points(self):
+        path = self.write(cpp_trials(["perf"], problems=["lorenz"], n=(8,)))
+        builds = subprocess.run([sys.executable, SCRIPT, "builds", path], capture_output=True, text=True)
+        self.assertEqual(builds.returncode, 0, builds.stderr)
+        rows = [line.split("\t") for line in builds.stdout.splitlines()]
+        self.assertEqual(sorted(r[:6] for r in rows), [["lorenz", "RK4", "8", "-", "float32", "false"],
+                                                       ["lorenz", "RKCK45", "8", "-", "float32", "false"]])
+        points = subprocess.run([sys.executable, SCRIPT, "points", path], capture_output=True, text=True)
+        self.assertEqual(points.returncode, 0, points.stderr)
+        rows = [line.split("\t") for line in points.stdout.splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([len(r) for r in rows], [len(mpgos_trials.POINT_COLUMNS)] * 2)
+        self.assertEqual(rows[0][8:], ["both,none", "false", ""])
+
+    def test_context_lists_the_run_constants(self):
+        context = mpgos_trials.context()
+        self.assertEqual(set(context), {"key", "source_hash", "package_version", "suite_rev", "watchdog_exit"})
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{12}", context["source_hash"]))
+        self.assertTrue(context["package_version"].startswith(context["source_hash"] + "+nvcc"))
+        self.assertEqual(context["watchdog_exit"], 3)
+        self.assertTrue(os.path.isfile(mpgos_trials.PROTOCOL_HEADER))
+        names = [os.path.basename(p) for p in mpgos_trials.source_files()]
+        for name in ("Bench.cu", "grid.cuh", "trial.cuh", "protocol.h", "makefile", "lorenz.cuh", "stubs.cuh"):
+            self.assertIn(name, names)
+
+
+class CppTrialTests(unittest.TestCase):
+    def test_trial_cuh_reads_a_trial_file_and_emits_a_row_the_store_hashes_to_the_same_ids(self):
+        if shutil.which("nvcc") is None:
+            self.skipTest("nvcc is not on PATH")
+        tmp = tempfile.mkdtemp(prefix="trial_cuh_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        exe = os.path.join(tmp, "test_trial.exe" if os.name == "nt" else "test_trial")
+        built = nvcc_build(CPP_TEST, exe)
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        trial_list = cpp_trials(["perf", "golden_grid"], problems=["lorenz"], n=(8,))
+        path = os.path.join(tmp, "cpp.jsonl")
+        trials.write_jsonl(path, trial_list)
+        solves = [t for t in trial_list if t["kind"] == "solve"]
+        target = [t for t in solves if t["controller"] == "fixed" and len(t["transfers"]) == 2][0]
+        row_path, spec_path = os.path.join(tmp, "row.json"), os.path.join(tmp, "spec.json")
+        proc = subprocess.run([exe, path, target["trial_id"], KEY, row_path, spec_path],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        fields = dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line)
+        self.assertEqual(fields["count"], str(len(trial_list)))
+        self.assertEqual(fields["kind"], "solve")
+        self.assertEqual(fields["leg"], target["leg"])
+        self.assertEqual(fields["ordinal"], str(target["ordinal"]))
+        self.assertEqual(fields["problem"], "lorenz")
+        self.assertEqual(fields["algorithm"], "classical-rk4")
+        self.assertEqual(fields["controller"], "fixed")
+        self.assertEqual(fields["n"], "8")
+        self.assertEqual(fields["states_param"], "-1")
+        self.assertEqual(float(fields["dt"]), target["dt"])
+        self.assertEqual(fields["atol_nan"], "1")
+        self.assertEqual(fields["finals"], "1" if target["finals"] else "0")
+        self.assertEqual(fields["cold"], "0")
+        self.assertEqual(fields["transfers"], "both,none")
+        self.assertEqual(fields["lists_none"], "1")
+        with open(row_path, encoding="utf-8") as handle:
+            row = json.load(handle)
+        self.assertEqual(list(row)[:len(store.TRIAL_FIELDS)], list(store.TRIAL_FIELDS))
+        self.assertEqual(row["transfers"], "both")
+        self.assertEqual(row["key"], KEY)
+        self.assertIsNone(row["dt_min"])
+        self.assertEqual(row["samples_ms"], [2.0, 1.5])
+        self.assertIsNone(row["build_s"])
+        made = store.make_row(**row)
+        self.assertEqual(made["trial_id"], target["trial_id"])
+        self.assertEqual(made["run_id"], store.run_id(dict(target, transfers="both", key=KEY)))
+        self.assertEqual(made["min_ms"], 1.5)
+        self.assertEqual(made["package_version"], "abcdef123456+nvcc13.3")
+        with open(spec_path, encoding="utf-8") as handle:
+            finals_spec = json.load(handle)
+        self.assertEqual(set(finals_spec), set(store.FINALS_FIELDS))
+        self.assertEqual(store.trial_id(finals_spec), target["trial_id"])
+        # A states trial names its state count.
+        states_list = trials.build_trials([spec(problem="lorenz96", parameter="F", grid_max=16.0,
+                                                system_params='{"states":64}', finals=True)])
+        trials.write_jsonl(path, states_list)
+        proc = subprocess.run([exe, path, states_list[-1]["trial_id"], KEY, row_path, spec_path],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        fields = dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line)
+        self.assertEqual(fields["states_param"], "64")
+        self.assertEqual(fields["finals"], "1")
+
+
+if __name__ == "__main__":
+    unittest.main()

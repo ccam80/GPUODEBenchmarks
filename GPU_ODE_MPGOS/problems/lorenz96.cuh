@@ -8,10 +8,8 @@
 #define PROBLEM_SD 32
 #endif
 #define PROBLEM_NCP 1
-#define PROBLEM_DURATION 1.0
-#define PROBLEM_SWEEP_MIN 0.0
-#define PROBLEM_SWEEP_MAX 16.0
-#define PROBLEM_SWEEP_LOG 0
+// The parameter the ensemble sweeps into cPAR[0].
+#define PROBLEM_PARAMETER "F"
 
 template <class Precision>
 __forceinline__ __device__ void PerThread_OdeFunction(\
