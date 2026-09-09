@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The benchmark entry point: `plan` writes the trials each package's runner executes, `run` drives the runners.
+"""The benchmark entry point: `plan` writes each package's trials file, `run` drives the runners.
 
 Usage:
   bench.py plan|run [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive|all]
@@ -9,25 +9,25 @@ Usage:
                     [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]]
                     [--no-lock-clocks] [--clock-tolerance MHZ]
 
-  plan            write trials/<key>/<package>.jsonl and print the counts per package and leg
-  run             write the same under logs/<key>_<stamp>/ and drive every package's runner
+  plan            write trials/<key>/<package>.jsonl and print counts per package and leg
+  run             write the same under logs/<key>_<stamp>/ and drive every runner
   -p, --package   all | comma list of cubie | cubie_mlir | jax | pytorch | myokit_cuda | cpp | julia_gpu | julia_cpu
   -s, --problem   all | comma list of names in runner_scripts/problems.csv
   -g, --algorithm all | comma list of names in runner_scripts/algorithms.csv
   --mode          all | fixed | adaptive
-  --for           comma list of the views to expand (default all five)
-  -n, --nmax      N sweep ceiling (8, 32, ... <= n) or a comma list of exact Ns
-  --setting       keep only the trials at these dt or tol values
+  --for           comma list of views (default all five)
+  -n, --nmax      N sweep ceiling or a comma list of exact Ns
+  --setting       keep only trials at these dt or tol values
   --states        the states grid of the states view
-  --transfers     the transfer legs to time (default both,none)
+  --transfers     transfer legs to time (default both,none)
   --tier          keep only these tiers of default | matched | pi
-  --point         a trial id, or a leading path of one; repeatable
-  --resume        drop solve trials whose every requested transfers row is present
-  --no-overwrite  drop solve trials whose rows are all finite
+  --point         a trial id or a leading path of one; repeatable
+  --resume        drop solve trials whose requested rows are all present
+  --no-overwrite  drop solve trials whose requested rows are all finite
   --floor         runners keep the lower finite time per row
   --cooldown      seconds between packages (default 15)
 
-Exit code: 0 when every runner completed, 1 otherwise. Clock drift in a runner also fails the run.
+Exit code: 0 when every runner completed, 1 otherwise; clock drift in a runner also fails the run.
 """
 
 import argparse

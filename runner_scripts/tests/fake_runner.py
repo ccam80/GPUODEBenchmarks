@@ -1,10 +1,4 @@
-"""A scripted runner on the 1.4 contract for the bench.py tests: fake_runner.py --root DIR --key KEY --mode MODE --trials PATH [--floor].
-
-Modes: `ok` records every solve trial and exits 0; `crash` exits 1 at once; `hang-once` records
-the ordinal-0 trial of every leg, writes the progress file for the next trial of the first leg and
-exits with the watchdog code, then behaves as `ok` on the next invocation (a marker file under
---root remembers the first call); `hang-silent` exits with the watchdog code and no progress file.
-"""
+"""A scripted runner for the bench.py tests: fake_runner.py --root DIR --key KEY --mode ok|crash|hang-once|hang-silent --trials PATH [--floor]; hang-once records each leg's first trial, writes the progress file and exits with the watchdog code, then behaves as ok."""
 
 import argparse
 import json

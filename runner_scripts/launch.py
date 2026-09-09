@@ -17,7 +17,6 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 
 # package -> callable returning the runner argv; bench.py appends `--trials <path> [--floor]`.
-# Each runner packet registers its package here.
 RUNNERS = {}
 
 

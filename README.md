@@ -417,15 +417,12 @@ and `reference_systems.jl` for the Float64 golden, a
 
 ### Generating the complete dataset
 
-`bench.py` generates trials and drives one runner per package; the analyses
-are separate scripts over the result store. `plan` writes
-`trials/<key>/<package>.jsonl` and prints the counts per package and leg;
-`run` writes the same under `logs/<key>_<stamp>/`, runs each package's runner
-on its file, and after a watchdog hard exit (exit 3) records the abandoned
-ordinals of that leg and re-invokes the runner with the trials that still
-have no row. Every axis takes a comma list; `--for` picks the views (`perf`,
-`wp`, `ne`, `states`, `overlap`), whose trials are deduplicated by identity.
-The `run_*.sh`/`.bat` scripts forward to `bench.py run`.
+`bench.py plan` writes `trials/<key>/<package>.jsonl` and prints counts per
+package and leg; `bench.py run` writes the same under `logs/<key>_<stamp>/`
+and runs each package's runner on its file, re-invoking after a watchdog exit
+with the trials still without a row. Every axis takes a comma list and
+`--for` picks the views (`perf`, `wp`, `ne`, `states`, `overlap`). The
+`run_*.sh`/`.bat` scripts forward to `bench.py run`.
 
 ```bash
     $ python3 bench.py plan                          # every view, every package; counts only
@@ -442,11 +439,10 @@ The `run_*.sh`/`.bat` scripts forward to `bench.py run`.
     $ python3 bench.py run --point julia_gpu/pollu/kvaerno3   # every trial under that path
 ```
 
-A trial id is `<package>/<problem>/<algorithm>/<mode>/<dt|tol>=<setting>/n=<N>/s=<states>/<tier>`
-and `--point` takes an id or any leading path of one. `--resume` drops a
-solve trial when every requested transfers row is in the store (NaN rows
-count); `--no-overwrite` drops it only when those rows are all finite.
-`--floor` reaches the runners, which then keep the lower finite time per row.
+A trial id is `<package>/<problem>/<algorithm>/<mode>/<dt|tol>=<setting>/n=<N>/s=<states>/<tier>`;
+`--point` takes an id or a leading path of one. `--resume` drops trials whose
+requested rows are present (NaN counts), `--no-overwrite` only those whose
+rows are finite, and `--floor` makes runners keep the lower time per row.
 `JULIA` overrides the `julia +1.13` launcher.
 
 **On Windows** the same flags apply:
