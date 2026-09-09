@@ -266,10 +266,10 @@ static long long NowMs()
 		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Deadline well past the soft cap.
+// Deadline 30 s past the soft cap.
 static void ArmWatchdog()
 {
-	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() * 2.0 + 30.0) * 1000.0);
+	WatchdogDeadlineMs = NowMs() + (long long)((WatchdogSeconds() + 30.0) * 1000.0);
 }
 
 static void DisarmWatchdog()

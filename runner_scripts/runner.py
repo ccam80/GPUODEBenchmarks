@@ -71,8 +71,8 @@ def write_progress(path, trial):
                   handle)
 
 
-def watchdogged(run, what, budget_s=None):
-    """run() under the watchdog's hard exit: the default budget, or budget_s seconds."""
+def watchdogged(run, what, budget_s):
+    """run() under the watchdog's hard exit after budget_s seconds."""
     def breach():
         print("WATCHDOG hard exit: {0} never returned".format(what), flush=True)
 
@@ -199,13 +199,10 @@ class Runner:
                     # The first line builds the leg; a warm line also compiles, and a cold one is timed as build_s.
                     cold = trial["kind"] == "warm" and bool(trial["cold"])
                     started = timeit.default_timer()
-                    budget = budget_of(trial) * 2.0 + 30.0
                     try:
-                        leg = watchdogged(lambda: self.adapter.build_leg(trial, cold),
-                                          "build " + name, budget)
+                        leg = self.adapter.build_leg(trial, cold)
                         if trial["kind"] == "warm":
-                            watchdogged(lambda: self.adapter.compile(leg, trial, grid_mod.grid(trial)),
-                                        "compile " + name, budget)
+                            self.adapter.compile(leg, trial, grid_mod.grid(trial))
                     except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
                         reason = failure_reason(classify(exc), exc)
                         self.record_failed_leg(solves, reason, leg.states if leg else None)

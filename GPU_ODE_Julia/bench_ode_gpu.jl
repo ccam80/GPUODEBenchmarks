@@ -213,18 +213,12 @@ function abandon!(state, transfers, outcome, ordinal)
     return
 end
 
-"One solve at n = 8 in the leg's process, off the GPU lock; the kernel compile lands here."
+"One solve at n = 8 in the leg's process, off the GPU lock and outside the watchdog; the kernel compile lands here."
 function warm_leg(parts, trial, label)
     values = grid_values(trial["grid_scale"], trial["grid_min"], trial["grid_max"], WARM_N)
     probs_host, probs = build_ensemble(parts.system, parts.prob, values)
-    on_breach = () -> begin
-        println("WATCHDOG $(label): warm run never returned")
-        flush(stdout)
-    end
-    run_watchdogged(on_breach; budget_s = trial["watchdog_s"] * 2.0 + 30.0) do
-        gpu_solve_device(probs, parts.prob, parts.solver, trial["controller"], trial["dt"],
-            trial["atol"], trial["rtol"])
-    end
+    gpu_solve_device(probs, parts.prob, parts.solver, trial["controller"], trial["dt"],
+        trial["atol"], trial["rtol"])
     return nothing
 end
 

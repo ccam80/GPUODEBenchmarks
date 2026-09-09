@@ -2,8 +2,8 @@
 
 include(joinpath(@__DIR__, "protocol.jl"))
 
-"Run f() under the watchdog; when it has not returned after budget_s (twice the soft cap plus 30 s), run on_breach() and hard-exit."
-function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS * 2.0 + 30.0)
+"Run f() under the watchdog; when it has not returned after budget_s (the soft cap plus 30 s), run on_breach() and hard-exit."
+function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0)
     finished = Threads.Atomic{Bool}(false)
     timer = Timer(budget_s) do _
         finished[] && return
@@ -53,7 +53,7 @@ function watchdogged_min_ms(f, on_breach, repeats; cap_s = WATCHDOG_SECONDS)
     lo = hi = 0
     result = nothing
     while true
-        elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s * 2.0 + 30.0)
+        elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0)
         push!(samples, elapsed * 1000.0)
         elapsed > cap_s && return (NaN, samples, result)
         length(samples) == 1 && continue   # the warm-up carries the compile
