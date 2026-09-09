@@ -255,10 +255,7 @@ class MyokitAdapter:
         return Leg(trial, cold, self.model_class)
 
     def compile(self, leg, trial, values):
-        """One step at the trial's n loads the compiled kernel onto the device."""
-        values = np.ascontiguousarray(values, dtype=np.float32)
-        leg.model.solve(dt=float(trial["dt"]), step_count=1,
-                        initial_states=leg.initial_states(int(values.shape[0])), diffusion_values=values)
+        """The kernel compiles when the model is built; nothing more to warm."""
 
     def optimize(self, leg, trial, values):
         raise NotImplementedError("myokit_cuda has no launch geometry to optimize")

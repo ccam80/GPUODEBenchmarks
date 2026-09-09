@@ -185,10 +185,10 @@ class LegTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             myokit_bench.MyokitAdapter(KEY, "data", model_class=Reordered).build_leg(trial())
 
-    def test_compile_runs_one_step_at_the_trials_n(self):
+    def test_compile_launches_nothing(self):
         leg = self.adapter.build_leg(trial(n=8))
         self.adapter.compile(leg, trial(n=8), self.values(trial(n=8)))
-        self.assertEqual(leg.model.launches, [("host", 8, 2.0 ** -10, 1)])
+        self.assertEqual(leg.model.launches, [])
         leg.close()
 
     def test_host_solves_run_the_step_count_and_hand_back_host_finals(self):
