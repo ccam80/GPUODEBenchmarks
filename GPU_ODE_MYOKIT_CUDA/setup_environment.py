@@ -49,6 +49,7 @@ def main():
 
     requirements = script_dir / "requirements.txt"
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
+    # pyarrow and tzdata serve the result store.
     run(
         [
             str(python),
@@ -58,6 +59,8 @@ def main():
             "-r",
             str(requirements),
             "{0}=={1}".format(CUPY_PACKAGE, CUPY_VERSION),
+            "pyarrow",
+            "tzdata",
         ]
     )
     run(

@@ -15,17 +15,17 @@ python GPU_ODE_MYOKIT_CUDA/setup_environment.py
 The setup detects CUDA 12 or 13 from `nvcc` (falling back to `nvidia-smi`)
 and installs the matching `cupy-cuda12x` or `cupy-cuda13x` wheel.
 
-From the repository root, run one timing point:
+Run it through `bench.py`:
 
 ```text
-GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 32768
+python bench.py run --set perf -p myokit_cuda
 ```
 
-On Linux, use `venv/bin/python`. Fixed-step work-precision mode is:
+or on a planned trial file (`venv/bin/python` on Linux):
 
 ```text
-GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py 32768 wp
+GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py --trials trials/<key>/myokit_cuda.jsonl
 ```
 
-Myokit's CUDA exporter implements forward Euler only, so this benchmark
-intentionally writes no adaptive timing or work-precision output.
+The kernel is fixed-step forward Euler in float32; any other algorithm,
+precision or controller records a failed row.
