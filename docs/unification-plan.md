@@ -226,8 +226,7 @@ Expansion, in `runner_scripts/sets.py`:
    (`problems.csv frameworks`) × algorithms the package can run with the
    stepping's controller kind (`algorithms.csv fixed` / `adaptive`) × grids
    × steppings.
-2. `default` grid fields resolve from `problems.csv`; a `problems` table
-   overrides fields per problem with literal floats.
+2. `default` grid fields resolve from `problems.csv`; `problems.<name>` overrides fields with literal floats.
 3. `duration_times_2_pow = k` resolves to `duration * 2**k`;
    `duration_times = f` to `duration * f`.
 4. `controller = "matched"` (cubie packages only) reads
