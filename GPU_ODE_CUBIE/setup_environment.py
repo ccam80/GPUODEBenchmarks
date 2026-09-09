@@ -110,11 +110,11 @@ def main():
         print("Failed to install cubie")
         return 1
 
-    # The suite interpreter: the result store needs pyarrow and DuckDB.
-    print("Installing the result-store dependencies (pyarrow, duckdb)...")
+    # The suite interpreter: the result store needs pyarrow and DuckDB, the analyses matplotlib.
+    print("Installing the result-store and analysis dependencies (pyarrow, duckdb, matplotlib)...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
-                        "pyarrow", "duckdb"]):
-        print("Failed to install pyarrow and duckdb")
+                        "pyarrow", "duckdb", "matplotlib"]):
+        print("Failed to install pyarrow, duckdb and matplotlib")
         return 1
 
     # Verify each backend resolves under its env var. The backend is read once
