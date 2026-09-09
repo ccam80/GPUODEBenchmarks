@@ -1,8 +1,9 @@
-"""The result store: one parquet file per leg under data/key=<os>_<gpu>/package=<pkg>/results/, finals beside it, DuckDB over the tree. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <identity.json> <finals.csv> | status <identity.json> | query "<sql over results>" | clear <filter.json>."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per leg, finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
 
 import argparse
 import csv
 import glob
+import hashlib
 import json
 import math
 import os
@@ -19,48 +20,78 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PACKAGES = ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp",
             "julia_gpu", "julia_cpu")
-MODES = ("fixed", "adaptive")
-SETTING_KINDS = ("dt", "tol")
-TIERS = ("default", "matched", "pi")
+PRECISIONS = ("float32", "float64")
+GRID_SCALES = ("linear", "log")
+GRID_DTYPES = ("float32",)
 TRANSFERS = ("both", "none")
 
-IDENTITY = ("package", "key", "problem", "algorithm", "mode", "setting_kind",
-            "setting", "n", "states", "tier", "transfers")
-# A finals file belongs to a trial, which both transfer legs share.
-FINALS_IDENTITY = tuple(f for f in IDENTITY if f != "transfers")
+# The run spec in table order; the type drives validation and the hash text.
+SPEC_TYPES = (
+    ("problem", "name"), ("system_params", "json"), ("duration", "float"),
+    ("precision", "str"),
+    ("parameter", "str"), ("grid_scale", "str"), ("grid_min", "float"),
+    ("grid_max", "float"), ("n", "int"), ("grid_dtype", "str"),
+    ("algorithm", "name"), ("controller", "str"), ("dt", "float"),
+    ("dt_min", "float"), ("dt_max", "float"), ("atol", "float"),
+    ("rtol", "float"), ("gains", "json"), ("newton_atol", "float"),
+    ("newton_rtol", "float"),
+    ("transfers", "str"), ("package", "str"), ("key", "name"),
+)
+SPEC_FIELDS = tuple(name for name, _ in SPEC_TYPES)
+TRIAL_FIELDS = tuple(f for f in SPEC_FIELDS if f not in ("transfers", "key"))
+FINALS_FIELDS = TRIAL_FIELDS + ("key",)
+ENSEMBLE_FIELDS = ("parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
+GROUP_FIELDS = tuple(f for f in TRIAL_FIELDS
+                     if f not in ENSEMBLE_FIELDS and f != "package")
+ID_FIELDS = {"trial_id": TRIAL_FIELDS, "run_id": SPEC_FIELDS, "group_id": GROUP_FIELDS}
+_ENUMS = {"precision": PRECISIONS, "grid_scale": GRID_SCALES,
+          "grid_dtype": GRID_DTYPES, "transfers": TRANSFERS, "package": PACKAGES}
 
-SCHEMA = pa.schema([
-    ("package", pa.string()), ("key", pa.string()), ("problem", pa.string()),
-    ("algorithm", pa.string()), ("mode", pa.string()),
-    ("setting_kind", pa.string()), ("setting", pa.float64()),
-    ("n", pa.int64()), ("states", pa.int32()), ("tier", pa.string()),
-    ("transfers", pa.string()), ("min_ms", pa.float64()),
+_ARROW = {"name": pa.string(), "str": pa.string(), "json": pa.string(),
+          "float": pa.float64(), "int": pa.int64()}
+SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
+    ("run_id", pa.string()), ("trial_id", pa.string()), ("group_id", pa.string()),
+    ("states", pa.int32()), ("min_ms", pa.float64()),
     ("samples_ms", pa.list_(pa.float64())), ("errored_pct", pa.float64()),
-    ("error", pa.float64()), ("build_s", pa.float64()),
-    ("reason", pa.string()), ("finals", pa.string()),
+    ("build_s", pa.float64()), ("reason", pa.string()), ("finals", pa.string()),
     ("package_version", pa.string()), ("suite_rev", pa.string()),
     ("recorded_utc", pa.timestamp("us", tz="UTC")),
 ])
 COLUMNS = tuple(SCHEMA.names)
-FLOAT_COLUMNS = ("setting", "min_ms", "errored_pct", "error", "build_s")
-TEXT_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
+FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s")
+TEXT_VALUE_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
 
 NAN = float("nan")
-SETTING_REL_TOL = 1e-8
+HASH_HEX = 16
 LOCK_TIMEOUT_S = 120.0
 LOCK_STALE_S = 300.0
 
 
 def _float(value):
-    """A float column value; None and unparsable text are NaN."""
+    """A float value; None, empty text and "nan" are NaN; infinities and other text are refused."""
     if value is None:
         return NAN
     if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
+        if value.strip().lower() in ("", "nan"):
             return NAN
-    return float(value)
+        value = float(value)
+    value = float(value)
+    if math.isinf(value):
+        raise ValueError("infinite float")
+    return value
+
+
+def _int(name, value):
+    """An integer value; a float or text is accepted only when it is a whole number."""
+    if isinstance(value, bool):
+        raise ValueError("{0} is a bool".format(name))
+    if isinstance(value, str):
+        value = float(value)
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("{0} {1!r} is not an integer".format(name, value))
+        value = int(value)
+    return int(value)
 
 
 def _text(value):
@@ -79,35 +110,103 @@ def _utc(value):
     return value.astimezone(timezone.utc)
 
 
-def format_setting(setting):
-    """The setting as it appears in finals file names."""
-    return format(float(setting), ".10g")
+def canonical_json(value):
+    """A JSON object as its canonical text: sorted keys, no whitespace; accepts a dict, JSON text, or None ({})."""
+    if isinstance(value, str):
+        value = json.loads(value) if value.strip() else {}
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        raise ValueError("a JSON object is required, got " + type(value).__name__)
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def setting_matches(a, b):
-    """Two settings name the same point within a relative 1e-8."""
-    a, b = _float(a), _float(b)
-    if math.isnan(a) and math.isnan(b):
-        return True
-    return math.isclose(a, b, rel_tol=SETTING_REL_TOL, abs_tol=0.0)
+def _spec_value(name, kind, value):
+    if kind == "float":
+        return _float(value)
+    if kind == "int":
+        return _int(name, value)
+    if kind == "json":
+        return canonical_json(value)
+    text = _text(value)
+    if not text:
+        raise ValueError("spec field {0} is empty".format(name))
+    if kind == "name" and ("/" in text or "\\" in text):
+        raise ValueError("bad {0} '{1}'".format(name, text))
+    if name in _ENUMS and text not in _ENUMS[name]:
+        raise ValueError("{0} '{1}' is not one of {2}".format(
+            name, text, ", ".join(_ENUMS[name])))
+    return text
+
+
+def spec_of(fields, names=SPEC_FIELDS):
+    """The validated spec columns named, from a row or trial dict; every one must be present."""
+    missing = [f for f in names if f not in fields]
+    if missing:
+        raise ValueError("spec incomplete: " + ", ".join(missing))
+    kinds = dict(SPEC_TYPES)
+    spec = {name: _spec_value(name, kinds[name], fields[name]) for name in names}
+    if "n" in spec and spec["n"] < 1:
+        raise ValueError("n must be positive")
+    return spec
+
+
+def _hash_text(value, kind):
+    if kind == "float":
+        return '"nan"' if math.isnan(value) else format(value, ".17g")
+    if kind == "int":
+        return str(int(value))
+    return json.dumps(value)
+
+
+def canonical_spec_text(spec, names):
+    """The hash input: a JSON object of the named fields in table order, floats %.17g, NaN "nan"."""
+    kinds = dict(SPEC_TYPES)
+    return "{" + ",".join('"{0}":{1}'.format(name, _hash_text(spec[name], kinds[name]))
+                          for name in names) + "}"
+
+
+def _hash(spec, names):
+    text = canonical_spec_text(spec_of(spec, names), names)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:HASH_HEX]
+
+
+def trial_id(spec):
+    """sha1 of the canonical text of every spec field but transfers and key, first 16 hex."""
+    return _hash(spec, TRIAL_FIELDS)
+
+
+def run_id(spec):
+    """sha1 of the canonical text of every spec field, first 16 hex; the store's replace key."""
+    return _hash(spec, SPEC_FIELDS)
+
+
+def group_id(spec):
+    """sha1 of the canonical text of the system and stepping fields (no ensemble, transfers, package or key), first 16 hex; the comparison key across packages and grids."""
+    return _hash(spec, GROUP_FIELDS)
+
+
+def ids(spec):
+    """{trial_id, run_id, group_id} of a spec; trial_id and group_id need every field but transfers and key."""
+    return {name: _hash(spec, names) for name, names in ID_FIELDS.items()}
 
 
 def make_row(**fields):
-    """One complete row: the identity as given, every value column defaulted (NaN, [], "", now)."""
+    """One complete row: the spec as given with its hashes, every value column defaulted (NaN, [], "", now)."""
     unknown = set(fields) - set(COLUMNS)
     if unknown:
         raise ValueError("unknown columns: " + ", ".join(sorted(unknown)))
-    missing = [f for f in IDENTITY if f not in fields]
-    if missing:
-        raise ValueError("identity incomplete: " + ", ".join(missing))
-    row = {}
-    for field in ("package", "key", "problem", "algorithm", "mode",
-                  "setting_kind", "tier", "transfers"):
-        row[field] = str(fields[field])
-    row["setting"] = float(fields["setting"])
-    row["n"] = int(fields["n"])
-    row["states"] = int(fields["states"])
-    for field in ("min_ms", "errored_pct", "error", "build_s"):
+    row = spec_of(fields)
+    row.update(ids(row))
+    for name in ID_FIELDS:
+        given = _text(fields.get(name))
+        if given and given != row[name]:
+            raise ValueError("{0} {1} does not hash the spec ({2})".format(
+                name, given, row[name]))
+    if fields.get("states") is None:
+        raise ValueError("states is required")
+    row["states"] = _int("states", fields["states"])
+    for field in FLOAT_VALUE_COLUMNS:
         row[field] = _float(fields.get(field))
     samples = fields.get("samples_ms")
     if samples is None:
@@ -115,49 +214,10 @@ def make_row(**fields):
     elif isinstance(samples, str):
         raise ValueError("samples_ms is a list of ms, not a string")
     row["samples_ms"] = [float(s) for s in samples]
-    for field in TEXT_COLUMNS:
+    for field in TEXT_VALUE_COLUMNS:
         row[field] = _text(fields.get(field))
     row["recorded_utc"] = _utc(fields.get("recorded_utc"))
-    _validate(row)
-    return row
-
-
-def _validate(row):
-    checks = (("package", PACKAGES), ("mode", MODES),
-              ("setting_kind", SETTING_KINDS), ("tier", TIERS),
-              ("transfers", TRANSFERS))
-    for field, allowed in checks:
-        if row[field] not in allowed:
-            raise ValueError("{0} '{1}' is not one of {2}".format(
-                field, row[field], ", ".join(allowed)))
-    for field in ("key", "problem", "algorithm"):
-        if not row[field] or "/" in row[field] or "\\" in row[field]:
-            raise ValueError("bad {0} '{1}'".format(field, row[field]))
-
-
-def same_identity(row, ident):
-    """True when a row carries every identity column given in ident."""
-    for field in IDENTITY:
-        if field not in ident:
-            continue
-        if field == "setting":
-            if not setting_matches(row[field], ident[field]):
-                return False
-        elif field in ("n", "states"):
-            if int(row[field]) != int(ident[field]):
-                return False
-        elif str(row[field]) != str(ident[field]):
-            return False
-    return True
-
-
-def finals_name(ident):
-    """<problem>__<algorithm>__<mode>__<kind>-<setting>__n<n>__s<states>__<tier>.parquet"""
-    return "{problem}__{algorithm}__{mode}__{kind}-{setting}__n{n}__s{states}__{tier}.parquet".format(
-        problem=ident["problem"], algorithm=ident["algorithm"],
-        mode=ident["mode"], kind=ident["setting_kind"],
-        setting=format_setting(ident["setting"]), n=int(ident["n"]),
-        states=int(ident["states"]), tier=ident["tier"])
+    return {name: row[name] for name in COLUMNS}
 
 
 def suite_rev(repo_root=REPO_ROOT):
@@ -242,6 +302,24 @@ def _lower_finite_wins(recorded, new):
     return fresh < old
 
 
+def _place(rows, row, floor):
+    """Replace the row of the same run_id in place (append when absent); returns the row that stands."""
+    standing = row
+    for index, existing in enumerate(rows):
+        if existing["run_id"] == row["run_id"]:
+            if floor and not _lower_finite_wins(existing, row):
+                standing = existing
+            rows[index] = standing
+            return standing
+    rows.append(row)
+    return standing
+
+
+def finals_name(spec):
+    """finals/<trial_id>.parquet, relative to the package dir."""
+    return "finals/" + trial_id(spec) + ".parquet"
+
+
 class Store:
     """The parquet tree under root; `data` by default."""
 
@@ -251,16 +329,13 @@ class Store:
     def package_dir(self, package, key):
         return os.path.join(self.root, "key=" + key, "package=" + package)
 
-    def leg_path(self, package, key, problem, algorithm, mode):
+    def leg_path(self, package, key, problem, algorithm):
         return os.path.join(self.package_dir(package, key), "results",
-                            "{0}__{1}__{2}.parquet".format(problem, algorithm, mode))
+                            "{0}__{1}.parquet".format(problem, algorithm))
 
-    def _leg_of(self, ident):
-        for field in ("package", "key", "problem", "algorithm", "mode"):
-            if field not in ident:
-                raise ValueError("identity needs " + field)
-        return self.leg_path(ident["package"], ident["key"], ident["problem"],
-                             ident["algorithm"], ident["mode"])
+    def _leg_of(self, row):
+        return self.leg_path(row["package"], row["key"], row["problem"],
+                             row["algorithm"])
 
     @staticmethod
     def _read_leg(path):
@@ -277,61 +352,67 @@ class Store:
         _write_parquet(path, pa.Table.from_pylist(rows, schema=SCHEMA))
 
     def record(self, row, floor=False):
-        """Replace the row with this identity; under floor the lower finite min_ms stays. Returns the row that now stands."""
-        row = make_row(**row)
-        path = self._leg_of(row)
-        with _Lock(path):
-            rows = self._read_leg(path)
-            standing = row
-            for index, existing in enumerate(rows):
-                if same_identity(existing, row):
-                    if floor and not _lower_finite_wins(existing, row):
-                        standing = existing
-                    rows[index] = standing
-                    break
-            else:
-                rows.append(row)
-            self._write_leg(path, rows)
+        """Replace the row of this run_id; under floor the lower finite min_ms stays. Returns the row that now stands."""
+        return self.record_batch([row], floor=floor)[0]
+
+    def record_batch(self, rows, floor=False):
+        """Record rows in order, one lock and one rewrite per leg file; returns the standing row of each."""
+        made = [make_row(**row) for row in rows]
+        standing = [None] * len(made)
+        by_leg = {}
+        for index, row in enumerate(made):
+            by_leg.setdefault(self._leg_of(row), []).append(index)
+        for path, indices in by_leg.items():
+            with _Lock(path):
+                existing = self._read_leg(path)
+                for index in indices:
+                    standing[index] = _place(existing, made[index], floor)
+                self._write_leg(path, existing)
         return standing
 
-    def record_finals(self, identity, finals, converged):
-        """Write the finals file of a trial; returns its path relative to the package dir."""
-        ident = {f: identity[f] for f in FINALS_IDENTITY if f in identity}
-        missing = [f for f in FINALS_IDENTITY if f not in ident]
-        if missing:
-            raise ValueError("finals identity incomplete: " + ", ".join(missing))
-        states = np.asarray(finals, dtype=np.float32)
+    def record_finals(self, spec, finals, converged):
+        """Write finals/<trial_id>.parquet of a trial (all n rows, the run precision); returns the path relative to the package dir."""
+        ident = spec_of(spec, FINALS_FIELDS)
+        dtype = np.float64 if ident["precision"] == "float64" else np.float32
+        states = np.asarray(finals, dtype=dtype)
         if states.ndim != 2:
             raise ValueError("finals is rows x states")
+        if states.shape[0] != ident["n"]:
+            raise ValueError("finals has {0} rows for n = {1}".format(
+                states.shape[0], ident["n"]))
         converged = np.asarray(converged, dtype=bool).reshape(-1)
         if converged.shape[0] != states.shape[0]:
             raise ValueError("converged has one flag per finals row")
         columns = {"traj": pa.array(np.arange(states.shape[0], dtype=np.int32),
                                     pa.int32())}
+        arrow_type = pa.float64() if dtype is np.float64 else pa.float32()
         for k in range(states.shape[1]):
-            columns["s{0}".format(k + 1)] = pa.array(states[:, k], pa.float32())
+            columns["s{0}".format(k + 1)] = pa.array(states[:, k], arrow_type)
         columns["converged"] = pa.array(converged, pa.bool_())
-        relative = "finals/" + finals_name(ident)
+        relative = finals_name(ident)
         _write_parquet(os.path.join(self.package_dir(ident["package"], ident["key"]),
-                                    "finals", finals_name(ident)),
+                                    *relative.split("/")),
                        pa.table(columns))
         return relative
 
     def load_finals(self, package, key, relative):
-        """(traj int32[m], states float32[m, k], converged bool[m]) of a finals file by its relative path."""
+        """(traj int32[m], states [m, k] in the stored precision, converged bool[m]) of a finals file by its package-relative path."""
         table = pq.read_table(os.path.join(self.package_dir(package, key),
                                            *relative.split("/")))
         names = [c for c in table.column_names if c.startswith("s")]
         names.sort(key=lambda c: int(c[1:]))
+        dtype = np.float64 if names and str(table.schema.field(names[0]).type) == "double" \
+            else np.float32
         states = np.column_stack([table.column(c).to_numpy() for c in names]) \
-            if names else np.zeros((table.num_rows, 0), np.float32)
-        return (table.column("traj").to_numpy(), states.astype(np.float32),
+            if names else np.zeros((table.num_rows, 0), dtype)
+        return (table.column("traj").to_numpy(), states.astype(dtype),
                 table.column("converged").to_numpy())
 
-    def status(self, identity):
-        """'absent', 'nan' or 'finite' for the rows carrying the given identity columns."""
-        matched = [r for r in self._read_leg(self._leg_of(identity))
-                   if same_identity(r, identity)]
+    def status(self, run):
+        """'absent', 'nan' or 'finite' for the row of a run_id (or of a spec's run_id)."""
+        if isinstance(run, dict):
+            run = run_id(run)
+        matched = self.rows(run_id=run)
         if not matched:
             return "absent"
         if any(math.isfinite(r["min_ms"]) for r in matched):
@@ -370,14 +451,13 @@ class Store:
             con.close()
 
     def rows(self, sql_where="", **eq_filters):
-        """Rows of the whole tree as dicts, filtered by equality on columns and an optional SQL predicate."""
+        """Rows of the whole tree as dicts, filtered by exact equality on columns (NaN matches NaN) and an optional SQL predicate."""
         clauses, params = [], []
         for column, value in eq_filters.items():
             if column not in COLUMNS:
                 raise ValueError("unknown column " + column)
-            if column == "setting":
-                clauses.append("abs(setting - ?) <= ? * abs(?)")
-                params += [float(value), SETTING_REL_TOL, float(value)]
+            if isinstance(value, float) and math.isnan(value):
+                clauses.append('isnan("{0}")'.format(column))
             else:
                 clauses.append('"{0}" = ?'.format(column))
                 params.append(value)
@@ -394,6 +474,9 @@ class Store:
 
     def clear(self, **eq_filters):
         """Drop every row matching the equality filters; returns the count dropped."""
+        unknown = set(eq_filters) - set(COLUMNS)
+        if unknown:
+            raise ValueError("unknown columns: " + ", ".join(sorted(unknown)))
         dropped = 0
         for path in self.leg_files():
             with _Lock(path):
@@ -406,12 +489,19 @@ class Store:
 
 
 def _matches(row, filters):
+    kinds = dict(SPEC_TYPES)
     for column, value in filters.items():
-        if column == "setting":
-            if not setting_matches(row[column], value):
+        if column not in COLUMNS:
+            raise ValueError("unknown column " + column)
+        if kinds.get(column) == "float" or column in FLOAT_VALUE_COLUMNS:
+            a, b = _float(row[column]), _float(value)
+            if not (a == b or (math.isnan(a) and math.isnan(b))):
                 return False
-        elif column in ("n", "states"):
+        elif kinds.get(column) == "int" or column == "states":
             if int(row[column]) != int(value):
+                return False
+        elif kinds.get(column) == "json":
+            if row[column] != canonical_json(value):
                 return False
         elif str(row[column]) != str(value):
             return False
@@ -448,14 +538,16 @@ def _cli(argv):
     record.add_argument("rows")
     record.add_argument("--floor", action="store_true")
     finals = commands.add_parser("finals")
-    finals.add_argument("identity")
+    finals.add_argument("spec")
     finals.add_argument("finals")
     status = commands.add_parser("status")
-    status.add_argument("identity")
+    status.add_argument("run_id")
     query = commands.add_parser("query")
     query.add_argument("sql")
     clear = commands.add_parser("clear")
     clear.add_argument("filters")
+    hash_ = commands.add_parser("hash")
+    hash_.add_argument("spec")
     args = parser.parse_args(argv)
     store = Store(args.root)
 
@@ -463,15 +555,14 @@ def _cli(argv):
         rows = _read_json(args.rows)
         if isinstance(rows, dict):
             rows = [rows]
-        for row in rows:
-            store.record(row, floor=args.floor)
+        store.record_batch(rows, floor=args.floor)
         return 0
     if args.command == "finals":
         finals, converged = _read_finals_csv(args.finals)
-        print(store.record_finals(_read_json(args.identity), finals, converged))
+        print(store.record_finals(_read_json(args.spec), finals, converged))
         return 0
     if args.command == "status":
-        print(store.status(_read_json(args.identity)))
+        print(store.status(args.run_id))
         return 0
     if args.command == "query":
         table = store.query(args.sql)
@@ -484,6 +575,9 @@ def _cli(argv):
         return 0
     if args.command == "clear":
         print(store.clear(**_read_json(args.filters)))
+        return 0
+    if args.command == "hash":
+        print(json.dumps(ids(_read_json(args.spec))))
         return 0
     return 1
 
