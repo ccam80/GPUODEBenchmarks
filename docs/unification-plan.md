@@ -143,16 +143,16 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 ```
 
 1. Reads the JSONL, groups `solve` trials by `leg`, builds once per leg, walks ordinals ascending, times each listed transfer leg with one untimed warm-up and the `[repeats]` schedule of `protocol.toml` (`timed_min_ms` semantics).
-2. Writes `<trials>.progress` (`{"trial_id": ..., "started_utc": ...}`) before each trial.
+2. Writes `<trials>.progress` (`{"trial_id": ..., "kind": ..., "started_utc": ...}`) before each line, warm and optimize lines included.
 3. Records every finished trial through the store before the next starts.
 4. Builds the grid by the 1.2 formula; rejects a `controller` name it does not recognise with `reason = "error: unknown controller <name>"`.
 5. One abandon rule. Outcomes per (trial, transfers): `ok`, `timeout` (soft cap, run returned), `oom`, `error`. After `timeout` or `oom` at ordinal k, every higher ordinal of the leg with the same transfers is recorded NaN with `reason = "abandoned: <timeout|oom> at ordinal k"` and not run. `error` records `reason = "error: <Type>: <message[:200]>"` and the leg continues. A `none` leg failing after a good `both` leg marks the `none` row only. OOM is classified by exception type or message: CUDA `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`, torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`.
-6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row.
+6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row. When the progress file names an `optimize` line, the driver records nothing, drops that line and re-invokes the runner, so the leg's solves run at the solver's own geometry.
 7. `errored_pct`: `store.errored_pct` over the trial's finals, `t_final` and `retcode`.
 8. `finals = true`: all n rows through `record_finals` with each trajectory's `t_final` and `retcode`.
-9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves.
+9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves. Build, warm and optimize lines run under the watchdog's hard exit; an optimize line's budget is `[watchdog] optimize_seconds`.
 10. `package_version` and `suite_rev` on every row.
-11. Reads `protocol.toml` for `[repeats]` and `[watchdog]`; no environment variables.
+11. Reads `protocol.toml` for `[repeats]` and `[watchdog]` (`seconds`, `exit_code`, `optimize_seconds`); no environment variables.
 12. Applies `dt_min` and `dt_max` only when they are not NaN; a NaN leaves the package's own floor and cap in place.
 
 ### 1.6 Sets and the entry point
@@ -361,7 +361,7 @@ README to about 100 wrapped lines; `SETUP.md`; this document reduced to section 
 
 ### P11 smoke and reruns
 Depends on: P10.
-`bench.py run --set perf,states,golden_grid -n 128` on the 4070 for every package; then per key: `cpp` in full; `golden_grid` for every package including julia_cpu on every problem; jax `kvaerno3` (WSL); every set on `nand_gate`; cubie and cubie_mlir in full.
+`bench.py run --set perf,states,golden_grid -n 128` on the 4070 for every package; then per key: `cpp` in full; `golden_grid` for every package including julia_cpu on every problem; jax `kvaerno3` (WSL); every set on `nand_gate`, the `nand_gate` golden row of another algorithm cleared first; cubie and cubie_mlir in full.
 
 ## 3. Schedule
 
