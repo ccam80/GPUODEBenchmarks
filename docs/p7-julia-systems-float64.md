@@ -119,7 +119,7 @@ The Float32-vs-Float64 check replaces the current hand-written-vs-MTK check; the
 
 ## 6. Tests
 
-`runner_scripts/tests/test_julia_systems.jl`: for every problem row and both element types, the entry builds, `eltype(u0) == T`, `mass_matrix` is `nothing` or `SMatrix{n,n,T}`, `rhs!` allocates 0 bytes, `u0_for(sweep_min)` leaves every algebraic row of `rhs!` below `1e-6 * eps(T)^0` scaled as `1e-12` for Float64 and `1e-6` for Float32, and `golden_index` is a permutation into `1:n` of length `problem["states"]`. `verify_references.jl` runs in the same test invocation.
+`runner_scripts/tests/test_julia_systems.jl`: for every problem row and both element types, the entry builds, `eltype(u0) == T`, `mass_matrix` is `nothing` or `SMatrix{n,n,T}`, `rhs!` allocates 0 bytes, `u0_for(sweep_min)` leaves every algebraic row of `rhs!` below 1e-12 for Float64 and 1e-6 for Float32, and `golden_index` is a permutation into `1:n` of length `problem["states"]`. `verify_references.jl` runs in the same test invocation.
 
 ## 7. Regeneration
 
