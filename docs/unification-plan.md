@@ -1,9 +1,6 @@
 # Unification plan
 
-- `bench.py` expands named sets into run specs.
-- One runner per package executes a trial file.
-- The store holds one row per executed spec, with finals where the set keeps them.
-- Analyses run offline over the store and compute every error there.
+Sets expand to run specs; runners execute trial files; the store holds one row per spec; analyses compute every error offline.
 
 ## 1. Contracts
 
