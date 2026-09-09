@@ -173,7 +173,10 @@ taking the larger `finals`:
 | wp | all | membership | prefix; `dts(algorithm)` or `TOLS` | `n_wp` | none | 1024 rows for cubie NE members |
 | ne | cubie, cubie_mlir, julia_cpu | `ne` / `ne_adaptive` rows | prefix; `ne_dts` (non-erk) and `TOLS` | `n_ne` for julia_cpu, `n_wp` for cubie | none | 1024 |
 | states | packages listing lorenz96 | membership | sweep; timing setting | `n_states` | both, none | 0 |
-| overlap | cubie, cubie_mlir, julia_gpu | rows with `julia_gpu` | sweep at timing dt and `overlap_tol` over the N list; prefix wp grid; prefix NE grid at `n_ne` for julia_gpu | as listed | both, none | 1024 on the NE grid |
+| overlap | cubie, cubie_mlir, julia_gpu | rows with `julia_gpu` | sweep at timing dt and `overlap_tol` over the N list; prefix on `ne_dts` and `TOLS` | N list; `n_wp` | both, none | 1024 on the prefix trials |
+
+Prefix trials below `n_wp` exist for julia_cpu only; every GPU package's NE
+finals are the first 1024 rows of its `n_wp` solves.
 
 Tiers: cubie NE adaptive trials get `default` plus `matched` when
 `controllers/<problem>.csv` from julia_cpu holds constants that differ from the
@@ -356,8 +359,8 @@ Depends on: P11.
 package; fallout fixed in small PRs. Then the reruns as data PRs, per key:
 `cpp` in full; `wp` for julia_gpu, cpp and myokit_cuda; jax `kvaerno3` in full
 (WSL); julia_gpu finals at n = 32768; julia_cpu `ne` for nand_gate and
-ring_modulator_index2; overlap `ne`-grid finals for julia_gpu; cubie and
-cubie_mlir in full.
+ring_modulator_index2; julia_gpu overlap wp legs on `ne_dts` with finals;
+cubie and cubie_mlir in full.
 
 ## 3. Schedule
 
