@@ -21,8 +21,7 @@ failed. Each script can be run on its own and reuses an existing venv.
   the newest CPython that torch publishes wheels for (3.14 at the pin) and
   recreates its venv with it.
 - The CUDA toolkit (`nvcc`) for MPGOS; on Windows also Visual Studio with the
-  C++ workload, which `runner_scripts/gpu/run_ode_cpp.ps1` enters through
-  `vswhere` and `Enter-VsDevShell`.
+  C++ workload (`run_ode_cpp.ps1` enters it through `vswhere`).
 - Julia through `juliaup`: `setup_julia.py` pins this directory to the 1.13
   channel and every launcher runs `julia +1.13` (override with `JULIA`).
 - Locking GPU clocks needs an elevated shell (passwordless `sudo nvidia-smi`
@@ -36,9 +35,8 @@ sudo apt install build-essential nvidia-cuda-toolkit python3-venv python3-pip gi
 curl -fsSL https://install.julialang.org | sh -s -- --yes
 ```
 
-Inside WSL2 do not install Linux NVIDIA driver packages: the driver comes
-from Windows through `/usr/lib/wsl/lib`, and a native `libcuda` in
-`/lib/x86_64-linux-gnu` shadows it and breaks CUDA context creation.
+Inside WSL2 do not install Linux NVIDIA driver packages; the driver comes
+from Windows through `/usr/lib/wsl/lib`.
 
 ## Packages
 
@@ -65,8 +63,8 @@ cubie is imported.
 python GPU_ODE_JAX/setup_environment.py
 ```
 
-Linux only (WSL2 included): jax publishes CUDA plugins for manylinux alone,
-and the script prints a skip and exits 0 elsewhere. Installs the pinned
+Linux only (WSL2 included); elsewhere the script prints a skip and exits 0.
+Installs the pinned
 `jax[cuda13]`, Diffrax and Equinox with `pyarrow` and `tzdata`, and fails
 when jax-cuda plugins of two CUDA generations coexist in the venv.
 
@@ -117,8 +115,7 @@ when the cubie venv is absent; that interpreter then needs `pyarrow` and
 
 ## Pinned versions
 
-Change these in the setup scripts; datasets are only comparable across
-machines that share them.
+Change these in the setup scripts.
 
 | package | pin |
 | --- | --- |
@@ -140,16 +137,14 @@ nvidia-smi && nvcc --version
 python bench.py plan --set perf
 ```
 
-On Windows the interpreters are `venv\Scripts\python.exe`. The `plan`
-command needs no GPU work but refuses to run when `nvidia-smi` cannot name
-the GPU, since the dataset key is `<os>_<gpu>`.
+On Windows the interpreters are `venv\Scripts\python.exe`. `plan` does no
+GPU work but refuses to run when `nvidia-smi` cannot name the GPU.
 
 ## Troubleshooting
 
 To rebuild a Python environment, remove its venv and re-run the setup
 script. `GPU_ODE_CUBIE_MLIR/venv` is a link to `GPU_ODE_CUBIE/venv`: remove
-the link itself, never its contents, or the shared venv is emptied through
-it.
+the link itself, not its contents.
 
 ```
 rm GPU_ODE_CUBIE_MLIR/venv && rm -rf GPU_ODE_CUBIE/venv         # Linux, macOS
@@ -158,10 +153,7 @@ Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv                   # then the venv
 ```
 
 If the Julia project fails to instantiate, `setup_julia.py --update`
-re-resolves it; a `Manifest.toml` resolved on another Julia version does
-not load, which is why the directory is pinned to the 1.13 channel.
+re-resolves it under the 1.13 channel.
 
-The cubie generated-code caches live under `generated/` at the repo root,
-JAX's compilation cache under `generated/jax_cache`, Myokit's exports under
-`GPU_ODE_MYOKIT_CUDA/models/generated/` and the MPGOS binaries under
-`GPU_ODE_MPGOS/build_cache/`; all are ignored by git and safe to delete.
+Caches safe to delete: `generated/` (cubie code, `jax_cache`),
+`GPU_ODE_MYOKIT_CUDA/models/generated/` and `GPU_ODE_MPGOS/build_cache/`.

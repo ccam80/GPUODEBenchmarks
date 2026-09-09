@@ -1,7 +1,4 @@
-# The dataset key "<os>_<gpu>" of this machine, as bench_key.py computes it: the GPU
-# name from nvidia-smi, tokenised on non-alphanumeric characters, the "NVIDIA"/"GeForce"
-# vendor words dropped, the rest joined with '-'.
-# e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
+# The dataset key "<os>_<gpu>" of this machine, as bench_key.py computes it: the nvidia-smi GPU name tokenised on non-alphanumerics, "NVIDIA"/"GeForce" dropped, joined with '-' (RTX-2060-SUPER).
 
 function _gpu_name_raw()
     try

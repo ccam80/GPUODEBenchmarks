@@ -1,9 +1,4 @@
-"""The dataset key "<os>_<gpu>" of this machine, the store partition every runner writes under; `python bench_key.py` prints it.
-
-The GPU name comes from nvidia-smi, as in bench_key.jl, and is sanitised the same way everywhere: tokenise on
-non-alphanumeric characters, drop the "NVIDIA"/"GeForce" vendor words, and join the rest with '-'.
-e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
-"""
+"""The dataset key "<os>_<gpu>" of this machine: the nvidia-smi GPU name tokenised on non-alphanumerics, "NVIDIA"/"GeForce" dropped, joined with '-' (RTX-2060-SUPER); `python bench_key.py` prints it."""
 
 import platform
 import re

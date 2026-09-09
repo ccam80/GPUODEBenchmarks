@@ -6,10 +6,9 @@ the same problems, grids and stepping: `cubie` (numba-cuda) and `cubie_mlir`
 (torchdiffeq, vmap fork), `myokit_cuda`, `cpp` (MPGOS) and `julia_gpu`
 (DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
 `EnsembleThreads`) runs the same trials and supplies the float64 reference
-every error is measured against. The suite began as the artefacts of
-*Automated Translation and Accelerated Solving of Differential Equations on
-Multiple GPU Platforms*; the figures of that paper are under
-`paper_artifacts/`.
+every error is measured against. The figures of *Automated Translation and
+Accelerated Solving of Differential Equations on Multiple GPU Platforms* are
+under `paper_artifacts/`.
 
 ## How a run works
 
@@ -19,8 +18,8 @@ controller, step or tolerance, and Newton tolerances. `bench.py` writes the
 specs as one JSONL trial file per package and hands each file to that
 package's runner, which builds once per leg, times every trial after one
 untimed warm-up, and records one row per (spec, transfers) in the parquet
-store under `data/`. Errors are never recorded; the analyses compute them
-offline from the finals files. `docs/unification-plan.md` is the contract:
+store under `data/`. The analyses compute every error offline from the
+finals files. `docs/unification-plan.md` is the contract:
 the spec columns and hashes, the store schema, the trial file, the runner
 rules, the set schema and the analyses.
 
