@@ -23,4 +23,4 @@ kvaerno5,Kvaerno5(),GPUKvaerno5(autodiff=Val(false)),
 Vern9,Vern9(),,golden reference algorithm named by problems.csv
 Rodas5P,Rodas5P(),,golden reference algorithm named by problems.csv
 RadauIIA9,RadauIIA9(),,golden reference algorithm named by problems.csv
-DFBDF,DFBDF(),,golden reference algorithm named by problems.csv
+RadauIIA5,RadauIIA5(),,golden reference algorithm named by problems.csv
