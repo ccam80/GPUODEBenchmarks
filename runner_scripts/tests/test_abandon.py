@@ -67,6 +67,14 @@ class AbandonTests(unittest.TestCase):
         self.assertEqual(self.data.rows(), [])
         self.assertEqual([t["kind"] for t in remaining], ["warm", "solve", "solve"])
         self.assertEqual([t["n"] for t in remaining if t["kind"] == "solve"], [8, 32])
+        import csv
+        with open(os.path.join(self.data.root, "key=" + KEY, "package=cubie", "optimize.csv"),
+                  newline="", encoding="utf-8") as handle:
+            recorded = list(csv.DictReader(handle))
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["setting"],
+                          recorded[0]["mode"], recorded[0]["settings"]),
+                         ("timeout", "64", "", "fixed", ""))
 
     def test_a_per_solve_optimize_hard_exit_keeps_its_solve(self):
         table = {"n": "solve", "per": "solve"}

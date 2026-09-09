@@ -1,4 +1,4 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per solve trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build_leg(trial, cold)`, `compile(leg, trial, values)`, `optimize(leg, trial, values)`, `solve(leg, trial, values, transfers)` and `finals(leg, result)`, plus a `controllers` tuple; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per solve trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build_leg(trial, cold)`, `compile(leg, trial, values)`, `optimize(leg, trial, values)`, `solve(leg, trial, values, transfers)` and `finals(leg, result)`, plus a `controllers` tuple and an optional `reset(leg, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
@@ -131,8 +131,10 @@ class Runner:
             print("WATCHDOG hard exit: {0} never returned".format(label(trial, transfers)),
                   flush=True)
 
+        reset = getattr(self.adapter, "reset", None)
+        setup = None if reset is None else (lambda: reset(leg, trial, values, transfers))
         try:
-            best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach,
+            best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach, setup=setup,
                                                  cap_s=budget_of(trial))
         except Exception as exc:  # noqa: BLE001 - every failure is a row
             return classify(exc), NAN, [], None, exc, NAN
