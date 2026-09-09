@@ -307,6 +307,7 @@ Each script under `analyses/` takes `--set <name>` (repeatable), expands it with
 - "Done" is the acceptance line; "Review" is what the PR is read against.
 - A packet replaces what it touches: no compatibility shim, no dual path.
 - `main` may not run between packets.
+- Comments, docstrings and README text describe the code; none names this document, a packet, a section or a phase.
 
 ### P1 store and grid
 Depends on: nothing.
