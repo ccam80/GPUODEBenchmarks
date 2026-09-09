@@ -52,3 +52,6 @@ function julia_constructor(name, package)
     isempty(expr) && error("no $(package) constructor for '$(name)'")
     return expr
 end
+
+"The algorithm names with a constructor for a package, in declaration order."
+package_algorithms(package) = [row["algorithm"] for row in load_algorithms() if !isempty(row[package])]

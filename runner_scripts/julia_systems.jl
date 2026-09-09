@@ -387,6 +387,9 @@ const _ENTRY_BUILDERS = Dict{String, Function}(
     "nand_gate" => _nand_gate_entry,
 )
 
+# Builders that take the state count as a construction parameter.
+const _SIZED_BUILDERS = Dict{String, Function}("lorenz96" => _lorenz96_entry)
+
 const _ENTRIES = Dict{String, Any}()
 
 "Compiled system artifacts for a problem row or name; built on first use."
