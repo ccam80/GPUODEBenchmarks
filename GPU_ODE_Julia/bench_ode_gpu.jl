@@ -1,302 +1,178 @@
-using Pkg
-
-Pkg.instantiate()
-Pkg.precompile()
+# The julia_gpu runner: `bench_ode_gpu.jl --trials <path> [--floor] [--gpu-lock <pidfile>] [--store-python <exe>]` runs one leg's trials on the DiffEqGPU kernel path, recording each through results.jl; exit 0 when done, the watchdog code when a run never returned.
 
 using CUDA
-using DiffEqGPU, OrdinaryDiffEq, StaticArrays
-using CSV, DataFrames, DelimitedFiles
+using DiffEqGPU
+using SciMLBase
+using StaticArrays
+using Dates
+using JSON
+using TOML
 using FileWatching.Pidfile: mkpidlock
 using GPU_ODE_JuliaKernels
 
-# CLI: <N|N,N,...>|wp|states:<nstates>:<N> [algorithm|all] [--problem <name|all>] [--mode <fixed|adaptive|all>].
-@show ARGS
-#settings
-CUDA.allowscalar(false)
-
-# Dataset key "<os>_<gpu>" keys output files per machine.
-include(joinpath(dirname(@__DIR__), "runner_scripts", "bench_key.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "problems.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "algorithms.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_systems.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "julia_prob.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "watchdog.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "errored.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "results.jl"))
-include(joinpath(dirname(@__DIR__), "runner_scripts", "resume.jl"))
+const REPO_ROOT = dirname(@__DIR__)
+const RUNNER_SCRIPTS = joinpath(REPO_ROOT, "runner_scripts")
+include(joinpath(RUNNER_SCRIPTS, "bench_key.jl"))
+include(joinpath(RUNNER_SCRIPTS, "problems.jl"))
+include(joinpath(RUNNER_SCRIPTS, "algorithms.jl"))
+include(joinpath(RUNNER_SCRIPTS, "julia_systems.jl"))
+include(joinpath(RUNNER_SCRIPTS, "julia_prob.jl"))
+include(joinpath(RUNNER_SCRIPTS, "grid.jl"))
+include(joinpath(RUNNER_SCRIPTS, "watchdog.jl"))
+include(joinpath(RUNNER_SCRIPTS, "errored.jl"))
+include(joinpath(RUNNER_SCRIPTS, "results.jl"))
 # Precompiled entries take precedence over runtime-built ones.
 merge!(_ENTRIES, GPU_ODE_JuliaKernels.ENTRIES)
-const DATASET_KEY = dataset_key()
-const REPO_ROOT = dirname(@__DIR__)
-const STORE = result_store(REPO_ROOT, "julia", DATASET_KEY)
 
-requested_algorithm = "all"
-requested_problem = "all"
-requested_mode = "all"
-let i = 2
-    while i <= length(ARGS)
-        tok = ARGS[i]
-        if tok == "--problem" || tok == "-s"
+CUDA.allowscalar(false)
+
+const WARM_N = 8
+const TRIAL_FLOAT_FIELDS = ("duration", "grid_min", "grid_max", "dt", "dt_min", "dt_max",
+    "atol", "rtol", "newton_atol", "newton_rtol")
+const CONTROLLERS = ("fixed", "default")
+
+# ------------------------------------------------------------------ inputs
+
+function parse_cli(args)
+    trials = ""
+    floor = false
+    lock = ""
+    i = 1
+    while i <= length(args)
+        tok = args[i]
+        if tok == "--trials"
             i += 1
-            i <= length(ARGS) || error("--problem requires a value")
-            global requested_problem = ARGS[i]
-        elseif startswith(tok, "--problem=")
-            global requested_problem = split(tok, "=", limit = 2)[2]
-        elseif tok == "--mode"
+            i <= length(args) || error("--trials requires a path")
+            trials = args[i]
+        elseif tok == "--floor"
+            floor = true
+        elseif tok == "--gpu-lock"
             i += 1
-            i <= length(ARGS) || error("--mode requires a value")
-            global requested_mode = ARGS[i]
-        elseif startswith(tok, "--mode=")
-            global requested_mode = split(tok, "=", limit = 2)[2]
+            i <= length(args) || error("--gpu-lock requires a path")
+            lock = args[i]
+        elseif tok == "--store-python"
+            i += 1
+            i <= length(args) || error("--store-python requires a path")
+            STORE_PYTHON[] = args[i]
         else
-            global requested_algorithm = tok
+            error("unknown argument '$(tok)'")
         end
         i += 1
     end
-end
-requested_mode in ("fixed", "adaptive", "all") ||
-    error("--mode takes fixed, adaptive or all, got '$(requested_mode)'")
-const REQUESTED_MODE = requested_mode
-const ALGORITHMS = resolve_algorithms(requested_algorithm, "julia")
-const FIXED_ALGORITHMS = supported_algorithms("julia", "fixed")
-const ADAPTIVE_ALGORITHMS = supported_algorithms("julia", "adaptive")
-if isempty(ALGORITHMS)
-    println("Julia (DiffEqGPU kernel path) runs none of the requested ",
-        "algorithms; skipping.")
-    exit(0)
-end
-const PROBLEMS = resolve_problems(requested_problem, "julia")
-if isempty(PROBLEMS)
-    println("Julia runs none of the requested problems; skipping.")
-    exit(0)
+    isempty(trials) && error("--trials <path> is required")
+    return (trials = trials, floor = floor, lock = lock)
 end
 
-const REPEATS = REPEAT_CAP
-const WP_MODE = !isempty(ARGS) && ARGS[1] == "wp"
-const STATES_MODE = !isempty(ARGS) && startswith(ARGS[1], "states:")
-# states:<nstates>:<ensemble>, one system size per process.
-const STATES_ARGS = STATES_MODE ? parse.(Int, split(ARGS[1], ':')[2:3]) : Int[]
-# The N sweep runs ascending inside one process so each kernel compiles once.
-const NS = isinteractive() ? [8192] :
-           (WP_MODE ? [N_WP] :
-            (STATES_MODE ? [STATES_ARGS[2]] :
-             sort(parse.(Int64, split(ARGS[1], ',')))))
-
-"Modes the algorithm runs under this framework and --mode, fixed first."
-algorithm_modes(algorithm) = [mode
-                              for (mode, list) in
-                                  (("fixed", FIXED_ALGORITHMS),
-                                   ("adaptive", ADAPTIVE_ALGORITHMS))
-                              if algorithm in list &&
-                                 REQUESTED_MODE in ("all", mode)]
-
-"Ensemble l2-at-final error against the Float64 golden reference."
-function ensemble_error(system, us, golden)
-    m = Float64.(final_states(system, Array(us[end, :])))
-    return sqrt(sum(abs2, m .- golden) / length(m))
+"The trial records of a JSONL file in file order; null floats come back as NaN."
+function read_trials(path)
+    trials = Dict{String, Any}[]
+    for line in eachline(path)
+        isempty(strip(line)) && continue
+        record = Dict{String, Any}(JSON.parse(line))
+        for field in TRIAL_FLOAT_FIELDS
+            record[field] = record[field] === nothing ? NaN : Float64(record[field])
+        end
+        push!(trials, record)
+    end
+    return trials
 end
 
-"An algorithm that cannot run this system is a NaN row, not an aborted run."
-function failed(what, err)
-    println("FAILED $(what): $(err)")
-    return NaN
+"Trials grouped by leg, legs in first appearance."
+function by_leg(trials)
+    legs = Dict{String, Vector{Dict{String, Any}}}()
+    order = String[]
+    for trial in trials
+        haskey(legs, trial["leg"]) || push!(order, trial["leg"])
+        push!(get!(() -> Dict{String, Any}[], legs, trial["leg"]), trial)
+    end
+    return [(leg, legs[leg]) for leg in order]
 end
 
-"Record NaN rows for the given sweep sizes of a leg."
-function nan_rows(problem, algorithm, mode, ns)
-    isinteractive() && return
-    for n in ns
-        result_record_times(STORE, "julia", DATASET_KEY, "times", problem,
-            algorithm, mode, n, problem["states"], NaN, NaN, 100.0)
+function write_progress(path, trial)
+    stamp = Dates.format(Dates.now(Dates.UTC), "yyyy-mm-ddTHH:MM:SS") * "Z"
+    open(path, "w") do io
+        JSON.print(io, Dict("trial_id" => trial["trial_id"], "kind" => trial["kind"],
+            "started_utc" => stamp))
     end
 end
 
-"Record NaN wp rows for the given settings of a leg."
-function nan_wp_rows(problem, algorithm, mode, settings)
-    for setting in settings
-        result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
-            setting, NaN, NaN, 100.0)
-    end
+"The DiffEqGPU version pinned by Manifest.toml."
+function diffeqgpu_version()
+    manifest = TOML.parsefile(joinpath(REPO_ROOT, "Manifest.toml"))
+    return String(manifest["deps"]["DiffEqGPU"][1]["version"])
 end
 
-"True when one N or states point of a julia leg is covered."
-function point_covered(analysis, problem, algorithm, mode, n, states)
-    kind, setting = timing_setting(problem, mode)
-    key = analysis == "states" ? states : n
-    return skip_point(STORE, analysis, problem["problem"], algorithm, mode, key,
-        n, states, kind, setting)
+"The reason a trial cannot run on the kernel path, or nothing: a controller other than fixed or default, a precision other than float32, a dt floor, a dt cap or explicit gains."
+function reject_reason(trial)
+    controller = trial["controller"]
+    controller in CONTROLLERS || return "error: unknown controller $(controller)"
+    trial["precision"] == "float32" ||
+        return "error: unsupported precision $(trial["precision"])"
+    isnan(trial["dt_min"]) || return "error: unsupported dt_min: the kernel path has no dt floor to set"
+    isnan(trial["dt_max"]) || return "error: unsupported dt_max: the kernel path has no dt cap to set"
+    trial["gains"] in ("", "{}") || return "error: unsupported gains $(trial["gains"])"
+    return nothing
 end
 
-# One wp sweep; a watchdog breach fills the remaining settings with NaN rows.
-function wp_sweep(solve_once, system, problem, algorithm, mode, settings,
-        golden, label)
-    if skip_wp_leg(STORE, problem["problem"], algorithm, mode, settings,
-            problem["states"])
-        println("-- resume: skipping wp $(label) (already covered)")
-        return
-    end
-    compiled = false
-    for (index, setting) in enumerate(settings)
-        on_breach = () -> begin
-            nan_wp_rows(problem, algorithm, mode, settings[index:end])
-            println("WATCHDOG $(label) setting=$(setting): run never returned")
-        end
-        samples = nothing
-        t_ms, err, pct = try
-            if !compiled
-                # The first solve carries the kernel compile, off the GPU lock.
-                run_watchdogged(() -> solve_once(setting), on_breach)
-                compiled = true
-            end
-            with_gpu_lock() do
-                warm = @elapsed sol = run_watchdogged(
-                    () -> solve_once(setting), on_breach)
-                if warm > WATCHDOG_SECONDS
-                    (NaN, NaN, 100.0)
-                else
-                    e = ensemble_error(system, sol[2], golden)
-                    p = errored_pct(@view sol[2][end, :])
-                    # The ensemble is resident and the result stays on the device.
-                    t, samples, _ = watchdogged_min_ms(
-                        () -> solve_once(setting), on_breach, REPEATS)
-                    (t, isnan(t) ? NaN : e, p)
-                end
-            end
-        catch err
-            (failed("wp $(label) setting=$(setting)", err), NaN, 100.0)
-        end
-        result_record_wp(STORE, "julia", DATASET_KEY, problem, algorithm, mode,
-            setting, t_ms, err, pct; samples = samples)
-        println("wp $(label) setting=$(setting): $(t_ms) ms, err=$(err), " *
-                "errored=$(round(pct, digits = 1))%")
-        if isnan(t_ms)
-            println("WATCHDOG wp $(label) setting=$(setting): run exceeded the cap")
-            nan_wp_rows(problem, algorithm, mode, settings[(index + 1):end])
-            break
-        end
-    end
+# ----------------------------------------------------------------- systems
+
+"The state count of a trial's system from its construction parameters, else the catalogue's."
+function trial_states(trial)
+    params = JSON.parse(trial["system_params"])
+    haskey(params, "states") && return Int(params["states"])
+    return Int(get_problem(trial["problem"])["states"])
 end
 
-# Sweeps fixed dt and adaptive tolerance at N=N_WP; grids mirror runner_scripts/wp_common.py.
-function run_wp(problem)
-    golden = readdlm(golden_path(problem), ',', Float64)
-    system, prob, duration = build_prob(problem)
-    probs_host, probs = build_ensemble(system, prob, problem, N_WP)
-
-    for algorithm in ALGORITHMS
-        problem_supports(problem, "julia") || continue
-        solver = gpu_solver(algorithm)
-        label = "$(problem["problem"]) $(algorithm)"
-        settings = Dict("fixed" => collect(problem_dts(problem, algorithm)),
-            "adaptive" => TOLS)
-        for mode in algorithm_modes(algorithm)
-            # The ensemble is resident; the timed solve leaves its result on the device.
-            wp_sweep(system, problem, algorithm, mode, settings[mode], golden,
-                "$(label) $(mode)") do setting
-                gpu_solve_device(probs, prob, solver, mode, setting, problem)
-            end
-        end
+"The Float32 system of a trial: the compiled entry when it matches the construction parameters, else built now; a cold leg always builds now."
+function trial_system(trial, cold)
+    problem = trial["problem"]
+    params = JSON.parse(trial["system_params"])
+    states = haskey(params, "states") ? Int(params["states"]) : 0
+    haskey(_ENTRY_BUILDERS, problem) ||
+        error("no ModelingToolkit definition for problem '$(problem)'")
+    if !cold && haskey(_ENTRIES, (problem, Float32)) &&
+       (states == 0 || _ENTRIES[(problem, Float32)].n == states)
+        return _ENTRIES[(problem, Float32)]
     end
+    if states > 0 && startswith(problem, "lorenz96")
+        return _lorenz96_entry(Float32, states)
+    end
+    system = cold ? _ENTRY_BUILDERS[problem](Float32) : julia_system(problem, Float32)
+    (states == 0 || system.n == states) ||
+        error("$(problem) has $(system.n) states, not $(states)")
+    return system
 end
 
-# One (algorithm, mode) leg: every sweep size ascending on one compiled kernel.
-function run_leg(problem, system, prob, duration, algorithm, mode, later_legs)
-    solver = gpu_solver(algorithm)
-    _, setting = timing_setting(problem, mode)
-    compiled = false
-
-    run_ns = [n for n in NS
-              if !point_covered("times", problem, algorithm, mode, n,
-                  problem["states"])]
-    if isempty(run_ns)
-        println("-- resume: skipping $(problem["problem"]) $(mode) " *
-                "$(algorithm) (already covered)")
-        return
-    end
-    if length(run_ns) < length(NS)
-        println("-- resume: $(problem["problem"]) $(mode) $(algorithm) " *
-                "runs N=" * join(run_ns, ","))
-    end
-
-    for (index, n) in enumerate(run_ns)
-        @info "Solving $(problem["problem"]) on GPU ($(mode) dt, $(algorithm), N=$(n))"
-        probs_host, probs = build_ensemble(system, prob, problem, n)
-
-        device_solve = () -> gpu_solve_device(probs, prob, solver, mode,
-            setting, problem)
-        full_solve = () -> gpu_solve_host(probs_host, prob, solver, mode,
-            setting, problem)[1]
-        # NaN rows for every uncovered point this process will no longer reach.
-        on_breach = () -> begin
-            nan_rows(problem, algorithm, mode, run_ns[index:end])
-            for (later_algorithm, later_mode) in later_legs()
-                nan_rows(problem, later_algorithm, later_mode,
-                    [m for m in NS
-                     if !point_covered("times", problem, later_algorithm,
-                         later_mode, m, problem["states"])])
-            end
-            println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
-                    "N=$(n): run never returned")
-        end
-
-        samples_none = samples_both = nothing
-        t_ms, t_dev_ms, pct, breached = try
-            if !compiled
-                # The first solve carries the kernel compile, off the GPU lock.
-                run_watchdogged(device_solve, on_breach)
-                compiled = true
-            end
-            t_dev, t, pct = with_gpu_lock() do
-                td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
-                    on_breach, REPEATS)
-                isnan(td) && return (td, NaN, 100.0)
-                p = errored_pct(@view dev_sol[2][end, :])
-                tt, samples_both, _ = watchdogged_min_ms(full_solve, on_breach,
-                    REPEATS)
-                (td, tt, p)
-            end
-            (t, t_dev, pct, isnan(t))
-        catch err
-            (failed("$(problem["problem"]) $(mode) $(algorithm) N=$(n)", err),
-                NaN, 100.0, false)
-        end
-        ran = !isnan(t_ms)
-
-        isinteractive() || result_record_times(STORE, "julia", DATASET_KEY,
-            "times", problem, algorithm, mode, n, problem["states"], t_ms,
-            t_dev_ms, pct; samples_both = samples_both,
-            samples_none = samples_none)
-
-        # Save numerical output for 32768-trajectory run
-        if ran && !isinteractive() && n == 32768 && algorithm == "tsit5"
-            sol = device_solve()
-            write_finals(system, problem, sol,
-                mode == "fixed" ? "julia_fixed.csv" : "julia_adaptive.csv",
-                duration)
-        end
-
-        # Ensembles are per-size; only the compiled kernels carry over.
-        probs_host = nothing
-        probs = nothing
-        GC.gc()
-        CUDA.reclaim()
-
-        println("Parameter number: " * string(n))
-        println("Minimum time: " * string(t_ms) * " ms")
-
-        if breached
-            # Larger sweep sizes are slower, so the leg ends here.
-            println("WATCHDOG $(problem["problem"]) $(mode) $(algorithm) " *
-                    "N=$(n): run exceeded the cap")
-            nan_rows(problem, algorithm, mode, run_ns[(index + 1):end])
-            return
-        end
-    end
+"(system, prob, solver) of a leg from one of its trials."
+function leg_parts(trial, cold)
+    system = trial_system(trial, cold)
+    return (system = system, prob = build_prob(system, trial["duration"]),
+        solver = gpu_solver(trial["algorithm"]))
 end
 
-# Serialize timed GPU sections on a pidfile; stale_age breaks dead owners' locks.
-function with_gpu_lock(f)
-    path = get(ENV, "BENCH_GPU_LOCK", "")
+# ------------------------------------------------------------------ solves
+
+struct Outcome
+    kind::String          # ok, timeout, oom, error, abandoned
+    min_ms::Float64
+    samples::Vector{Float64}
+    reason::String
+    result::Any           # the last solve's (ts, us), or nothing
+end
+
+failed(kind, reason) = Outcome(kind, NaN, Float64[], reason, nothing)
+
+"oom or error, with the reason text: '<kind>: <Type>: <message[:200]>'."
+function classify(err)
+    text = sprint(showerror, err)
+    oom = err isa CUDA.OutOfGPUMemoryError || occursin("OUT_OF_MEMORY", text) ||
+          occursin("out of memory", lowercase(text))
+    kind = oom ? "oom" : "error"
+    message = replace(first(text, 200), r"\s+" => " ")
+    return kind, "$(kind): $(nameof(typeof(err))): $(message)"
+end
+
+function with_gpu_lock(f, path)
     isempty(path) && return f()
     gpu_lock = mkpidlock(path; wait = true, stale_age = 120)
     try
@@ -306,111 +182,179 @@ function with_gpu_lock(f)
     end
 end
 
-# One system size per process; the driver backfills rows a process never wrote.
-function run_states(nstates, n)
-    # Runtime entry at every size, so build_s is a cold compile.
-    entry = _lorenz96_entry(nstates)
-    row = copy(get_problem("lorenz96"))
-    row["states"] = nstates
-    system, prob, duration = build_prob_parts(entry, row)
+"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog; a run past the soft cap is a timeout, an exception an oom or error."
+function timed(f, label)
+    on_breach = () -> begin
+        println("WATCHDOG $(label): run never returned")
+        flush(stdout)
+    end
+    try
+        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP)
+        isnan(ms) && return Outcome("timeout", NaN, samples,
+            "timeout: run exceeded $(WATCHDOG_SECONDS)s", result)
+        return Outcome("ok", ms, samples, "", result)
+    catch err
+        return failed(classify(err)...)
+    end
+end
 
-    for algorithm in ALGORITHMS
-        solver = gpu_solver(algorithm)
-        for mode in algorithm_modes(algorithm)
-            _, setting = timing_setting(row, mode)
-            if point_covered("states", row, algorithm, mode, n, nstates)
-                println("-- resume: skipping states=$(nstates) $(mode) " *
-                        "$(algorithm) (already covered)")
-                continue
-            end
-            @info "Solving lorenz96 states=$(nstates) on GPU ($(mode) dt, $(algorithm), N=$(n))"
-            samples_none = samples_both = nothing
-            t_ms, t_dev_ms, build_s, pct = try
-                probs_host, probs = build_ensemble(system, prob, row, n)
-                device_solve = () -> gpu_solve_device(probs, prob, solver,
-                    mode, setting, row)
-                full_solve = () -> gpu_solve_host(probs_host, prob, solver,
-                    mode, setting, row)[1]
-                # Uncapped: the first solve carries the kernel compile.
-                build = @elapsed device_solve()
-                on_breach = () -> println("WATCHDOG lorenz96 " *
-                    "states=$(nstates) $(mode) $(algorithm) N=$(n): " *
-                    "run never returned")
-                t_dev, t, pct = with_gpu_lock() do
-                    td, samples_none, dev_sol = watchdogged_min_ms(device_solve,
-                        on_breach, REPEATS)
-                    isnan(td) && return (td, NaN, 100.0)
-                    p = errored_pct(@view dev_sol[2][end, :])
-                    tt, samples_both, _ = watchdogged_min_ms(full_solve,
-                        on_breach, REPEATS)
-                    (td, tt, p)
+"Per leg: the transfers already abandoned (with the reason), the cold build time and the build failure's reason when it did not build."
+mutable struct LegState
+    abandoned::Dict{String, String}
+    build_s::Float64
+    failure::String
+end
+
+"The abandon rule: after a timeout or oom at ordinal k, every higher ordinal of the leg with the same transfers is recorded abandoned instead of run."
+function abandon!(state, transfers, outcome, ordinal)
+    outcome.kind in ("timeout", "oom") || return
+    haskey(state.abandoned, transfers) && return
+    state.abandoned[transfers] = "abandoned: $(outcome.kind) at ordinal $(ordinal)"
+    return
+end
+
+"One solve at n = 8 in the leg's process, off the GPU lock; the kernel compile lands here."
+function warm_leg(parts, trial, label)
+    values = grid_values(trial["grid_scale"], trial["grid_min"], trial["grid_max"], WARM_N)
+    probs_host, probs = build_ensemble(parts.system, parts.prob, values)
+    on_breach = () -> begin
+        println("WATCHDOG $(label): warm run never returned")
+        flush(stdout)
+    end
+    run_watchdogged(on_breach) do
+        gpu_solve_device(probs, parts.prob, parts.solver, trial["controller"], trial["dt"],
+            trial["atol"], trial["rtol"])
+    end
+    return nothing
+end
+
+"Time each listed transfers leg of a solve trial, then record every transfers row (and the finals when kept) in one batch."
+function run_solve(trial, parts, state, cli, version, rev, key)
+    n = Int(trial["n"])
+    duration = trial["duration"]
+    label = "$(trial["leg"]) ordinal $(trial["ordinal"]) n=$(n)"
+    rejection = reject_reason(trial)
+    outcomes = Dict{String, Outcome}()
+    ensemble = nothing
+    ensemble_failure = nothing
+    result = nothing
+    for transfers in trial["transfers"]
+        outcome = if haskey(state.abandoned, transfers)
+            failed("abandoned", state.abandoned[transfers])
+        elseif rejection !== nothing
+            failed("error", rejection)
+        elseif parts === nothing
+            failed("error", isempty(state.failure) ?
+                "error: the leg's system, problem or solver could not be built" : state.failure)
+        else
+            if ensemble === nothing && ensemble_failure === nothing
+                try
+                    values = grid_values(trial["grid_scale"], trial["grid_min"],
+                        trial["grid_max"], n)
+                    ensemble = build_ensemble(parts.system, parts.prob, values)
+                catch err
+                    ensemble_failure = failed(classify(err)...)
                 end
-                isnan(t) &&
-                    println("WATCHDOG lorenz96 states=$(nstates) $(mode) " *
-                            "$(algorithm) N=$(n): run exceeded the cap")
-                (t, t_dev, build, pct)
-            catch err
-                (failed("lorenz96 states=$(nstates) $(mode) $(algorithm) " *
-                        "N=$(n)", err), NaN, NaN, 100.0)
             end
-            isinteractive() || result_record_times(STORE, "julia", DATASET_KEY,
-                "states", row, algorithm, mode, n, nstates, t_ms, t_dev_ms, pct;
-                samples_both = samples_both, samples_none = samples_none,
-                build_s = build_s)
-            GC.gc()
-            CUDA.reclaim()
-            println("states=$(nstates) $(mode) $(algorithm): $(t_ms) ms")
+            if ensemble_failure !== nothing
+                ensemble_failure
+            else
+                probs_host, probs = ensemble
+                solve = transfers == "both" ?
+                    () -> gpu_solve_host(probs_host, parts.prob, parts.solver,
+                        trial["controller"], trial["dt"], trial["atol"], trial["rtol"]) :
+                    () -> gpu_solve_device(probs, parts.prob, parts.solver,
+                        trial["controller"], trial["dt"], trial["atol"], trial["rtol"])
+                with_gpu_lock(cli.lock) do
+                    timed(solve, "$(label) $(transfers)")
+                end
+            end
+        end
+        abandon!(state, transfers, outcome, Int(trial["ordinal"]))
+        outcome.result === nothing || (result = outcome.result)
+        outcomes[transfers] = outcome
+        println("$(label) $(transfers): $(outcome.min_ms) ms $(outcome.reason)")
+        flush(stdout)
+    end
+    pct = NaN
+    finals = ""
+    if result !== nothing
+        # The kernel path reports no retcode; a failed trajectory shows in its state or final time.
+        m = final_states(parts.system, Array(result[2][end, :]))
+        t_final = Float64.(Array(result[1][end, :]))
+        retcode = fill("", size(m, 1))
+        pct = errored_pct(m, t_final, retcode, duration)
+        if trial["finals"]
+            finals = store_finals(merge(trial, Dict("key" => key)), m, t_final; retcode)
         end
     end
+    states = parts === nothing ? trial_states(trial) : parts.system.n
+    rows = [store_row(merge(trial, Dict("transfers" => transfers, "key" => key));
+                states = states, min_ms = outcomes[transfers].min_ms,
+                samples_ms = outcomes[transfers].samples, errored_pct = pct,
+                build_s = state.build_s, reason = outcomes[transfers].reason, finals = finals,
+                package_version = version, suite_rev = rev)
+            for transfers in trial["transfers"]]
+    store_record(rows; floor = cli.floor)
+    # Ensembles are per-trial; only the compiled kernels carry over.
+    ensemble = nothing
+    result = nothing
+    outcomes = nothing
+    GC.gc()
+    CUDA.reclaim()
+    return nothing
 end
 
-function run_times(problem)
-    legs = [(algorithm, mode) for algorithm in ALGORITHMS
-            if problem_supports(problem, "julia")
-            for mode in algorithm_modes(algorithm)]
-    if isempty(legs)
-        println("Julia runs none of the requested algorithms on ",
-            problem["problem"], "; skipping.")
-        return
-    end
-    system, prob, duration = build_prob(problem)
-    for (index, (algorithm, mode)) in enumerate(legs)
-        run_leg(problem, system, prob, duration, algorithm, mode,
-            () -> legs[(index + 1):end])
-    end
-end
-
-"Write the per-trajectory final states for the pairwise numerical check; a trajectory that never reached `duration` is a NaN row."
-function write_finals(system, problem, sol, name, duration)
-    # Do not count solves that never wrote a final time
-    final_times = Array(sol[1][end, :])
-    m = Float64.(final_states(system, Array(sol[2][end, :])))
-    arrived = 0
-    for i in eachindex(final_times)
-        if isapprox(Float64(final_times[i]), Float64(duration); rtol = 1.0f-4)
-            arrived += 1
-        else
-            m[i, :] .= NaN
+"A leg: its warm line (cold builds the system now and times the build), then every solve in ordinal order; optimize lines do not apply to the kernel path."
+function run_leg(leg, trials, cli, version, rev, key, progress_path)
+    warm = findfirst(t -> t["kind"] == "warm", trials)
+    cold = warm !== nothing && trials[warm]["cold"] == true
+    state = LegState(Dict{String, String}(), NaN, "")
+    parts = nothing
+    built = false
+    for trial in trials
+        write_progress(progress_path, trial)
+        kind = trial["kind"]
+        if kind == "optimize"
+            println("$(leg): optimize lines do not apply to the DiffEqGPU kernel path; skipped")
+            continue
         end
+        if !built
+            built = true
+            elapsed = @elapsed begin
+                rejection = reject_reason(trial)
+                if rejection !== nothing
+                    println("$(leg): $(rejection)")
+                else
+                    try
+                        parts = leg_parts(trial, cold)
+                        kind == "warm" && warm_leg(parts, trial, leg)
+                    catch err
+                        state.failure = classify(err)[2]
+                        println("$(leg): build failed: $(state.failure)")
+                    end
+                end
+            end
+            cold && (state.build_s = elapsed)
+            kind == "warm" && println("$(leg): warm at n=$(WARM_N) in $(elapsed)s")
+        end
+        kind == "solve" || continue
+        run_solve(trial, parts, state, cli, version, rev, key)
     end
-    if arrived < length(final_times)
-        @warn "$(name): $(length(final_times) - arrived) of " *
-              "$(length(final_times)) trajectories stopped before " *
-              "t=$(duration); written as NaN rows"
-    end
-    df = DataFrame(m, :auto)
-    CSV.write(joinpath(data_dir(REPO_ROOT, "numerical", DATASET_KEY, problem),
-            name), df, header = false)
+    return nothing
 end
 
-if STATES_MODE
-    run_states(STATES_ARGS[1], STATES_ARGS[2])
-else
-    for problem in PROBLEMS
-        if WP_MODE
-            run_wp(problem)
-        else
-            run_times(problem)
-        end
+function main(args)
+    cli = parse_cli(args)
+    trials = read_trials(cli.trials)
+    version = diffeqgpu_version()
+    rev = store_suite_rev(REPO_ROOT)
+    key = dataset_key()
+    progress_path = cli.trials * ".progress"
+    for (leg, leg_trials) in by_leg(trials)
+        run_leg(leg, leg_trials, cli, version, rev, key, progress_path)
     end
+    return 0
 end
+
+exit(main(ARGS))

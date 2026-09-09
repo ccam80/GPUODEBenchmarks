@@ -53,6 +53,9 @@ function julia_constructor(name, package)
     return expr
 end
 
+"The algorithm names with a constructor for a package, in declaration order."
+package_algorithms(package) = [row["algorithm"] for row in load_algorithms() if !isempty(row[package])]
+
 "The solver instance of an algorithm for a package, its constructor evaluated in the including module with `T` bound to the element type for the tableau builders."
 function julia_solver(name, package, ::Type{T} = Float32) where {T}
     expr = Meta.parse(julia_constructor(name, package))

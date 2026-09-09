@@ -40,10 +40,11 @@ _under_suite_python()
 import sets  # noqa: E402
 import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
+from abandon import abandon_after_hard_exit, run_ids  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
-from problems import get_problem, problem_names  # noqa: E402
+from problems import problem_names  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
 TRIALS_DIR = os.path.join(ROOT, "trials")
@@ -139,11 +140,6 @@ def resolve(args):
 
 # ------------------------------------------------------------------ planning
 
-def _run_ids(trial, key):
-    """{transfers: run_id} of a solve trial under a key."""
-    return {t: store.run_id(dict(trial, transfers=t, key=key)) for t in trial["transfers"]}
-
-
 def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
     """Trials still to run: under resume the solve trials with a missing transfers row, under no_overwrite those with a NaN or missing row; warm and optimize trials follow their leg."""
     if not (resume or no_overwrite):
@@ -156,7 +152,7 @@ def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
     for trial in trial_list:
         if trial["kind"] != "solve":
             continue
-        status = [recorded.get(run) for run in _run_ids(trial, key).values()]
+        status = [recorded.get(run) for run in run_ids(trial, key).values()]
         covered = all(s is not None for s in status) if resume else all(status)
         if not covered:
             kept.append(trial)
@@ -196,14 +192,6 @@ def print_counts(by_package):
 
 
 # ---------------------------------------------------------------------- run
-
-def states_of(trial):
-    """The state count a trial's system will have, from its construction parameters or the catalogue."""
-    params = json.loads(trial["system_params"]) if trial["system_params"] else {}
-    if "states" in params:
-        return int(params["states"])
-    return int(get_problem(trial["problem"])["states"])
-
 
 class Run:
     """One invocation: log dir, clock guard, manifest, summary and the runner loop."""
@@ -277,51 +265,6 @@ class Run:
         if self.args.cooldown > 0:
             time.sleep(self.args.cooldown)
 
-    # ------------------------------------------------------------ hard exit
-    def _recorded(self, trial):
-        """{transfers: True when a row exists} of a solve trial."""
-        return {t: bool(self.store.rows(run_id=run))
-                for t, run in _run_ids(trial, self.key).items()}
-
-    def abandon_after_hard_exit(self, trial_list, progress_path):
-        """Record the leg's ordinals from the one in progress as abandoned; returns the trials still without a row, or None when the progress file names no trial."""
-        try:
-            with open(progress_path, encoding="utf-8") as handle:
-                progress = json.load(handle)
-            current = [t for t in trial_list if t["trial_id"] == progress["trial_id"]]
-        except (OSError, ValueError, KeyError):
-            current = []
-        if not current:
-            return None
-        current.sort(key=lambda t: t["kind"] != "solve")
-        leg, ordinal = current[0]["leg"], current[0]["ordinal"]
-        reason = "abandoned: hard-exit at ordinal {0}".format(ordinal)
-        suite_rev = store.suite_rev(ROOT)
-        rows = []
-        doomed = set()
-        for trial in trial_list:
-            if trial["kind"] != "solve" or trial["leg"] != leg or trial["ordinal"] < ordinal:
-                continue
-            doomed.add(trial["trial_id"])
-            for transfers, present in self._recorded(trial).items():
-                if present:
-                    continue
-                spec = {field: trial[field] for field in store.TRIAL_FIELDS}
-                rows.append(dict(spec, transfers=transfers, key=self.key,
-                                 states=states_of(trial), reason=reason, suite_rev=suite_rev))
-        if rows:
-            self.store.record_batch(rows)
-        remaining = []
-        live_legs = set()
-        for trial in trial_list:
-            if trial["kind"] != "solve" or trial["trial_id"] in doomed:
-                continue
-            if not all(self._recorded(trial).values()):
-                remaining.append(trial)
-                live_legs.add(trial["leg"])
-        return [t for t in trial_list if t["kind"] == "solve" and t in remaining
-                or t["kind"] != "solve" and t["leg"] in live_legs]
-
     # ------------------------------------------------------------- packages
     def run_package(self, package, trial_list, path):
         """Drive one runner over its trial file, re-invoking after every watchdog hard exit."""
@@ -339,7 +282,8 @@ class Run:
                 self.record(package, "FAILED", "runner exit {0}".format(status), status)
                 return
             hard_exits += 1
-            remaining = self.abandon_after_hard_exit(trial_list, path + ".progress")
+            remaining = abandon_after_hard_exit(self.store, self.key, trial_list, path + ".progress",
+                                                store.suite_rev(ROOT))
             if remaining is None:
                 self.record(package, "FAILED", "hard exit without a progress file", status)
                 return
