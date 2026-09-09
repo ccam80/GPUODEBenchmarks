@@ -6,9 +6,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from algorithms import get_algorithm
 from problems import as_problem
-from protocol import OPTIMIZE_N, OPTIMIZE_PER_POINT_FAMILIES
 from store import _Lock
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
@@ -170,18 +168,11 @@ def optimize_path(package, key, root=None):
     return os.path.join(directory, "optimize.csv")
 
 
-def per_point(algorithm):
-    """True when the algorithm's family is optimised at every stepping."""
-    return get_algorithm(algorithm)["family"] in OPTIMIZE_PER_POINT_FAMILIES
-
-
 def _ident(package, key, problem, algorithm, mode, setting, states):
-    """The optimize row identity; a family optimised once per leg carries no setting."""
+    """The optimize row identity; a row recorded without a setting serves every stepping of its leg."""
     row = as_problem(problem)
     kind = "dt" if mode == "fixed" else "tol"
-    text = ""
-    if per_point(algorithm) and setting is not None:
-        text = "{0:.10g}".format(float(setting))
+    text = "" if setting is None else "{0:.10g}".format(float(setting))
     return {"package": package, "key": key, "problem": row.name,
             "algorithm": algorithm, "mode": mode, "setting_kind": kind,
             "setting": text,
@@ -244,7 +235,10 @@ def load_optimized(package, key, problem, algorithm, mode, setting,
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states)
     with _Lock(path):
-        rows = [row for row in _load(path) if _same(row, ident)]
+        recorded = _load(path)
+    rows = [row for row in recorded if _same(row, ident)]
+    if not rows and ident["setting"]:
+        rows = [row for row in recorded if _same(row, dict(ident, setting=""))]
     if not rows:
         return None
     row = rows[-1]
@@ -254,12 +248,12 @@ def load_optimized(package, key, problem, algorithm, mode, setting,
 
 
 def record_optimized(package, key, problem, algorithm, mode, setting, result,
-                     states=None, n=OPTIMIZE_N, root=None):
+                     states=None, n=None, root=None):
     """Replace the optimize row for a point with the result's best launch."""
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states)
     best = result.best
-    row = dict(ident, n=str(int(n)), label=best.label,
+    row = dict(ident, n="" if n is None else str(int(n)), label=best.label,
                best_ms="{0:.6g}".format(best.best_ms),
                blocksize=str(best.blocksize),
                resident_blocks=("" if best.resident_blocks is None

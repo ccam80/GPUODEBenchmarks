@@ -1,13 +1,18 @@
-# Runtime against the state count: lorenz96 resized, built cold so the build time is measured, timed at one ensemble size.
+# Runtime against the state count: lorenz96 resized, built in a fresh cache so the build time is measured, timed at one ensemble size.
 
 [set]
-packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu"]
+packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
 problems   = ["lorenz96"]
 algorithms = "all"
 precision  = "float32"
 finals     = false
 transfers  = ["both", "none"]
 build      = "cold"
+
+[set.optimize]
+packages = ["cubie", "cubie_mlir"]
+n = 262144
+per = "leg"
 
 [[grid]]
 packages = "all"
@@ -20,14 +25,14 @@ system_params = {states = [4, 8, 16, 32, 64, 128]}
 
 [[stepping]]
 packages = "all"
-algorithms = "all"
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-10]}
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
 packages = "all"
-algorithms = "all"
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
@@ -38,7 +43,7 @@ gains = {}
 
 [[stepping]]
 packages = ["cubie", "cubie_mlir"]
-algorithms = "all"
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "pi"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}

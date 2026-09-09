@@ -126,22 +126,16 @@ class OptimizeStoreTests(unittest.TestCase):
         os.chdir(self.cwd)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_per_point_families(self):
-        self.assertFalse(adapter.per_point("tsit5"))
-        self.assertTrue(adapter.per_point("kvaerno3"))
-        self.assertTrue(adapter.per_point("radau_iia_5"))
-        self.assertTrue(adapter.per_point("rosenbrock23_sciml"))
-
     def test_the_store_lives_under_the_package_partition(self):
         path = adapter.optimize_path("cubie_mlir", "k")
         self.assertEqual(os.path.relpath(path, self.tmp),
                          os.path.join("data", "key=k", "package=cubie_mlir", "optimize.csv"))
 
-    def test_explicit_rows_serve_every_setting_of_the_leg(self):
+    def test_a_row_without_a_setting_serves_every_setting_of_the_leg(self):
         result = FakeResult(FakeLaunch(256, 3),
                             {"state_location": "shared", "blocksize": 256})
         adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "fixed", 2.0 ** -10, result)
+                                 "fixed", None, result)
         for setting in (2.0 ** -10, 0.0625, 2.0 ** -13):
             tuned = adapter.load_optimized("cubie", "k", self.problem,
                                            "tsit5", "fixed", setting)

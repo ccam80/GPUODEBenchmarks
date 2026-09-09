@@ -1,22 +1,16 @@
-"""Trial records: run specs merged by trial_id, grouped into legs, ordered by cost, joined by the warm and optimize trials each leg needs, written one JSONL line per trial."""
+"""Trial records: run specs merged by trial_id, grouped into legs, ordered by cost, each leg led by its build line and the optimize lines the set asks for, written one JSONL line per trial."""
 
 import json
 import math
 import os
 
-from algorithms import get_algorithm
-from protocol import OPTIMIZE_N, OPTIMIZE_PER_POINT_FAMILIES
 from store import TRIAL_FIELDS, trial_id
 
 KINDS = ("solve", "warm", "optimize")
 AXES = ("n", "dt", "tol", "states")
-TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal")
+TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal", "cold")
 TRANSFERS_ORDER = ("both", "none")
 LEG_FIELDS = ("problem", "system_params", "algorithm", "controller", "precision")
-STEPPING_FIELDS = ("controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains",
-                   "newton_atol", "newton_rtol")
-# Packages whose legs carry Solver.optimize trials.
-OPTIMIZE_PACKAGES = ("cubie", "cubie_mlir")
 
 
 def leg_name(spec, axis):
@@ -39,7 +33,7 @@ def ordinal_key(spec):
             _states(spec))
 
 
-def _record(spec, kind, transfers, finals, leg, axis, ordinal):
+def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False):
     record = {field: spec[field] for field in TRIAL_FIELDS}
     record["trial_id"] = trial_id(spec)
     record["kind"] = kind
@@ -48,16 +42,18 @@ def _record(spec, kind, transfers, finals, leg, axis, ordinal):
     record["leg"] = leg
     record["axis"] = axis
     record["ordinal"] = int(ordinal)
+    record["cold"] = bool(cold)
     return record
 
 
-def _stepping_key(spec):
-    return tuple(spec[f] if not (isinstance(spec[f], float) and math.isnan(spec[f])) else "nan"
-                 for f in STEPPING_FIELDS)
+def _optimize_record(entry, leg, axis, ordinal):
+    table = entry["optimize"]
+    n = entry["spec"]["n"] if table["n"] == "solve" else int(table["n"])
+    return _record(dict(entry["spec"], n=n), "optimize", [], False, leg, axis, ordinal)
 
 
-def build_trials(specs, optimize_n=OPTIMIZE_N, per_point_families=OPTIMIZE_PER_POINT_FAMILIES):
-    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins); per package leg, solves take cost ordinals, a warm-built leg adds one warm trial, an optimize package adds optimize trials at optimize_n (per stepping for per_point_families, else per leg); states legs add neither."""
+def build_trials(specs):
+    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins); per package leg, a warm line (cold when the set builds cold), optimize lines once per leg or before every solve as the set's optimize table says, then the solves in cost order."""
     merged = {}
     order = []
     for spec in specs:
@@ -69,7 +65,7 @@ def build_trials(specs, optimize_n=OPTIMIZE_N, per_point_families=OPTIMIZE_PER_P
             continue
         merged[ident] = {"spec": spec, "transfers": set(spec["transfers"]),
                          "finals": bool(spec["finals"]), "axis": spec["axis"],
-                         "build": spec["build"],
+                         "build": spec["build"], "optimize": spec["optimize"],
                          "leg": leg_name(spec, spec["axis"])}
         order.append(ident)
     # A leg name repeats across packages; each package's trial file holds its own legs.
@@ -80,22 +76,15 @@ def build_trials(specs, optimize_n=OPTIMIZE_N, per_point_families=OPTIMIZE_PER_P
     trials = []
     for (_, leg), entries in legs.items():
         entries.sort(key=lambda e: ordinal_key(e["spec"]))
-        axis = entries[0]["axis"]
-        first = entries[0]["spec"]
-        if axis != "states":
-            if entries[0]["build"] == "warm":
-                trials.append(_record(first, "warm", [], False, leg, axis, 0))
-            if first["package"] in OPTIMIZE_PACKAGES:
-                per_point = get_algorithm(first["algorithm"])["family"] in per_point_families
-                seen = set()
-                for ordinal, entry in enumerate(entries):
-                    stepping = _stepping_key(entry["spec"]) if per_point else ()
-                    if stepping in seen:
-                        continue
-                    seen.add(stepping)
-                    tuned = dict(entry["spec"], n=int(optimize_n))
-                    trials.append(_record(tuned, "optimize", [], False, leg, axis, ordinal))
+        first = entries[0]
+        axis = first["axis"]
+        trials.append(_record(first["spec"], "warm", [], False, leg, axis, 0,
+                              cold=first["build"] == "cold"))
+        if first["optimize"] is not None and first["optimize"]["per"] == "leg":
+            trials.append(_optimize_record(first, leg, axis, 0))
         for ordinal, entry in enumerate(entries):
+            if entry["optimize"] is not None and entry["optimize"]["per"] == "solve":
+                trials.append(_optimize_record(entry, leg, axis, ordinal))
             transfers = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
             trials.append(_record(entry["spec"], "solve", transfers, entry["finals"], leg,
                                   axis, ordinal))

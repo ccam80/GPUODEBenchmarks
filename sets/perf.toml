@@ -1,4 +1,4 @@
-# Timing sweep over trajectory counts: every GPU package, every problem it implements, every algorithm it runs, at one fixed step and one tolerance.
+# Timing sweep over trajectory counts: every GPU package, every problem it implements, the algorithms at least two package families run, at one fixed step and one tolerance.
 
 [set]
 packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
@@ -8,6 +8,11 @@ precision  = "float32"
 finals     = false
 transfers  = ["both", "none"]
 build      = "warm"
+
+[set.optimize]
+packages = ["cubie", "cubie_mlir"]
+n = 262144
+per = "leg"
 
 [[grid]]
 packages = "all"
@@ -20,14 +25,14 @@ system_params = {}
 
 [[stepping]]
 packages = "all"
-algorithms = "all"
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-10]}
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
 packages = "all"
-algorithms = "all"
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
@@ -38,7 +43,7 @@ gains = {}
 
 [[stepping]]
 packages = ["cubie", "cubie_mlir"]
-algorithms = "all"
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "pi"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}

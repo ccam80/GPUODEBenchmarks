@@ -55,8 +55,13 @@ class CatalogueTests(unittest.TestCase):
             union = set(supported_for(package, "fixed")) | set(supported_for(package, "adaptive"))
             self.assertEqual(union, set(supported_for(package)))
         self.assertTrue(get_algorithm("tsit5").supports("julia_cpu", "adaptive"))
-        self.assertFalse(get_algorithm("tsit5").supports("julia_cpu", "fixed"))
+        self.assertTrue(get_algorithm("cash-karp-54").supports("cubie", "fixed"))
+        self.assertTrue(get_algorithm("backwards_euler").supports("julia_cpu", "adaptive"))
+        self.assertFalse(get_algorithm("backwards_euler").supports("cubie", "adaptive"))
         self.assertFalse(get_algorithm("euler").supports("julia_cpu"))
+        # No error estimate: no package runs these adaptively.
+        for name in ("euler", "classical-rk4", "trapezoidal_dirk", "implicit_midpoint", "sdirk_2_2"):
+            self.assertEqual(get_algorithm(name)["adaptive"], (), name)
 
     def test_julia_constructors_cover_every_julia_capability_and_golden_algorithm(self):
         table = julia_rows()

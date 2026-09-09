@@ -1,4 +1,4 @@
-"""protocol.toml holds the repeat schedule, the watchdog and the optimize table alone; the Python, Julia and C++ views agree."""
+"""protocol.toml holds the repeat schedule and the watchdog alone; the Python, Julia and C++ views agree."""
 
 import os
 import shutil
@@ -19,8 +19,8 @@ from launch import julia_command  # noqa: E402
 class PythonViewTests(unittest.TestCase):
     def test_only_the_three_tables_remain(self):
         self.assertEqual(sorted(protocol.PROTOCOL), sorted(protocol.TABLES))
-        self.assertEqual(protocol.TABLES, ("repeats", "watchdog", "optimize"))
-        for gone in ("ensemble", "fixed", "adaptive", "newton", "plots"):
+        self.assertEqual(protocol.TABLES, ("repeats", "watchdog"))
+        for gone in ("ensemble", "fixed", "adaptive", "newton", "plots", "optimize"):
             self.assertNotIn(gone, protocol.PROTOCOL)
         for name in ("N_WP", "STATES_GRID", "TOLS", "TIMING_TOL", "NEWTON_ATOL", "parse_ns"):
             self.assertFalse(hasattr(protocol, name), name)
@@ -30,8 +30,6 @@ class PythonViewTests(unittest.TestCase):
         self.assertEqual(protocol.REPEAT_SCHEDULE[-1][0], float("inf"))
         self.assertEqual(protocol.WATCHDOG_EXIT_CODE, 3)
         self.assertEqual(protocol.WATCHDOG_SECONDS, float(protocol.get("watchdog.seconds")))
-        self.assertGreater(protocol.OPTIMIZE_N, 0)
-        self.assertIn("dirk", protocol.OPTIMIZE_PER_POINT_FAMILIES)
 
     def test_wp_common_reexports_the_timing_constants(self):
         self.assertEqual(wp_common.REPEAT_SCHEDULE, protocol.REPEAT_SCHEDULE)
@@ -50,9 +48,9 @@ class PythonViewTests(unittest.TestCase):
     def test_get(self):
         out = subprocess.run(
             [sys.executable, os.path.join(ROOT, "runner_scripts", "protocol.py"),
-             "get", "optimize.per_point_families"],
+             "get", "repeats.cap"],
             capture_output=True, text=True, check=True)
-        self.assertEqual(out.stdout.split(), list(protocol.OPTIMIZE_PER_POINT_FAMILIES))
+        self.assertEqual(int(out.stdout), protocol.REPEAT_CAP)
 
 
 class CxxHeaderTests(unittest.TestCase):
@@ -84,8 +82,8 @@ class JuliaViewTests(unittest.TestCase):
         script = (
             'include(joinpath("{0}", "runner_scripts", "watchdog.jl")); '
             'println(REPEAT_CAP, " ", REPEAT_SPREAD, " ", length(REPEAT_SCHEDULE), " ", '
-            'WATCHDOG_SECONDS, " ", WATCHDOG_EXIT_CODE, " ", OPTIMIZE_N, " ", '
-            'join(OPTIMIZE_PER_POINT_FAMILIES, ","), " ", isdefined(@__MODULE__, :N_WP))'
+            'WATCHDOG_SECONDS, " ", WATCHDOG_EXIT_CODE, " ", '
+            'isdefined(@__MODULE__, :N_WP), " ", isdefined(@__MODULE__, :OPTIMIZE_N))'
         ).format(ROOT.replace("\\", "/"))
         out = subprocess.run(
             julia_command() + ["--startup-file=no", "--project=" + ROOT, "-e", script],
@@ -96,9 +94,7 @@ class JuliaViewTests(unittest.TestCase):
         self.assertEqual(int(fields[2]), len(protocol.REPEAT_SCHEDULE))
         self.assertEqual(float(fields[3]), protocol.WATCHDOG_SECONDS)
         self.assertEqual(int(fields[4]), protocol.WATCHDOG_EXIT_CODE)
-        self.assertEqual(int(fields[5]), protocol.OPTIMIZE_N)
-        self.assertEqual(fields[6].split(","), list(protocol.OPTIMIZE_PER_POINT_FAMILIES))
-        self.assertEqual(fields[7], "false")
+        self.assertEqual(fields[5:7], ["false", "false"])
 
 
 if __name__ == "__main__":

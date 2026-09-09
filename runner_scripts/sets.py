@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids and steppings; expand() turns the named sets into run specs, each with its transfers, finals flag, axis and build mode. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize step; expand() turns the named sets into run specs, each with its transfers, finals flag, axis, build mode and optimize choice. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -18,7 +18,9 @@ CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 # Packages with a Newton tolerance setting; the rest carry NaN on implicit rows.
 NEWTON_PACKAGES = ("cubie", "cubie_mlir", "jax", "julia_cpu")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
-SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build")
+SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
+            "optimize")
+OPTIMIZE_KEYS = ("packages", "n", "per")
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -29,7 +31,7 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "axis", "build", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "axis", "build", "optimize", "set", "stepping")
 
 
 class SetError(ValueError):
@@ -103,6 +105,21 @@ def load_set(name, sets_dir=SETS_DIR):
         raise SetError(path + ": transfers must list both and/or none")
     if head["build"] not in ("warm", "cold"):
         raise SetError(path + ": build must be warm or cold")
+    optimize = head.get("optimize")
+    if optimize is not None:
+        where = path + " [set.optimize]"
+        if not isinstance(optimize, dict):
+            raise SetError(where + " must be a table")
+        _check_keys(optimize, OPTIMIZE_KEYS, where)
+        optimize.setdefault("packages", "all")
+        optimize.setdefault("per", "leg")
+        optimize["packages"] = _name_list(optimize["packages"], PACKAGES, where + " packages")
+        n = optimize.get("n")
+        if not (n == "solve" or (isinstance(n, int) and not isinstance(n, bool) and n >= 2)):
+            raise SetError(where + ": n must be an integer >= 2 or \"solve\"")
+        if optimize["per"] not in ("leg", "solve"):
+            raise SetError(where + ": per must be leg or solve")
+    head["optimize"] = optimize
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
     if not grids or not steppings:
@@ -366,6 +383,13 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
 
 # --------------------------------------------------------------- expansion
 
+def _optimize_for(table, package):
+    """{n, per} of the set's optimize table when it names the package, else None."""
+    if table is None or (table["packages"] != "all" and package not in table["packages"]):
+        return None
+    return {"n": table["n"], "per": table["per"]}
+
+
 def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,
            sets_dir=SETS_DIR):
     """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems` and `algorithms` narrow; `n` replaces every grid's n list."""
@@ -417,6 +441,7 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["finals"] = bool(head["finals"])
                                         spec["axis"] = axis
                                         spec["build"] = head["build"]
+                                        spec["optimize"] = _optimize_for(head["optimize"], package)
                                         spec["set"] = loaded["name"]
                                         spec["stepping"] = stepping["controller"]
                                         specs.append(spec)

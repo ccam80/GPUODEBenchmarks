@@ -21,9 +21,8 @@ import store  # noqa: E402
 import trials  # noqa: E402
 from algorithms import load_algorithms  # noqa: E402
 from problems import load_problems  # noqa: E402
-from protocol import OPTIMIZE_N, OPTIMIZE_PER_POINT_FAMILIES  # noqa: E402
-
 KEY = "windows_RTX-4070-SUPER"
+OPTIMIZE_N = 262144
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
 
@@ -47,11 +46,13 @@ def capable(package, kind):
     return [row for row in ALGORITHMS.values() if row.supports(package, kind)]
 
 
-def pi_algorithms(package):
-    """Adaptive algorithms whose DIRK PI defaults differ from cubie's shipped controller."""
+def pi_algorithms(package, names=None):
+    """Adaptive algorithms (within names when given) whose DIRK PI defaults differ from cubie's shipped controller."""
     import cubie_adapter
     out = []
     for row in capable(package, "adaptive"):
+        if names is not None and row.name not in names:
+            continue
         shipped = cubie_adapter.default_controller(row.name, row["family"], row["order"])
         if not cubie_adapter.controllers_equal(cubie_adapter.pi_tier_controller(row["order"]), shipped):
             out.append(row)
@@ -60,6 +61,26 @@ def pi_algorithms(package):
 
 def problems_of(package):
     return [row for row in PROBLEMS.values() if row.supports(package)]
+
+
+def stepping_algorithms(loaded, index, package):
+    """The catalogue rows one stepping of a loaded set yields for a package: its list narrowed by capability, pi minus the shipped matches."""
+    stepping = loaded["stepping"][index]
+    kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
+    names = [r.name for r in capable(package, kind)]
+    if stepping["algorithms"] != "all":
+        names = [n for n in names if n in stepping["algorithms"]]
+    if stepping["packages"] != "all" and package not in stepping["packages"]:
+        return []
+    if stepping["controller"] == "pi":
+        return pi_algorithms(package, names)
+    if stepping["controller"] == "matched":
+        return []          # no controllers table under the test root
+    return [ALGORITHMS[n] for n in names]
+
+
+def leg_count(loaded, package):
+    return sum(len(stepping_algorithms(loaded, i, package)) for i in range(len(loaded["stepping"])))
 
 
 class ShippedSetTests(unittest.TestCase):
@@ -81,20 +102,28 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({tuple(s["transfers"]) for s in specs}, {("both", "none")})
         self.assertEqual({s["finals"] for s in specs}, {False})
         self.assertNotIn("julia_cpu", by_package_kind(specs))
-        expected = {}
-        for package in ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"):
-            legs = len(capable(package, "fixed")) + len(capable(package, "adaptive"))
-            if package in ("cubie", "cubie_mlir"):
-                legs += len(pi_algorithms(package))
-            expected[package] = legs * len(problems_of(package)) * len(PERF_N)
+        loaded = sets.load_set("perf")
+        expected = {package: leg_count(loaded, package) * len(problems_of(package)) * len(PERF_N)
+                    for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 4608, "cubie_mlir": 4608, "jax": 360, "pytorch": 180,
-                                    "myokit_cuda": 36, "cpp": 120, "julia_gpu": 960})
+        self.assertEqual(expected, {"cubie": 1536, "cubie_mlir": 1536, "jax": 360, "pytorch": 180,
+                                    "myokit_cuda": 36, "cpp": 120, "julia_gpu": 864})
+        # Every timed algorithm is run by cubie and at least one other package family, or by two others.
+        for spec in specs:
+            kind = "fixed" if spec["controller"] == "fixed" else "adaptive"
+            families = {"cubie" if p in ("cubie", "cubie_mlir") else p
+                        for p in ALGORITHMS[spec["algorithm"]][kind] if p != "julia_cpu"}
+            self.assertGreaterEqual(len(families), 2, (spec["algorithm"], kind))
         built = self.trials["perf"]
         self.assertEqual(dict(solve_counts(built)), expected)
-        self.assertEqual(kind_counts(built, "cubie"), {"solve": 4608, "warm": 384, "optimize": 384})
+        self.assertEqual(kind_counts(built, "cubie"), {"solve": 1536, "warm": 128, "optimize": 128})
         self.assertEqual(kind_counts(built, "jax"), {"solve": 360, "warm": 30})
-        self.assertEqual(kind_counts(built, "julia_gpu"), {"solve": 960, "warm": 80})
+        self.assertEqual(kind_counts(built, "julia_gpu"), {"solve": 864, "warm": 72})
+        self.assertEqual({t["cold"] for t in built}, {False})
+        # One optimize per leg at the set's n, right after the warm line.
+        cubie = [t for t in built if t["package"] == "cubie"]
+        self.assertEqual([t["kind"] for t in cubie[:4]], ["warm", "optimize", "solve", "solve"])
+        self.assertEqual({t["n"] for t in cubie if t["kind"] == "optimize"}, {OPTIMIZE_N})
 
     def test_perf_stepping_values(self):
         specs = self.expanded["perf"]
@@ -136,8 +165,9 @@ class ShippedSetTests(unittest.TestCase):
         specs = [s for s in self.expanded["perf"] if s["stepping"] == "pi" and s["problem"] == "lorenz"
                  and s["package"] == "cubie" and s["n"] == 8]
         names = sorted(s["algorithm"] for s in specs)
-        self.assertEqual(names, sorted(r.name for r in pi_algorithms("cubie")))
-        for absent in ("kvaerno3", "kvaerno5", "l_stable_sdirk_4"):
+        self.assertEqual(names, sorted(r.name for r in stepping_algorithms(sets.load_set("perf"), 2, "cubie")))
+        self.assertEqual(names, ["cash-karp-54", "rosenbrock23_sciml", "tsit5", "vern7"])
+        for absent in ("kvaerno3", "kvaerno5"):
             self.assertNotIn(absent, names)
         self.assertIn("tsit5", names)
         tsit5 = [s for s in specs if s["algorithm"] == "tsit5"][0]
@@ -156,19 +186,18 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["axis"] for s in specs}, {"states"})
         self.assertEqual(sorted({json.loads(s["system_params"])["states"] for s in specs}),
                          [4, 8, 16, 32, 64, 128])
-        expected = {}
-        for package in store.PACKAGES:
-            legs = len(capable(package, "fixed")) + len(capable(package, "adaptive"))
-            if package in ("cubie", "cubie_mlir"):
-                legs += len(pi_algorithms(package))
-            expected[package] = legs * 6
+        loaded = sets.load_set("states")
+        self.assertNotIn("julia_cpu", loaded["set"]["packages"])
+        expected = {package: leg_count(loaded, package) * 6 for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected["cubie"], 288)
-        self.assertEqual(expected["julia_cpu"], 186)
+        self.assertEqual(expected["cubie"], 96)
+        self.assertEqual(expected["julia_gpu"], 54)
         built = self.trials["states"]
-        # Cold builds: no warm or optimize trials, one solve per leg.
-        self.assertEqual({t["kind"] for t in built}, {"solve"})
-        self.assertEqual(len({t["leg"] for t in built if t["package"] == "cubie"}), 288)
+        # Cold builds: every leg is one warm line flagged cold, the optimize line, one solve.
+        self.assertEqual(kind_counts(built, "cubie"), {"solve": 96, "warm": 96, "optimize": 96})
+        self.assertEqual(kind_counts(built, "jax"), {"solve": 36, "warm": 36})
+        self.assertEqual({t["cold"] for t in built if t["kind"] == "warm"}, {True})
+        self.assertEqual({t["cold"] for t in built if t["kind"] != "warm"}, {False})
         self.assertEqual({t["ordinal"] for t in built}, {0})
 
     def test_golden_grid_counts(self):
@@ -177,36 +206,41 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["finals"] for s in specs}, {True})
         self.assertEqual({s["axis"] for s in specs}, {"dt", "tol"})
         self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default", "pi"})
+        loaded = sets.load_set("golden_grid")
         expected = {}
-        for package in store.PACKAGES:
-            fixed = capable(package, "fixed")
-            dts = sum(10 if row.name == "euler" else 13 for row in fixed)
-            tols = len(capable(package, "adaptive")) * len(TOLS)
-            if package in ("cubie", "cubie_mlir"):
-                tols += len(pi_algorithms(package)) * len(TOLS)
-            expected[package] = (dts + tols) * len(problems_of(package))
+        for package in loaded["set"]["packages"]:
+            count = 0
+            for index, stepping in enumerate(loaded["stepping"]):
+                values = 13 if stepping["controller"] == "fixed" else len(TOLS)
+                count += len(stepping_algorithms(loaded, index, package)) * values
+            if count:
+                expected[package] = count * len(problems_of(package))
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 3480, "cubie_mlir": 3480, "jax": 315, "pytorch": 180,
-                                    "myokit_cuda": 30, "cpp": 100, "julia_gpu": 800, "julia_cpu": 2408})
-        euler = sorted({s["dt"] for s in specs if s["algorithm"] == "euler" and s["problem"] == "lorenz"})
-        self.assertEqual(euler, [2.0 ** -k for k in range(17, 7, -1)])
-        tsit5 = sorted({s["dt"] for s in specs if s["algorithm"] == "tsit5" and s["problem"] == "lorenz"
-                        and s["controller"] == "fixed"})
-        self.assertEqual(tsit5, [2.0 ** -k for k in range(13, 0, -1)])
+        self.assertEqual(expected, {"cubie": 3192, "cubie_mlir": 3192, "jax": 135, "cpp": 35,
+                                    "julia_gpu": 592, "julia_cpu": 2464})
+        # No explicit algorithm at a fixed step, so the fixed-only explicit packages have no rows.
+        self.assertEqual({ALGORITHMS[s["algorithm"]]["family"] for s in specs if s["controller"] == "fixed"},
+                         {"dirk", "firk", "rosenbrock", "implicit"})
+        for absent in ("pytorch", "myokit_cuda"):
+            self.assertNotIn(absent, expected)
+        kvaerno3 = sorted({s["dt"] for s in specs if s["algorithm"] == "kvaerno3" and s["problem"] == "lorenz"
+                           and s["controller"] == "fixed"})
+        self.assertEqual(kvaerno3, [2.0 ** -k for k in range(13, 0, -1)])
         self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
         built = self.trials["golden_grid"]
-        self.assertEqual(kind_counts(built, "cubie"), {"solve": 3480, "warm": 384, "optimize": 2544})
-        self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 2408, "warm": 248})
+        self.assertEqual(kind_counts(built, "cubie"), {"solve": 3192, "warm": 360, "optimize": 3192})
+        self.assertEqual(kind_counts(built, "julia_cpu"), {"solve": 2464, "warm": 256})
 
-    def test_golden_grid_optimize_trials_follow_the_families(self):
+    def test_golden_grid_optimizes_before_every_solve(self):
         built = [t for t in self.trials["golden_grid"] if t["package"] == "cubie" and t["problem"] == "lorenz"]
-        optimize = [t for t in built if t["kind"] == "optimize"]
-        self.assertEqual({t["n"] for t in optimize}, {OPTIMIZE_N})
-        per_leg = Counter(t["leg"] for t in optimize)
-        for t in built:
-            family = ALGORITHMS[t["algorithm"]]["family"]
-            solves = sum(1 for s in built if s["kind"] == "solve" and s["leg"] == t["leg"])
-            self.assertEqual(per_leg[t["leg"]], solves if family in OPTIMIZE_PER_POINT_FAMILIES else 1, t["leg"])
+        kinds = [t["kind"] for t in built]
+        for index, kind in enumerate(kinds):
+            if kind == "solve":
+                self.assertEqual(kinds[index - 1], "optimize")
+                self.assertEqual(built[index - 1]["trial_id"], built[index]["trial_id"].__class__(built[index - 1]["trial_id"]))
+                self.assertEqual((built[index - 1]["ordinal"], built[index - 1]["n"]), (built[index]["ordinal"], OPTIMIZE_N))
+                self.assertEqual(built[index - 1]["dt"], built[index]["dt"])
+                self.assertEqual(built[index - 1]["atol"] == built[index]["atol"], built[index]["controller"] != "fixed")
 
     def test_golden_counts_and_values(self):
         specs = self.expanded["golden"]
@@ -389,14 +423,14 @@ class MergeAndNarrowTests(unittest.TestCase):
         specs = sets.expand(["perf", "golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"])
         built = trials.build_trials(specs)
         shared = [t for t in built if t["kind"] == "solve" and t["n"] == 131072 and t["controller"] == "fixed"
-                  and t["algorithm"] == "tsit5" and t["dt"] == 2.0 ** -10]
+                  and t["algorithm"] == "kvaerno3" and t["dt"] == 2.0 ** -10]
         self.assertEqual(len(shared), 1)
         self.assertEqual(shared[0]["transfers"], ["both", "none"])
         self.assertTrue(shared[0]["finals"])
         # The first set's leg keeps the trial; the perf leg is on the n axis.
-        self.assertEqual(shared[0]["leg"], "lorenz/{}/tsit5/fixed/float32/n")
+        self.assertEqual(shared[0]["leg"], "lorenz/{}/kvaerno3/fixed/float32/n")
         self.assertEqual(shared[0]["ordinal"], PERF_N.index(131072))
-        dt_leg = [t for t in built if t["leg"] == "lorenz/{}/tsit5/fixed/float32/dt" and t["kind"] == "solve"]
+        dt_leg = [t for t in built if t["leg"] == "lorenz/{}/kvaerno3/fixed/float32/dt" and t["kind"] == "solve"]
         self.assertEqual(len(dt_leg), 12)
         self.assertNotIn(2.0 ** -10, [t["dt"] for t in dt_leg])
         ids = [t["trial_id"] for t in built if t["kind"] == "solve"]
@@ -405,7 +439,7 @@ class MergeAndNarrowTests(unittest.TestCase):
         reverse = trials.build_trials(sets.expand(["golden_grid", "perf"], KEY, self.root,
                                                   packages=["jax"], problems=["lorenz"]))
         shared = [t for t in reverse if t["trial_id"] == shared[0]["trial_id"] and t["kind"] == "solve"][0]
-        self.assertEqual(shared["leg"], "lorenz/{}/tsit5/fixed/float32/dt")
+        self.assertEqual(shared["leg"], "lorenz/{}/kvaerno3/fixed/float32/dt")
         self.assertEqual(shared["transfers"], ["both", "none"])
 
     def test_ordinals_follow_the_cost_order(self):
@@ -434,13 +468,13 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertEqual(len(specs), 2 * 2 * 2)
         # -n replaces the n list of every set's grids.
         golden = sets.expand(["golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"],
-                             algorithms=["euler"], n=[16])
+                             algorithms=["kvaerno3"], n=[16])
         self.assertEqual({s["n"] for s in golden}, {16})
-        self.assertEqual({s["axis"] for s in golden}, {"dt"})
+        self.assertEqual({s["axis"] for s in golden}, {"dt", "tol"})
 
     def test_narrowing_by_mode_controller_tol_and_dt(self):
         specs = sets.expand(["golden_grid"], KEY, self.root, packages=["cubie"], problems=["lorenz"],
-                            algorithms=["tsit5"])
+                            algorithms=["rosenbrock23_sciml"])
         self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default", "pi"})
         fixed = sets.narrow(specs, mode="fixed")
         self.assertEqual({s["controller"] for s in fixed}, {"fixed"})
@@ -481,10 +515,39 @@ class SchemaTests(unittest.TestCase):
                          ("all", "float32", False, ["both", "none"], "warm"))
         self.assertEqual(loaded["grid"][0]["parameter"], "default")
         self.assertEqual(loaded["stepping"][0]["newton"], "none")
+        self.assertIsNone(head["optimize"])
         specs = sets.expand(["s"], KEY, sets_dir=self.tmp)
         self.assertEqual(len(specs), len(capable("jax", "fixed")))
         self.assertEqual({s["dt"] for s in specs}, {0.5})
         self.assertTrue(all(np.isnan(s["newton_atol"]) for s in specs))
+        self.assertEqual({s["optimize"] for s in specs}, {None})
+        built = trials.build_trials(specs)
+        self.assertEqual([t["kind"] for t in built].count("optimize"), 0)
+        self.assertEqual([t["kind"] for t in built].count("warm"), len(specs))
+
+    def test_optimize_table_per_leg_and_per_solve(self):
+        text = self.MINIMAL.replace("[[grid]]\nn = [8]", "[[grid]]\nn = [8, 32]") + \
+            '\n[set.optimize]\npackages = ["jax"]\nn = "solve"\nper = "solve"\n'
+        self.write(text)
+        specs = sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"])
+        self.assertEqual({s["optimize"]["n"] for s in specs}, {"solve"})
+        built = trials.build_trials(specs)
+        self.assertEqual([(t["kind"], t["n"]) for t in built],
+                         [("warm", 8), ("optimize", 8), ("solve", 8), ("optimize", 32), ("solve", 32)])
+        self.write(text.replace('n = "solve"\nper = "solve"', 'n = 64\nper = "leg"'))
+        built = trials.build_trials(sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"]))
+        self.assertEqual([(t["kind"], t["n"]) for t in built],
+                         [("warm", 8), ("optimize", 64), ("solve", 8), ("solve", 32)])
+        self.write(text.replace('["jax"]\nn = "solve"', '["cubie"]\nn = "solve"'))
+        built = trials.build_trials(sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"]))
+        self.assertNotIn("optimize", [t["kind"] for t in built])
+        for bad in ('n = 1\nper = "leg"', 'n = "solve"\nper = "step"', 'n = "solve"\nshape = 1'):
+            self.write(text.replace('n = "solve"\nper = "solve"', bad))
+            with self.assertRaises(sets.SetError, msg=bad):
+                sets.expand(["s"], KEY, sets_dir=self.tmp)
+        self.write(text.replace('packages = ["jax"]\nn = "solve"', 'packages = ["fortran"]\nn = "solve"'))
+        with self.assertRaises(sets.SetError):
+            sets.expand(["s"], KEY, sets_dir=self.tmp)
 
     def test_bad_sets_are_refused(self):
         bad = {
@@ -545,6 +608,7 @@ class TrialFileTests(unittest.TestCase):
         self.assertEqual(list(first), list(trials.TRIAL_KEYS))
         self.assertNotIn("nan", lines[0].lower())
         self.assertIsNone(first["atol"])
+        self.assertIs(first["cold"], False)
         back = trials.read_jsonl(path)
         self.assertEqual(len(back), len(built))
         self.assertTrue(np.isnan(back[0]["atol"]))

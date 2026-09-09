@@ -1,17 +1,17 @@
 algorithm,display,family,order,fixed,adaptive
 euler,Euler,erk,1,cubie|cubie_mlir|jax|pytorch|myokit_cuda,
 classical-rk4,RK4,erk,4,cubie|cubie_mlir|jax|pytorch|cpp,
-tsit5,Tsit5,erk,5,cubie|cubie_mlir|jax|pytorch|julia_gpu,cubie|cubie_mlir|jax|julia_gpu|julia_cpu
-cash-karp-54,Cash-Karp 5(4),erk,5,,cubie|cubie_mlir|cpp|julia_cpu
+tsit5,Tsit5,erk,5,cubie|cubie_mlir|jax|pytorch|julia_gpu|julia_cpu,cubie|cubie_mlir|jax|julia_gpu|julia_cpu
+cash-karp-54,Cash-Karp 5(4),erk,5,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|cpp|julia_cpu
 rosenbrock23_sciml,Rosenbrock23,rosenbrock,2,cubie|cubie_mlir|julia_gpu|julia_cpu,cubie|cubie_mlir|julia_gpu|julia_cpu
 kvaerno3,Kvaerno3,dirk,3,cubie|cubie_mlir|jax|julia_gpu|julia_cpu,cubie|cubie_mlir|jax|julia_gpu|julia_cpu
 radau_iia_5,Radau IIA 5,firk,5,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
-bogacki-shampine-32,BS3,erk,3,,cubie|cubie_mlir|julia_cpu
-dormand-prince-54,DP5,erk,5,,cubie|cubie_mlir|julia_cpu
-fehlberg-45,Fehlberg 4(5),erk,5,,cubie|cubie_mlir|julia_cpu
-dormand-prince-853,DP8,erk,8,,cubie|cubie_mlir|julia_cpu
-vern7,Vern7,erk,7,julia_gpu,cubie|cubie_mlir|julia_gpu|julia_cpu
-backwards_euler,Backward Euler,implicit,1,cubie|cubie_mlir|julia_cpu,
+bogacki-shampine-32,BS3,erk,3,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
+dormand-prince-54,DP5,erk,5,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
+fehlberg-45,Fehlberg 4(5),erk,5,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
+dormand-prince-853,DP8,erk,8,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
+vern7,Vern7,erk,7,cubie|cubie_mlir|julia_gpu|julia_cpu,cubie|cubie_mlir|julia_gpu|julia_cpu
+backwards_euler,Backward Euler,implicit,1,cubie|cubie_mlir|julia_cpu,julia_cpu
 crank_nicolson,Crank-Nicolson,implicit,2,cubie|cubie_mlir|julia_cpu,cubie|cubie_mlir|julia_cpu
 trapezoidal_dirk,Trapezoidal DIRK,dirk,2,cubie|cubie_mlir|julia_cpu,
 implicit_midpoint,Implicit midpoint,dirk,2,cubie|cubie_mlir|julia_cpu,
