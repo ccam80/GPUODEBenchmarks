@@ -121,13 +121,16 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 | trial_id | 1.2 |
 | kind | `solve`, `warm`, `optimize` |
 | finals | `true` (finals kept) or `false` |
-| transfers | list, subset of `both`, `none`, in timing order |
+| transfers | list, subset of `both`, `none`, in timing order; empty on `warm` and `optimize` |
 | leg | `<problem>/<system_params>/<algorithm>/<controller>/<precision>/<axis>` |
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
+| cold | `true` on the `warm` line of a cold-built set: fresh cache directory, `build_s` recorded; `false` otherwise |
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
-- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv`.
+- Every leg starts with one `warm` line (build only, the leg's cheapest spec), then the `optimize` lines its set's `[set.optimize]` table asks for, then the `solve` lines.
+- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv` and apply to the solves that follow in the leg.
+- Specs sharing a `trial_id` across sets merge: the first set's leg and axis stay, `transfers` union, `finals` true over false.
 
 ### 1.5 Runner contract
 
@@ -140,12 +143,12 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 3. Records every finished trial through the store before the next starts.
 4. Builds the grid by the 1.2 formula; rejects a `controller` name it does not recognise with `reason = "error: unknown controller <name>"`.
 5. One abandon rule. Outcomes per (trial, transfers): `ok`, `timeout` (soft cap, run returned), `oom`, `error`. After `timeout` or `oom` at ordinal k, every higher ordinal of the leg with the same transfers is recorded NaN with `reason = "abandoned: <timeout|oom> at ordinal k"` and not run. `error` records `reason = "error: <Type>: <message[:200]>"` and the leg continues. A `none` leg failing after a good `both` leg marks the `none` row only. OOM is classified by exception type or message: CUDA `OUT_OF_MEMORY`, numba `CUDA_ERROR_OUT_OF_MEMORY`, XLA `RESOURCE_EXHAUSTED`, torch `OutOfMemoryError`, Julia `CuError(OUT_OF_MEMORY)`.
-6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's higher ordinals, and re-invokes the runner with the trials that still have no row.
+6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row.
 7. `errored_pct` counts the trial's own non-finite final rows.
 8. `finals = true`: the finals of all n rows are written through `record_finals`; `converged` is the package's success flag when it has one, else finiteness.
-9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. Legs with `axis = states` are never warmed; their cold `build_s` is the measurement.
+9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves.
 10. `package_version` and `suite_rev` on every row.
-11. Reads `protocol.toml` for `[repeats]` and `[watchdog]` only; no environment variables.
+11. Reads `protocol.toml` for `[repeats]` and `[watchdog]`; no environment variables.
 
 ### 1.6 Sets and the entry point
 
@@ -159,7 +162,12 @@ algorithms = "all"                 # or a list; always narrowed by algorithms.cs
 precision  = "float32"
 finals     = false                 # true: every solve keeps its finals
 transfers  = ["both", "none"]
-build      = "warm"                # or "cold": no warm trials, build_s recorded
+build      = "warm"                # or "cold": the warm line carries cold = true
+
+[set.optimize]                     # optional; without it no optimize lines
+packages = ["cubie", "cubie_mlir"]
+n = 262144                         # or "solve": each solve's own n
+per = "leg"                        # one line after the warm line; or "solve": one before every solve
 
 [[grid]]
 packages = "all"                   # optional narrowing
@@ -196,6 +204,7 @@ Expansion, in `runner_scripts/sets.py`:
 4. `controller = "matched"` (cubie packages only) reads `controllers/<problem>.csv` of julia_cpu under the run key and resolves the algorithm's row through `cubie_adapter.matched_controller` into `controller = "pi"` with explicit `gains`; skipped when the row is absent or the result equals cubie's shipped controller. `gains = "dirk_defaults"` resolves through `cubie_adapter.pi_tier_controller(order)`; skipped when equal to shipped.
 5. `system_params` with a list value yields one grid per value; the problem's default construction parameters otherwise (`{"states":32}` for lorenz96).
 6. Trials that share a `trial_id` merge: `transfers` union, `finals` true over false.
+7. The axis of a grid and stepping: `states` when the grid lists `system_params`, else `dt` or `tol` when the stepping lists more than one value, else `n`.
 
 ```
 bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
@@ -208,22 +217,22 @@ bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
 - `plan` writes `trials/<key>/<package>.jsonl` and prints counts per package and leg.
 - `run` writes the same under `logs/<key>_<stamp>/`, drives runners per 1.5 (6), keeps the clock guard, manifest and summary; no analysis.
 
-Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and `tol` adaptive, `dt0 = duration * 2^-10`, `dt_min = duration * 1e-6`, `dt_max` none, unless stated):
+Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and `tol` adaptive, `dt0 = duration * 2^-10`, `dt_min = duration * 1e-6`, `dt_max` none, unless stated). The timed algorithms are the ones two package families run (cubie and cubie_mlir count as one, julia_cpu is not timed): fixed euler, classical-rk4, tsit5, rosenbrock23_sciml, kvaerno3, kvaerno5; adaptive tsit5, cash-karp-54, rosenbrock23_sciml, kvaerno3, vern7, kvaerno5.
 
-| set | packages | problems | grid | stepping | finals, transfers |
-|---|---|---|---|---|---|
-| perf | all but julia_cpu | all | default range; n = perf list | fixed dt 2^-10; default controller tol 1e-5; cubie packages add `pi` with `dirk_defaults` at tol 1e-5 | false; both, none |
-| states | packages implementing lorenz96 | lorenz96 | default range; n = 131072; states 4, 8, 16, 32, 64, 128 | as perf | false; both, none; build cold |
-| golden_grid | all | all | default range; n = 131072; julia_cpu n = 1024 with per-problem `max` = the float64 `v[1023]` of the 131072-point grid, written out with 17 digits | fixed dt 2^-k, k 1..13 (euler 8..17); default controller tol 1e-2..1e-8; cubie packages add `matched` and `pi` with `dirk_defaults` over the same tolerances | true; none |
-| golden | julia_cpu | all | default range; n = 131072 | `problems.csv golden_algorithm`, default controller, tol = `golden_tol`, dt0, dt_min, dt_max package default | true; none; precision float64 |
+| set | packages | problems | grid | stepping | optimize | finals, transfers |
+|---|---|---|---|---|---|---|
+| perf | all but julia_cpu | all | default range; n = perf list | the timed algorithms: fixed dt 2^-10; default controller tol 1e-5; cubie packages add `pi` with `dirk_defaults` at tol 1e-5 | cubie packages, 262144, per leg | false; both, none |
+| states | all but julia_cpu | lorenz96 | default range; n = 131072; states 4, 8, 16, 32, 64, 128 | as perf | as perf | false; both, none; build cold |
+| golden_grid | all | all | default range; n = 131072; julia_cpu n = 1024 with per-problem `max` = the float64 `v[1023]` of the 131072-point grid, written out with 17 digits | the implicit families at fixed dt 2^-k, k 1..13; every adaptive-capable algorithm under the default controller at tol 1e-2..1e-8; cubie packages add `matched` and `pi` with `dirk_defaults` over the same tolerances | cubie packages, 262144, per solve | true; none |
+| golden | julia_cpu | all | default range; n = 131072 | `problems.csv golden_algorithm`, default controller, tol = `golden_tol`, dt0, dt_min, dt_max and Newton package default | none | true; none; precision float64 |
 
 - Every list, grid and pin is spelled out in the set files.
-- `protocol.toml` keeps `[repeats]`, `[watchdog]` and `[optimize]` only.
+- `protocol.toml` keeps `[repeats]` and `[watchdog]` only.
 
 ### 1.7 Catalogues
 
 - `problems.csv`: `problem, display, states, duration, sweep_parameter, sweep_min, sweep_max, sweep_scale, golden_algorithm, golden_tol, frameworks`; read by `sets.py` only.
-- `algorithms.csv`: `algorithm, display, family, order, fixed, adaptive` (capability per package); read by `sets.py` only.
+- `algorithms.csv`: `algorithm, display, family, order, fixed, adaptive`; `fixed` and `adaptive` list the packages whose solver tables run the algorithm at a fixed step and under an adaptive controller (capability; the sets list inclusion); read by `sets.py` only.
 - `runner_scripts/julia_algorithms.csv`: the Julia constructor columns; read by the Julia adapters.
 - Runners map `problem` to their system modules and `algorithm` to their solver tables; everything else comes from the trial.
 
@@ -286,8 +295,8 @@ Depends on: P1.
 - `runner_scripts/trials.py`: the 1.4 record, JSONL, legs, ordinals.
 - `bench.py`: the 1.6 CLI, run loop, exit-3 handling; `launch.py` runner registry.
 - `algorithms.csv` and `problems.csv` per 1.7; `julia_algorithms.csv`.
-- Delete `resume.py`, `resume.jl`, `wp_common.parse_bench_args`, the `BENCH_*` environment contract, and every `protocol.toml` table but `[repeats]`, `[watchdog]`, `[optimize]`.
-Done: `test_sets.py` covers every shipped set's expansion counts, the julia_cpu 1024 grid equalling the first 1024 values of the 131072 grid, matched and pi resolution, merge, and the narrowing flags; `bench.py plan --set perf` prints counts.
+- Delete `resume.py`, `resume.jl`, `wp_common.parse_bench_args`, the `BENCH_*` environment contract, and every `protocol.toml` table but `[repeats]`, `[watchdog]`.
+Done: `test_sets.py` covers every shipped set's expansion counts, the julia_cpu 1024 grid equalling the first 1024 values of the 131072 grid, matched and pi resolution, the optimize table, merge, and the narrowing flags; `bench.py plan --set perf` prints counts.
 Review: no trial field outside 1.4; no runner reads a catalogue; no error or reference anywhere.
 
 ### P4 runner core and cubie
