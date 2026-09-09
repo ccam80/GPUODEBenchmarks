@@ -1,4 +1,4 @@
-"""Cubie backend, system naming, solver factory, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows."""
+"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows."""
 
 import csv
 import json
@@ -8,9 +8,8 @@ from datetime import datetime, timezone
 
 from algorithms import get_algorithm
 from problems import as_problem
-from protocol import (DT_MIN_FRACTION, NEWTON_ATOL, NEWTON_RTOL, OPTIMIZE_N,
-                      OPTIMIZE_PER_POINT_FAMILIES)
-from results import PACKAGE_DIRS, _Lock, timing_setting
+from protocol import OPTIMIZE_N, OPTIMIZE_PER_POINT_FAMILIES
+from store import _Lock
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
 SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
@@ -52,21 +51,13 @@ def build_system(problem, package, precision=None, states=None):
     """(system, initial_values) named for the package so both suites share one generated-code cache per backend."""
     import numpy as np
     from cubie_systems import build_system as build
-    from problems import states_row
-    row = states_row(states) if states is not None else as_problem(problem)
+    row = as_problem(problem)
     suffix = SYSTEM_SUFFIX[package]
     if states is not None:
+        row = row.resized(states)
         suffix = "{0}_s{1}".format(suffix, states)
     return build(row, np.float32 if precision is None else precision,
                  name_suffix=suffix)
-
-
-# --------------------------------------------------------------------- pins
-
-def pins(problem):
-    """(dt0, dt_min) for adaptive solves: the timing step and duration * dt_min_fraction."""
-    row = as_problem(problem)
-    return row.timing_dt, row["duration"] * DT_MIN_FRACTION
 
 
 # -------------------------------------------------------------- controllers
@@ -107,7 +98,7 @@ def default_controller(alias, family, order):
 
 
 def pi_tier_controller(order):
-    """The DIRK PI defaults, resolved for an order, as the overlap suite's comparison tier."""
+    """The DIRK PI defaults, resolved for an order, applied to any family."""
     from cubie.integrators.algorithms import generic_dirk
     return {
         "step_controller": "pi",
@@ -160,41 +151,6 @@ def controllers_equal(a, b, rel_tol=1e-9):
 
 # ------------------------------------------------------------------ solvers
 
-def make_solver(system, problem, algorithm, mode, setting=None, package=None,
-                key=None, controller=None, states=None, optimized=True):
-    """A Solver for one point; a recorded optimize row is applied when package and key are given. The Newton norm scales by the [newton] table at a fixed step and by the step tolerance when adaptive, as in OrdinaryDiffEq and diffrax; explicit algorithms ignore the keys."""
-    import cubie as qb
-    from cubie_systems import output_types
-    row = as_problem(problem)
-    if setting is None:
-        setting = timing_setting(row, mode)[1]
-    kwargs = dict(algorithm=algorithm, save_every=row["duration"],
-                  output_types=output_types(system), time_logging_level=None)
-    if mode == "fixed":
-        kwargs.update(dt=setting, step_controller="fixed",
-                      newton_atol=NEWTON_ATOL, newton_rtol=NEWTON_RTOL)
-    else:
-        dt0, dt_min = pins(row)
-        kwargs.update(atol=setting, rtol=setting, dt=dt0, dt_min=dt_min,
-                      newton_atol=setting, newton_rtol=setting)
-        if controller:
-            kwargs["step_controller"] = controller["step_controller"]
-    tuned = None
-    if optimized and package is not None and key is not None:
-        tuned = load_optimized(package, key, row, algorithm, mode, setting,
-                               states)
-    if tuned is not None:
-        kwargs.update(tuned["settings"])
-    solver = qb.Solver(system, **kwargs)
-    if controller:
-        extra = {k: v for k, v in controller.items() if k != "step_controller"}
-        if extra:
-            solver.update(extra)
-    if tuned is not None and tuned["resident_blocks"] is not None:
-        solver.kernel.resident_blocks = tuned["resident_blocks"]
-    return solver
-
-
 def solve(solver, initial_values, parameters, duration, on_device=False):
     """One solve at the solver's own launch geometry; a device solve is synchronised before returning."""
     result = solver.solve(initial_values=initial_values,
@@ -208,32 +164,42 @@ def solve(solver, initial_values, parameters, duration, on_device=False):
 # ------------------------------------------------------------------ optimize
 
 def optimize_path(package, key, root=None):
-    directory = os.path.join(root or "data", PACKAGE_DIRS[package], key)
+    """data/key=<key>/package=<pkg>/optimize.csv; the directory is created."""
+    directory = os.path.join(root or "data", "key=" + key, "package=" + package)
     os.makedirs(directory, exist_ok=True)
     return os.path.join(directory, "optimize.csv")
 
 
 def per_point(algorithm):
-    """True when the algorithm's family is optimised at every setting."""
+    """True when the algorithm's family is optimised at every stepping."""
     return get_algorithm(algorithm)["family"] in OPTIMIZE_PER_POINT_FAMILIES
 
 
 def _ident(package, key, problem, algorithm, mode, setting, states):
+    """The optimize row identity; a family optimised once per leg carries no setting."""
     row = as_problem(problem)
     kind = "dt" if mode == "fixed" else "tol"
-    if not per_point(algorithm):
-        setting = timing_setting(row, mode)[1]
+    text = ""
+    if per_point(algorithm) and setting is not None:
+        text = "{0:.10g}".format(float(setting))
     return {"package": package, "key": key, "problem": row.name,
             "algorithm": algorithm, "mode": mode, "setting_kind": kind,
-            "setting": "{0:.10g}".format(float(setting)),
+            "setting": text,
             "states": str(int(row["states"] if states is None else states))}
 
 
+def _setting_matches(a, b):
+    """Two settings name the same stepping: both empty, or equal within a relative 1e-8."""
+    import math
+    if a == "" or b == "":
+        return a == b
+    return math.isclose(float(a), float(b), rel_tol=1e-8, abs_tol=0.0)
+
+
 def _same(row, ident):
-    from results import setting_matches
     for field, value in ident.items():
         if field == "setting":
-            if not setting_matches(row[field], value):
+            if not _setting_matches(row[field], value):
                 return False
         elif str(row[field]) != str(value):
             return False

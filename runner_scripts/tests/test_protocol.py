@@ -1,4 +1,4 @@
-"""protocol.toml is the one source: the Python, Julia and C++ views agree."""
+"""protocol.toml holds the repeat schedule, the watchdog and the optimize table alone; the Python, Julia and C++ views agree."""
 
 import os
 import shutil
@@ -14,45 +14,45 @@ sys.path.insert(0, os.path.dirname(HERE))
 import protocol  # noqa: E402
 import wp_common  # noqa: E402
 from launch import julia_command  # noqa: E402
-from problems import get_problem  # noqa: E402
 
 
 class PythonViewTests(unittest.TestCase):
-    def test_grids_follow_the_exponent_ranges(self):
-        lorenz = get_problem("lorenz")
-        self.assertEqual(lorenz.dts(), protocol.fixed_dts(1.0, protocol.WP_K))
-        self.assertEqual(lorenz.dts("euler"),
-                         protocol.fixed_dts(1.0, protocol.EULER_K))
-        self.assertEqual(len(protocol.TOLS),
-                         protocol.TOL_K[1] - protocol.TOL_K[0] + 1)
-        self.assertEqual(lorenz.timing_dt, 2.0 ** -protocol.TIMING_DT_K)
+    def test_only_the_three_tables_remain(self):
+        self.assertEqual(sorted(protocol.PROTOCOL), sorted(protocol.TABLES))
+        self.assertEqual(protocol.TABLES, ("repeats", "watchdog", "optimize"))
+        for gone in ("ensemble", "fixed", "adaptive", "newton", "plots"):
+            self.assertNotIn(gone, protocol.PROTOCOL)
+        for name in ("N_WP", "STATES_GRID", "TOLS", "TIMING_TOL", "NEWTON_ATOL", "parse_ns"):
+            self.assertFalse(hasattr(protocol, name), name)
 
-    def test_newton_scale_is_one_table(self):
-        self.assertEqual(protocol.NEWTON_ATOL, protocol.get("newton.atol"))
-        self.assertEqual(protocol.NEWTON_RTOL, protocol.get("newton.rtol"))
-        self.assertGreater(protocol.NEWTON_ATOL, 0.0)
-        self.assertGreater(protocol.NEWTON_RTOL, 0.0)
+    def test_values(self):
+        self.assertEqual(protocol.REPEAT_CAP, protocol.get("repeats.cap"))
+        self.assertEqual(protocol.REPEAT_SCHEDULE[-1][0], float("inf"))
+        self.assertEqual(protocol.WATCHDOG_EXIT_CODE, 3)
+        self.assertEqual(protocol.WATCHDOG_SECONDS, float(protocol.get("watchdog.seconds")))
+        self.assertGreater(protocol.OPTIMIZE_N, 0)
+        self.assertIn("dirk", protocol.OPTIMIZE_PER_POINT_FAMILIES)
 
-    def test_wp_common_reexports(self):
-        self.assertIs(wp_common.TOLS, protocol.TOLS)
-        self.assertEqual(wp_common.N_WP, protocol.N_WP)
+    def test_wp_common_reexports_the_timing_constants(self):
         self.assertEqual(wp_common.REPEAT_SCHEDULE, protocol.REPEAT_SCHEDULE)
-        self.assertEqual(wp_common.REPEAT_SCHEDULE[-1][0], float("inf"))
+        self.assertEqual(wp_common.WATCHDOG_SECONDS, protocol.WATCHDOG_SECONDS)
+        self.assertFalse(hasattr(wp_common, "parse_bench_args"))
+        self.assertFalse(hasattr(wp_common, "load_golden"))
 
-    def test_performance_ns(self):
-        self.assertEqual(protocol.performance_ns(512), [8, 32, 128, 512])
-        self.assertEqual(protocol.parse_ns("512", 128), [128, 512])
-        self.assertEqual(protocol.parse_ns("32768,134217728"),
-                         [32768, 134217728])
+    def test_no_environment_override(self):
+        env = dict(os.environ, BENCH_WATCHDOG_SECONDS="1")
+        out = subprocess.run([sys.executable, "-c",
+                              "import sys; sys.path.insert(0, r'{0}'); import protocol; "
+                              "print(protocol.WATCHDOG_SECONDS)".format(os.path.dirname(HERE))],
+                             capture_output=True, text=True, check=True, env=env)
+        self.assertEqual(float(out.stdout), protocol.WATCHDOG_SECONDS)
 
     def test_get(self):
-        self.assertEqual(protocol.get("ensemble.n_wp"), protocol.N_WP)
         out = subprocess.run(
             [sys.executable, os.path.join(ROOT, "runner_scripts", "protocol.py"),
-             "get", "ensemble.states_grid"],
+             "get", "optimize.per_point_families"],
             capture_output=True, text=True, check=True)
-        self.assertEqual(out.stdout.split(),
-                         [str(s) for s in protocol.get("ensemble.states_grid")])
+        self.assertEqual(out.stdout.split(), list(protocol.OPTIMIZE_PER_POINT_FAMILIES))
 
 
 class CxxHeaderTests(unittest.TestCase):
@@ -62,14 +62,13 @@ class CxxHeaderTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_header_carries_the_schedule(self):
+    def test_header_carries_the_schedule_and_the_watchdog(self):
         text = protocol.cxx_header()
-        self.assertIn("#define PROTOCOL_N_WP {0}".format(protocol.N_WP), text)
-        self.assertIn("#define PROTOCOL_REPEAT_CAP {0}".format(
-            protocol.REPEAT_CAP), text)
+        self.assertIn("#define PROTOCOL_REPEAT_CAP {0}".format(protocol.REPEAT_CAP), text)
+        self.assertIn("#define PROTOCOL_WATCHDOG_EXIT_CODE 3", text)
         self.assertIn("{INFINITY, 3, 10}", text)
-        self.assertIn("PROTOCOL_REPEAT_SCHEDULE_ROWS {0}".format(
-            len(protocol.REPEAT_SCHEDULE)), text)
+        self.assertIn("PROTOCOL_REPEAT_SCHEDULE_ROWS {0}".format(len(protocol.REPEAT_SCHEDULE)), text)
+        self.assertNotIn("N_WP", text)
 
     def test_write_is_idempotent(self):
         path = os.path.join(self.tmp, "protocol.h")
@@ -83,27 +82,23 @@ class CxxHeaderTests(unittest.TestCase):
 class JuliaViewTests(unittest.TestCase):
     def test_julia_reads_the_same_values(self):
         script = (
-            'include(joinpath("{0}", "runner_scripts", "problems.jl")); '
             'include(joinpath("{0}", "runner_scripts", "watchdog.jl")); '
-            'println(N_WP, " ", N_NE, " ", TIMING_TOL, " ", REPEAT_CAP, " ", '
-            'WATCHDOG_SECONDS, " ", length(TOLS), " ", '
-            'join(problem_dts(get_problem("lorenz")), ","), " ", '
-            'NEWTON_ATOL, " ", NEWTON_RTOL)'
+            'println(REPEAT_CAP, " ", REPEAT_SPREAD, " ", length(REPEAT_SCHEDULE), " ", '
+            'WATCHDOG_SECONDS, " ", WATCHDOG_EXIT_CODE, " ", OPTIMIZE_N, " ", '
+            'join(OPTIMIZE_PER_POINT_FAMILIES, ","), " ", isdefined(@__MODULE__, :N_WP))'
         ).format(ROOT.replace("\\", "/"))
         out = subprocess.run(
             julia_command() + ["--startup-file=no", "--project=" + ROOT, "-e", script],
             capture_output=True, text=True, check=True, cwd=ROOT)
         fields = out.stdout.split()
-        self.assertEqual(int(fields[0]), protocol.N_WP)
-        self.assertEqual(int(fields[1]), protocol.N_NE)
-        self.assertEqual(float(fields[2]), protocol.TIMING_TOL)
-        self.assertEqual(int(fields[3]), protocol.REPEAT_CAP)
-        self.assertEqual(float(fields[4]), protocol.WATCHDOG_SECONDS)
-        self.assertEqual(int(fields[5]), len(protocol.TOLS))
-        self.assertEqual([float(v) for v in fields[6].split(",")],
-                         get_problem("lorenz").dts())
-        self.assertEqual(float(fields[7]), protocol.NEWTON_ATOL)
-        self.assertEqual(float(fields[8]), protocol.NEWTON_RTOL)
+        self.assertEqual(int(fields[0]), protocol.REPEAT_CAP)
+        self.assertEqual(float(fields[1]), protocol.REPEAT_SPREAD)
+        self.assertEqual(int(fields[2]), len(protocol.REPEAT_SCHEDULE))
+        self.assertEqual(float(fields[3]), protocol.WATCHDOG_SECONDS)
+        self.assertEqual(int(fields[4]), protocol.WATCHDOG_EXIT_CODE)
+        self.assertEqual(int(fields[5]), protocol.OPTIMIZE_N)
+        self.assertEqual(fields[6].split(","), list(protocol.OPTIMIZE_PER_POINT_FAMILIES))
+        self.assertEqual(fields[7], "false")
 
 
 if __name__ == "__main__":

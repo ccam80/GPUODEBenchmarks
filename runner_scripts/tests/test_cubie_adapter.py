@@ -64,72 +64,6 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(adapter.package_for_backend("mlir"), "cubie_mlir")
 
 
-class PinTests(unittest.TestCase):
-    def test_dt0_is_the_timing_step_and_dt_min_scales_with_duration(self):
-        problem = get_problem("ring_modulator")
-        dt0, dt_min = adapter.pins(problem)
-        self.assertAlmostEqual(dt0, problem["duration"] * 2.0 ** -10)
-        self.assertAlmostEqual(dt_min, problem["duration"] * 1.0e-6)
-
-    def test_timing_setting(self):
-        problem = get_problem("lorenz")
-        self.assertEqual(adapter.timing_setting(problem, "fixed"),
-                         ("dt", problem.timing_dt))
-        self.assertEqual(adapter.timing_setting(problem, "adaptive")[0], "tol")
-
-
-class SolverKwargTests(unittest.TestCase):
-    """make_solver hands cubie the protocol's pins; a fake cubie records them."""
-
-    def setUp(self):
-        import types
-        self.saved = {name: sys.modules.get(name)
-                      for name in ("cubie", "cubie.cuda_backend")}
-        calls = self.calls = []
-
-        class Solver:
-            def __init__(self, system, **kwargs):
-                calls.append(kwargs)
-                self.kernel = types.SimpleNamespace(resident_blocks=None)
-
-            def update(self, extra):
-                calls[-1].update(extra)
-
-        fake = types.ModuleType("cubie")
-        fake.Solver = Solver
-        sys.modules["cubie"] = fake
-        self.system = types.SimpleNamespace(
-            sizes=types.SimpleNamespace(observables=0))
-
-    def tearDown(self):
-        for name, module in self.saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-
-    def test_fixed_step_takes_the_newton_table(self):
-        from protocol import NEWTON_ATOL, NEWTON_RTOL
-        problem = get_problem("lorenz")
-        adapter.make_solver(self.system, problem, "kvaerno3", "fixed", 0.125)
-        kwargs = self.calls[-1]
-        self.assertEqual(kwargs["dt"], 0.125)
-        self.assertEqual(kwargs["step_controller"], "fixed")
-        self.assertEqual((kwargs["newton_atol"], kwargs["newton_rtol"]),
-                         (NEWTON_ATOL, NEWTON_RTOL))
-
-    def test_adaptive_scales_the_newton_norm_by_the_step_tolerance(self):
-        problem = get_problem("lorenz")
-        adapter.make_solver(self.system, problem, "kvaerno3", "adaptive", 1e-4)
-        kwargs = self.calls[-1]
-        self.assertEqual((kwargs["atol"], kwargs["rtol"]), (1e-4, 1e-4))
-        self.assertEqual((kwargs["newton_atol"], kwargs["newton_rtol"]),
-                         (1e-4, 1e-4))
-        self.assertEqual(kwargs["dt"], problem.timing_dt)
-        self.assertEqual(kwargs["dt_min"], problem["duration"] * 1e-6)
-        self.assertNotIn("step_controller", kwargs)
-
-
 class ControllerMappingTests(unittest.TestCase):
     def test_julia_pi_constants_map_to_cubie_gains(self):
         # cubie: (I + P) / (2 (order + 1)) on the squared norm = beta1 / 2.
@@ -202,12 +136,17 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertTrue(adapter.per_point("radau_iia_5"))
         self.assertTrue(adapter.per_point("rosenbrock23_sciml"))
 
+    def test_the_store_lives_under_the_package_partition(self):
+        path = adapter.optimize_path("cubie_mlir", "k")
+        self.assertEqual(os.path.relpath(path, self.tmp),
+                         os.path.join("data", "key=k", "package=cubie_mlir", "optimize.csv"))
+
     def test_explicit_rows_serve_every_setting_of_the_leg(self):
         result = FakeResult(FakeLaunch(256, 3),
                             {"state_location": "shared", "blocksize": 256})
         adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "fixed", self.problem.timing_dt, result)
-        for setting in (self.problem.timing_dt, 0.0625, 2.0 ** -13):
+                                 "fixed", 2.0 ** -10, result)
+        for setting in (2.0 ** -10, 0.0625, 2.0 ** -13):
             tuned = adapter.load_optimized("cubie", "k", self.problem,
                                            "tsit5", "fixed", setting)
             self.assertEqual(tuned["settings"],

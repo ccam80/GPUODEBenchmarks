@@ -1,38 +1,4 @@
-# Benchmark protocol shared by every writer: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates.
-
-[ensemble]
-n_wp = 131072
-n_ne = 1024
-n_states = 131072
-n_min = 8
-n_step = 4
-nmax_default = 16777216
-states_grid = [4, 8, 16, 32, 64, 128]
-# The ne ensemble is the first n_ne points of the n_wp sweep, scored on the same rows of the wp golden.
-
-# Fixed steps are duration * 2^-k.
-[fixed]
-timing_k = 10
-wp_k = [4, 13]
-euler_k = [8, 17]
-ne_k = [1, 13]
-
-# Tolerances are atol = rtol; the sweep grid is 10^-k. Adaptive solves start at the timing step and floor at duration * dt_min_fraction.
-[adaptive]
-timing_tol = 1.0e-5
-overlap_tol = 1.0e-8
-tol_k = [2, 8]
-dt_min_fraction = 1.0e-6
-
-# Fixed-step Newton scale, eta * rms(dz / (atol + rtol |u|)) < 0.01, in OrdinaryDiffEq, diffrax and cubie; adaptive solves use the step tolerance; DiffEqGPU kernels take none.
-[newton]
-atol = 1.0e-6
-rtol = 1.0e-6
-
-# Solver.optimize runs on an n-trajectory batch; families listed are optimised at every setting, the rest once per leg.
-[optimize]
-n = 262144
-per_point_families = ["dirk", "firk", "rosenbrock", "implicit"]
+# Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances and pins are spelled out in the set files under sets/.
 
 # Rows are [first-run seconds below, floor, ceiling]; a leg stops past its floor once median/min - 1 is within spread.
 [repeats]
@@ -44,5 +10,7 @@ spread = 0.02
 seconds = 120
 exit_code = 3
 
-[plots]
-max_errored_pct = 10.0
+# Solver.optimize runs on an n-trajectory batch; families listed are optimised at every stepping, the rest once per leg.
+[optimize]
+n = 262144
+per_point_families = ["dirk", "firk", "rosenbrock", "implicit"]

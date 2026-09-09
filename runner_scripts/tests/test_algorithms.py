@@ -1,5 +1,6 @@
-"""Registry tests: the algorithm table and the per-framework subsets."""
+"""The algorithm catalogue: typed rows, capability columns naming known packages, and the Julia constructor table covering every Julia capability and golden algorithm."""
 
+import csv
 import os
 import sys
 import unittest
@@ -8,143 +9,67 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from algorithms import (  # noqa: E402
-    FAMILIES, MODES, algorithm_names, get_algorithm, load_algorithms,
-    ne_algorithms, overlap_algorithms, resolve_algorithms, resolve_modes,
-    supported_for, wp_supported_for,
+    ALGORITHMS_CSV, FAMILIES, KINDS, algorithm_names, get_algorithm, load_algorithms, supported_for,
 )
-from problems import get_problem  # noqa: E402
-from wp_common import N_WP, parse_bench_args, wp_settings  # noqa: E402
+from problems import load_problems  # noqa: E402
+from store import PACKAGES  # noqa: E402
+
+JULIA_CSV = os.path.join(os.path.dirname(HERE), "julia_algorithms.csv")
 
 
-class WorkPrecisionMembershipTests(unittest.TestCase):
-    def test_cubie_wp_carries_the_ne_set(self):
-        fixed = wp_supported_for("cubie", "fixed")
-        self.assertIn("classical-rk4", fixed)
-        self.assertIn("backwards_euler", fixed)
-        self.assertNotIn("tsit5", supported_for("cubie", "fixed")[:0] + ("bogacki-shampine-32",))
-        adaptive = wp_supported_for("cubie_mlir", "adaptive")
-        self.assertIn("cash-karp-54", adaptive)
-        self.assertIn("radau_iia_9", adaptive)
-        self.assertNotIn("backwards_euler", adaptive)
-        self.assertEqual(wp_supported_for("julia", "fixed"),
-                         supported_for("julia", "fixed"))
-
-    def test_wp_resolution_and_the_ne_token(self):
-        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie", wp=True),
-                         ["radau_iia_9", "euler"])
-        self.assertEqual(resolve_algorithms("radau_iia_9,euler", "cubie"), ["euler"])
-        self.assertEqual(resolve_algorithms("radau_iia_9", "pytorch", wp=True), [])
-        self.assertEqual(set(wp_supported_for("cubie")),
-                         set(wp_supported_for("cubie", "fixed")) | set(wp_supported_for("cubie", "adaptive")))
-        _, analysis, algorithms, _, _ = parse_bench_args(["ne"], "cubie")
-        self.assertEqual(analysis, "ne")
-        self.assertNotIn("euler", algorithms)
-        self.assertIn("radau_iia_9", algorithms)
-        _, _, algorithms, _, _ = parse_bench_args(["wp"], "cubie")
-        self.assertIn("euler", algorithms)
-        self.assertIn("radau_iia_9", algorithms)
-
-    def test_wp_settings_follow_the_membership(self):
-        lorenz = get_problem("lorenz")
-        self.assertEqual(wp_settings(lorenz, "backwards_euler", "fixed", "cubie"),
-                         lorenz.ne_dts())
-        self.assertEqual(wp_settings(lorenz, "euler", "fixed", "cubie"),
-                         lorenz.dts("euler"))
-        self.assertEqual(wp_settings(lorenz, "tsit5", "fixed", "julia"),
-                         lorenz.dts("tsit5"))
-        self.assertEqual(len(wp_settings(lorenz, "tsit5", "adaptive", "cubie")), 7)
+def julia_rows():
+    with open(JULIA_CSV, newline="", encoding="utf-8") as handle:
+        return {row["algorithm"]: row for row in csv.DictReader(handle)}
 
 
-class RegistryTests(unittest.TestCase):
-    def test_rows_are_typed(self):
-        for row in load_algorithms():
-            self.assertIsInstance(row["fixed"], tuple)
-            self.assertIsInstance(row["adaptive"], tuple)
+class CatalogueTests(unittest.TestCase):
+    def test_columns_are_the_capability_schema(self):
+        with open(ALGORITHMS_CSV, newline="", encoding="utf-8") as handle:
+            header = next(csv.reader(handle))
+        self.assertEqual(header, ["algorithm", "display", "family", "order", "fixed", "adaptive"])
+
+    def test_rows_are_typed_and_name_known_packages(self):
+        rows = load_algorithms()
+        self.assertEqual(len(rows), 23)
+        for row in rows:
             self.assertIn(row["family"], FAMILIES)
             self.assertIsInstance(row["order"], int)
-            self.assertTrue(row["fixed"] or row["adaptive"] or row["ne"],
-                            "{0} is in no suite".format(row["algorithm"]))
-
-    def test_suite_memberships(self):
-        ne = [row["algorithm"] for row in ne_algorithms()]
-        self.assertEqual(len(ne), 21)
-        for row in ne_algorithms():
-            self.assertTrue(row["julia_cpu"], row["algorithm"])
-        self.assertEqual([row["algorithm"] for row in overlap_algorithms()],
-                         ["tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7",
-                          "kvaerno5"])
-        self.assertEqual([row["algorithm"] for row in ne_algorithms("tsit5,vern7")],
-                         ["tsit5", "vern7"])
-        with self.assertRaises(SystemExit):
-            ne_algorithms("nosuchalgorithm")
-        for row in load_algorithms():
-            if row["ne_adaptive"]:
-                self.assertTrue(row["ne"], row["algorithm"])
-
-    def test_unknown_algorithm_exits(self):
-        with self.assertRaises(SystemExit):
-            get_algorithm("nosuchalgorithm")
-
-    def test_names_are_unique(self):
+            for kind in KINDS:
+                self.assertIsInstance(row[kind], tuple)
+                for package in row[kind]:
+                    self.assertIn(package, PACKAGES, row.name)
+            self.assertTrue(row["fixed"] or row["adaptive"], row.name)
+            self.assertEqual(row.implicit, row["family"] != "erk")
         names = algorithm_names()
         self.assertEqual(len(names), len(set(names)))
 
-    def test_supported_is_the_union_of_the_modes(self):
-        for framework in ("cubie", "julia", "jax", "pytorch", "cpp",
-                          "myokit_cuda"):
-            union = set(supported_for(framework, "fixed"))
-            union |= set(supported_for(framework, "adaptive"))
-            self.assertEqual(union, set(supported_for(framework)))
-
-    def test_the_timed_implicit_set_reaches_cubie(self):
-        implicit = [row["algorithm"] for row in load_algorithms()
-                    if row["family"] != "erk" and (row["fixed"] or row["adaptive"])]
-        self.assertTrue(implicit)
-        for name in implicit:
-            self.assertIn(name, supported_for("cubie"))
-
-    def test_resolve_drops_unsupported_names_but_rejects_unknown_ones(self):
-        self.assertEqual([], resolve_algorithms("radau_iia_5", "pytorch"))
+    def test_lookups(self):
+        self.assertEqual(get_algorithm("tsit5")["order"], 5)
         with self.assertRaises(SystemExit):
-            resolve_algorithms("nosuchalgorithm", "cubie")
+            get_algorithm("nosuchalgorithm")
+        self.assertEqual(supported_for("pytorch"), ("euler", "classical-rk4", "tsit5"))
+        self.assertEqual(supported_for("pytorch", "adaptive"), ())
+        self.assertEqual(supported_for("myokit_cuda"), ("euler",))
+        self.assertEqual(supported_for("cpp"), ("classical-rk4", "cash-karp-54"))
+        for package in PACKAGES:
+            union = set(supported_for(package, "fixed")) | set(supported_for(package, "adaptive"))
+            self.assertEqual(union, set(supported_for(package)))
+        self.assertTrue(get_algorithm("tsit5").supports("julia_cpu", "adaptive"))
+        self.assertFalse(get_algorithm("tsit5").supports("julia_cpu", "fixed"))
+        self.assertFalse(get_algorithm("euler").supports("julia_cpu"))
 
-    def test_resolve_all_is_the_framework_set(self):
-        self.assertEqual(list(supported_for("jax")),
-                         resolve_algorithms("all", "jax"))
-
-
-class ParseTests(unittest.TestCase):
-    def test_bench_args_resolve_every_axis(self):
-        ns, analysis, algorithms, problems, modes = parse_bench_args(
-            ["wp", "kvaerno3", "--problem", "lorenz"], "cubie")
-        self.assertEqual([N_WP], ns)
-        self.assertEqual("wp", analysis)
-        self.assertEqual(["kvaerno3"], algorithms)
-        self.assertEqual(["lorenz"], [p.name for p in problems])
-        self.assertEqual(MODES, modes)
-
-    def test_mode_narrows_and_rejects_unknown_names(self):
-        self.assertEqual(parse_bench_args(["wp", "--mode", "adaptive"], "cubie")[4], ("adaptive",))
-        self.assertEqual(parse_bench_args(["wp", "--mode=fixed,adaptive"], "cubie")[4], MODES)
-        self.assertEqual(resolve_modes("adaptive,fixed"), MODES)
-        with self.assertRaises(SystemExit):
-            parse_bench_args(["wp", "--mode", "sideways"], "cubie")
-        with self.assertRaises(SystemExit):
-            parse_bench_args(["wp", "--mode"], "cubie")
-
-    def test_a_timing_count_parses_without_wp(self):
-        ns, analysis, _, _, _ = parse_bench_args(["1024", "tsit5"], "cubie")
-        self.assertEqual([1024], ns)
-        self.assertEqual("times", analysis)
-
-    def test_an_algorithm_the_framework_lacks_yields_an_empty_list(self):
-        _, _, algorithms, _, _ = parse_bench_args(
-            ["1024", "radau_iia_5"], "pytorch")
-        self.assertEqual([], algorithms)
-
-    def test_an_unknown_algorithm_exits(self):
-        with self.assertRaises(SystemExit):
-            parse_bench_args(["1024", "nosuchalgorithm"], "cubie")
+    def test_julia_constructors_cover_every_julia_capability_and_golden_algorithm(self):
+        table = julia_rows()
+        self.assertEqual(list(next(iter(table.values()))), ["algorithm", "julia_cpu", "julia_gpu", "notes"])
+        for row in load_algorithms():
+            for package in ("julia_cpu", "julia_gpu"):
+                if row.supports(package):
+                    self.assertTrue(table.get(row.name, {}).get(package), "{0} {1}".format(row.name, package))
+        for name in table:
+            self.assertTrue(name in algorithm_names() or table[name]["notes"].startswith("golden"), name)
+        for problem in load_problems():
+            golden = problem["golden_algorithm"]
+            self.assertTrue(table[golden]["julia_cpu"], golden)
 
 
 if __name__ == "__main__":

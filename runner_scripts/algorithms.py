@@ -1,4 +1,4 @@
-"""The algorithm axis: one row per integration algorithm in algorithms.csv, read the same way by algorithms.jl."""
+"""The algorithm catalogue: one row per integration algorithm in algorithms.csv with the packages that run it at a fixed step and adaptively."""
 
 import csv
 import os
@@ -6,37 +6,27 @@ import os
 ALGORITHMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "algorithms.csv")
 
-# The mode axis, fixed first: the order every sweep and cursor walks.
-MODES = ("fixed", "adaptive")
-_MODES = MODES
-_BOOLS = ("ne", "ne_adaptive")
+# The two stepping kinds, each a capability column.
+KINDS = ("fixed", "adaptive")
 FAMILIES = ("erk", "dirk", "firk", "rosenbrock", "implicit")
 
 
 class Algorithm(dict):
-    """One row of algorithms.csv: `fixed` and `adaptive` are framework tuples, `ne` and `ne_adaptive` bools, `julia_cpu` and `julia_gpu` constructor expressions or empty."""
+    """One row of algorithms.csv: `fixed` and `adaptive` are package tuples, `order` an int."""
 
     @property
     def name(self):
         return self["algorithm"]
 
-    def supports(self, framework, mode=None):
-        """True when the framework times this algorithm, in the mode if given."""
-        modes = _MODES if mode is None else (mode,)
-        return any(framework in self[m] for m in modes)
-
     @property
-    def in_ne(self):
-        return self["ne"]
-
-    @property
-    def in_overlap(self):
-        return bool(self["julia_gpu"])
-
-    @property
-    def runs_fixed_ne(self):
-        """The fixed-step ne sweep excludes the erk family."""
+    def implicit(self):
+        """True for every family that solves stage equations."""
         return self["family"] != "erk"
+
+    def supports(self, package, kind=None):
+        """True when the package runs this algorithm, in the stepping kind if given."""
+        kinds = KINDS if kind is None else (kind,)
+        return any(package in self[k] for k in kinds)
 
 
 def load_algorithms():
@@ -45,10 +35,8 @@ def load_algorithms():
         rows = list(csv.DictReader(handle))
     algorithms = []
     for row in rows:
-        for mode in _MODES:
-            row[mode] = tuple(f for f in row[mode].split("|") if f)
-        for flag in _BOOLS:
-            row[flag] = row[flag].strip().lower() == "true"
+        for kind in KINDS:
+            row[kind] = tuple(f for f in row[kind].split("|") if f)
         row["order"] = int(row["order"])
         algorithms.append(Algorithm(row))
     return algorithms
@@ -67,82 +55,17 @@ def get_algorithm(name):
                      .format(name, ", ".join(algorithm_names())))
 
 
-def supported_for(framework, mode=None):
-    """Algorithm names a framework times, in declaration order."""
+def supported_for(package, kind=None):
+    """Algorithm names a package runs, in declaration order."""
     return tuple(row["algorithm"] for row in load_algorithms()
-                 if row.supports(framework, mode))
-
-
-def resolve_algorithms(request, framework, wp=False):
-    """Resolve "all" or a comma list to the algorithms a framework times, or with wp the ones its wp sweep runs."""
-    supported = wp_supported_for(framework) if wp else supported_for(framework)
-    if request in (None, "", "all"):
-        return list(supported)
-    names = [name for name in request.split(",") if name]
-    for name in names:
-        get_algorithm(name)
-    return [name for name in names if name in supported]
-
-
-def resolve_modes(request):
-    """Resolve "all" or a comma list to the modes to run, fixed first; an unknown name exits."""
-    if request in (None, "", "all"):
-        return MODES
-    names = [name for name in request.split(",") if name]
-    for name in names:
-        if name not in MODES:
-            raise SystemExit("unknown mode '{0}' (expected one of: all, {1})"
-                             .format(name, ", ".join(MODES)))
-    return tuple(mode for mode in MODES if mode in names)
-
-
-# The packages whose work-precision sweep also carries the numerical-equivalence set.
-NE_PACKAGES = ("cubie", "cubie_mlir")
-
-
-def ne_member(row, mode):
-    """Whether an algorithm row is in the ne sweep for a mode."""
-    if mode == "fixed":
-        return row.in_ne and row.runs_fixed_ne
-    return row["ne_adaptive"]
-
-
-def wp_supported_for(framework, mode=None):
-    """Algorithm names a framework's wp sweep runs, in the mode if given: its timed set plus, for NE_PACKAGES, the ne set."""
-    modes = MODES if mode is None else (mode,)
-    return tuple(row["algorithm"] for row in load_algorithms()
-                 if any(row.supports(framework, m)
-                        or (framework in NE_PACKAGES and ne_member(row, m))
-                        for m in modes))
-
-
-def _select(rows, request):
-    """Rows named by "all" or a comma list; an unknown name exits."""
-    if request in (None, "", "all"):
-        return rows
-    names = [name for name in request.split(",") if name]
-    for name in names:
-        get_algorithm(name)
-    return [row for row in rows if row["algorithm"] in names]
-
-
-def ne_algorithms(request="all"):
-    """The numerical-equivalence rows, narrowed by name."""
-    return _select([row for row in load_algorithms() if row.in_ne], request)
-
-
-def overlap_algorithms(request="all"):
-    """The cubie-DiffEqGPU overlap rows, narrowed by name."""
-    return _select([row for row in load_algorithms() if row.in_overlap],
-                   request)
+                 if row.supports(package, kind))
 
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
-        # <framework> [request]: the resolved algorithm names, one per line.
-        request = sys.argv[2] if len(sys.argv) > 2 else "all"
-        for name in resolve_algorithms(request, sys.argv[1]):
+        # <package> [fixed|adaptive]: the algorithms it runs, one per line.
+        for name in supported_for(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None):
             print(name)
     else:
         for row in load_algorithms():

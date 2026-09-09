@@ -1,38 +1,26 @@
-"""Per-package command sequences for bench.py: which interpreter, script, environment and process split each package's analyses use."""
+"""The runner registry for bench.py: per package, the interpreter, script and environment that consume a trial file (`<runner argv> --trials <path> [--floor]`)."""
 
 import os
 import platform
 import shlex
 import sys
 
-from algorithms import MODES
-from cubie_adapter import PACKAGES as CUBIE_PACKAGES
-from protocol import WATCHDOG_EXIT_CODE
+from store import PACKAGES
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PACKAGES = CUBIE_PACKAGES + ("julia", "cpp", "pytorch", "jax", "myokit_cuda")
-ANALYSES = ("optimize", "warm", "performance", "states", "work-precision")
+CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 
 VENV = {"cubie": "GPU_ODE_CUBIE/venv", "cubie_mlir": "GPU_ODE_CUBIE_MLIR/venv",
         "pytorch": "GPU_ODE_PyTorch/venv", "jax": "GPU_ODE_JAX/venv",
         "myokit_cuda": "GPU_ODE_MYOKIT_CUDA/venv"}
-SCRIPT = {"cubie": "GPU_ODE_CUBIE/bench_cubie.py",
-          "cubie_mlir": "GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py",
-          "pytorch": "GPU_ODE_PyTorch/bench_torchdiffeq.py",
-          "jax": "GPU_ODE_JAX/bench_diffrax.py",
-          "myokit_cuda": "GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py"}
 ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "cubie_mlir": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
-# Work-precision legs run one process each so a watchdog hard-exit abandons one leg.
-WP_PER_LEG = ("pytorch", "jax", "myokit_cuda")
-# Packages whose performance sweep fills its cache before timing.
-PERF_WARM = ("cubie", "cubie_mlir", "jax", "myokit_cuda")
 
 
 class Command:
-    """One subprocess of a stage: argv, extra environment, and the exit codes that are not failures."""
+    """One runner invocation: argv, extra environment, and the exit codes that are not failures."""
 
     def __init__(self, label, argv, env=None, ok=(0,)):
         self.label, self.argv, self.env, self.ok = label, list(argv), dict(env or {}), tuple(ok)
@@ -56,13 +44,8 @@ def venv_python(package):
     return sys.executable
 
 
-def cubie_python():
-    """The shared cubie interpreter, for the NE, overlap and comparison scripts."""
-    return venv_python("cubie")
-
-
 def suite_python():
-    """The suite interpreter: GPU_ODE_CUBIE/venv with pyarrow and duckdb; bench.py, the analyses and the shell wrappers run under it."""
+    """The suite interpreter: GPU_ODE_CUBIE/venv with pyarrow and duckdb; bench.py, the store CLI and the analyses run under it."""
     return venv_python("cubie")
 
 
@@ -71,110 +54,41 @@ def julia_command():
     return shlex.split(os.environ.get("JULIA", "julia +1.13"))
 
 
-def mode_args(mode):
-    """The --mode tail a bench script or driver takes; nothing when every mode runs."""
-    return [] if mode == "all" else ["--mode", mode]
+def _script(path):
+    return os.path.join(REPO_ROOT, *path.split("/"))
 
 
-def wp_legs(package, algorithm, problem, mode="all"):
-    """(problem, algorithm) work-precision legs the package runs in the requested modes."""
-    from algorithms import resolve_algorithms, resolve_modes, supported_for
-    from problems import resolve_problems
-    algorithms = resolve_algorithms(algorithm, package)
-    modes = resolve_modes(mode)
-    legs = []
-    for row in resolve_problems(problem, package):
-        for name in algorithms:
-            if any(name in supported_for(package, m) for m in modes):
-                legs.append((row.name, name))
-    return legs
+def _python_runner(package, script):
+    return [venv_python(package), _script(script)]
 
 
-def _python_commands(package, analysis, nlist, algorithm, problem, mode):
-    python = venv_python(package)
-    script = os.path.join(REPO_ROOT, SCRIPT[package])
-    env = ENV.get(package, {})
-    csv = ",".join(str(n) for n in nlist)
-    tail = mode_args(mode)
-
-    def bench(*args):
-        return [python, script] + list(args) + tail
-
-    if analysis == "optimize":
-        if package not in CUBIE_PACKAGES:
-            return []
-        return [Command("optimize", bench("optimize", algorithm, "--problem", problem), env)]
-    if analysis == "warm":
-        return [Command("warm", bench("warm:" + csv, algorithm, "--problem", problem), env)]
-    if analysis == "states":
-        return [Command("states", bench("states", algorithm), env)]
-    if analysis == "numerical":
-        if package not in CUBIE_PACKAGES:
-            return []
-        return [Command("optimize", bench("optimize", algorithm, "--problem", problem), env),
-                Command("ne", bench("ne", algorithm, "--problem", problem), env)]
-    if analysis == "work-precision":
-        commands = []
-        if package in CUBIE_PACKAGES:
-            commands.append(Command("optimize", bench("optimize", algorithm, "--problem", problem), env))
-        if package in WP_PER_LEG:
-            for leg_problem, leg_algorithm in wp_legs(package, algorithm, problem, mode):
-                commands.append(Command(
-                    "wp {0} {1}".format(leg_problem, leg_algorithm),
-                    bench("wp", leg_algorithm, "--problem", leg_problem), env,
-                    ok=(0, WATCHDOG_EXIT_CODE)))
-        else:
-            commands.append(Command("wp", bench("wp", algorithm, "--problem", problem), env))
-        return commands
-    commands = []
-    if package in CUBIE_PACKAGES:
-        commands.append(Command("optimize", bench("optimize", algorithm, "--problem", problem), env))
-    if package in PERF_WARM:
-        commands.append(Command("warm", bench("warm:" + csv, algorithm, "--problem", problem), env))
-    commands.append(Command("performance", bench(csv, algorithm, "--problem", problem), env))
-    return commands
-
-
-def _julia_commands(analysis, nlist, algorithm, problem, mode):
-    driver = [sys.executable, os.path.join(REPO_ROOT, "runner_scripts", "gpu", "julia_driver.py")]
-    tail = mode_args(mode)
-    if analysis == "optimize":
-        return []
-    if analysis == "warm":
-        return [Command("warm", julia_command() + ["--project=.", "-e", "using Pkg; Pkg.precompile()"])]
-    if analysis == "states":
-        return [Command("states", driver + ["states", algorithm] + tail)]
-    if analysis == "work-precision":
-        return [Command("wp", driver + ["wp", algorithm, problem] + tail)]
-    csv = ",".join(str(n) for n in nlist)
-    return [Command("performance", driver + ["performance", csv, algorithm, problem] + tail)]
-
-
-def _cpp_commands(analysis, nmax, algorithm, problem, mode):
-    if analysis == "optimize":
-        return []
+def _cpp_runner():
     if platform.system() == "Windows":
-        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                os.path.join(REPO_ROOT, "runner_scripts", "gpu", "run_ode_cpp.ps1")]
-    else:
-        argv = ["bash", os.path.join(REPO_ROOT, "runner_scripts", "gpu", "run_ode_cpp.sh")]
-    argv += ["-a", analysis, "-n", nmax, "-g", algorithm, "-s", problem, "-m", mode]
-    return [Command(analysis, argv)]
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                _script("runner_scripts/gpu/run_ode_cpp.ps1")]
+    return ["bash", _script("runner_scripts/gpu/run_ode_cpp.sh")]
 
 
-def commands(package, analysis, nlist, nmax, algorithm, problem, mode="all"):
-    """The commands one (package, analysis) stage runs."""
-    if mode != "all" and mode not in MODES:
-        raise ValueError("unknown mode '{0}'".format(mode))
-    if analysis == "numerical" and package not in CUBIE_PACKAGES:
-        return []
-    if package == "julia":
-        return _julia_commands(analysis, nlist, algorithm, problem, mode)
-    if package == "cpp":
-        return _cpp_commands(analysis, nmax, algorithm, problem, mode)
-    return _python_commands(package, analysis, nlist, algorithm, problem, mode)
+# package -> callable giving the argv a trial file is appended to.
+RUNNERS = {
+    "cubie": lambda: _python_runner("cubie", "GPU_ODE_CUBIE/bench_cubie.py"),
+    "cubie_mlir": lambda: _python_runner("cubie_mlir", "GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py"),
+    "jax": lambda: _python_runner("jax", "GPU_ODE_JAX/bench_diffrax.py"),
+    "pytorch": lambda: _python_runner("pytorch", "GPU_ODE_PyTorch/bench_torchdiffeq.py"),
+    "myokit_cuda": lambda: _python_runner("myokit_cuda", "GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py"),
+    "cpp": _cpp_runner,
+    "julia_gpu": lambda: [suite_python(), _script("runner_scripts/gpu/julia_driver.py")],
+    "julia_cpu": lambda: julia_command() + ["-t", "auto", "--project=.",
+                                            _script("GPU_ODE_Julia/bench_ode_cpu.jl")],
+}
 
 
-def store_analysis(analysis):
-    """The result-store analysis name a bench analysis writes."""
-    return {"work-precision": "wp", "states": "states"}.get(analysis, "times")
+def runner_command(package, trials_path, floor=False):
+    """The Command that runs a package's trial file."""
+    if package not in RUNNERS:
+        raise ValueError("no runner registered for '{0}' (known: {1})".format(
+            package, ", ".join(PACKAGES)))
+    argv = list(RUNNERS[package]()) + ["--trials", trials_path]
+    if floor:
+        argv.append("--floor")
+    return Command(package, argv, ENV.get(package, {}))
