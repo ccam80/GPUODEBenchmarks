@@ -222,20 +222,14 @@ def make_row(**fields):
 
 
 def suite_rev(repo_root=REPO_ROOT):
-    """`git rev-parse --short HEAD`, suffixed -dirty when tracked files have changed; 'unknown' outside git."""
+    """`git rev-parse --short HEAD`; 'unknown' outside git."""
     try:
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                              cwd=repo_root, capture_output=True, text=True,
                              timeout=30)
-        if rev.returncode != 0:
-            return "unknown"
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
-            cwd=repo_root, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return "unknown"
-    dirty = status.returncode == 0 and status.stdout.strip() != ""
-    return rev.stdout.strip() + ("-dirty" if dirty else "")
+    return rev.stdout.strip() if rev.returncode == 0 else "unknown"
 
 
 class _Lock:
