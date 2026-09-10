@@ -22,6 +22,8 @@ from cubie_systems import final_states, output_types, variable_order  # noqa: E4
 from problems import as_problem  # noqa: E402
 
 PRECISIONS = {"float32": np.float32, "float64": np.float64}
+# Runs in the grid a per-kernel optimize compiles on: at least one full block at any block size.
+GEOMETRY_RUNS = 1024
 # The controller names a trial may carry: cubie's own step controllers plus the two shared tokens.
 CONTROLLERS = ("fixed", "default", "i", "pi", "pid", "gustafsson")
 # The trial fields that reach the Solver only when finite.
@@ -68,8 +70,8 @@ def make_solver(system, trial, solver_class=None):
     if solver_class is None:
         import cubie
         solver_class = cubie.Solver
-    kwargs = dict(algorithm=trial["algorithm"], save_every=float(trial["duration"]),
-                  output_types=output_types(system), time_logging_level=None)
+    # Without save_every cubie saves the final state alone, at any duration.
+    kwargs = dict(algorithm=trial["algorithm"], output_types=output_types(system), time_logging_level=None)
     kwargs.update(stepping_kwargs(trial))
     solver = solver_class(system, **kwargs)
     gains = gains_of(trial)
@@ -201,20 +203,25 @@ class CubieAdapter:
         build.solver.compile(initials, parameters, duration=build.duration)
 
     def optimize(self, build, trial):
-        """The line's recorded settings from the same source applied to the solver and compiled, else Solver.optimize on the line's n with the winner applied and recorded; returns what was done."""
+        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the waves batch (per kernel) or the line's n (per solve) at the duration optimize_duration sizes and record the winner; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
-        initials, parameters = build.grid(grid_mod.grid(trial))
         source = adapter.source_hash(build.solver)
         tuned = adapter.load_optimized(trial, self.key, root=self.root, source=source)
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile(initials, parameters, duration=build.duration)
+            build.solver.compile(*build.grid(grid_mod.grid(trial)), duration=build.duration)
             return "recorded"
+        batch = int(trial["n"])
+        if trial["optimize"] == "kernel":
+            geometry = build.grid(grid_mod.grid(dict(trial, n=max(batch, GEOMETRY_RUNS))))
+            batch = adapter.optimize_batch(build.solver, *geometry, build.duration)
+        initials, parameters = build.grid(grid_mod.grid(dict(trial, n=batch)))
+        duration = adapter.optimize_duration(build.solver, initials, parameters, build.duration)
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key,
-                                     root=self.root, force=True, source=source)
-        return "{0} on {1} runs".format(row["label"], row["n"])
+                                     root=self.root, force=True, source=source, duration=duration)
+        return "{0} on {1} runs over {2}".format(row["label"], row["n"], row["duration"])
 
     def solve(self, build, trial, values, transfers):
         build.apply(trial)

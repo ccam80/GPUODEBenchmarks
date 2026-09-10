@@ -44,8 +44,11 @@ for a count no grid of the named sets lists. A trial is one line per point;
 a point several set files declare runs under one contract whichever sets
 are named: it builds cold, keeps finals, optimizes per solve over per
 kernel and times each transfers mode when any declaration asks. A cubie
-optimize runs once per compiled kernel (build plus stepping) or once per
-line on its own n, as the set's `[set.optimize] per` says. Lines run
+optimize runs once per compiled kernel (build plus stepping) on
+`[optimize] waves` occupancy waves of the kernel, or once per line on its
+own n, as the set's `[set.optimize] per` says; either times launches at
+the duration whose solve takes about `launch_ms`, at least 1/100 of the
+problem's. Lines run
 easiest first (states, then n, then step and tolerance loose to tight); a
 timeout or out-of-memory run abandons every harder run of its family (same
 problem, precision, algorithm, controller and gains; larger n or states,

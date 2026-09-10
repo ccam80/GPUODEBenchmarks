@@ -5,9 +5,11 @@ import json
 import os
 import subprocess
 import sys
+import timeit
 from datetime import datetime, timezone
 
 from problems import as_problem
+from protocol import OPTIMIZE_LAUNCH_MS, OPTIMIZE_WAVES
 from store import _Lock
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
@@ -15,10 +17,12 @@ SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
 PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "states", "precision", "algorithm", "controller",
-                   "gains", "stepping", "per", "n", "source", "label", "best_ms", "blocksize",
+                   "gains", "stepping", "per", "n", "duration", "source", "label", "best_ms", "blocksize",
                    "resident_blocks", "settings", "recorded_utc")
 # The stepping values that compile into a cubie kernel.
 STEPPING_FIELDS = ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
+# Fractions of the problem duration the optimize-duration probes solve, shortest first.
+PROBE_FRACTIONS = (0.01, 0.1)
 
 # Controller keys a caller may pass; everything else in a defaults table configures the step.
 CONTROLLER_KEYS = ("step_controller", "integral_gain", "proportional_gain",
@@ -324,6 +328,47 @@ def apply_optimized(solver, tuned):
         kernel.resident_blocks = tuned["resident_blocks"]
 
 
+def _occupancy(kernel, blocksize, dynamic_shared):
+    """The driver's resident blocks per SM of a compiled kernel at a launch geometry."""
+    from cubie.backend.utils import active_blocks_per_multiprocessor
+    return int(active_blocks_per_multiprocessor(kernel.kernel, blocksize, dynamic_shared))
+
+
+def _multiprocessors():
+    from cubie.backend.utils import device_hardware
+    return int(device_hardware().multiprocessor_count)
+
+
+def optimize_batch(solver, initial_values, parameters, duration, waves=OPTIMIZE_WAVES):
+    """The run count filling `waves` occupancy waves of the solver's kernel at its block size; compiles the kernel on the given grid, which holds at least one block of runs."""
+    solver.compile(initial_values, parameters, duration=duration)
+    kernel = solver.kernel
+    blocksize, dynamic = kernel.launch_geometry(kernel.compile_settings.blocksize)
+    resident = max(1, _occupancy(kernel, blocksize, dynamic))
+    runs_per_block = max(1, int(blocksize) // int(kernel.single_integrator.threads_per_step))
+    return int(round(waves * _multiprocessors() * resident * runs_per_block))
+
+
+def optimize_duration(solver, initial_values, parameters, duration, target_ms=OPTIMIZE_LAUNCH_MS,
+                      fractions=PROBE_FRACTIONS):
+    """The solve duration whose launch on the batch takes about target_ms: probes of the fractions run until one takes target_ms, and that probe scaled to target_ms, kept between the first fraction and the duration; the first probe runs untimed once from the host and once on the device."""
+    duration = float(duration)
+    probe = duration * fractions[0]
+    solve(solver, initial_values, parameters, probe)
+    solve(solver, solver.device_initial_values, solver.device_parameters, probe, on_device=True)
+    elapsed_ms = 0.0
+    for fraction in fractions:
+        probe = duration * fraction
+        started = timeit.default_timer()
+        solve(solver, solver.device_initial_values, solver.device_parameters, probe, on_device=True)
+        elapsed_ms = (timeit.default_timer() - started) * 1000.0
+        if elapsed_ms >= target_ms:
+            break
+    if elapsed_ms <= 0.0:
+        return duration
+    return min(duration, max(duration * fractions[0], probe * target_ms / elapsed_ms))
+
+
 def _replace(trial, key, root, row):
     path = optimize_path(trial["package"], key, root)
     ident = optimize_ident(trial, key)
@@ -338,10 +383,10 @@ def _stamp():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def record_optimized(trial, key, result, n, root=None, source=""):
-    """Replace the optimize row of a line with the result's best launch on a batch of n."""
+def record_optimized(trial, key, result, n, root=None, source="", duration=None):
+    """Replace the optimize row of a line with the result's best launch on a batch of n at a duration."""
     best = result.best
-    row = dict(optimize_ident(trial, key), n=str(int(n)), source=source, label=best.label,
+    row = dict(optimize_ident(trial, key), n=str(int(n)), duration=_text(duration), source=source, label=best.label,
                best_ms="{0:.6g}".format(best.best_ms), blocksize=str(best.blocksize),
                resident_blocks="" if best.resident_blocks is None else str(best.resident_blocks),
                settings=_encode(result.applied_settings), recorded_utc=_stamp())
@@ -350,20 +395,21 @@ def record_optimized(trial, key, result, n, root=None, source=""):
 
 def record_optimize_timeout(trial, key, root=None):
     """Replace the optimize row of a line with one labelled timeout and no settings."""
-    row = dict(optimize_ident(trial, key), n=str(int(trial["n"])), source="", label="timeout",
+    row = dict(optimize_ident(trial, key), n=str(int(trial["n"])), duration="", source="", label="timeout",
                best_ms="nan", blocksize="", resident_blocks="", settings="", recorded_utc=_stamp())
     return _replace(trial, key, root, row)
 
 
 def optimize_point(solver, trial, initial_values, parameters, key, root=None, force=False,
-                   source="", verbose=True):
-    """Run Solver.optimize on a batch for the trial's duration, apply the winner to the solver and record it under `source`; `force` varies settings an earlier optimize applied."""
-    result = solver.optimize(initial_values, parameters, duration=float(trial["duration"]),
-                             verbose=verbose, force=force)
+                   source="", verbose=True, duration=None):
+    """Run Solver.optimize on a batch for `duration` (the trial's when None), apply the winner to the solver and record it under `source`; `force` varies settings an earlier optimize applied."""
+    duration = float(trial["duration"] if duration is None else duration)
+    result = solver.optimize(initial_values, parameters, duration=duration, verbose=verbose, force=force)
     if result.best is None:
         raise RuntimeError("optimize timed no launch for {0} {1}".format(
             trial["problem"], trial["algorithm"]))
-    return record_optimized(trial, key, result, int(initial_values.shape[1]), root=root, source=source)
+    return record_optimized(trial, key, result, int(initial_values.shape[1]), root=root, source=source,
+                            duration=duration)
 
 
 def clear_optimized(package, key, algorithm=None, problem=None, root=None):

@@ -1,4 +1,4 @@
-# Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances, pins and the optimize step are spelled out in the set files under sets/.
+# Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances, pins and the optimize policy are spelled out in the set files under sets/.
 
 # Rows are [first-run seconds below, floor, ceiling]; a run stops past its floor once median/min - 1 is within spread.
 [repeats]
@@ -11,3 +11,8 @@ seconds = 120
 exit_code = 3
 # Hard-exit budget of a line's optimize; its solves then run at the solver's own geometry.
 optimize_seconds = 600
+
+# A cubie optimize runs `waves` occupancy waves of the kernel (per kernel) or the line's n (per solve), timed at the duration whose launch takes about launch_ms, at least 1/100 of the problem's.
+[optimize]
+launch_ms = 20
+waves = 5
