@@ -54,6 +54,11 @@ def julia_command():
     return shlex.split(os.environ.get("JULIA", "julia +1.13"))
 
 
+def julia_project():
+    """The Julia project every launcher passes as --project: JULIA_PROJECT when set, else this checkout."""
+    return os.environ.get("JULIA_PROJECT") or REPO_ROOT
+
+
 def _script(path):
     return os.path.join(REPO_ROOT, *path.split("/"))
 
@@ -78,7 +83,7 @@ RUNNERS = {
     "myokit_cuda": lambda: _python_runner("myokit_cuda", "GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py"),
     "cpp": _cpp_runner,
     "julia_gpu": lambda: [suite_python(), _script("runner_scripts/gpu/julia_driver.py")],
-    "julia_cpu": lambda: julia_command() + ["-t", "auto", "--project=.",
+    "julia_cpu": lambda: julia_command() + ["-t", "auto", "--project=" + julia_project(),
                                             _script("GPU_ODE_Julia/bench_ode_cpu.jl")],
 }
 

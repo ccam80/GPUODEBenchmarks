@@ -205,6 +205,7 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(launch.runner_command("julia_gpu", "x.jsonl").argv[1].endswith("julia_driver.py"))
         julia_cpu = launch.runner_command("julia_cpu", "x.jsonl").argv
         self.assertEqual(julia_cpu[:2], launch.julia_command())
+        self.assertIn("--project=" + launch.julia_project(), julia_cpu)
         self.assertTrue(julia_cpu[-3].endswith("bench_ode_cpu.jl"))
         cpp = launch.runner_command("cpp", "x.jsonl").argv
         self.assertTrue(cpp[-3].endswith("run_ode_cpp.ps1") or cpp[-3].endswith("run_ode_cpp.sh"))
@@ -222,6 +223,21 @@ class LaunchTests(unittest.TestCase):
             os.environ.pop("JULIA", None)
             if saved is not None:
                 os.environ["JULIA"] = saved
+
+    def test_the_julia_project_is_the_checkout_unless_JULIA_PROJECT_names_one(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "gpu"))
+        import julia_driver
+        saved = os.environ.pop("JULIA_PROJECT", None)
+        try:
+            self.assertEqual(launch.julia_project(), launch.REPO_ROOT)
+            os.environ["JULIA_PROJECT"] = "/srv/GPUODEBenchmarks"
+            self.assertEqual(launch.julia_project(), "/srv/GPUODEBenchmarks")
+            self.assertIn("--project=/srv/GPUODEBenchmarks", launch.runner_command("julia_cpu", "x.jsonl").argv)
+            self.assertEqual(julia_driver.julia_command()[-1], "--project=/srv/GPUODEBenchmarks")
+        finally:
+            os.environ.pop("JULIA_PROJECT", None)
+            if saved is not None:
+                os.environ["JULIA_PROJECT"] = saved
 
 
 class HardExitTests(unittest.TestCase):
