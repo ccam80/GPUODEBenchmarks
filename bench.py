@@ -4,8 +4,8 @@
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
 --resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
-run ends with a store sync (runner_scripts/sync.py): push this key, pull the others; --no-sync skips it; no remote configured means no sync.
-Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed sync.
+run pulls the store into data/ before planning and pushes this key after the runners (runner_scripts/sync.py); a machine without the store refuses to run unless --no-sync.
+Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
 
 import argparse
@@ -378,34 +378,42 @@ def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     plan = resolve(args)
     os.chdir(ROOT)
+    key = dataset_key()
+    if key.endswith("_unknown-gpu") and not args.allow_unknown_gpu:
+        raise SystemExit("Could not identify the GPU; the dataset key would be '{0}'. Fix the driver "
+                         "or pass --allow-unknown-gpu.".format(key))
     if args.command == "plan":
-        key = dataset_key()
-        if key.endswith("_unknown-gpu") and not args.allow_unknown_gpu:
-            raise SystemExit("Could not identify the GPU; the dataset key would be '{0}'. Fix the driver "
-                             "or pass --allow-unknown-gpu.".format(key))
         by_package = plan_trials(plan, key, DATA_DIR, args.resume, args.no_overwrite)
         paths = write_plan(os.path.join(TRIALS_DIR, key), by_package)
         print_counts(by_package)
         for path in paths.values():
             print(os.path.relpath(path, ROOT))
         return 0
-    run = Run(args, plan)
-    code = run.execute()
-    return max(code, sync_store(run.key, skip=args.no_sync))
+    pull_store(key, skip=args.no_sync)
+    code = Run(args, plan, key=key).execute()
+    return max(code, push_store(key, skip=args.no_sync))
 
 
-def sync_store(key, root=DATA_DIR, skip=False):
-    """Push this key and pull the others after a run; 0 when done or skipped, the sync's exit code otherwise."""
+def pull_store(key, root=DATA_DIR, skip=False):
+    """Fill the local mirror from the store before a run; SystemExit when the store is not set up or the pull fails."""
     if skip:
-        print("Store sync : skipped (--no-sync)")
-        return 0
+        print("Store       : not used (--no-sync)")
+        return
     reason = sync.unavailable()
     if reason:
-        print("Store sync : skipped, " + reason)
+        raise SystemExit("Store       : {0}; pass --no-sync to run without it".format(reason))
+    print("Store       : pull from " + sync.remote_default(), flush=True)
+    if sync.run("pull", root, key):
+        raise SystemExit("Store       : pull FAILED; pass --no-sync to run without it")
+
+
+def push_store(key, root=DATA_DIR, skip=False):
+    """Copy this key and its clocks files to the store after a run; 0 when done or skipped, 1 on failure."""
+    if skip:
         return 0
-    print("Store sync : " + sync.remote_default(), flush=True)
-    code = sync.run("sync", root, key)
-    print("Store sync : " + ("done" if code == 0 else "FAILED (exit {0})".format(code)))
+    print("Store       : push to " + sync.remote_default(), flush=True)
+    code = sync.run("push", root, key)
+    print("Store       : " + ("pushed" if code == 0 else "push FAILED (exit {0})".format(code)))
     return 1 if code else 0
 
 

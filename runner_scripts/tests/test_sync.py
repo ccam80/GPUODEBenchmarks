@@ -1,4 +1,4 @@
-"""sync.py: the push, pull and check argv for both tools, the availability checks, and a real rclone round trip between two local trees: the push mirrors this key and its clocks only, the pull brings the other keys without deleting, the check reports drift."""
+"""sync.py: the argv of every command for both tools, the availability checks, and a real rclone round trip between two local trees: push copies this key and its clocks without deleting, pull brings the whole tree back, prune deletes what is gone locally, check reports drift."""
 
 import io
 import os
@@ -16,6 +16,7 @@ import sync  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 OTHER = "linux_RTX-2060-SUPER"
 SYNC_PY = os.path.join(os.path.dirname(HERE), "sync.py")
+REMOTE = "box:/srv/gpuode/data"
 
 
 def _touch(root, relative, text="x"):
@@ -36,37 +37,44 @@ def _files(root):
 
 class Commands(unittest.TestCase):
     def test_rclone_argv(self):
-        push, clocks = sync.commands("push", "d", KEY, "box:/srv/gpuode/data", "rclone")
-        self.assertEqual(push[:2], ["rclone", "sync"])
+        push, clocks = sync.commands("push", "d", KEY, REMOTE, "rclone")
+        self.assertEqual(push[:2], ["rclone", "copy"])
         self.assertTrue(push[2].endswith("key=" + KEY))
-        self.assertEqual(push[3], "box:/srv/gpuode/data/key=" + KEY)
+        self.assertEqual(push[3], REMOTE + "/key=" + KEY)
         self.assertIn("*.partial", push)
         self.assertIn("*.lock/**", push)
         self.assertEqual(clocks[:2], ["rclone", "copy"])
         self.assertEqual(clocks[-2:], ["--include", "*_" + KEY + ".csv"])
-        (pull,) = sync.commands("pull", "d", KEY, "box:/srv/gpuode/data", "rclone")
-        self.assertEqual(pull[:3], ["rclone", "copy", "box:/srv/gpuode/data"])
-        self.assertIn("key=" + KEY + "/**", pull)
-        (check,) = sync.commands("check", "d", KEY, "box:/srv/gpuode/data", "rclone")
+        (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rclone")
+        self.assertEqual(pull[:3], ["rclone", "copy", REMOTE])
+        self.assertNotIn("key=" + KEY + "/**", pull)
+        (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rclone")
+        self.assertEqual(prune[:2], ["rclone", "sync"])
+        self.assertEqual(prune[3], REMOTE + "/key=" + KEY)
+        (check,) = sync.commands("check", "d", KEY, REMOTE, "rclone")
         self.assertEqual(check[:2], ["rclone", "check"])
         self.assertIn("--dry-run", sync.commands("push", "d", KEY, "r:/p", "rclone", dry_run=True)[0])
         self.assertEqual(len(sync.commands("sync", "d", KEY, "r:/p", "rclone")), 3)
 
     def test_rsync_argv(self):
-        push, clocks = sync.commands("push", "d", KEY, "box:/srv/gpuode/data", "rsync")
-        self.assertEqual(push[:3], ["rsync", "-a", "--delete"])
+        push, clocks = sync.commands("push", "d", KEY, REMOTE, "rsync")
+        self.assertEqual(push[:2], ["rsync", "-a"])
+        self.assertNotIn("--delete", push)
         self.assertTrue(push[-2].endswith("key=" + KEY + "/"))
-        self.assertEqual(push[-1], "box:/srv/gpuode/data/key=" + KEY + "/")
+        self.assertEqual(push[-1], REMOTE + "/key=" + KEY + "/")
         self.assertEqual(clocks[2:6], ["--include", "*_" + KEY + ".csv", "--exclude", "*"])
-        (pull,) = sync.commands("pull", "d", KEY, "box:/srv/gpuode/data", "rsync")
-        self.assertEqual(pull[2:4], ["--exclude", "key=" + KEY + "/"])
-        self.assertEqual(pull[-2], "box:/srv/gpuode/data/")
-        (check,) = sync.commands("check", "d", KEY, "box:/srv/gpuode/data", "rsync")
+        (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rsync")
+        self.assertNotIn("key=" + KEY + "/", pull)
+        self.assertEqual(pull[-2], REMOTE + "/")
+        (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rsync")
+        self.assertIn("--delete", prune)
+        self.assertNotIn("--dry-run", prune)
+        (check,) = sync.commands("check", "d", KEY, REMOTE, "rsync")
         self.assertIn("--dry-run", check)
         self.assertIn("--itemize-changes", check)
 
     def test_remote_host(self):
-        self.assertEqual(sync.remote_host("box:/srv/gpuode/data"), "box")
+        self.assertEqual(sync.remote_host(REMOTE), "box")
         self.assertEqual(sync.remote_host("/srv/gpuode/data"), "")
         if sys.platform == "win32":
             self.assertEqual(sync.remote_host("C:/tmp/store"), "")
@@ -111,9 +119,7 @@ class RcloneRoundTrip(unittest.TestCase):
         code = sync.run(command, self.local, KEY, self.remote, tool="rclone", out=out, **kw)
         return code, out.getvalue()
 
-    def test_push_pull_check(self):
-        code, text = self.run_sync("check")
-        self.assertNotEqual(code, 0, text)
+    def test_push_keeps_remote_files(self):
         code, text = self.run_sync("push")
         self.assertEqual(code, 0, text)
         self.assertEqual(_files(self.remote), [
@@ -122,12 +128,14 @@ class RcloneRoundTrip(unittest.TestCase):
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
             "key={0}/package=cubie/finals/abc.parquet".format(KEY),
+            "key={0}/package=cubie/results/gone.parquet".format(KEY),
             "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY),
         ])
         self.assertFalse(os.path.exists(os.path.join(
             self.remote, "key=" + KEY, "package=cubie", "results", "lorenz__rk4.parquet.lock")))
-        code, text = self.run_sync("check")
-        self.assertEqual(code, 0, text)
+
+    def test_pull_brings_own_key_back(self):
+        shutil.rmtree(os.path.join(self.local, "key=" + KEY))
         code, text = self.run_sync("pull")
         self.assertEqual(code, 0, text)
         self.assertEqual(_files(self.local), [
@@ -136,39 +144,48 @@ class RcloneRoundTrip(unittest.TestCase):
             "clocks/lightload_{0}.csv".format(OTHER),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
-            "key={0}/package=cubie/finals/abc.parquet".format(KEY),
-            "key={0}/package=cubie/results/lorenz__rk4.parquet.partial".format(KEY),
-            "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY),
+            "key={0}/package=cubie/results/gone.parquet".format(KEY),
         ])
         with open(os.path.join(self.local, "key=" + OTHER, "package=jax", "results",
                                "stale.parquet")) as handle:
             self.assertEqual(handle.read(), "new")
 
-    def test_dry_run_and_sync(self):
-        code, text = self.run_sync("push", dry_run=True)
+    def test_prune_and_check(self):
+        code, text = self.run_sync("check")
+        self.assertNotEqual(code, 0, text)
+        code, text = self.run_sync("prune", dry_run=True)
         self.assertEqual(code, 0, text)
-        self.assertNotIn("key=" + KEY, [p.split("/")[0] for p in _files(self.remote)
-                                        if p.endswith("abc.parquet")])
+        self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
+        code, text = self.run_sync("prune")
+        self.assertEqual(code, 0, text)
+        self.assertNotIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
+        self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY), _files(self.remote))
+        code, text = self.run_sync("check")
+        self.assertEqual(code, 0, text)
+
+    def test_prune_needs_a_partition_with_files(self):
+        shutil.rmtree(os.path.join(self.local, "key=" + KEY))
+        os.makedirs(os.path.join(self.local, "key=" + KEY))
+        code, text = self.run_sync("prune")
+        self.assertEqual(code, 2)
+        self.assertIn("no files under", text)
+        self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
+
+    def test_push_from_an_empty_mirror(self):
+        shutil.rmtree(self.local)
+        code, text = self.run_sync("push")
+        self.assertEqual(code, 0, text)
+        self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
+
+    def test_sync_and_cli(self):
         code, text = self.run_sync("sync")
         self.assertEqual(code, 0, text)
-        self.assertIn("key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
-                      _files(self.local))
-        self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY),
-                      _files(self.remote))
-
-    def test_missing_partition(self):
-        shutil.rmtree(os.path.join(self.local, "key=" + KEY))
-        code, text = self.run_sync("push")
-        self.assertEqual(code, 2)
-        self.assertIn("no local partition", text)
-
-    def test_cli(self):
-        done = subprocess.run([sys.executable, SYNC_PY, "push", "--root", self.local,
+        self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.local))
+        self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY), _files(self.remote))
+        done = subprocess.run([sys.executable, SYNC_PY, "check", "--root", self.local,
                                "--remote", self.remote, "--key", KEY, "--tool", "rclone"],
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY),
-                      _files(self.remote))
 
 
 if __name__ == "__main__":
