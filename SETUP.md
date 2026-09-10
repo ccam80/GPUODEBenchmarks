@@ -27,8 +27,7 @@ failed. Each script can be run on its own and reuses an existing venv.
 - Locking GPU clocks needs an elevated shell (passwordless `sudo nvidia-smi`
   on Linux, an Administrator console on Windows); without it a run measures
   unlocked and reports the clocks it saw.
-- `rclone` with the `box:` remote for the result store (README, Using the
-  store); without it a run needs `--no-sync`.
+- `rclone` with the `box:` remote (README, Using the store), or `--no-sync` on every run.
 
 On a fresh Linux machine:
 

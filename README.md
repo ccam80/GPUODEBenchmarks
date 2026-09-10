@@ -75,30 +75,21 @@ python analyses/timing.py --x error  --set golden_grid  # min_ms against error
 python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 ```
 
-`data/` is a local mirror of the store, not tracked in git; pull before an
-analysis with `python runner_scripts/sync.py pull`.
+`data/` is an untracked mirror of the store; `python runner_scripts/sync.py pull` refreshes it.
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
 and write figures and CSVs under `plots/<key>/<problem>/`.
 
 ## Using the store
 
-The store is one `data/` tree on the store box, reached over Tailscale; each
-machine writes its own key partition and its own clocks files. A run pulls the
-whole tree into `data/` before planning and pushes its key after the runners;
-a machine that cannot reach the store refuses to run unless `--no-sync` is
-passed. To set a machine up:
+The store is one `data/` tree on the store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners, or refuses to run without the store unless `--no-sync`. Setup:
 
 1. Join the tailnet.
 2. Add the machine's public key to the store user's `authorized_keys` on the box.
-3. Record the box's host keys, every type: `ssh-keyscan -t rsa,ecdsa,ed25519 <box> >> ~/.ssh/known_hosts`.
-4. Install rclone and create the remote: `rclone config create box sftp host <box> user <user> key_file ~/.ssh/id_ed25519 known_hosts_file ~/.ssh/known_hosts`.
+3. `ssh-keyscan -t rsa,ecdsa,ed25519 <box> >> ~/.ssh/known_hosts`
+4. `rclone config create box sftp host <box> user <user> key_file ~/.ssh/id_ed25519 known_hosts_file ~/.ssh/known_hosts`
 
-`runner_scripts/sync.py pull|push|sync|prune|check` is the same sync by hand.
-Push never deletes; after `store.py clear` or deleting files under your key,
-`prune` mirrors the partition so they go from the box too, and it refuses an
-empty partition. `GPUODE_STORE_REMOTE` overrides the remote; rsync over the
-`box` ssh host is used when rclone is absent. An error is the RMS
+By hand: `runner_scripts/sync.py pull|push|sync|prune|check`. Push never deletes; `prune` mirrors your key after local deletions and refuses an empty partition. `GPUODE_STORE_REMOTE` overrides the remote; rsync over the `box` ssh host stands in when rclone is absent. An error is the RMS
 over every state of the difference from the julia_cpu float64 finals, paired
 by exact grid value, over the trajectories neither side flags as errored.
 
