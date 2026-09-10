@@ -1,10 +1,4 @@
-"""Symlink the main checkout's suite venvs and caches into a worktree.
-
-Symlinks ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
-``generated``; copies ``.claude/settings.local.json`` and sets
-``JULIA_PROJECT`` in its ``env`` to the main checkout; aborts on a
-junction. Env: ``ORCA_WORKTREE_PATH``, ``ORCA_ROOT_PATH``.
-"""
+"""Symlink the main checkout's ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and ``generated`` into a worktree, copy ``.claude/settings.local.json`` with ``JULIA_PROJECT`` set to the main checkout in its ``env``, abort on a junction; ``ORCA_WORKTREE_PATH`` and ``ORCA_ROOT_PATH`` override the paths."""
 
 import json
 import os
