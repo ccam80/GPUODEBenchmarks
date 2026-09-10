@@ -1,6 +1,6 @@
 """agreement.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-Per stepping, each package's error against the golden and the difference between every package pair, from finals paired by grid value. Per (key, problem) under plots/<key>/<problem>/: agreement.csv (one row per trial), agreement_pairs.csv (one row per pair) and one figure per leg against the swept dt/tolerance. Rows with errored_pct above 10 are dropped.
+Per stepping, each package's error against the golden and the difference between every package pair, from finals paired by grid value. Per (key, problem) under plots/<key>/<problem>/: agreement.csv (one row per trial), agreement_pairs.csv (one row per pair) and one figure per sweep against the swept dt/tolerance. Rows with errored_pct above 10 are dropped.
 With --set, the store is first checked against the sets' canonical trials under every key: what it lacks is printed and written to plots/<key>/incomplete.csv, and the exit code is 1 while anything is lacking.
 """
 
@@ -20,9 +20,9 @@ shared.under_suite_python()
 import errors as errors_mod  # noqa: E402
 import store as store_mod  # noqa: E402
 
-# The stepping value a leg sweeps; every other group field names the leg.
+# The stepping value a sweep varies; every other group field names the sweep.
 SWEPT_FIELDS = ("dt", "atol", "rtol", "newton_atol", "newton_rtol")
-LEG_FIELDS = tuple(f for f in store_mod.GROUP_FIELDS if f not in SWEPT_FIELDS)
+SWEEP_FIELDS = tuple(f for f in store_mod.GROUP_FIELDS if f not in SWEPT_FIELDS)
 ROW_COLUMNS = ("group_id", "trial_id", "run_id", "package", "n", "states", "error", "errored_pct") + \
     tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package", "n")) + ("key", "finals")
 PAIR_COLUMNS = ("group_id",) + store_mod.GROUP_FIELDS + ("package_a", "n_a", "package_b", "n_b",
@@ -55,9 +55,9 @@ def swept_value(row):
     return shared.number(row["dt"]) if row["controller"] == "fixed" else shared.number(row["atol"])
 
 
-def leg_of(row):
-    """The leg fields of a row as text, so NaN equals NaN."""
-    return tuple(shared.cell(row[f]) for f in LEG_FIELDS)
+def sweep_of(row):
+    """The sweep fields of a row as text, so NaN equals NaN."""
+    return tuple(shared.cell(row[f]) for f in SWEEP_FIELDS)
 
 
 def pair_row(group, a, b, difference):
@@ -82,33 +82,33 @@ def analyse(rows, errs):
             if a["package"] == b["package"]:
                 continue
             pair_rows.append(pair_row(a, a, b, errs.compare(a, b)))
-    # Leg by leg, loosest stepping first, then by package.
+    # Sweep by sweep, loosest stepping first, then by package.
     for trial_rows, pair_rows in by_problem.values():
-        trial_rows.sort(key=lambda r: (leg_of(r), loose_first(r), r["package"], r["n"]))
-        pair_rows.sort(key=lambda p: (leg_of(p), loose_first(p), p["package_a"], p["package_b"],
+        trial_rows.sort(key=lambda r: (sweep_of(r), loose_first(r), r["package"], r["n"]))
+        pair_rows.sort(key=lambda p: (sweep_of(p), loose_first(p), p["package_a"], p["package_b"],
                                       p["n_a"], p["n_b"]))
     return by_problem
 
 
-def legs(trial_rows, pair_rows):
-    """{leg: ({package: [(x, error)]}, {(package_a, package_b): [(x, difference)]})} of one problem's rows, points in loose-to-tight order."""
+def sweeps(trial_rows, pair_rows):
+    """{sweep: ({package: [(x, error)]}, {(package_a, package_b): [(x, difference)]})} of one problem's rows, points in loose-to-tight order."""
     out = {}
     for row in sorted(trial_rows, key=loose_first):
-        series, _ = out.setdefault(leg_of(row), ({}, {}))
+        series, _ = out.setdefault(sweep_of(row), ({}, {}))
         if errors_mod.is_finite_positive(row["error"]):
             series.setdefault(row["package"], []).append((swept_value(row), row["error"]))
     for pair in sorted(pair_rows, key=loose_first):
-        _, diffs = out.setdefault(leg_of(pair), ({}, {}))
+        _, diffs = out.setdefault(sweep_of(pair), ({}, {}))
         if errors_mod.is_finite_positive(pair["difference"]):
             diffs.setdefault((pair["package_a"], pair["package_b"]), []).append(
                 (swept_value(pair), pair["difference"]))
     return out
 
 
-def render(path, leg, series, diffs, key):
+def render(path, sweep, series, diffs, key):
     """Two panels against the swept value: error per package, difference per package pair."""
     plt = shared.pyplot()
-    first = dict(zip(LEG_FIELDS, leg))
+    first = dict(zip(SWEEP_FIELDS, sweep))
     fixed = first["controller"] == "fixed"
     x_label = "dt" if fixed else "tolerance (atol = rtol)"
     fig, (left, right) = plt.subplots(1, 2, figsize=(15.0, 5.0))
@@ -152,13 +152,13 @@ def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
         written.append(shared.write_csv(os.path.join(directory, "agreement.csv"), ROW_COLUMNS, trial_rows))
         written.append(shared.write_csv(os.path.join(directory, "agreement_pairs.csv"), PAIR_COLUMNS,
                                         pair_rows))
-        for leg, (series, diffs) in sorted(legs(trial_rows, pair_rows).items(), key=lambda item: repr(item[0])):
+        for sweep, (series, diffs) in sorted(sweeps(trial_rows, pair_rows).items(), key=lambda item: repr(item[0])):
             if not series and not diffs:
                 continue
-            first = dict(zip(LEG_FIELDS, leg))
+            first = dict(zip(SWEEP_FIELDS, sweep))
             stem = "agreement_{0}_{1}_{2}".format(shared.slug(first["algorithm"]),
-                                                  shared.slug(first["controller"]), shared.short_hash(leg))
-            written.append(render(os.path.join(directory, stem + ".png"), leg, series, diffs, key))
+                                                  shared.slug(first["controller"]), shared.short_hash(sweep))
+            written.append(render(os.path.join(directory, stem + ".png"), sweep, series, diffs, key))
     return written
 
 

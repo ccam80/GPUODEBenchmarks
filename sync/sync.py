@@ -8,7 +8,7 @@ import sys
 
 REMOTE_ENV = "GPUODE_STORE_REMOTE"
 DEFAULT_REMOTE = "box:/srv/gpuode/data"
-# Files a leg write leaves beside a parquet while it is in flight; never shipped.
+# Files a store write leaves beside a parquet while it is in flight; never shipped.
 TRANSIENT = ("*.partial", "*.lock", "*.lock/**")
 TOOLS = ("rclone", "rsync")
 COMMANDS = ("pull", "push", "sync", "prune", "check")

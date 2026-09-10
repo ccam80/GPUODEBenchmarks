@@ -41,12 +41,12 @@ plan = json.load(open(marker))
 log = os.path.join(os.path.dirname(path), "calls.jsonl")
 with open(log, "a") as h:
     h.write(json.dumps({{"path": os.path.basename(path), "argv": argv,
-                         "ids": [t["trial_id"] + ":" + t["kind"] for t in trials]}}) + "\\n")
+                         "ids": [t["trial_id"] for t in trials]}}) + "\\n")
 data = store.Store(plan["root"])
 for t in trials:
     with open(path + ".progress", "w") as h:
-        json.dump({{"trial_id": t["trial_id"], "started_utc": "2026-09-09T00:00:00Z"}}, h)
-    if t["kind"] != "solve":
+        json.dump({{"trial_id": t["trial_id"], "stage": "solve", "started_utc": "2026-09-09T00:00:00Z"}}, h)
+    if not t["transfers"]:
         continue
     if t["trial_id"] == plan.get("trial_id") and not plan.get("done"):
         json.dump(dict(plan, done=True), open(marker, "w"))
@@ -107,23 +107,18 @@ class PlanTests(unittest.TestCase):
                                "-n", "8,32")
         self.assertEqual(list(by_package), ["jax", "pytorch", "cpp"])
         for rows in by_package.values():
-            self.assertEqual(trials.counts(rows)[0], {"solve": 2, "warm": 1, "optimize": 0})
+            self.assertEqual(trials.counts(rows), (2, 0, 0, 1))
         paths = bench.write_plan(os.path.join(self.tmp, "trials"), by_package)
         self.assertEqual(sorted(os.path.basename(p) for p in paths.values()),
                          ["cpp.jsonl", "jax.jsonl", "pytorch.jsonl"])
         back = trials.read_jsonl(paths["jax"])
-        self.assertEqual([t["kind"] for t in back], ["warm", "solve", "solve"])
-        self.assertEqual([t["n"] for t in back if t["kind"] == "solve"], [8, 32])
+        self.assertEqual([t["n"] for t in back], [8, 32])
         self.assertEqual(set(back[0]), set(trials.TRIAL_KEYS))
 
     def test_resume_drops_trials_whose_rows_exist_and_no_overwrite_those_finite(self):
-        by_package = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32")
-        cpp = by_package["cpp"]
-        solves = [t for t in cpp if t["kind"] == "solve"]
-        self.assertEqual(len(solves), 4)
-        recorded = solves[0]
-        nan_row = solves[1]
-        partial = solves[2]
+        cpp = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32")["cpp"]
+        self.assertEqual(len(cpp), 4)
+        recorded, nan_row, partial, absent = cpp
         data = store.Store(self.root)
         for transfers in ("both", "none"):
             spec = {f: recorded[f] for f in store.TRIAL_FIELDS}
@@ -132,34 +127,23 @@ class PlanTests(unittest.TestCase):
             data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=NAN, reason="error: x"))
         spec = {f: partial[f] for f in store.TRIAL_FIELDS}
         data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0, finals="finals/p.parquet"))
-        resumed = bench.continue_filter(cpp, KEY, self.root, resume=True)
-        ids = {(t["trial_id"], t["kind"]) for t in resumed}
-        self.assertNotIn((recorded["trial_id"], "solve"), ids)
-        self.assertNotIn((nan_row["trial_id"], "solve"), ids)
-        self.assertIn((partial["trial_id"], "solve"), ids)
-        self.assertIn((solves[3]["trial_id"], "solve"), ids)
+        resumed = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, resume=True)}
+        self.assertEqual(set(resumed), {partial["trial_id"], absent["trial_id"]})
         # A partial trial runs its missing transfers alone and keeps asking finals once a row carries them.
-        kept = {t["trial_id"]: t for t in resumed if t["kind"] == "solve"}
-        self.assertEqual((kept[partial["trial_id"]]["transfers"], kept[partial["trial_id"]]["finals"]),
+        self.assertEqual((resumed[partial["trial_id"]]["transfers"], resumed[partial["trial_id"]]["finals"]),
                          (["none"], True))
-        self.assertEqual(kept[solves[3]["trial_id"]]["transfers"], ["both", "none"])
-        fresh = bench.continue_filter(cpp, KEY, self.root, no_overwrite=True)
-        ids = {(t["trial_id"], t["kind"]) for t in fresh}
-        self.assertNotIn((recorded["trial_id"], "solve"), ids)
-        self.assertIn((nan_row["trial_id"], "solve"), ids)
-        self.assertIn((partial["trial_id"], "solve"), ids)
-        kept = {t["trial_id"]: t for t in fresh if t["kind"] == "solve"}
-        self.assertEqual(kept[nan_row["trial_id"]]["transfers"], ["both", "none"])
-        # A leg name repeats across packages; a covered package's warm line is dropped while another's stays.
+        self.assertEqual(resumed[absent["trial_id"]]["transfers"], ["both", "none"])
+        fresh = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, no_overwrite=True)}
+        self.assertEqual(set(fresh), {nan_row["trial_id"], partial["trial_id"], absent["trial_id"]})
+        self.assertEqual(fresh[nan_row["trial_id"]]["transfers"], ["both", "none"])
+        # A recorded package's lines drop while another package's stay.
         both = self.plan("--set", "perf", "-p", "cpp,pytorch", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")
         for t in both["cpp"]:
-            if t["kind"] == "solve":
-                spec = {f: t[f] for f in store.TRIAL_FIELDS}
-                for transfers in ("both", "none"):
-                    data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0))
+            spec = {f: t[f] for f in store.TRIAL_FIELDS}
+            for transfers in ("both", "none"):
+                data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0))
         mixed = bench.continue_filter(both["pytorch"] + both["cpp"], KEY, self.root, resume=True)
-        self.assertEqual({t["package"] for t in mixed}, {"pytorch"})
-        self.assertEqual([t["kind"] for t in mixed], ["warm", "solve"])
+        self.assertEqual([t["package"] for t in mixed], ["pytorch"])
         # A trial that asks finals over rows without them runs its last transfers again.
         wants = dict(recorded, finals=True)
         again = bench.continue_filter([wants], KEY, self.root, resume=True)
@@ -169,16 +153,8 @@ class PlanTests(unittest.TestCase):
         for transfers in ("both", "none"):
             data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, finals=relative))
         self.assertEqual(bench.continue_filter([wants], KEY, self.root, resume=True), [])
-        # Warm trials follow their leg: a fully recorded leg loses its warm trial.
-        leg = recorded["leg"]
-        other = [t for t in cpp if t["kind"] == "solve" and t["leg"] == leg and t is not recorded]
-        for t in other:
-            spec = {f: t[f] for f in store.TRIAL_FIELDS}
-            for transfers in ("both", "none"):
-                data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0))
-        resumed = bench.continue_filter(cpp, KEY, self.root, resume=True)
-        self.assertNotIn(leg, {t["leg"] for t in resumed})
-        self.assertIn("warm", {t["kind"] for t in resumed})
+        # A line without transfers never runs again; without a flag the plan stands.
+        self.assertEqual(bench.continue_filter([dict(recorded, transfers=[])], KEY, self.root, resume=True), [])
         self.assertEqual(bench.continue_filter(cpp, KEY, self.root), cpp)
 
     def test_n_is_checked_against_every_grid_of_the_named_sets_not_the_filtered_specs(self):
@@ -189,7 +165,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual({t["n"] for t in julia["julia_cpu"]}, {1024})
         cpp = self.plan("--set", "perf,golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
                         "-n", "128,1024,131072")
-        self.assertEqual({t["n"] for t in cpp["cpp"] if t["kind"] == "solve"}, {128, 131072})
+        self.assertEqual({t["n"] for t in cpp["cpp"]}, {128, 131072})
         # A count declared by a grid no filtered package uses yields no trials and no error.
         self.assertEqual(self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-n", "1024"), {})
         # A count no grid of the named sets lists exits.
@@ -205,24 +181,23 @@ class PlanTests(unittest.TestCase):
                      ("--set", "golden_grid,states,perf")):
             by_package = self.plan(*argv, "-p", "cpp", "-s", "lorenz96", "-g", "classical-rk4", "-n", "131072",
                                    "--mode", "fixed", "--dt", str(2.0 ** -10))
-            leg = [t for t in by_package["cpp"] if t["leg"].endswith("/states") and '"states":32' in t["leg"]]
-            self.assertEqual([(t["kind"], t["cold"], t["finals"], t["transfers"]) for t in leg],
-                             [("warm", True, False, []), ("solve", False, True, ["both", "none"])], argv)
-            self.assertEqual(leg[1]["sets"], ["golden_grid", "perf", "states"])
+            point = [t for t in by_package["cpp"] if t["system_params"] == '{"states":32}']
+            self.assertEqual([(t["cold"], t["finals"], t["transfers"], t["optimize"], t["sets"]) for t in point],
+                             [(True, True, ["both", "none"], None, ["golden_grid", "perf", "states"])], argv)
 
     def test_plan_cli_writes_the_trial_files_and_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "bench.py"), "plan", "--set", "perf",
                               "-p", "cpp", "-s", "lorenz", "-n", "8", "--allow-unknown-gpu"],
                              capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertIn("cpp: 2 solve, 2 warm, 0 optimize trials in 2 legs", out.stdout)
-        self.assertIn("lorenz/{}/classical-rk4/fixed/float32/n  1", out.stdout)
-        self.assertIn("2 solve trials", out.stdout)
+        self.assertIn("cpp: 2 trials, 0 optimize, 0 cold, 2 builds", out.stdout)
+        self.assertIn("lorenz/{}/float32/classical-rk4/fixed/{}  1", out.stdout)
+        self.assertIn("2 trials", out.stdout)
         written = [line for line in out.stdout.splitlines() if line.endswith("cpp.jsonl")]
         self.assertEqual(len(written), 1)
         path = os.path.join(ROOT, written[0])
         self.assertTrue(os.path.isfile(path))
-        self.assertEqual(len(trials.read_jsonl(path)), 4)
+        self.assertEqual(len(trials.read_jsonl(path)), 2)
         os.remove(path)
 
 
@@ -244,99 +219,101 @@ class CompletenessTests(unittest.TestCase):
 
     def kept(self, trial_list, **kw):
         kw.setdefault("sources", lambda package, systems: {s: "S" for s in systems})
-        out = bench.continue_filter(trial_list, KEY, self.root, **kw)
-        return {(t["trial_id"], t["kind"]): t for t in out}
+        return {t["trial_id"]: t for t in bench.continue_filter(trial_list, KEY, self.root, **kw)}
 
-    def test_a_cold_leg_needs_a_finite_build_time_on_every_row(self):
+    def test_a_cold_line_needs_a_finite_build_time_on_every_row(self):
         states = self.plan("--set", "states", "-p", "cpp", "-g", "classical-rk4")["cpp"]
-        solves = [t for t in states if t["kind"] == "solve"]
-        self.assertEqual(len(solves), 6)
+        self.assertEqual(len(states), 6)
+        self.assertEqual({t["cold"] for t in states}, {True})
         for transfers in ("both", "none"):
-            self.record(solves[0], transfers)
-            self.record(solves[1], transfers, build_s=12.5 if transfers == "both" else NAN)
-            self.record(solves[2], transfers, build_s=12.5)
+            self.record(states[0], transfers)
+            self.record(states[1], transfers, build_s=12.5 if transfers == "both" else NAN)
+            self.record(states[2], transfers, build_s=12.5)
         kept = self.kept(states, resume=True)
-        self.assertEqual(kept[(solves[0]["trial_id"], "solve")]["transfers"], ["both", "none"])
-        self.assertEqual(kept[(solves[1]["trial_id"], "solve")]["transfers"], ["none"])
-        self.assertNotIn((solves[2]["trial_id"], "solve"), kept)
-        self.assertNotIn((solves[2]["trial_id"], "warm"), kept)
-        self.assertIn((solves[1]["trial_id"], "warm"), kept)
+        self.assertEqual(kept[states[0]["trial_id"]]["transfers"], ["both", "none"])
+        self.assertEqual(kept[states[1]["trial_id"]]["transfers"], ["none"])
+        self.assertNotIn(states[2]["trial_id"], kept)
         audits = completeness.audit(states, KEY, self.data, "resume")
-        self.assertEqual(audits[solves[0]["trial_id"]].reasons(), ["build:both", "build:none"])
-        self.assertEqual(audits[solves[1]["trial_id"]].reasons(), ["build:none"])
-        self.assertTrue(audits[solves[2]["trial_id"]].complete())
-        # A warm leg's rows never need one.
+        self.assertEqual(audits[states[0]["trial_id"]].reasons(), ["build:both", "build:none"])
+        self.assertEqual(audits[states[1]["trial_id"]].reasons(), ["build:none"])
+        self.assertTrue(audits[states[2]["trial_id"]].complete())
+        # A warm line's rows never need one.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")["cpp"]
         for transfers in ("both", "none"):
-            self.record([t for t in perf if t["kind"] == "solve"][0], transfers)
+            self.record(perf[0], transfers)
         self.assertEqual(self.kept(perf, resume=True), {})
 
     def test_finals_need_a_readable_file(self):
         golden = self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cpp"]
-        solves = [t for t in golden if t["kind"] == "solve"]
-        self.assertEqual([t["finals"] for t in solves], [True, True])
-        spec = {f: solves[0][f] for f in store.TRIAL_FIELDS}
+        self.assertEqual([(t["dt"], t["finals"]) for t in golden], [(0.5, True), (0.25, True)])
+        spec = {f: golden[0][f] for f in store.TRIAL_FIELDS}
         relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
-        self.record(solves[0], "none", finals=relative)
-        self.record(solves[1], "none", finals="finals/gone.parquet")
+        self.record(golden[0], "none", finals=relative)
+        self.record(golden[1], "none", finals="finals/gone.parquet")
         kept = self.kept(golden, resume=True)
-        self.assertNotIn((solves[0]["trial_id"], "solve"), kept)
-        self.assertEqual((kept[(solves[1]["trial_id"], "solve")]["transfers"], kept[(solves[1]["trial_id"], "solve")]["finals"]),
+        self.assertEqual(list(kept), [golden[1]["trial_id"]])
+        self.assertEqual((kept[golden[1]["trial_id"]]["transfers"], kept[golden[1]["trial_id"]]["finals"]),
                          (["none"], True))
-        self.assertEqual(completeness.audit(golden, KEY, self.data)[solves[1]["trial_id"]].reasons(), ["finals"])
+        self.assertEqual(completeness.audit(golden, KEY, self.data)[golden[1]["trial_id"]].reasons(), ["finals"])
         # A corrupt file is as absent.
         path = os.path.join(self.data.package_dir("cpp", KEY), *relative.split("/"))
         with open(path, "wb") as handle:
             handle.write(b"not parquet")
-        self.assertIn((solves[0]["trial_id"], "solve"), self.kept(golden, resume=True))
+        self.assertIn(golden[0]["trial_id"], self.kept(golden, resume=True))
         # A canonical finals requirement over rows recorded without finals reruns the last transfers.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "131072",
                          "--mode", "fixed")["cpp"]
-        point = [t for t in perf if t["kind"] == "solve"][0]
+        point = perf[0]
         self.assertTrue(point["finals"])
         for transfers in ("both", "none"):
             self.record(point, transfers)
         kept = self.kept(perf, resume=True)
-        self.assertEqual((kept[(point["trial_id"], "solve")]["transfers"], kept[(point["trial_id"], "solve")]["finals"]),
-                         (["none"], True))
+        self.assertEqual((kept[point["trial_id"]]["transfers"], kept[point["trial_id"]]["finals"]), (["none"], True))
 
     def test_an_optimize_record_must_exist_from_the_current_source(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
                          "-n", "8,32")["cubie"]
-        self.assertEqual([t["kind"] for t in perf], ["warm", "optimize", "solve", "solve"])
-        solves = [t for t in perf if t["kind"] == "solve"]
-        for trial in solves:
+        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, 8), (32, 32)])
+        for trial in perf:
             for transfers in ("both", "none"):
                 self.record(trial, transfers)
-        # Complete rows, no record: every transfers of both solves runs again behind the optimize line.
+        # Complete rows, no record: every transfers of both lines runs again.
         kept = self.kept(perf, resume=True)
-        self.assertEqual(sorted(kind for _, kind in kept), ["optimize", "solve", "solve", "warm"])
-        self.assertEqual({t["transfers"][:] == ["both", "none"] for t in kept.values() if t["kind"] == "solve"}, {True})
+        self.assertEqual(sorted(kept), sorted(t["trial_id"] for t in perf))
+        self.assertEqual({tuple(t["transfers"]) for t in kept.values()}, {("both", "none")})
         audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "S" for x in s})
-        self.assertEqual(audits[solves[0]["trial_id"]].reasons(), ["optimize:absent"])
+        self.assertEqual(audits[perf[0]["trial_id"]].reasons(), ["optimize:absent"])
         result = FakeOptimizeResult()
-        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", None, result, root=self.root,
-                                       controller="fixed", gains="{}", source="S")
+        for batch in (8, 32):
+            cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
+                                           controller="fixed", gains="{}", source="S", n=batch)
         self.assertEqual(self.kept(perf, resume=True), {})
         self.assertEqual(self.kept(perf, no_overwrite=True), {})
-        # Recorded from another source: stale, so the leg runs again.
+        # A record from another batch does not serve a line.
+        cubie_adapter.clear_optimized("cubie", KEY, "tsit5", "lorenz", root=self.root)
+        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
+                                       controller="fixed", gains="{}", source="S", n=8)
+        self.assertEqual(list(self.kept(perf, resume=True)), [perf[1]["trial_id"]])
+        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
+                                       controller="fixed", gains="{}", source="S", n=32)
+        # Recorded from another source: stale, so both lines run again.
         stale = self.kept(perf, resume=True, sources=lambda p, s: {x: "T" for x in s})
-        self.assertEqual(sorted(kind for _, kind in stale), ["optimize", "solve", "solve", "warm"])
+        self.assertEqual(sorted(stale), sorted(t["trial_id"] for t in perf))
         audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "T" for x in s})
-        self.assertEqual(audits[solves[1]["trial_id"]].reasons(), ["optimize:source S"])
-        # A timed-out optimize line stands under --resume and is attempted again under --no-overwrite.
+        self.assertEqual(audits[perf[1]["trial_id"]].reasons(), ["optimize:source S"])
+        # A timed-out optimize stands under --resume and is attempted again under --no-overwrite.
         cubie_adapter.record_optimize_timeout(perf[1], KEY, self.root)
         self.assertEqual(self.kept(perf, resume=True), {})
-        self.assertEqual(sorted(kind for _, kind in self.kept(perf, no_overwrite=True)),
-                         ["optimize", "solve", "solve", "warm"])
-        self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[solves[0]["trial_id"]].reasons(),
+        self.assertEqual(list(self.kept(perf, no_overwrite=True)), [perf[1]["trial_id"]])
+        self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[perf[1]["trial_id"]].reasons(),
                          ["optimize:timeout"])
         # Without a current source (the analyses) a record of any source stands.
-        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", None, result, root=self.root,
-                                       controller="fixed", gains="{}", source="old")
+        for batch in (8, 32):
+            cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
+                                           controller="fixed", gains="{}", source="old", n=batch)
         self.assertTrue(all(m.complete() for m in completeness.audit(perf, KEY, self.data).values()))
-        # The source hashes are asked once per cubie package for the systems of its optimize lines.
+        # The source hashes are asked once per cubie package for the systems of its optimizing lines.
         asked = []
         bench.continue_filter(perf, KEY, self.root, resume=True,
                               sources=lambda p, s: asked.append((p, list(s))) or {x: "old" for x in s})
@@ -346,24 +323,19 @@ class CompletenessTests(unittest.TestCase):
                 bench.continue_filter(perf, KEY, self.root, resume=True)
         self.assertIn("no cubie", str(caught.exception))
 
-    def test_a_per_solve_line_governs_its_own_solve(self):
+    def test_each_line_has_its_own_optimize_record(self):
         golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cubie"]
-        self.assertEqual([t["kind"] for t in golden], ["warm", "optimize", "solve", "optimize", "solve"])
-        lines = completeness.governing_lines(golden)
-        self.assertEqual(lines[golden[2]["trial_id"]], golden[1])
-        self.assertEqual(lines[golden[4]["trial_id"]], golden[3])
+        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, 131072), (0.25, 131072)])
         result = FakeOptimizeResult()
-        for trial in (golden[2], golden[4]):
+        for trial in golden:
             spec = {f: trial[f] for f in store.TRIAL_FIELDS}
             relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
             self.record(trial, "none", finals=relative)
         cubie_adapter.record_optimized("cubie", KEY, "lorenz", "classical-rk4", "fixed", 0.5, result,
-                                       root=self.root, controller="fixed", gains="{}", source="S")
-        # The 0.5 point stands with its record; the 0.25 point runs again behind its own line alone.
-        kept = self.kept(golden, resume=True)
-        self.assertEqual([(t["kind"], t["dt"]) for t in golden if (t["trial_id"], t["kind"]) in kept],
-                         [("warm", 0.5), ("optimize", 0.25), ("solve", 0.25)])
+                                       root=self.root, controller="fixed", gains="{}", source="S", n=131072)
+        # The 0.5 line stands with its record; the 0.25 line runs again.
+        self.assertEqual(list(self.kept(golden, resume=True)), [golden[1]["trial_id"]])
         self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume",
                                                                  lambda p, s: {x: "S" for x in s})),
                          {"optimize:absent": 1})
@@ -411,7 +383,7 @@ class LaunchTests(unittest.TestCase):
 
 
 class HardExitTests(unittest.TestCase):
-    """The runner loop against a fake runner: a hard exit abandons the leg's higher ordinals and the rest re-runs."""
+    """The runner loop against a fake runner: a hard exit abandons the harder runs of the family and the rest re-runs."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bench_run_")
@@ -438,8 +410,12 @@ class HardExitTests(unittest.TestCase):
             summary = [line.rstrip("\n").split("\t") for line in handle]
         return status, run, calls, summary
 
-    def solves(self, run):
-        return [t for t in trials.read_jsonl(os.path.join(run.log_dir, "cpp.jsonl")) if t["kind"] == "solve"]
+    def planned(self):
+        return bench.plan_trials(bench.resolve(bench.parse_args(
+            ["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128"])), KEY, self.root)["cpp"]
+
+    def line(self, algorithm, n):
+        return [t for t in self.planned() if t["algorithm"] == algorithm and t["n"] == n][0]
 
     def test_a_clean_runner_is_one_call(self):
         status, run, calls, summary = self.run_bench()
@@ -452,11 +428,9 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(len(rows), 12)
         self.assertEqual({r["min_ms"] for r in rows}, {1.0})
 
-    def test_a_hard_exit_abandons_the_higher_ordinals_and_reruns_the_rest(self):
-        # Hang the classical-rk4 leg at n = 32 (ordinal 1).
-        first = bench.plan_trials(bench.resolve(bench.parse_args(
-            ["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128"])), KEY, self.root)["cpp"]
-        hung = [t for t in first if t["kind"] == "solve" and t["algorithm"] == "classical-rk4" and t["n"] == 32][0]
+    def test_a_hard_exit_abandons_the_harder_runs_and_reruns_the_rest(self):
+        # The cash-karp-54 build runs first; hang it at n = 32.
+        hung = self.line("cash-karp-54", 32)
         status, run, calls, summary = self.run_bench(hung["trial_id"])
         self.assertEqual(status, 0)
         self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "0"]])
@@ -465,36 +439,32 @@ class HardExitTests(unittest.TestCase):
         abandoned = [r for r in rows if r["min_ms"] != r["min_ms"]]
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
-        self.assertEqual({r["reason"] for r in abandoned}, {"abandoned: hard-exit at ordinal 1"})
-        self.assertEqual({r["algorithm"] for r in abandoned}, {"classical-rk4"})
+        self.assertEqual({r["reason"] for r in abandoned}, {"abandoned: hard-exit at " + hung["trial_id"]})
+        self.assertEqual({r["algorithm"] for r in abandoned}, {"cash-karp-54"})
         self.assertEqual({r["states"] for r in abandoned}, {3})
         self.assertTrue(all(r["suite_rev"] for r in abandoned))
-        # The rows the runner recorded before the hard exit stand, and the other leg ran in the retry.
+        # The rows the runner recorded before the hard exit stand, and the other build ran in the retry.
         finite = [r for r in rows if r["min_ms"] == 1.0]
         self.assertEqual(sorted((r["algorithm"], r["n"]) for r in finite if r["transfers"] == "both"),
-                         [("cash-karp-54", 8), ("cash-karp-54", 32), ("cash-karp-54", 128), ("classical-rk4", 8)])
+                         [("cash-karp-54", 8), ("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
         retry = trials.read_jsonl(os.path.join(run.log_dir, "cpp.retry1.jsonl"))
-        self.assertEqual({t["algorithm"] for t in retry}, {"cash-karp-54"})
-        self.assertEqual([t["kind"] for t in retry], ["warm", "solve", "solve", "solve"])
+        self.assertEqual([(t["algorithm"], t["n"]) for t in retry],
+                         [("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
 
-    def test_a_hard_exit_on_the_last_leg_ends_the_package_without_a_retry(self):
-        first = bench.plan_trials(bench.resolve(bench.parse_args(
-            ["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128"])), KEY, self.root)["cpp"]
-        hung = [t for t in first if t["kind"] == "solve" and t["algorithm"] == "cash-karp-54" and t["n"] == 8][0]
+    def test_a_hard_exit_on_the_last_build_ends_the_package_without_a_retry(self):
+        hung = self.line("classical-rk4", 8)
         status, run, calls, summary = self.run_bench(hung["trial_id"])
         self.assertEqual(status, 0)
         self.assertEqual([c["path"] for c in calls], ["cpp.jsonl"])
         rows = store.Store(self.root).rows()
         self.assertEqual({(r["algorithm"], r["min_ms"] == r["min_ms"]) for r in rows},
-                         {("classical-rk4", True), ("cash-karp-54", False)})
-        self.assertEqual({r["reason"] for r in rows if r["algorithm"] == "cash-karp-54"},
-                         {"abandoned: hard-exit at ordinal 0"})
+                         {("cash-karp-54", True), ("classical-rk4", False)})
+        self.assertEqual({r["reason"] for r in rows if r["algorithm"] == "classical-rk4"},
+                         {"abandoned: hard-exit at " + hung["trial_id"]})
         self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "3"]])
 
     def test_other_exit_codes_fail_the_package(self):
-        first = bench.plan_trials(bench.resolve(bench.parse_args(
-            ["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128"])), KEY, self.root)["cpp"]
-        hung = [t for t in first if t["kind"] == "solve"][0]
+        hung = self.planned()[0]
         status, run, calls, summary = self.run_bench(hung["trial_id"], 2)
         self.assertEqual(status, 1)
         self.assertEqual(len(calls), 1)

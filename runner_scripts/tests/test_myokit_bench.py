@@ -155,7 +155,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(len(myokit_bench.state_names("pleiades", 28)), 28)
 
 
-class LegTests(unittest.TestCase):
+class BuildTests(unittest.TestCase):
     def setUp(self):
         FakeModel.made = []
         self.adapter = myokit_bench.MyokitAdapter(KEY, "data", model_class=FakeModel)
@@ -164,13 +164,13 @@ class LegTests(unittest.TestCase):
         return grid.grid(record)
 
     def test_build_leg_loads_the_problem_model_and_checks_its_state_order(self):
-        leg = self.adapter.build_leg(trial())
+        leg = self.adapter.build(trial())
         self.assertEqual(leg.states, 3)
         self.assertTrue(leg.model.cellml_path.endswith("lorenz.cellml"))
         self.assertEqual(leg.model.diffusion_variable, "lorenz.rho")
         leg.close()
         self.assertIsNone(leg.model)
-        leg = self.adapter.build_leg(lorenz96(8))
+        leg = self.adapter.build(lorenz96(8))
         self.assertEqual(leg.states, 8)
         self.assertTrue(leg.model.cellml_path.endswith(os.path.join("generated", "lorenz96_8.cellml")))
         self.assertEqual(leg.model.diffusion_variable, "lorenz96.F")
@@ -180,7 +180,7 @@ class LegTests(unittest.TestCase):
                     trial(problem="pollu", parameter="k1", grid_scale="log", grid_min=3.5e-2, grid_max=3.5,
                           duration=60.0)):
             with self.assertRaises(ValueError):
-                self.adapter.build_leg(bad)
+                self.adapter.build(bad)
 
         class Reordered(FakeModel):
             def __init__(self, *args, **kwargs):
@@ -188,16 +188,16 @@ class LegTests(unittest.TestCase):
                 self.state_names = tuple(reversed(self.state_names))
 
         with self.assertRaises(RuntimeError):
-            myokit_bench.MyokitAdapter(KEY, "data", model_class=Reordered).build_leg(trial())
+            myokit_bench.MyokitAdapter(KEY, "data", model_class=Reordered).build(trial())
 
     def test_compile_launches_nothing(self):
-        leg = self.adapter.build_leg(trial(n=8))
+        leg = self.adapter.build(trial(n=8))
         self.adapter.compile(leg, trial(n=8), self.values(trial(n=8)))
         self.assertEqual(leg.model.launches, [])
         leg.close()
 
     def test_host_solves_run_the_step_count_and_hand_back_host_finals(self):
-        leg = self.adapter.build_leg(trial(n=4))
+        leg = self.adapter.build(trial(n=4))
         record = trial(n=4)
         result = self.adapter.solve(leg, record, self.values(record), "both")
         self.assertEqual(leg.model.launches, [("host", 4, 2.0 ** -10, 1024)])
@@ -215,7 +215,7 @@ class LegTests(unittest.TestCase):
         leg.close()
 
     def test_device_solves_upload_once_per_n_and_reset_restores_the_resident_states(self):
-        leg = self.adapter.build_leg(trial(n=4))
+        leg = self.adapter.build(trial(n=4))
         record = trial(n=4)
         values = self.values(record)
         first = self.adapter.solve(leg, record, values, "none")
@@ -257,15 +257,15 @@ class LegTests(unittest.TestCase):
         myokit_bench.cold_cache, myokit_bench.restore_cache = fake_cold_cache, fake_restore
         self.addCleanup(setattr, myokit_bench, "cold_cache", saved[0])
         self.addCleanup(setattr, myokit_bench, "restore_cache", saved[1])
-        leg = self.adapter.build_leg(trial(), cold=True)
+        leg = self.adapter.build(trial(), cold=True)
         self.assertEqual(swaps, ["cold"])
         leg.close()
         self.assertEqual(swaps, ["cold", ("restore", "previous")])
         with self.assertRaises(ValueError):
-            self.adapter.build_leg(trial(algorithm="tsit5"), cold=True)
+            self.adapter.build(trial(algorithm="tsit5"), cold=True)
         # A refused trial never touched the cache.
         self.assertEqual(len(swaps), 2)
-        warm = self.adapter.build_leg(trial(), cold=False)
+        warm = self.adapter.build(trial(), cold=False)
         warm.close()
         self.assertEqual(len(swaps), 2)
 

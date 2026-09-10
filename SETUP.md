@@ -105,7 +105,7 @@ python setup_julia.py --update   # re-resolve and rewrite Project/Manifest
 project; `GPU_ODE_JuliaKernels` is a path dependency whose precompile
 workload warms the DiffEqGPU kernels (`GPU_ODE_JuliaKernels/README.md`).
 `runner_scripts/gpu/julia_driver.py` runs `Pkg.instantiate()` and
-`Pkg.precompile()` once before its legs. `bench_ode_cpu.jl` and
+`Pkg.precompile()` once before its builds. `bench_ode_cpu.jl` and
 `bench_ode_gpu.jl` record through `runner_scripts/results.jl`, which calls
 the store CLI under the suite interpreter, or under the `python` on PATH
 when the cubie venv is absent; that interpreter then needs `pyarrow` and

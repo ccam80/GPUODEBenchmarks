@@ -1,4 +1,4 @@
-"""The cubie adapter: Solver keywords from a trial, gains applied after construction, a leg's stepping updates and resident inputs, finals with status codes, the optimize rows, cold cache roots, and the version string."""
+"""The cubie adapter: Solver keywords from a trial, gains applied after construction, a build's stepping updates and resident inputs, finals with status codes, the optimize rows, cold cache roots, and the version string."""
 
 import math
 import os
@@ -21,8 +21,7 @@ NAN = float("nan")
 NAMES = ("x", "y", "z")
 
 
-def trial(n=8, kind="solve", transfers=("both", "none"), finals=False, axis="n", ordinal=0,
-          cold=False, **overrides):
+def trial(n=8, transfers=("both", "none"), finals=False, cold=False, optimize=None, **overrides):
     """A trial record: lorenz, fixed tsit5 at dt 2^-10, cubie."""
     fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
                   parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
@@ -31,10 +30,8 @@ def trial(n=8, kind="solve", transfers=("both", "none"), finals=False, axis="n",
                   newton_rtol=NAN, package="cubie")
     fields.update(overrides)
     fields["trial_id"] = store.trial_id(fields)
-    fields.update(kind=kind, finals=finals, transfers=list(transfers), axis=axis,
-                  ordinal=ordinal, cold=cold,
-                  leg="/".join([fields["problem"], fields["system_params"], fields["algorithm"],
-                                fields["controller"], fields["precision"], axis]))
+    fields.update(finals=finals, transfers=list(transfers), cold=cold, optimize=optimize,
+                  watchdog_s=120.0, sets=[])
     return fields
 
 
@@ -204,11 +201,10 @@ class KeywordTests(unittest.TestCase):
         plain = cubie_bench.make_solver(FakeSystem(), trial(), solver_class=FakeSolver)
         self.assertEqual(plain.updates, [])
 
-    def test_optimize_setting_is_per_leg_on_n_and_states_axes(self):
-        self.assertEqual(cubie_bench.optimize_setting(trial(axis="n")), ("fixed", None))
-        self.assertEqual(cubie_bench.optimize_setting(trial(axis="states")), ("fixed", None))
-        self.assertEqual(cubie_bench.optimize_setting(trial(axis="dt")), ("fixed", 2.0 ** -10))
-        self.assertEqual(cubie_bench.optimize_setting(trial(axis="tol", **adaptive())), ("adaptive", 1e-5))
+    def test_optimize_setting_is_the_lines_step_or_tolerance(self):
+        self.assertEqual(cubie_bench.optimize_setting(trial()), ("fixed", 2.0 ** -10))
+        self.assertEqual(cubie_bench.optimize_setting(trial(dt=0.5)), ("fixed", 0.5))
+        self.assertEqual(cubie_bench.optimize_setting(trial(**adaptive())), ("adaptive", 1e-5))
 
     def test_controllers_version_and_states(self):
         import importlib.metadata
@@ -224,14 +220,14 @@ class KeywordTests(unittest.TestCase):
                                               grid_min=3.5e-2, grid_max=3.5, duration=60.0)), 20)
 
 
-class LegTests(AdapterCase):
-    def test_build_leg_sizes_the_system_from_system_params(self):
-        leg = self.adapter.build_leg(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
+class BuildTests(AdapterCase):
+    def test_build_sizes_the_system_from_system_params(self):
+        leg = self.adapter.build(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
                                            grid_max=16.0))
         self.assertEqual(self.built, [("lorenz96", 8, "cubie", np.float32, 8)])
         self.assertEqual(leg.states, 8)
         leg.close()
-        leg = self.adapter.build_leg(trial(precision="float64"))
+        leg = self.adapter.build(trial(precision="float64"))
         self.assertEqual(self.built[-1], ("lorenz", 3, "cubie", np.float64, None))
         self.assertEqual(leg.states, 3)
         self.assertEqual(leg.precision, np.float64)
@@ -239,14 +235,14 @@ class LegTests(AdapterCase):
         self.assertTrue(all(s.closed for s in FakeSolver.made))
 
     def test_compile_builds_the_grid_at_the_trials_n(self):
-        leg = self.adapter.build_leg(trial(n=8, kind="warm"))
+        leg = self.adapter.build(trial(n=8))
         self.adapter.compile(leg, trial(n=8, kind="warm"), self.values(8))
         self.assertEqual(leg.solver.compiled, [(8, 1.0)])
         leg.close()
 
     def test_a_changed_stepping_updates_the_solver_and_drops_the_resident_inputs(self):
         first = trial(dt=2.0 ** -10, axis="dt")
-        leg = self.adapter.build_leg(first)
+        leg = self.adapter.build(first)
         self.adapter.solve(leg, first, self.values(8), "both")
         self.adapter.solve(leg, first, self.values(8), "none")
         self.assertEqual(leg.solver.updates, [])
@@ -276,7 +272,7 @@ class LegTests(AdapterCase):
         leg.close()
 
     def test_device_solves_reuse_the_host_solves_inputs_per_n(self):
-        leg = self.adapter.build_leg(trial(n=8))
+        leg = self.adapter.build(trial(n=8))
         self.adapter.solve(leg, trial(n=8), self.values(8), "both")
         self.adapter.solve(leg, trial(n=8), self.values(8), "none")
         self.adapter.solve(leg, trial(n=8), self.values(8), "none")
@@ -286,7 +282,7 @@ class LegTests(AdapterCase):
         leg.close()
 
     def test_finals_carry_the_status_flags_and_the_duration_of_clean_runs(self):
-        leg = self.adapter.build_leg(trial(n=4))
+        leg = self.adapter.build(trial(n=4))
         leg.solver.codes = [0, 8, 0, 2 | 256]
         result = self.adapter.solve(leg, trial(n=4), self.values(4), "both")
         finals, t_final, retcode = self.adapter.finals(leg, result)
@@ -303,25 +299,27 @@ class LegTests(AdapterCase):
         self.assertIs(device, result)
         leg.close()
 
-    def test_optimize_records_the_winner_per_leg_or_per_setting(self):
-        line = trial(n=64, kind="optimize", transfers=(), axis="n")
-        leg = self.adapter.build_leg(trial(n=8))
+    def test_optimize_records_the_winner_at_the_lines_step_or_tolerance(self):
+        line = trial(n=8, optimize=64)
+        leg = self.adapter.build(trial(n=8))
         self.adapter.optimize(leg, line, self.values(64))
         self.assertEqual(leg.solver.optimized, [(64, 1.0, True)])
-        tuned = cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -13,
+        tuned = cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10,
                                              root=self.root, controller="fixed", gains="{}")
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
+        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -13,
+                                                       root=self.root, controller="fixed", gains="{}"))
         leg.close()
-        tol_line = trial(n=64, kind="optimize", transfers=(), axis="tol", **adaptive(atol=1e-4, rtol=1e-4))
-        leg = self.adapter.build_leg(trial(axis="tol", **adaptive(atol=1e-4, rtol=1e-4)))
+        tol_line = trial(n=8, optimize=64, **adaptive(atol=1e-4, rtol=1e-4))
+        leg = self.adapter.build(trial(**adaptive(atol=1e-4, rtol=1e-4)))
         self.adapter.optimize(leg, tol_line, self.values(64))
         self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
                                                           root=self.root, controller="default", gains="{}"))
         self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-5,
                                                        root=self.root, controller="default", gains="{}"))
-        # The controller and gains keep one algorithm's legs apart in the record.
-        pi_line = trial(n=64, kind="optimize", transfers=(), axis="tol",
+        # The controller and gains keep one algorithm's builds apart in the record.
+        pi_line = trial(n=8, optimize=64,
                         **adaptive(atol=1e-4, rtol=1e-4, controller="pi", gains='{"integral_gain":0.3}'))
         self.adapter.optimize(leg, pi_line, self.values(64))
         self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
@@ -339,8 +337,8 @@ class LegTests(AdapterCase):
         leg.close()
 
     def test_a_point_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
-        line = trial(n=64, kind="optimize", transfers=(), axis="n")
-        leg = self.adapter.build_leg(trial(n=8))
+        line = trial(n=8, optimize=64)
+        leg = self.adapter.build(trial(n=8))
         self.adapter.optimize(leg, line, self.values(64))
         self.adapter.optimize(leg, line, self.values(64))
         self.assertEqual(len(leg.solver.optimized), 1)
@@ -360,10 +358,10 @@ class LegTests(AdapterCase):
             self.assertEqual(handle.read().count(source), 1)
         leg.close()
 
-    def test_a_cold_leg_builds_in_a_fresh_cache_root_and_restores_it(self):
+    def test_a_cold_build_uses_a_fresh_cache_root_and_restores_it(self):
         from cubie.cache_root import get_cache_root_override
         before = get_cache_root_override()
-        leg = self.adapter.build_leg(trial(kind="warm", cold=True), cold=True)
+        leg = self.adapter.build(trial(cold=True), cold=True)
         override = get_cache_root_override()
         self.assertIsNotNone(override)
         self.assertNotEqual(override, before)
@@ -372,7 +370,7 @@ class LegTests(AdapterCase):
         leg.close()
         self.assertEqual(get_cache_root_override(), before)
         self.assertFalse(os.path.isdir(str(override)))
-        warm = self.adapter.build_leg(trial(kind="warm"), cold=False)
+        warm = self.adapter.build(trial(), cold=False)
         self.assertIsNone(warm.cache_dir)
         self.assertEqual(get_cache_root_override(), before)
         warm.close()
@@ -386,7 +384,7 @@ class LegTests(AdapterCase):
         cubie_adapter.build_system = broken
         before = get_cache_root_override()
         with self.assertRaises(RuntimeError):
-            self.adapter.build_leg(trial(kind="warm", cold=True), cold=True)
+            self.adapter.build(trial(cold=True), cold=True)
         self.assertEqual(get_cache_root_override(), before)
 
 

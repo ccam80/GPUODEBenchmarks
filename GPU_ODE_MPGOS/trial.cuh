@@ -204,13 +204,12 @@ private:
 struct Trial
 {
 	JsonObject raw;
-	std::string trial_id, kind, leg, axis;
+	std::string trial_id;
 	std::string problem, system_params, precision, parameter, grid_scale, grid_dtype;
 	std::string algorithm, controller, gains, package;
 	double duration, grid_min, grid_max, dt, dt_min, dt_max, atol, rtol, newton_atol, newton_rtol;
 	double watchdog_s;
 	long long n;
-	int ordinal;
 	bool finals, cold;
 	std::vector<std::string> transfers;
 
@@ -267,10 +266,6 @@ inline Trial ParseTrial(const std::string& line)
 	for (int i = 0; i < TRIAL_FIELD_COUNT; i++)
 		Field(t.raw, TRIAL_FIELDS[i]);
 	t.trial_id = TextField(t.raw, "trial_id");
-	t.kind = TextField(t.raw, "kind");
-	t.leg = TextField(t.raw, "leg");
-	t.axis = TextField(t.raw, "axis");
-	t.ordinal = (int)NumberField(t.raw, "ordinal");
 	t.finals = BoolField(t.raw, "finals");
 	t.cold = BoolField(t.raw, "cold");
 	t.watchdog_s = NumberField(t.raw, "watchdog_s");

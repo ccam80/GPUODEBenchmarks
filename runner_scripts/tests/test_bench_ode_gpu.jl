@@ -37,9 +37,8 @@ function trial(; overrides...)
         "algorithm" => "tsit5", "controller" => "fixed", "dt" => 2.0^-10, "dt_min" => NaN,
         "dt_max" => NaN, "atol" => NaN, "rtol" => NaN, "gains" => "{}", "newton_atol" => NaN,
         "newton_rtol" => NaN, "package" => "julia_gpu", "trial_id" => "0123456789abcdef",
-        "kind" => "solve", "finals" => false, "transfers" => ["both", "none"],
-        "leg" => "lorenz/{}/tsit5/fixed/float32/n", "axis" => "n", "ordinal" => 0, "cold" => false,
-        "watchdog_s" => 120.0)
+        "finals" => false, "transfers" => ["both", "none"], "cold" => false, "optimize" => nothing,
+        "watchdog_s" => 120.0, "sets" => ["perf"])
     for (name, value) in overrides
         record[String(name)] = value
     end
@@ -57,14 +56,14 @@ end
         @test_throws ErrorException parse_cli(["--trials", "x.jsonl", "--bogus"])
     end
 
-    @testset "trials read back with null floats as NaN, grouped by leg in file order" begin
+    @testset "trials read back with null floats as NaN in file order" begin
         path = tempname() * ".jsonl"
         # trials.py writes NaN as null.
         line(record) = replace(JSON.json(record; allownan = true), "NaN" => "null")
         lines = [
-            line(trial(; kind = "warm", transfers = [], dt = nothing, atol = 1e-5)),
-            line(trial(; dt = 0.5, atol = nothing, leg = "b")),
-            line(trial(; n = 32, ordinal = 1)),
+            line(trial(; transfers = [], dt = nothing, atol = 1e-5)),
+            line(trial(; dt = 0.5, atol = nothing)),
+            line(trial(; n = 32)),
         ]
         write(path, join(lines, "\n") * "\n\n")
         back = read_trials(path)
@@ -74,17 +73,16 @@ end
         @test back[2]["dt"] == 0.5 && isnan(back[2]["atol"])
         @test back[3]["n"] == 32 && isnan(back[3]["dt_min"])
         @test back[1]["watchdog_s"] == 120.0
-        legs = by_leg(back)
-        @test [leg for (leg, _) in legs] == ["lorenz/{}/tsit5/fixed/float32/n", "b"]
-        @test length(legs[1][2]) == 2 && length(legs[2][2]) == 1
+        @test back[1]["optimize"] === nothing
     end
 
-    @testset "the progress file names the trial" begin
+    @testset "the progress file names the trial and its stage" begin
         path = tempname()
-        write_progress(path, trial(; trial_id = "feedfacefeedface"))
+        write_progress(path, trial(; trial_id = "feedfacefeedface"), "solve")
         progress = JSON.parse(read(path, String))
         rm(path)
         @test progress["trial_id"] == "feedfacefeedface"
+        @test progress["stage"] == "solve"
         @test endswith(progress["started_utc"], "Z")
     end
 
@@ -98,16 +96,21 @@ end
         @test reject_reason(trial(; gains = "{\"beta1\":0.7}")) == "error: unsupported gains {\"beta1\":0.7}"
     end
 
-    @testset "the abandon rule marks one transfers leg from the failing ordinal on" begin
-        state = LegState(Dict{String, String}(), NaN, "")
-        abandon!(state, "both", failed("error", "error: x"), 2)
-        @test isempty(state.abandoned)
-        abandon!(state, "none", failed("timeout", "timeout: run exceeded 120.0s"), 2)
-        @test state.abandoned == Dict("none" => "abandoned: timeout at ordinal 2")
-        abandon!(state, "none", failed("oom", "oom: y"), 3)
-        @test state.abandoned["none"] == "abandoned: timeout at ordinal 2"
-        abandon!(state, "both", failed("oom", "oom: y"), 3)
-        @test state.abandoned["both"] == "abandoned: oom at ordinal 3"
+    @testset "the abandon rule gives up the harder runs of the family on the same transfers" begin
+        failures = Dict{String, Vector{Tuple{Dict{String, Any}, String}}}()
+        base = trial(; n = 32, trial_id = "base")
+        note_failure!(failures, base, "both", "error")
+        @test isempty(failures)
+        note_failure!(failures, base, "none", "timeout")
+        @test abandon_reason(trial(; n = 128), "none", failures) == "abandoned: timeout at base"
+        @test abandon_reason(trial(; n = 32, dt = 2.0^-12), "none", failures) == "abandoned: timeout at base"
+        @test abandon_reason(trial(; n = 128, dt = 0.5), "none", failures) === nothing
+        @test abandon_reason(trial(; n = 8), "none", failures) === nothing
+        @test abandon_reason(trial(; n = 128), "both", failures) === nothing
+        @test abandon_reason(trial(; n = 128, algorithm = "vern7"), "none", failures) === nothing
+        @test harder(trial(; n = 32, system_params = "{\"states\":64}"), trial(; n = 32, system_params = "{\"states\":32}"))
+        @test !harder(base, base)
+        @test trial_label(trial()) == "lorenz tsit5 fixed n=8 dt=0.0009765625"
     end
 
     @testset "outcome classification and texts" begin

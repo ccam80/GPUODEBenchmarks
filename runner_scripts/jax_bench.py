@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The jax adapter for runner.py: a leg is one Diffrax vector field and initial state whose vmapped, jitted solve is built per stepping; a warm line lowers and compiles at the trial's n (in a fresh compilation cache when cold); a solve runs through host arrays (`both`) or on the resident device parameters (`none`). Every algorithm here steps at a constant dt or under Diffrax's PID controller, so `fixed` and `default` are the controllers a trial may name."""
+"""The jax adapter for runner.py: a build is one Diffrax vector field and initial state whose vmapped, jitted solve is built per stepping; compile lowers and compiles at the trial's n (in a fresh compilation cache when cold); a solve runs through host arrays (`both`) or on the resident device parameters (`none`). Every algorithm here steps at a constant dt or under Diffrax's PID controller, so `fixed` and `default` are the controllers a trial may name."""
 
 import json
 import math
@@ -182,9 +182,9 @@ def set_cache_dir(path):
     compilation_cache.set_cache_dir(path)
 
 
-# ---------------------------------------------------------------------- leg
+# ---------------------------------------------------------------------- build
 
-class Leg:
+class Build:
     """One vector field and initial state; a jitted solve per stepping, one memory check per (stepping, n), the device parameters of the last upload."""
 
     def __init__(self, trial, cold=False):
@@ -287,24 +287,24 @@ class JaxAdapter:
     def states(self, trial):
         return int(problem_row(trial)["states"])
 
-    def build_leg(self, trial, cold=False):
-        return Leg(trial, cold)
+    def build(self, trial, cold=False):
+        return Build(trial, cold)
 
-    def compile(self, leg, trial, values):
-        leg.compile(trial, values)
+    def compile(self, build, trial, values):
+        build.compile(trial, values)
 
-    def optimize(self, leg, trial, values):
+    def optimize(self, build, trial, values):
         raise NotImplementedError("jax has no launch geometry to optimize")
 
-    def solve(self, leg, trial, values, transfers):
+    def solve(self, build, trial, values, transfers):
         if transfers == "both":
-            return leg.host_solve(trial, values)
-        return leg.device_solve(trial, values)
+            return build.host_solve(trial, values)
+        return build.device_solve(trial, values)
 
-    def finals(self, leg, result):
+    def finals(self, build, result):
         """(finals, t_final, retcode) of a Solution: the last saved state of every trajectory, the duration where Diffrax reports success and NaN otherwise, and Diffrax's message on failure."""
         ys = np.asarray(result.ys)[:, -1, :]
-        return finals_of(ys, retcodes(result.result), leg.duration)
+        return finals_of(ys, retcodes(result.result), build.duration)
 
 
 def run(argv):

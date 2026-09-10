@@ -1,4 +1,4 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per solve trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build_leg(trial, cold)`, `compile(leg, trial, values)`, `optimize(leg, trial, values)`, `solve(leg, trial, values, transfers)` and `finals(leg, result)`, plus a `controllers` tuple and an optional `reset(leg, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial, values)`, `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import grid as grid_mod
 import store as store_mod
 import trials as trials_mod
+from abandon import History
 from bench_key import dataset_key
 from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, WATCHDOG_SECONDS
 from wp_common import run_watchdogged, timed_min_ms
@@ -20,6 +21,7 @@ DATA_ROOT = os.path.join(REPO_ROOT, "data")
 
 NAN = float("nan")
 OUTCOMES = ("ok", "timeout", "oom", "error")
+STAGES = ("build", "optimize", "solve")
 # Exception text that names an exhausted device or host: CUDA, numba, XLA and torch.
 OOM_MARKERS = ("OUT_OF_MEMORY", "CUDA_ERROR_OUT_OF_MEMORY", "RESOURCE_EXHAUSTED",
                "OutOfMemoryError")
@@ -47,26 +49,10 @@ def budget_of(trial):
     return float(trial.get("watchdog_s", WATCHDOG_SECONDS))
 
 
-def abandon_reason(history, transfers, ordinal):
-    """The abandon rule: after a timeout or oom at ordinal k on some transfers, every higher ordinal of the leg on the same transfers is not run; returns its reason, or None when the trial runs. `history` maps transfers to (outcome, ordinal) of the leg's first timeout or oom."""
-    hit = history.get(transfers)
-    if hit is None or ordinal <= hit[1]:
-        return None
-    return "abandoned: {0} at ordinal {1}".format(hit[0], hit[1])
-
-
-def legs_of(trial_list):
-    """[(leg, trials)] in first appearance, each leg's trials in file order."""
-    groups = {}
-    for trial in trial_list:
-        groups.setdefault(trial["leg"], []).append(trial)
-    return list(groups.items())
-
-
-def write_progress(path, trial):
-    """<trials>.progress: the trial under way, its kind and the start time."""
+def write_progress(path, trial, stage):
+    """<trials>.progress: the trial under way, its stage (build, optimize, solve) and the start time."""
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"trial_id": trial["trial_id"], "kind": trial["kind"],
+        json.dump({"trial_id": trial["trial_id"], "stage": stage,
                    "started_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
                   handle)
 
@@ -94,7 +80,7 @@ def label(trial, transfers=None):
 
 
 class Runner:
-    """One trial file through an adapter: legs built once, ordinals walked ascending, every finished trial recorded before the next starts."""
+    """One trial file through an adapter: a build kept while consecutive lines share it, every finished trial recorded before the next starts."""
 
     def __init__(self, adapter, key, root=DATA_ROOT, floor=False, repeats=REPEAT_CAP):
         self.adapter = adapter
@@ -104,6 +90,8 @@ class Runner:
         self.repeats = repeats
         self.package_version = adapter.version()
         self.suite_rev = store_mod.suite_rev(REPO_ROOT)
+        self.build = None
+        self.build_key = None
 
     # -------------------------------------------------------------- rows
     def record(self, trial, transfers, states, **values):
@@ -113,26 +101,26 @@ class Runner:
         row.update(values)
         return self.store.record(row, floor=self.floor)
 
-    def record_failed_leg(self, solves, reason, states=None):
-        """Every requested transfers row of the leg's solves as NaN with one reason."""
-        for trial in solves:
-            count = self.adapter.states(trial) if states is None else states
-            for transfers in trial["transfers"]:
-                self.record(trial, transfers, count, reason=reason)
+    def record_failed(self, trial, reason, states=None):
+        """Every requested transfers row of a trial as NaN with one reason."""
+        count = self.adapter.states(trial) if states is None else states
+        for transfers in trial["transfers"]:
+            self.record(trial, transfers, count, reason=reason)
+        if trial["transfers"]:
             print("FAILED {0}: {1}".format(label(trial), reason), flush=True)
 
     # ------------------------------------------------------------- timing
-    def time(self, leg, trial, values, transfers):
+    def time(self, build, trial, values, transfers):
         """(outcome, best_ms, samples, result, exc, elapsed_s) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog."""
         def run():
-            return self.adapter.solve(leg, trial, values, transfers)
+            return self.adapter.solve(build, trial, values, transfers)
 
         def breach():
             print("WATCHDOG hard exit: {0} never returned".format(label(trial, transfers)),
                   flush=True)
 
         reset = getattr(self.adapter, "reset", None)
-        setup = None if reset is None else (lambda: reset(leg, trial, values, transfers))
+        setup = None if reset is None else (lambda: reset(build, trial, values, transfers))
         try:
             best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach, setup=setup,
                                                  cap_s=budget_of(trial))
@@ -142,9 +130,9 @@ class Runner:
             return "timeout", NAN, samples, result, None, samples[-1] / 1000.0
         return "ok", best, samples, result, None, samples[-1] / 1000.0
 
-    def finals(self, leg, trial, result):
+    def finals(self, build, trial, result):
         """(errored_pct, finals path) of a solve's result; the finals file is written when the trial keeps finals."""
-        states, t_final, retcode = self.adapter.finals(leg, result)
+        states, t_final, retcode = self.adapter.finals(build, result)
         pct = store_mod.errored_pct(states, t_final, retcode, trial["duration"])
         path = ""
         if trial["finals"]:
@@ -152,29 +140,28 @@ class Runner:
             path = self.store.record_finals(dict(spec, key=self.key), states, t_final, retcode)
         return pct, path
 
-    def run_solve(self, leg, trial, history, build_s):
+    def run_solve(self, build, trial, history, build_s):
         values = grid_mod.grid(trial)
         pct, finals_path = NAN, ""
         finals_read = False
         for transfers in trial["transfers"]:
-            reason = abandon_reason(history, transfers, trial["ordinal"])
+            reason = history.reason(trial, transfers)
             if reason is not None:
-                self.record(trial, transfers, leg.states, reason=reason, build_s=build_s)
+                self.record(trial, transfers, build.states, reason=reason, build_s=build_s)
                 print("SKIP {0}: {1}".format(label(trial, transfers), reason), flush=True)
                 continue
-            outcome, best, samples, result, exc, elapsed = self.time(leg, trial, values, transfers)
-            if outcome in ("timeout", "oom"):
-                history.setdefault(transfers, (outcome, trial["ordinal"]))
+            outcome, best, samples, result, exc, elapsed = self.time(build, trial, values, transfers)
+            history.add(trial, transfers, outcome)
             if result is not None and not finals_read:
                 try:
-                    pct, finals_path = self.finals(leg, trial, result)
+                    pct, finals_path = self.finals(build, trial, result)
                     finals_read = True
                 except Exception as finals_exc:  # noqa: BLE001 - the timing row still stands
                     print("FINALS {0}: {1}: {2}".format(label(trial), type(finals_exc).__name__,
                                                         finals_exc), flush=True)
             result = None
             reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed, budget_of(trial))
-            self.record(trial, transfers, leg.states, min_ms=best, samples_ms=samples,
+            self.record(trial, transfers, build.states, min_ms=best, samples_ms=samples,
                         errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason)
             if outcome == "ok":
                 print("{0}: {1:.3f} ms over {2} attempts, errored {3:.1f}%".format(
@@ -183,62 +170,77 @@ class Runner:
                 print("FAILED {0}: {1}".format(label(trial, transfers), reason), flush=True)
         gc.collect()
 
-    # --------------------------------------------------------------- legs
-    def run_leg(self, name, members, progress_path):
-        solves = [t for t in members if t["kind"] == "solve"]
-        controller = members[0]["controller"]
-        if controller not in self.adapter.controllers:
-            self.record_failed_leg(solves, "error: unknown controller " + controller)
+    # ------------------------------------------------------------- builds
+    def close_build(self):
+        if self.build is not None:
+            self.build.close()
+            self.build = None
+            self.build_key = None
+            gc.collect()
+
+    def ensure_build(self, trial):
+        """(build, build_s): the build the trial runs on, kept from the last line when it serves it; a cold line rebuilds in a fresh cache and its build and compile wall time is build_s."""
+        key = trials_mod.build_key(trial)
+        cold = bool(trial["cold"])
+        if self.build is not None and key == self.build_key and not cold:
+            return self.build, NAN
+        self.close_build()
+        started = timeit.default_timer()
+        self.build = self.adapter.build(trial, cold)
+        self.build_key = key
+        if cold:
+            self.adapter.compile(self.build, trial, grid_mod.grid(trial))
+            build_s = timeit.default_timer() - started
+            print("built {0} cold in {1:.1f}s".format(label(trial), build_s), flush=True)
+            return self.build, build_s
+        return self.build, NAN
+
+    def run_trial(self, trial, history, progress_path, failed_builds):
+        if trial["controller"] not in self.adapter.controllers:
+            self.record_failed(trial, "error: unknown controller " + trial["controller"])
             return
-        print("== leg " + name, flush=True)
-        leg = None
-        build_s = NAN
-        history = {}
+        key = trials_mod.build_key(trial)
+        if key in failed_builds:
+            self.record_failed(trial, failed_builds[key])
+            return
+        write_progress(progress_path, trial, "build")
         try:
-            for trial in members:
-                write_progress(progress_path, trial)
-                if leg is None:
-                    # The first line builds the leg; a warm line compiles unless an optimize line follows, and a cold one is timed as build_s.
-                    cold = trial["kind"] == "warm" and bool(trial["cold"])
-                    optimized = len(members) > 1 and members[1]["kind"] == "optimize"
-                    started = timeit.default_timer()
-                    try:
-                        leg = self.adapter.build_leg(trial, cold)
-                        if trial["kind"] == "warm" and (cold or not optimized):
-                            self.adapter.compile(leg, trial, grid_mod.grid(trial))
-                    except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
-                        reason = failure_reason(classify(exc), exc)
-                        self.record_failed_leg(solves, reason, leg.states if leg else None)
-                        return
-                    if cold:
-                        build_s = timeit.default_timer() - started
-                        print("built {0} cold in {1:.1f}s".format(name, build_s), flush=True)
-                if trial["kind"] == "warm":
-                    continue
-                if trial["kind"] == "optimize":
-                    # Past OPTIMIZE_SECONDS the watchdog hard-exits; the driver drops this line and re-runs the leg's solves.
-                    started = timeit.default_timer()
-                    try:
-                        watchdogged(lambda: self.adapter.optimize(leg, trial, grid_mod.grid(trial)),
-                                    "optimize " + label(trial), OPTIMIZE_SECONDS)
-                        print("optimized {0} in {1:.1f}s".format(
-                            label(trial), timeit.default_timer() - started), flush=True)
-                    except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
-                        print("OPTIMIZE {0} failed: {1}".format(
-                            label(trial), failure_reason(classify(exc), exc)), flush=True)
-                    continue
-                self.run_solve(leg, trial, history, build_s)
-        finally:
-            if leg is not None:
-                leg.close()
-                gc.collect()
+            build, build_s = self.ensure_build(trial)
+        except Exception as exc:  # noqa: BLE001 - the trial's rows carry the reason
+            failed_builds[key] = failure_reason(classify(exc), exc)
+            self.close_build()
+            self.record_failed(trial, failed_builds[key])
+            return
+        if trial["optimize"]:
+            # Past OPTIMIZE_SECONDS the watchdog hard-exits; the driver drops the optimize from this line and re-runs it.
+            write_progress(progress_path, trial, "optimize")
+            started = timeit.default_timer()
+            batch = grid_mod.grid(dict(trial, n=int(trial["optimize"])))
+            try:
+                watchdogged(lambda: self.adapter.optimize(build, trial, batch),
+                            "optimize " + label(trial), OPTIMIZE_SECONDS)
+                print("optimized {0} at n={1} in {2:.1f}s".format(
+                    label(trial), trial["optimize"], timeit.default_timer() - started), flush=True)
+            except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
+                print("OPTIMIZE {0} failed: {1}".format(
+                    label(trial), failure_reason(classify(exc), exc)), flush=True)
+        elif not trial["cold"] and not trial["transfers"]:
+            self.adapter.compile(build, trial, grid_mod.grid(trial))
+        if trial["transfers"]:
+            write_progress(progress_path, trial, "solve")
+            self.run_solve(build, trial, history, build_s)
 
     def run_file(self, path):
-        """Every leg of a trial file; returns 0."""
+        """Every trial of a file in order; returns 0."""
         trial_list = trials_mod.read_jsonl(path)
         progress_path = path + ".progress"
-        for name, members in legs_of(trial_list):
-            self.run_leg(name, members, progress_path)
+        history = History()
+        failed_builds = {}
+        try:
+            for trial in trial_list:
+                self.run_trial(trial, history, progress_path, failed_builds)
+        finally:
+            self.close_build()
         return 0
 
 

@@ -11,8 +11,7 @@ build      = "warm"
 
 [set.optimize]
 packages = ["cubie", "cubie_mlir"]
-n = 262144
-per = "solve"
+n = "solve"
 
 [[grid]]
 packages = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]

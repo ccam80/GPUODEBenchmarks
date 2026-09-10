@@ -127,9 +127,8 @@ class CompletenessTests(AnalysesCase):
 
     def test_the_report_names_every_lacking_row_and_artifact_under_each_key(self):
         trial_list = shared.canonical_trials(self.store, ["tiny"], KEY, self.sets_dir)
-        self.assertEqual([(t["kind"], t["n"], t["finals"], t["sets"]) for t in trial_list],
-                         [("warm", 8, False, ["keep", "tiny"]), ("solve", 8, False, ["tiny"]),
-                          ("solve", 32, True, ["keep", "tiny"])])
+        self.assertEqual([(t["n"], t["finals"], t["sets"]) for t in trial_list],
+                         [(8, False, ["tiny"]), (32, True, ["keep", "tiny"])])
         self.store.record(dict(self.point(8), states=3, min_ms=1.0))
         self.store.record(dict(self.point(32), states=3, min_ms=1.0))
         self.store.record(dict(self.point(8, key=OTHER_KEY), states=3, min_ms=NAN))

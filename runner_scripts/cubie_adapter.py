@@ -170,16 +170,19 @@ def optimize_path(package, key, root=None):
 
 
 def _ident(package, key, problem, algorithm, mode, setting, states,
-           controller="", gains=""):
-    """The optimize row identity; a row recorded without a setting serves every stepping of its leg. `controller` and `gains` separate the controllers one algorithm runs under."""
+           controller="", gains="", n=None):
+    """The optimize row identity; a row recorded without a setting serves every stepping of its build, an identity without `n` (the batch size) matches any batch. `controller` and `gains` separate the controllers one algorithm runs under."""
     row = as_problem(problem)
     kind = "dt" if mode == "fixed" else "tol"
     text = "" if setting is None else "{0:.10g}".format(float(setting))
-    return {"package": package, "key": key, "problem": row.name,
-            "algorithm": algorithm, "mode": mode,
-            "controller": controller or "", "gains": gains or "",
-            "setting_kind": kind, "setting": text,
-            "states": str(int(row["states"] if states is None else states))}
+    ident = {"package": package, "key": key, "problem": row.name,
+             "algorithm": algorithm, "mode": mode,
+             "controller": controller or "", "gains": gains or "",
+             "setting_kind": kind, "setting": text,
+             "states": str(int(row["states"] if states is None else states))}
+    if n is not None:
+        ident["n"] = str(int(n))
+    return ident
 
 
 def _setting_matches(a, b):
@@ -295,7 +298,7 @@ def optimize_rows(package, key, root=None):
 
 
 def find_optimized(rows, ident):
-    """The last row matching an identity, else the last row of the same leg recorded without a setting (it serves every stepping); None when neither exists."""
+    """The last row matching an identity, else the last row of the same build recorded without a setting (it serves every stepping); None when neither exists."""
     matched = [row for row in rows if _same(row, ident)]
     if not matched and ident["setting"]:
         matched = [row for row in rows if _same(row, dict(ident, setting=""))]
@@ -303,10 +306,10 @@ def find_optimized(rows, ident):
 
 
 def load_optimized(package, key, problem, algorithm, mode, setting,
-                   states=None, root=None, controller="", gains="", source=None):
-    """{'settings', 'resident_blocks'} recorded for a point, or None; with `source`, only a row recorded from that source."""
+                   states=None, root=None, controller="", gains="", source=None, n=None):
+    """{'settings', 'resident_blocks'} recorded for a point, or None; with `source`, only a row recorded from that source; with `n`, only a row optimized on that batch."""
     ident = _ident(package, key, problem, algorithm, mode, setting, states,
-                   controller, gains)
+                   controller, gains, n)
     recorded = optimize_rows(package, key, root)
     if source is not None:
         recorded = [row for row in recorded if row.get("source", "") == source]
@@ -329,10 +332,10 @@ def apply_optimized(solver, tuned):
 
 def record_optimized(package, key, problem, algorithm, mode, setting, result,
                      states=None, n=None, root=None, controller="", gains="", source=""):
-    """Replace the optimize row for a point with the result's best launch."""
+    """Replace the optimize row for a point and batch with the result's best launch."""
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states,
-                   controller, gains)
+                   controller, gains, n)
     best = result.best
     row = dict(ident, source=source, n="" if n is None else str(int(n)), label=best.label,
                best_ms="{0:.6g}".format(best.best_ms),
@@ -350,27 +353,25 @@ def record_optimized(package, key, problem, algorithm, mode, setting, result,
 
 
 def optimize_setting(trial):
-    """(mode, setting) of the optimize row a trial records: None on an n or states axis, where one row serves the leg, else the trial's dt or tolerance."""
+    """(mode, setting) of the optimize row a trial records: its dt or tolerance."""
     mode = "fixed" if trial["controller"] == "fixed" else "adaptive"
-    if trial["axis"] in ("n", "states"):
-        return mode, None
     return mode, float(trial["dt"] if mode == "fixed" else trial["atol"])
 
 
 def optimize_ident(trial, key):
-    """The optimize row identity an optimize line records under a key."""
+    """The optimize row identity a line's optimize records under a key: its step or tolerance and its batch."""
     mode, setting = optimize_setting(trial)
     params = json.loads(trial["system_params"]) if trial["system_params"] else {}
     return _ident(trial["package"], key, trial["problem"], trial["algorithm"], mode, setting,
-                  params.get("states"), trial["controller"], trial["gains"])
+                  params.get("states"), trial["controller"], trial["gains"], trial.get("optimize"))
 
 
 def record_optimize_timeout(trial, key, root=None):
-    """Replace the optimize row of a trial with one labelled timeout and no settings, so the leg runs at the solver's own geometry."""
+    """Replace the optimize row of a trial with one labelled timeout and no settings, so the line runs at the solver's own geometry."""
     path = optimize_path(trial["package"], key, root)
     ident = optimize_ident(trial, key)
-    row = dict(ident, source="", n=str(int(trial["n"])), label="timeout", best_ms="nan", blocksize="",
-               resident_blocks="", settings="",
+    row = dict(ident, source="", n=str(int(trial.get("optimize") or trial["n"])), label="timeout", best_ms="nan",
+               blocksize="", resident_blocks="", settings="",
                recorded_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     with _Lock(path):
         rows = [r for r in _load(path) if not _same(r, ident)]

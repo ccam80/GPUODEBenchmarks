@@ -1,4 +1,4 @@
-"""runner.py against a fake adapter: every outcome, the abandon rule, finals kept and not kept, unknown controllers, build and optimize failures, cold builds, the progress file and the CLI."""
+"""runner.py against a fake adapter: every outcome, the abandon rule, finals kept and not kept, unknown controllers, build and optimize failures, cold builds, builds kept across lines, the progress file and the CLI."""
 
 import json
 import math
@@ -24,21 +24,19 @@ NAN = float("nan")
 CAP_S = 0.05
 
 
-def spec(n=8, transfers=("both", "none"), finals=False, axis="n", build="warm", optimize=None,
-         **overrides):
+def spec(n=8, transfers=("both", "none"), finals=False, build="warm", optimize=None, **overrides):
     """A run spec with the expansion's own fields: lorenz, fixed tsit5 at dt 2^-10, cubie."""
     fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
                   parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
                   grid_dtype="float32", algorithm="tsit5", controller="fixed", dt=2.0 ** -10,
                   dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}", newton_atol=NAN,
                   newton_rtol=NAN, package="cubie", transfers=list(transfers), finals=finals,
-                  axis=axis, build=build, optimize=optimize, watchdog_s=CAP_S, set="test",
-                  stepping="fixed")
+                  build=build, optimize=optimize, watchdog_s=CAP_S, set="test", stepping="fixed")
     fields.update(overrides)
     return fields
 
 
-class FakeLeg:
+class FakeBuild:
     def __init__(self, trial):
         self.states = 3
         self.trial = trial
@@ -49,7 +47,7 @@ class FakeLeg:
 
 
 class FakeAdapter:
-    """Solve behaviour by (n, transfers): ok, slow (past the cap), oom, error; an optimize line fails when ("optimize", n) says error."""
+    """Solve behaviour by (n, transfers): ok, slow (past the cap), oom, error; an optimize fails when ("optimize", n) says error."""
 
     controllers = ("fixed", "default", "pi")
 
@@ -58,7 +56,7 @@ class FakeAdapter:
         self.fail_build = fail_build
         self.bad_row = bad_row
         self.calls = []
-        self.legs = []
+        self.builds = []
 
     def version(self):
         return "fake 1.0"
@@ -66,15 +64,15 @@ class FakeAdapter:
     def states(self, trial):
         return 3
 
-    def build_leg(self, trial, cold=False):
+    def build(self, trial, cold=False):
         self.calls.append(("build", trial["n"], cold))
         if self.fail_build:
             raise RuntimeError("no such system")
         if cold:
             time.sleep(0.01)
-        leg = FakeLeg(trial)
-        self.legs.append(leg)
-        return leg
+        build = FakeBuild(trial)
+        self.builds.append(build)
+        return build
 
     def compile(self, leg, trial, values):
         self.calls.append(("compile", trial["n"], None))
@@ -82,9 +80,10 @@ class FakeAdapter:
     def reset(self, leg, trial, values, transfers):
         self.calls.append(("reset", trial["n"], transfers))
 
-    def optimize(self, leg, trial, values):
-        self.calls.append(("optimize", trial["n"], None))
-        if self.behaviour.get(("optimize", trial["n"])) == "error":
+    def optimize(self, build, trial, values):
+        batch = int(values.shape[0])
+        self.calls.append(("optimize", batch, None))
+        if self.behaviour.get(("optimize", batch)) == "error":
             raise RuntimeError("no launch timed")
 
     def solve(self, leg, trial, values, transfers):
@@ -146,16 +145,18 @@ class OutcomeTests(RunnerCase):
             self.assertTrue(row["suite_rev"])
             self.assertEqual(row["states"], 3)
             self.assertTrue(math.isnan(row["build_s"]))
-        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("compile", 8, None)])
+        self.assertEqual(adapter.calls[:1], [("build", 8, False)])
+        self.assertNotIn("compile", {c[0] for c in adapter.calls})
         solves = [c for c in adapter.calls if c[0] == "solve"]
         self.assertEqual([(n, t) for _, n, t in solves][::4], [(8, "both"), (8, "none"), (32, "both"), (32, "none")])
-        self.assertTrue(all(leg.closed for leg in adapter.legs))
+        self.assertTrue(all(build.closed for build in adapter.builds))
         with open(path + ".progress") as handle:
             progress = json.load(handle)
         self.assertEqual(progress["trial_id"], [t for t in trials.read_jsonl(path)][-1]["trial_id"])
+        self.assertEqual(progress["stage"], "solve")
         self.assertTrue(progress["started_utc"].endswith("Z"))
 
-    def test_timeout_abandons_the_higher_ordinals_of_the_same_transfers(self):
+    def test_timeout_abandons_the_harder_runs_of_the_same_transfers(self):
         adapter = FakeAdapter({(32, "none"): "slow"})
         status, rows, _ = self.run_specs([spec(8), spec(32), spec(128)], adapter)
         self.assertEqual(status, 0)
@@ -168,7 +169,7 @@ class OutcomeTests(RunnerCase):
         self.assertEqual(hit["errored_pct"], 0.0)
         after = rows[(128, "none")]
         self.assertTrue(math.isnan(after["min_ms"]))
-        self.assertEqual(after["reason"], "abandoned: timeout at ordinal 1")
+        self.assertEqual(after["reason"], "abandoned: timeout at " + hit["trial_id"])
         self.assertEqual(after["samples_ms"], [])
         self.assertTrue(math.isfinite(rows[(128, "both")]["min_ms"]))
         self.assertTrue(math.isfinite(rows[(32, "both")]["min_ms"]))
@@ -201,10 +202,10 @@ class OutcomeTests(RunnerCase):
         self.assertEqual(hit["samples_ms"], [])
         self.assertTrue(math.isnan(hit["errored_pct"]))
         self.assertTrue(math.isfinite(rows[(32, "none")]["min_ms"]))
-        self.assertEqual(rows[(128, "both")]["reason"], "abandoned: oom at ordinal 1")
+        self.assertEqual(rows[(128, "both")]["reason"], "abandoned: oom at " + hit["trial_id"])
         self.assertTrue(math.isfinite(rows[(128, "none")]["min_ms"]))
 
-    def test_an_error_marks_its_row_and_the_leg_continues(self):
+    def test_an_error_marks_its_row_and_the_build_continues(self):
         adapter = FakeAdapter({(32, "both"): "error", (32, "none"): "error"})
         status, rows, _ = self.run_specs([spec(8), spec(32), spec(128)], adapter)
         self.assertEqual(rows[(32, "both")]["reason"], "error: ValueError: bad both")
@@ -249,7 +250,7 @@ class FinalsTests(RunnerCase):
         self.assertFalse(os.path.isdir(os.path.join(self.root, "key=" + KEY, "package=cubie", "finals")))
 
 
-class LegTests(RunnerCase):
+class BuildTests(RunnerCase):
     def test_an_unknown_controller_records_the_reason_without_running(self):
         adapter = FakeAdapter()
         status, rows, _ = self.run_specs([spec(8, controller="gustafsson", dt=NAN, atol=1e-5, rtol=1e-5,
@@ -260,44 +261,48 @@ class LegTests(RunnerCase):
         self.assertEqual({r["states"] for r in rows.values()}, {3})
         self.assertEqual(adapter.calls, [])
 
-    def test_a_build_failure_records_every_row_of_the_leg(self):
+    def test_a_build_failure_records_every_row_of_its_lines_once(self):
         adapter = FakeAdapter(fail_build=True)
         status, rows, _ = self.run_specs([spec(8), spec(32)], adapter)
         self.assertEqual(len(rows), 4)
         self.assertEqual({r["reason"] for r in rows.values()}, {"error: RuntimeError: no such system"})
-        self.assertNotIn("compile", [c[0] for c in adapter.calls])
+        self.assertEqual([c[0] for c in adapter.calls], ["build"])
 
-    def test_a_cold_build_is_timed_onto_every_row_of_the_leg(self):
+    def test_a_cold_line_rebuilds_and_carries_its_own_build_time(self):
         adapter = FakeAdapter()
-        status, rows, path = self.run_specs([spec(8, build="cold"), spec(32, build="cold")], adapter)
-        self.assertEqual(adapter.calls[0], ("build", 8, True))
-        self.assertEqual({t["cold"] for t in trials.read_jsonl(path) if t["kind"] == "warm"}, {True})
-        build_s = {r["build_s"] for r in rows.values()}
-        self.assertEqual(len(build_s), 1)
-        self.assertGreater(build_s.pop(), 0.0)
+        status, rows, path = self.run_specs([spec(8, build="cold"), spec(32, build="cold"), spec(128)], adapter)
+        self.assertEqual([c for c in adapter.calls if c[0] in ("build", "compile")],
+                         [("build", 8, True), ("compile", 8, None), ("build", 32, True), ("compile", 32, None)])
+        self.assertEqual([t["cold"] for t in trials.read_jsonl(path)], [True, True, False])
+        self.assertGreater(rows[(8, "both")]["build_s"], 0.0)
+        self.assertEqual(rows[(8, "both")]["build_s"], rows[(8, "none")]["build_s"])
+        self.assertGreater(rows[(32, "none")]["build_s"], 0.0)
+        self.assertNotEqual(rows[(8, "both")]["build_s"], rows[(32, "both")]["build_s"])
+        self.assertTrue(math.isnan(rows[(128, "both")]["build_s"]))
+        self.assertEqual(len(adapter.builds), 2)
 
     def test_an_optimize_failure_leaves_the_solves_running(self):
-        table = {"n": 64, "per": "leg"}
         adapter = FakeAdapter({("optimize", 64): "error"})
-        status, rows, _ = self.run_specs([spec(8, optimize=table), spec(32, optimize=table)], adapter)
+        status, rows, _ = self.run_specs([spec(8, optimize={"n": 64}), spec(32, optimize={"n": 64})], adapter)
         self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 64, None)])
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
 
-    def test_a_warm_line_compiles_only_without_an_optimize_line_or_when_cold(self):
+    def test_each_line_optimizes_at_its_batch_before_its_solves(self):
         adapter = FakeAdapter()
-        self.run_specs([spec(8, optimize={"n": 64, "per": "leg"}, build="cold")], adapter)
+        self.run_specs([spec(8, optimize={"n": 64}, build="cold")], adapter)
         self.assertEqual(adapter.calls[:3], [("build", 8, True), ("compile", 8, None), ("optimize", 64, None)])
         adapter = FakeAdapter()
-        self.run_specs([spec(8, optimize={"n": "solve", "per": "solve"}), spec(32, optimize={"n": "solve", "per": "solve"})], adapter)
-        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, None)])
-        self.assertNotIn("compile", {c[0] for c in adapter.calls})
+        self.run_specs([spec(8, optimize={"n": "solve"}), spec(32, optimize={"n": "solve"})], adapter)
+        self.assertEqual([c for c in adapter.calls if c[0] != "solve" and c[0] != "reset"],
+                         [("build", 8, False), ("optimize", 8, None), ("optimize", 32, None)])
+        # A line without transfers warms the build alone.
         adapter = FakeAdapter()
-        self.run_specs([spec(8)], adapter)
-        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("compile", 8, None)])
+        self.run_specs([spec(8, transfers=())], adapter)
+        self.assertEqual(adapter.calls, [("build", 8, False), ("compile", 8, None)])
 
-    def test_only_the_optimize_line_runs_under_the_watchdog(self):
-        table = {"n": 64, "per": "leg"}
+    def test_only_the_optimize_runs_under_the_watchdog(self):
+        table = {"n": 64}
         budgets = []
 
         def recording(run, on_breach, budget_s=None):
@@ -313,35 +318,21 @@ class LegTests(RunnerCase):
         self.assertEqual(budgets, [runner.OPTIMIZE_SECONDS])
         self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
         with open(path + ".progress") as handle:
-            self.assertEqual(json.load(handle)["kind"], "solve")
+            self.assertEqual(json.load(handle)["stage"], "solve")
 
-    def test_legs_are_built_once_each_in_file_order(self):
+    def test_a_build_is_kept_while_consecutive_lines_share_it(self):
         adapter = FakeAdapter()
         specs = [spec(8), spec(32), spec(8, algorithm="euler"), spec(32, algorithm="euler")]
         status, rows, _ = self.run_specs(specs, adapter)
         builds = [c for c in adapter.calls if c[0] == "build"]
         self.assertEqual(len(builds), 2)
-        self.assertEqual(len(adapter.legs), 2)
-        self.assertEqual([leg.trial["algorithm"] for leg in adapter.legs], ["tsit5", "euler"])
+        self.assertEqual(len(adapter.builds), 2)
+        self.assertEqual([build.trial["algorithm"] for build in adapter.builds], ["euler", "tsit5"])
         self.assertEqual(len(rows), 4)
         self.assertEqual({r["algorithm"] for r in store.Store(self.root).rows()}, {"tsit5", "euler"})
 
 
 class RuleTests(unittest.TestCase):
-    def test_the_abandon_rule(self):
-        history = {}
-        self.assertIsNone(runner.abandon_reason(history, "both", 0))
-        history.setdefault("none", ("timeout", 1))
-        self.assertIsNone(runner.abandon_reason(history, "none", 1))
-        self.assertIsNone(runner.abandon_reason(history, "none", 0))
-        self.assertEqual(runner.abandon_reason(history, "none", 2), "abandoned: timeout at ordinal 1")
-        self.assertIsNone(runner.abandon_reason(history, "both", 2))
-        history.setdefault("both", ("oom", 3))
-        self.assertEqual(runner.abandon_reason(history, "both", 4), "abandoned: oom at ordinal 3")
-        # The first hit stands.
-        history.setdefault("none", ("oom", 0))
-        self.assertEqual(history["none"], ("timeout", 1))
-
     def test_classification_and_reasons(self):
         self.assertEqual(runner.classify(MemoryError("x")), "oom")
         self.assertEqual(runner.classify(RuntimeError("CUDA_ERROR_OUT_OF_MEMORY")), "oom")
@@ -357,15 +348,13 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(reason, "error: ValueError: " + "m" * 200)
         self.assertEqual(runner.failure_reason("timeout", elapsed_s=130.25),
                          "timeout: 130.2s over the {0:g}s cap".format(runner.WATCHDOG_SECONDS))
-        self.assertEqual(runner.legs_of([{"leg": "a"}, {"leg": "b"}, {"leg": "a"}]),
-                         [("a", [{"leg": "a"}, {"leg": "a"}]), ("b", [{"leg": "b"}])])
 
 
 class CliTests(RunnerCase):
     def test_main_builds_the_adapter_for_the_key_and_honours_floor(self):
         trial_list = trials.build_trials([spec(8, transfers=("both",))])
         path = trials.write_jsonl(os.path.join(self.tmp, "cubie.jsonl"), trial_list)
-        solve = [t for t in trial_list if t["kind"] == "solve"][0]
+        solve = trial_list[0]
         data = store.Store(self.root)
         fields = {f: solve[f] for f in store.TRIAL_FIELDS}
         data.record(dict(fields, transfers="both", key=KEY, states=3, min_ms=1e-9))

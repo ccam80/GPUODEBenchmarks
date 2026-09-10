@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The pytorch adapter for runner.py: a leg is one torchdiffeq module factory and initial state on the device; a solve runs vmapped over the parameters through host tensors (`both`) or on the resident device parameters (`none`). torchdiffeq under vmap is fixed-grid only, so `fixed` is the one controller a trial may name and there is nothing to warm."""
+"""The pytorch adapter for runner.py: a build is one torchdiffeq module factory and initial state on the device; a solve runs vmapped over the parameters through host tensors (`both`) or on the resident device parameters (`none`). torchdiffeq under vmap is fixed-grid only, so `fixed` is the one controller a trial may name and there is nothing to warm."""
 
 import importlib.metadata
 import json
@@ -119,9 +119,9 @@ def register_solvers():
     SOLVERS["tsit5"] = tsit5_solver()
 
 
-# ---------------------------------------------------------------------- leg
+# ---------------------------------------------------------------------- build
 
-class Leg:
+class Build:
     """One module factory and initial state on the device, in the trial's precision; the device parameters of the last upload."""
 
     def __init__(self, trial, cold=False):
@@ -132,7 +132,7 @@ class Leg:
             raise ValueError("precision '{0}' is not float32 or float64".format(trial["precision"]))
         self.duration = float(trial["duration"])
         self.method = method_of(trial["algorithm"])
-        # The problem's tensors take the default dtype, so the precision is set for the leg's life.
+        # The problem's tensors take the default dtype, so the precision is set for the build's life.
         self.saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(getattr(torch, trial["precision"]))
         try:
@@ -210,22 +210,22 @@ class TorchAdapter:
     def states(self, trial):
         return int(problem_row(trial)["states"])
 
-    def build_leg(self, trial, cold=False):
-        return Leg(trial, cold)
+    def build(self, trial, cold=False):
+        return Build(trial, cold)
 
-    def compile(self, leg, trial, values):
+    def compile(self, build, trial, values):
         """torchdiffeq runs eagerly; there is nothing to warm."""
 
-    def optimize(self, leg, trial, values):
+    def optimize(self, build, trial, values):
         raise NotImplementedError("pytorch has no launch geometry to optimize")
 
-    def solve(self, leg, trial, values, transfers):
+    def solve(self, build, trial, values, transfers):
         if transfers == "both":
-            return leg.host_solve(trial, values)
-        return leg.device_solve(trial, values)
+            return build.host_solve(trial, values)
+        return build.device_solve(trial, values)
 
-    def finals(self, leg, result):
-        return finals_of(result.cpu().numpy(), leg.duration)
+    def finals(self, build, result):
+        return finals_of(result.cpu().numpy(), build.duration)
 
 
 def run(argv):

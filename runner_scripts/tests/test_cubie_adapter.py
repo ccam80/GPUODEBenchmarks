@@ -237,6 +237,16 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(tol, atol=1e-4), "k")))
         self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(line, system_params='{"states":4}'), "k")))
         self.assertEqual(adapter.optimize_rows("cubie_mlir", "k"), [])
+        # A batch in the identity matches rows of that batch alone.
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5", "fixed", None, result, n=64,
+                                 controller="fixed", gains="{}", source="S")
+        rows = adapter.optimize_rows("cubie", "k")
+        self.assertIsNotNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(line, optimize=64), "k")))
+        self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(line, optimize=128), "k")))
+        self.assertEqual(adapter.load_optimized("cubie", "k", self.problem, "tsit5", "fixed", None, n=64,
+                                                controller="fixed", gains="{}")["resident_blocks"], 2)
+        self.assertIsNone(adapter.load_optimized("cubie", "k", self.problem, "tsit5", "fixed", None, n=128,
+                                                 controller="fixed", gains="{}"))
 
     def test_source_hashes_come_from_the_package_interpreter(self):
         systems = [("lorenz", "{}", "float32"), ("lorenz96", '{"states":8}', "float32"), ("lorenz", "{}", "float32")]

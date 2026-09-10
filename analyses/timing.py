@@ -18,7 +18,7 @@ shared.under_suite_python()
 
 import errors as errors_mod  # noqa: E402
 import store as store_mod  # noqa: E402
-from trials import ordinal_key  # noqa: E402
+from trials import difficulty  # noqa: E402
 
 AXES = ("n", "error", "states")
 # The columns that vary along each axis and so stay out of the figure identity.
@@ -68,7 +68,7 @@ def collect(rows, axis, errs):
         figures.setdefault(ident, {}).setdefault(row["package"], []).append((x, row))
     for figure in figures.values():
         for points in figure.values():
-            points.sort(key=lambda p: ordinal_key(p[1]))
+            points.sort(key=lambda p: difficulty(p[1]))
     for figure in builds.values():
         for points in figure.values():
             points.sort()

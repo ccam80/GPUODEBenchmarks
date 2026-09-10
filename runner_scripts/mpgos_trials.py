@@ -1,4 +1,4 @@
-"""MPGOS trial-file helper for run_ode_cpp.ps1 and .sh: `context` prints key, source hash, package_version, suite_rev and the watchdog exit code; `builds <trials>` lists binaries; `points <trials>` lists solve trials in run order; `nan <trials> <trial_id> <key> <transfers,...> <reason> [--floor] [--build-s S]` records NaN rows."""
+"""MPGOS trial-file helper for run_ode_cpp.ps1 and .sh: `context` prints key, source hash, package_version, suite_rev and the watchdog exit code; `builds <trials>` lists binaries; `points <trials>` lists the trials in file order; `harder <trials> <trial_id>` lists the trials the abandon rule gives up after that one; `nan <trials> <trial_id> <key> <transfers,...> <reason> [--floor] [--build-s S]` records NaN rows."""
 
 import argparse
 import hashlib
@@ -11,6 +11,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import abandon  # noqa: E402
 import protocol  # noqa: E402
 import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
@@ -26,9 +27,9 @@ SOLVERS = {"classical-rk4": "RK4", "cash-karp-54": "RKCK45"}
 PRECISION_TYPES = {"float32": "float", "float64": "double"}
 HASH_HEX = 12
 
-BUILD_COLUMNS = ("problem", "solver", "nt", "sd", "precision", "cold", "leg")
-POINT_COLUMNS = ("trial_id", "leg", "ordinal", "problem", "solver", "nt", "sd", "precision",
-                 "transfers", "finals", "reason")
+BUILD_COLUMNS = ("problem", "solver", "nt", "sd", "precision", "cold")
+POINT_COLUMNS = ("trial_id", "problem", "solver", "nt", "sd", "precision", "transfers", "finals",
+                 "cold", "reason")
 
 
 def source_files():
@@ -107,46 +108,48 @@ def build_key(trial):
 
 
 def builds(trial_list):
-    """One row per binary in first appearance, cold when a cold warm line asks for it, with that leg."""
+    """One row per binary in first appearance, cold when a cold line runs on it."""
     rows = {}
     for trial in trial_list:
-        if trial["kind"] not in ("warm", "solve") or unrunnable(trial):
+        if unrunnable(trial):
             continue
-        key = build_key(trial)
-        row = rows.setdefault(key, {"cold": False, "leg": trial["leg"]})
-        if trial["kind"] == "warm" and trial["cold"] and not row["cold"]:
-            row["cold"] = True
-            row["leg"] = trial["leg"]
+        row = rows.setdefault(build_key(trial), {"cold": False})
+        row["cold"] = row["cold"] or bool(trial["cold"])
     out = []
     for (problem, solver, nt, sd, precision), row in rows.items():
         out.append({"problem": problem, "solver": solver, "nt": nt, "sd": sd,
-                    "precision": precision, "cold": row["cold"], "leg": row["leg"]})
+                    "precision": precision, "cold": row["cold"]})
     return out
 
 
 def points(trial_list):
-    """The solve trials in file order with build key, transfers, finals and the reason they cannot run ('' when they can)."""
+    """The trials in file order with build key, transfers, finals, cold and the reason they cannot run ('' when they can)."""
     out = []
     for trial in trial_list:
-        if trial["kind"] != "solve":
-            continue
         reason = unrunnable(trial)
         solver = SOLVERS.get(trial["algorithm"], "-")
         given = states_param(trial)
-        out.append({"trial_id": trial["trial_id"], "leg": trial["leg"], "ordinal": trial["ordinal"],
-                    "problem": trial["problem"], "solver": solver, "nt": int(trial["n"]),
-                    "sd": "-" if given is None else str(given), "precision": trial["precision"],
-                    "transfers": ",".join(trial["transfers"]), "finals": trial["finals"],
-                    "reason": reason})
+        out.append({"trial_id": trial["trial_id"], "problem": trial["problem"], "solver": solver,
+                    "nt": int(trial["n"]), "sd": "-" if given is None else str(given),
+                    "precision": trial["precision"], "transfers": ",".join(trial["transfers"]),
+                    "finals": trial["finals"], "cold": bool(trial["cold"]), "reason": reason})
     return out
+
+
+def harder(trial_list, trial_id):
+    """The trial_ids of the trials the abandon rule gives up after the named one fails."""
+    failed = [t for t in trial_list if t["trial_id"] == trial_id]
+    if not failed:
+        raise ValueError("no trial " + trial_id)
+    return [t["trial_id"] for t in trial_list if abandon.abandon_reason(t, [(failed[0], "x")])]
 
 
 def nan_rows(trial_list, trial_id, key, transfers, reason, build_s=None, src_hash=None,
              suite_rev=None):
     """NaN rows for the named solve trial's transfers with a reason; the caller records them."""
-    matched = [t for t in trial_list if t["kind"] == "solve" and t["trial_id"] == trial_id]
+    matched = [t for t in trial_list if t["trial_id"] == trial_id]
     if not matched:
-        raise ValueError("no solve trial " + trial_id)
+        raise ValueError("no trial " + trial_id)
     trial = matched[0]
     states = states_of(trial)
     if states is None:
@@ -187,6 +190,9 @@ def main(argv):
     commands.add_parser("context")
     commands.add_parser("builds").add_argument("trials")
     commands.add_parser("points").add_argument("trials")
+    harder_ = commands.add_parser("harder")
+    harder_.add_argument("trials")
+    harder_.add_argument("trial_id")
     nan = commands.add_parser("nan")
     nan.add_argument("trials")
     nan.add_argument("trial_id")
@@ -206,6 +212,10 @@ def main(argv):
         return 0
     if args.command == "points":
         _print_table(points(trial_list), POINT_COLUMNS)
+        return 0
+    if args.command == "harder":
+        for ident in harder(trial_list, args.trial_id):
+            print(ident)
         return 0
     transfers = [t for t in args.transfers.split(",") if t]
     rows = nan_rows(trial_list, args.trial_id, args.key, transfers, args.reason, args.build_s)

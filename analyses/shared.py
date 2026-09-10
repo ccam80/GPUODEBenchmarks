@@ -86,9 +86,9 @@ def pull_store(args):
 # --------------------------------------------------------------- selection
 
 def store_keys(store):
-    """The dataset keys with leg files under the store."""
+    """The dataset keys with results files under the store."""
     keys = set()
-    for path in store.leg_files():
+    for path in store.results_files():
         parts = os.path.normpath(path).split(os.sep)
         keys.update(p[len("key="):] for p in parts if p.startswith("key="))
     return sorted(keys)
@@ -103,7 +103,7 @@ def canonical_trials(store, set_names, key, sets_dir=None):
                                sets.declarations(key, store.root, sets_dir=sets_dir))
 
 
-INCOMPLETE_COLUMNS = ("key", "package", "trial_id", "leg", "problem", "system_params", "precision",
+INCOMPLETE_COLUMNS = ("key", "package", "trial_id", "problem", "system_params", "precision",
                       "algorithm", "controller", "n", "dt", "atol", "sets", "missing")
 
 

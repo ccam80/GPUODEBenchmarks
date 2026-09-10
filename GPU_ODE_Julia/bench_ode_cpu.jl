@@ -1,4 +1,4 @@
-# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a trial file, one system and solver per leg in the trial's element type; every transfers entry times the same call, finals land when asked, and each adaptive leg's resolved controller goes to controllers/<problem>.csv under the run key.
+# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a trial file, one system and solver per build (consecutive lines of one system, algorithm, controller and precision) in the trial's element type; every transfers entry times the same call, finals land when asked, and each adaptive build's resolved controller goes to controllers/<problem>.csv under the run key.
 #   julia -t auto --project=. GPU_ODE_Julia/bench_ode_cpu.jl --trials <path> [--floor]
 
 using OrdinaryDiffEq
@@ -73,20 +73,62 @@ function read_trials(path)
     return trials
 end
 
-"Legs in first appearance, each with its lines in file order."
-function legs_of(trials)
-    legs = Pair{String, Vector{Dict{String, Any}}}[]
-    index = Dict{String, Int}()
+build_key(trial) = (trial["problem"], trial["system_params"], trial["precision"], trial["algorithm"],
+    trial["controller"], trial["gains"])
+
+"Builds in file order: each run of consecutive lines with one build key."
+function builds_of(trials)
+    builds = Pair{Any, Vector{Dict{String, Any}}}[]
     for trial in trials
-        leg = trial["leg"]
-        if !haskey(index, leg)
-            push!(legs, leg => Dict{String, Any}[])
-            index[leg] = length(legs)
+        key = build_key(trial)
+        if isempty(builds) || builds[end].first != key
+            push!(builds, key => Dict{String, Any}[])
         end
-        push!(legs[index[leg]].second, trial)
+        push!(builds[end].second, trial)
     end
-    return legs
+    return builds
 end
+
+"(n, states, -dt, -tol) of a trial: each entry grows with the cost of the run."
+function difficulty(trial)
+    params = JSON.parse(trial["system_params"])
+    states = haskey(params, "states") ? Int(params["states"]) : 0
+    finite(x) = isnan(x) ? 0.0 : x
+    return (Int(trial["n"]), states, -finite(trial["dt"]), -finite(trial["atol"]))
+end
+
+"True when a is at least as hard as b in every difficulty entry and harder in one."
+function harder(a, b)
+    da, db = difficulty(a), difficulty(b)
+    return all(x >= y for (x, y) in zip(da, db)) && da != db
+end
+
+"The fields the abandon rule compares within."
+family(trial) = (trial["problem"], trial["precision"], trial["algorithm"], trial["controller"], trial["gains"])
+
+"The abandon rule: 'abandoned: <outcome> at <trial_id>' when a timeout or oom of the trial's family on these transfers is no harder than it, else nothing; `failures` maps transfers to [(trial, outcome)]."
+function abandon_reason(trial, transfers, failures)
+    for (failed, outcome) in get(failures, transfers, Tuple{Dict{String, Any}, String}[])
+        family(failed) == family(trial) && harder(trial, failed) &&
+            return "abandoned: $(outcome) at $(failed["trial_id"])"
+    end
+    return nothing
+end
+
+function note_failure!(failures, trial, transfers, outcome)
+    outcome in ("timeout", "oom") || return
+    push!(get!(() -> Tuple{Dict{String, Any}, String}[], failures, transfers), (trial, outcome))
+    return
+end
+
+"'<problem> <algorithm> <controller> n=<n> dt=<dt>|tol=<tol> [<system_params>]'."
+function trial_label(trial)
+    text = "$(trial["problem"]) $(trial["algorithm"]) $(trial["controller"]) n=$(Int(trial["n"]))"
+    text *= trial["controller"] == "fixed" ? " dt=$(trial["dt"])" : " tol=$(trial["atol"])"
+    trial["system_params"] in ("", "{}") || (text *= " " * trial["system_params"])
+    return text
+end
+
 
 element_type(precision) = precision == "float64" ? Float64 :
                           precision == "float32" ? Float32 :
@@ -109,7 +151,7 @@ end
 const _SIZED_ENTRIES = Dict{Tuple{String, DataType, Int}, Any}()
 
 "The compiled system of a trial in T; a lorenz96 size other than the catalogue's builds its own entry."
-function leg_system(trial, ::Type{T}) where {T}
+function build_system(trial, ::Type{T}) where {T}
     system = julia_system(trial["problem"], T)
     states = requested_states(trial)
     (states === nothing || states == length(system.golden_index)) && return system
@@ -222,15 +264,16 @@ function trial_row(ctx, trial, transfers; states, min_ms = NaN, samples_ms = Flo
         package_version = ctx.version, suite_rev = ctx.suite_rev)
 end
 
-function write_progress(ctx, trial)
+function write_progress(ctx, trial, stage = "solve")
     stamp = Dates.format(Dates.now(Dates.UTC), "yyyy-mm-ddTHH:MM:SS.sss") * "Z"
-    write(ctx.progress, JSON.json(Dict("trial_id" => trial["trial_id"], "started_utc" => stamp)))
+    write(ctx.progress, JSON.json(Dict("trial_id" => trial["trial_id"], "stage" => stage,
+        "started_utc" => stamp)))
 end
 
 controllers_path(ctx, problem) = joinpath(ctx.root, "key=" * ctx.key, "package=" * PACKAGE,
     "controllers", problem * ".csv")
 
-"Resolve the step controller OrdinaryDiffEq picks for an adaptive leg and merge its row into controllers/<problem>.csv under the key."
+"Resolve the step controller OrdinaryDiffEq picks for an adaptive build and merge its row into controllers/<problem>.csv under the key."
 function export_controller(ctx, trial, prob, alg, ::Type{T}) where {T}
     kw = solve_kwargs(trial, T)
     integ = init(prob, alg; abstol = kw[:abstol], reltol = kw[:reltol],
@@ -269,75 +312,77 @@ function export_controller(ctx, trial, prob, alg, ::Type{T}) where {T}
             "qmin=$(row["qmin"]) qmax=$(row["qmax"]) gamma=$(row["gamma"]) -> $(path)")
 end
 
-# ---------------------------------------------------------------------- legs
+# --------------------------------------------------------------------- builds
 
-"Record every solve line of a leg with one reason (the leg never built)."
-function record_leg_failure(ctx, solves, reason)
-    for trial in solves
-        write_progress(ctx, trial)
-        states = something(requested_states(trial), 0)
-        rows = [trial_row(ctx, trial, transfers; states, reason) for transfers in trial["transfers"]]
-        isempty(rows) || store_record(rows; root = ctx.root, floor = ctx.floor)
-        println("  $(trial["trial_id"]) ordinal $(trial["ordinal"]): $(reason)")
-    end
+"Record every transfers row of a trial with one reason."
+function record_failure(ctx, trial, reason)
+    write_progress(ctx, trial)
+    states = something(requested_states(trial), 0)
+    rows = [trial_row(ctx, trial, transfers; states, reason) for transfers in trial["transfers"]]
+    isempty(rows) || store_record(rows; root = ctx.root, floor = ctx.floor)
+    println("  $(trial_label(trial)): $(reason)")
 end
 
-function run_leg(ctx, leg, lines)
-    warm = findfirst(l -> l["kind"] == "warm", lines)
-    solves = sort(filter(l -> l["kind"] == "solve", lines); by = l -> l["ordinal"])
-    for line in lines
-        line["kind"] == "optimize" &&
-            println("  optimize line $(line["trial_id"]) skipped: no launch geometry to optimize")
-    end
-    isempty(solves) && warm === nothing && return
-    lead = warm === nothing ? first(solves) : lines[warm]
-    println("=== $(leg): $(length(solves)) solves ===")
+"One build's lines: the first builds the system and solver and compiles them with one solve at n = 8 (timed as build_s on a cold line), then every line with transfers solves."
+function run_build(ctx, lines, failures)
+    lead = first(lines)
+    println("=== $(trial_label(lead)): $(count(l -> !isempty(l["transfers"]), lines)) trials ===")
     T = element_type(lead["precision"])
-    system, alg, prob = try
-        system = leg_system(lead, T)
-        alg = julia_solver(lead["algorithm"], PACKAGE, T)
-        system, alg, cpu_problem(system, lead, lead["grid_min"])
-    catch err
-        record_leg_failure(ctx, solves, error_reason(err))
-        return
+    write_progress(ctx, lead, "build")
+    built = nothing
+    build_s = NaN
+    elapsed = @elapsed begin
+        built = try
+            system = build_system(lead, T)
+            alg = julia_solver(lead["algorithm"], PACKAGE, T)
+            (system, alg, cpu_problem(system, lead, lead["grid_min"]))
+        catch err
+            reason = error_reason(err)
+            for trial in lines
+                record_failure(ctx, trial, reason)
+            end
+            nothing
+        end
+        if built !== nothing && isempty(rejection(lead, built[2]))
+            points = grid(merge(lead, Dict("n" => WARM_N)))
+            try
+                ensemble_solve(built[1], built[3], built[2], points, solve_kwargs(lead, T))
+            catch err
+                println("  warm failed: $(error_reason(err))")
+            end
+        end
     end
+    built === nothing && return
+    system, alg, prob = built
+    lead["cold"] == true && (build_s = elapsed)
+    println(@sprintf("  built%s: %.2f s", lead["cold"] == true ? " cold" : "", elapsed))
     states = length(system.golden_index)
 
-    # One solve at WARM_N carries the compile; a cold leg records its wall time as build_s.
-    build_s = NaN
-    if warm !== nothing && isempty(rejection(lead, alg))
-        points = grid(merge(lead, Dict("n" => WARM_N)))
-        elapsed = try
-            @elapsed ensemble_solve(system, prob, alg, points, solve_kwargs(lead, T))
-        catch err
-            println("  warm failed: $(error_reason(err))")
-            NaN
-        end
-        lead["cold"] && (build_s = elapsed)
-        println(@sprintf("  warm: %.2f s", elapsed))
-    end
-
-    if !isempty(solves) && first(solves)["controller"] == "default" && isempty(rejection(first(solves), alg))
+    first_default = findfirst(l -> l["controller"] == "default" && !isempty(l["transfers"]) &&
+        isempty(rejection(l, alg)), lines)
+    if first_default !== nothing
         try
-            export_controller(ctx, first(solves), prob, alg, T)
+            export_controller(ctx, lines[first_default], prob, alg, T)
         catch err
             println("  controller export failed: $(error_reason(err))")
         end
     end
 
-    abandoned = Dict{String, String}()
-    for trial in solves
+    for trial in lines
+        isempty(trial["transfers"]) && continue
         write_progress(ctx, trial)
         reason = rejection(trial, alg)
         kwargs = solve_kwargs(trial, T)
         points = grid(trial)
         duration = trial["duration"]
-        label = "$(leg) ordinal $(trial["ordinal"]) n=$(trial["n"])"
+        label = trial_label(trial)
+        line_build_s = trial === lead ? build_s : NaN
         finals_path = ""
         rows = Dict{String, Any}[]
         for transfers in trial["transfers"]
-            if haskey(abandoned, transfers)
-                push!(rows, trial_row(ctx, trial, transfers; states, reason = abandoned[transfers]))
+            abandoned = abandon_reason(trial, transfers, failures)
+            if abandoned !== nothing
+                push!(rows, trial_row(ctx, trial, transfers; states, reason = abandoned))
                 continue
             end
             if !isempty(reason)
@@ -357,13 +402,11 @@ function run_leg(ctx, leg, lines)
                 end
             end
             push!(rows, trial_row(ctx, trial, transfers; states, min_ms = ms, samples_ms = samples,
-                errored_pct = pct, build_s, reason = why, finals = finals_path))
+                errored_pct = pct, build_s = line_build_s, reason = why, finals = finals_path))
             println(@sprintf("  %s %s: %s ms, errored=%s%%%s", label, transfers,
                 isnan(ms) ? "nan" : @sprintf("%.3f", ms), isnan(pct) ? "nan" : @sprintf("%.1f", pct),
                 isempty(why) ? "" : "  [" * why * "]"))
-            if outcome in ("timeout", "oom")
-                abandoned[transfers] = "abandoned: $(outcome) at ordinal $(trial["ordinal"])"
-            end
+            note_failure!(failures, trial, transfers, outcome)
         end
         isempty(rows) || store_record(rows; root = ctx.root, floor = ctx.floor)
     end
@@ -377,8 +420,9 @@ function main(args)
         progress = path * ".progress")
     println("julia_cpu: $(length(trials)) trial lines, key $(ctx.key), OrdinaryDiffEq $(ctx.version), " *
             "$(Threads.nthreads()) threads")
-    for (leg, lines) in legs_of(trials)
-        run_leg(ctx, leg, lines)
+    failures = Dict{String, Vector{Tuple{Dict{String, Any}, String}}}()
+    for (_, lines) in builds_of(trials)
+        run_build(ctx, lines, failures)
     end
     return 0
 end

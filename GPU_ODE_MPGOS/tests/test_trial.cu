@@ -63,9 +63,6 @@ int main(int argc, char** argv)
 		}
 		const Trial& t = *found;
 		std::printf("count=%d\n", (int)trials.size());
-		std::printf("kind=%s\n", t.kind.c_str());
-		std::printf("leg=%s\n", t.leg.c_str());
-		std::printf("ordinal=%d\n", t.ordinal);
 		std::printf("problem=%s\n", t.problem.c_str());
 		std::printf("algorithm=%s\n", t.algorithm.c_str());
 		std::printf("controller=%s\n", t.controller.c_str());

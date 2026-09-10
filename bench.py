@@ -3,8 +3,8 @@
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
-A point declared by several set files runs under one contract whatever sets are named: cold, finals, per-leg optimize, transfers and the watchdog budget each true or largest over its declarations.
---resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimize lines; --floor lets runners keep the lower finite time.
+A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals, the optimize batch, transfers and the watchdog budget each true or largest over its declarations.
+--resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
@@ -155,29 +155,18 @@ def source_hashes(package, systems):
 
 
 def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
-    """Trials still to run: a solve trial keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a warm line follows its leg, an optimize line the solves it governs."""
+    """Trials still to run: each keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a line without transfers never runs again."""
     if not (resume or no_overwrite):
         return list(trial_list)
     mode = "no_overwrite" if no_overwrite else "resume"
     audits = completeness.audit(trial_list, key, store.Store(root), mode, sources)
-    governing = completeness.governing_lines(trial_list)
-    kept = {}
-    live_legs = set()
-    lines = set()
+    kept = []
     for trial in trial_list:
-        if trial["kind"] != "solve":
+        missing = audits.get(trial["trial_id"])
+        if missing is None or missing.complete():
             continue
-        missing = audits[trial["trial_id"]]
-        if missing.complete():
-            continue
-        kept[trial["trial_id"]] = dict(trial, transfers=missing.transfers(), finals=missing.wants_finals)
-        live_legs.add((trial["package"], trial["leg"]))
-        if governing[trial["trial_id"]] is not None:
-            lines.add(id(governing[trial["trial_id"]]))
-    return [kept[t["trial_id"]] if t["kind"] == "solve" else t for t in trial_list
-            if t["kind"] == "solve" and t["trial_id"] in kept
-            or t["kind"] == "warm" and (t["package"], t["leg"]) in live_legs
-            or t["kind"] == "optimize" and id(t) in lines]
+        kept.append(dict(trial, transfers=missing.transfers(), finals=missing.wants_finals))
+    return kept
 
 
 def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
@@ -213,13 +202,13 @@ def write_plan(directory, by_package):
 def print_counts(by_package):
     total = 0
     for package, rows in by_package.items():
-        kinds, legs = trials_mod.counts(rows)
-        total += kinds["solve"]
-        print("{0}: {1} solve, {2} warm, {3} optimize trials in {4} legs".format(
-            package, kinds["solve"], kinds["warm"], kinds["optimize"], len(legs)))
-        for leg, count in legs.items():
-            print("  {0}  {1}".format(leg, count))
-    print("{0} solve trials".format(total))
+        solves, optimizes, colds, builds = trials_mod.counts(rows)
+        total += solves
+        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds".format(
+            package, solves, optimizes, colds, builds))
+        for key, lines in trials_mod.builds_of(rows):
+            print("  {0}  {1}".format("/".join(str(k) for k in key), len(lines)))
+    print("{0} trials".format(total))
 
 
 # ---------------------------------------------------------------------- run
@@ -370,7 +359,7 @@ class Run:
         print("Logs: " + self.log_dir)
         print("Clocks: {0}  (1 Hz log in {1})".format(self.clock_status, os.path.join(self.log_dir, "clocks.csv")))
         if self.partials:
-            print("{0} package(s) partial: a watchdog hard exit abandoned part of a leg.".format(self.partials))
+            print("{0} package(s) partial: a watchdog hard exit abandoned part of a build.".format(self.partials))
         if self.clock_failures:
             print("{0} runner(s) drifted; lower the lock in runner_scripts/gpu_clocks.conf and re-run them.".format(self.clock_failures))
         if self.failures:
