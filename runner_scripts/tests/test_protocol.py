@@ -1,4 +1,4 @@
-"""protocol.toml holds the repeat schedule and the watchdog alone; the Python, Julia and C++ views agree."""
+"""protocol.toml holds the repeat schedule, the watchdog and the optimize sizing alone; the Python, Julia and C++ views agree."""
 
 import os
 import shutil
@@ -19,8 +19,9 @@ from launch import julia_command  # noqa: E402
 class PythonViewTests(unittest.TestCase):
     def test_only_the_three_tables_remain(self):
         self.assertEqual(sorted(protocol.PROTOCOL), sorted(protocol.TABLES))
-        self.assertEqual(protocol.TABLES, ("repeats", "watchdog"))
-        for gone in ("ensemble", "fixed", "adaptive", "newton", "plots", "optimize"):
+        self.assertEqual(protocol.TABLES, ("repeats", "watchdog", "optimize"))
+        self.assertEqual(sorted(protocol.PROTOCOL["optimize"]), ["launch_ms", "waves"])
+        for gone in ("ensemble", "fixed", "adaptive", "newton", "plots"):
             self.assertNotIn(gone, protocol.PROTOCOL)
         for name in ("N_WP", "STATES_GRID", "TOLS", "TIMING_TOL", "NEWTON_ATOL", "parse_ns"):
             self.assertFalse(hasattr(protocol, name), name)
@@ -30,6 +31,10 @@ class PythonViewTests(unittest.TestCase):
         self.assertEqual(protocol.REPEAT_SCHEDULE[-1][0], float("inf"))
         self.assertEqual(protocol.WATCHDOG_EXIT_CODE, 3)
         self.assertEqual(protocol.WATCHDOG_SECONDS, float(protocol.get("watchdog.seconds")))
+        self.assertEqual(protocol.OPTIMIZE_LAUNCH_MS, float(protocol.get("optimize.launch_ms")))
+        self.assertGreater(protocol.OPTIMIZE_LAUNCH_MS, 0.0)
+        self.assertEqual(protocol.OPTIMIZE_WAVES, float(protocol.get("optimize.waves")))
+        self.assertGreater(protocol.OPTIMIZE_WAVES, 0.0)
 
     def test_wp_common_holds_the_timing_helpers_only(self):
         self.assertEqual(wp_common.WATCHDOG_SECONDS, protocol.WATCHDOG_SECONDS)

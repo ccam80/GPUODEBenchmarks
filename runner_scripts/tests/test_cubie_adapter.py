@@ -272,14 +272,82 @@ class OptimizeStoreTests(unittest.TestCase):
         row = adapter.optimize_point(solver, line(n=8, optimize="solve", duration=7.0),
                                      np.zeros((3, 512)), np.zeros((1, 512)), "k")
         self.assertEqual(solver.seen, ((3, 512), 7.0, False))
-        self.assertEqual((row["n"], row["per"]), ("512", "solve"))
+        self.assertEqual((row["n"], row["per"], row["duration"]), ("512", "solve", "7"))
         self.assertEqual(float(row["best_ms"]), 2.5)
         forced = adapter.optimize_point(solver, line(n=8), np.zeros((3, 512)), np.zeros((1, 512)), "k",
-                                        root=os.path.join(self.tmp, "elsewhere"), force=True, source="S")
-        self.assertEqual(solver.seen[2], True)
-        self.assertEqual((forced["n"], forced["per"], forced["source"]), ("512", "kernel", "S"))
+                                        root=os.path.join(self.tmp, "elsewhere"), force=True, source="S",
+                                        duration=0.25)
+        self.assertEqual(solver.seen, ((3, 512), 0.25, True))
+        self.assertEqual((forced["n"], forced["per"], forced["source"], forced["duration"]),
+                         ("512", "kernel", "S", "0.25"))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "elsewhere", "key=k", "package=cubie",
                                                     "optimize.csv")))
+
+    def test_optimize_batch_fills_the_waves_of_the_compiled_kernel(self):
+        class Kernel:
+            kernel = "dispatcher"
+            compile_settings = type("S", (), {"blocksize": 32})()
+            single_integrator = type("I", (), {"threads_per_step": 1})()
+
+            def launch_geometry(self, blocksize):
+                return int(blocksize), 16512
+
+        class Solver:
+            kernel = Kernel()
+
+            def __init__(self):
+                self.compiled = []
+
+            def compile(self, initial_values, parameters, duration):
+                self.compiled.append((initial_values, duration))
+
+        seen = []
+        for name, fake in (("_occupancy", lambda kernel, blocksize, dynamic: seen.append((blocksize, dynamic)) or 5),
+                           ("_multiprocessors", lambda: 56)):
+            self.addCleanup(setattr, adapter, name, getattr(adapter, name))
+            setattr(adapter, name, fake)
+        solver = Solver()
+        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=5), 5 * 56 * 5 * 32)
+        self.assertEqual(solver.compiled, [("i", 1.0)])
+        self.assertEqual(seen, [(32, 16512)])
+        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=2), 2 * 56 * 5 * 32)
+        # Two threads per run halve the runs a block holds.
+        Kernel.single_integrator = type("I", (), {"threads_per_step": 2})()
+        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=5), 5 * 56 * 5 * 16)
+
+    def test_optimize_duration_ramps_probes_to_the_target(self):
+        class ProbeSolver:
+            """A device solve of a probe takes ms_per_unit milliseconds per unit of duration."""
+
+            device_initial_values = "resident inits"
+            device_parameters = "resident params"
+
+            def __init__(self, ms_per_unit):
+                self.ms_per_unit = ms_per_unit
+                self.solves = []
+
+            def solve(self, initial_values, parameters, duration, on_device=False):
+                self.solves.append((duration, on_device))
+                ticks.append(ticks[-1] + (duration * self.ms_per_unit / 1000.0 if on_device else 0.0))
+                return type("R", (), {"stream": type("S", (), {"synchronize": staticmethod(lambda: None)})()})()
+
+        ticks = [0.0]
+        self.addCleanup(setattr, adapter.timeit, "default_timer", adapter.timeit.default_timer)
+        adapter.timeit.default_timer = lambda: ticks[-1]
+        # 1/100 of the duration takes 5 ms, 1/10 takes 50 ms: the 1/10 probe scales to 20 ms.
+        solver = ProbeSolver(500.0)
+        self.assertAlmostEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.1 * 20.0 / 50.0)
+        self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True), (0.1, True)])
+        # 1/100 already takes 40 ms: it alone is timed and scales down.
+        solver = ProbeSolver(4000.0)
+        self.assertAlmostEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.01 * 20.0 / 40.0)
+        self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True)])
+        # A fast kernel scales past the duration and is clamped to it.
+        solver = ProbeSolver(1.0)
+        self.assertEqual(adapter.optimize_duration(solver, "i", "p", 2.0, target_ms=20.0), 2.0)
+        self.assertEqual(solver.solves, [(0.02, False), (0.02, True), (0.02, True), (0.2, True)])
+        # A zero-time probe yields the duration.
+        self.assertEqual(adapter.optimize_duration(ProbeSolver(0.0), "i", "p", 3.0, target_ms=20.0), 3.0)
 
 
 if __name__ == "__main__":

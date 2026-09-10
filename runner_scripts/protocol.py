@@ -1,4 +1,4 @@
-"""Run-time constants from protocol.toml ([repeats], [watchdog]); `python protocol.py get <table.key>` prints one value, `--cxx-header <path>` writes the C++ header."""
+"""Run-time constants from protocol.toml ([repeats], [watchdog], [optimize]); `python protocol.py get <table.key>` prints one value, `--cxx-header <path>` writes the C++ header."""
 
 import os
 import sys
@@ -10,7 +10,7 @@ PROTOCOL_TOML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 with open(PROTOCOL_TOML, "rb") as _handle:
     PROTOCOL = tomllib.load(_handle)
 
-TABLES = ("repeats", "watchdog")
+TABLES = ("repeats", "watchdog", "optimize")
 
 _repeats = PROTOCOL["repeats"]
 _watchdog = PROTOCOL["watchdog"]
@@ -23,6 +23,8 @@ REPEAT_SPREAD = float(_repeats["spread"])
 WATCHDOG_SECONDS = float(_watchdog["seconds"])
 WATCHDOG_EXIT_CODE = int(_watchdog["exit_code"])
 OPTIMIZE_SECONDS = float(_watchdog["optimize_seconds"])
+OPTIMIZE_LAUNCH_MS = float(PROTOCOL["optimize"]["launch_ms"])
+OPTIMIZE_WAVES = float(PROTOCOL["optimize"]["waves"])
 
 
 def get(path):

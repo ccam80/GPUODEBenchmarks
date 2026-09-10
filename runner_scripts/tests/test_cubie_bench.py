@@ -91,6 +91,19 @@ class FakeOptimizeResult:
         self.applied_settings = {"blocksize": 128, "state_location": "shared"}
 
 
+class FakeKernel:
+    """A block size of 64, one thread per run and 1024 dynamic shared bytes at any launch."""
+
+    kernel = "dispatcher"
+
+    def __init__(self):
+        self.compile_settings = type("Settings", (), {"blocksize": 64})()
+        self.single_integrator = type("Integrator", (), {"threads_per_step": 1})()
+
+    def launch_geometry(self, blocksize):
+        return int(blocksize), 1024
+
+
 class FakeSolver:
     """Records its construction keywords, updates, compiles, optimizes and solves; a device solve needs the resident inputs of the last host solve."""
 
@@ -106,6 +119,7 @@ class FakeSolver:
         self.resident = None
         self.closed = False
         self.codes = None
+        self.kernel = FakeKernel()
         FakeSolver.made.append(self)
 
     def update(self, updates):
@@ -158,6 +172,10 @@ class AdapterCase(unittest.TestCase):
         self.built = []
         FakeSolver.made = []
         self.adapter = cubie_bench.CubieAdapter("cubie", KEY, self.root, solver_class=FakeSolver)
+        # Four resident blocks per SM on 56 SMs: a per-kernel batch of 5 waves x 56 x 4 x 64 runs.
+        for name, fake in (("_occupancy", lambda kernel, blocksize, dynamic: 4), ("_multiprocessors", lambda: 56)):
+            self.addCleanup(setattr, cubie_adapter, name, getattr(cubie_adapter, name))
+            setattr(cubie_adapter, name, fake)
 
     def fake_build_system(self, problem, package, precision=None, states=None):
         self.built.append((problem.name, problem["states"], package, precision, states))
@@ -193,7 +211,7 @@ class KeywordTests(unittest.TestCase):
         solver = cubie_bench.make_solver(FakeSystem(), trial(**adaptive(controller="pi", gains=gains)),
                                          solver_class=FakeSolver)
         self.assertEqual(solver.kwargs["algorithm"], "tsit5")
-        self.assertEqual(solver.kwargs["save_every"], 1.0)
+        self.assertNotIn("save_every", solver.kwargs)
         self.assertEqual(solver.kwargs["output_types"], ["state"])
         self.assertIsNone(solver.kwargs["time_logging_level"])
         self.assertEqual(solver.kwargs["step_controller"], "pi")
@@ -297,8 +315,12 @@ class BuildTests(AdapterCase):
     def test_optimize_records_the_winner_under_the_lines_kernel(self):
         line = trial(n=64, optimize="kernel")
         leg = self.adapter.build(trial(n=8))
-        self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 64 runs")
-        self.assertEqual(leg.solver.optimized, [(64, 1.0, True)])
+        # Instant probe solves size the optimize at the problem's whole duration.
+        self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 71680 runs over 1")
+        self.assertEqual(leg.solver.optimized, [(71680, 1.0, True)])
+        # The geometry grid holds a full block; the probes solve on the batch, the first from the host.
+        self.assertEqual(leg.solver.compiled, [(1024, 1.0)])
+        self.assertEqual(leg.solver.calls, [(71680, False), (71680, True), (71680, True), (71680, True)])
         tuned = cubie_adapter.load_optimized(line, KEY, root=self.root)
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
