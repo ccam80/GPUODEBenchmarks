@@ -601,33 +601,24 @@ class JuliaShimTests(unittest.TestCase):
 
 
 class SuiteRevTests(unittest.TestCase):
-    def test_suite_rev_is_a_short_hash_here_and_unknown_outside_git(self):
+    def test_suite_rev_is_the_short_hash_whatever_the_tree_holds_and_unknown_outside_git(self):
         rev = store.suite_rev()
-        base = rev.replace("-dirty", "")
-        self.assertTrue(7 <= len(base) <= 12 and all(c in "0123456789abcdef" for c in base), rev)
+        self.assertTrue(7 <= len(rev) <= 12 and all(c in "0123456789abcdef" for c in rev), rev)
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         self.assertEqual(store.suite_rev(tmp), "unknown")
-
-    def test_suite_rev_is_dirty_for_changed_sources_not_changed_data(self):
         repo = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, repo, True)
-        os.makedirs(os.path.join(repo, "data"))
-        for name in ("bench.py", os.path.join("data", "rows.parquet")):
-            with open(os.path.join(repo, name), "w") as handle:
-                handle.write("one\n")
+        with open(os.path.join(repo, "bench.py"), "w") as handle:
+            handle.write("one\n")
         env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                    GIT_COMMITTER_EMAIL="t@t")
         for argv in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "one"]):
             subprocess.run(["git"] + argv, cwd=repo, check=True, env=env, capture_output=True)
-        clean = store.suite_rev(repo)
-        self.assertNotIn("-dirty", clean)
-        with open(os.path.join(repo, "data", "rows.parquet"), "w") as handle:
-            handle.write("two\n")
-        self.assertEqual(store.suite_rev(repo), clean)
+        committed = store.suite_rev(repo)
         with open(os.path.join(repo, "bench.py"), "w") as handle:
             handle.write("two\n")
-        self.assertEqual(store.suite_rev(repo), clean + "-dirty")
+        self.assertEqual(store.suite_rev(repo), committed)
 
 
 if __name__ == "__main__":

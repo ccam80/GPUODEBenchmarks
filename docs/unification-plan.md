@@ -20,7 +20,7 @@ Sets expand to run specs; runners execute trial files; the store holds one row p
 | julia_gpu | DiffEqGPU version from `Manifest.toml` |
 | julia_cpu | OrdinaryDiffEq version from `Manifest.toml` |
 
-`suite_rev`: `git rev-parse --short HEAD`, `-dirty` appended when tracked files differ.
+`suite_rev`: `git rev-parse --short HEAD`.
 
 ### 1.2 Run spec
 
