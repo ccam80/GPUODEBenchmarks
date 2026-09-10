@@ -75,8 +75,14 @@ python analyses/timing.py --x error  --set golden_grid  # min_ms against error
 python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 ```
 
+`data/` is an untracked mirror of the store; the analyses pull it before reading.
+
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`. An error is the RMS
+and write figures and CSVs under `plots/<key>/<problem>/`.
+
+## Using the store
+
+The store is one `data/` tree on a store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners; an analysis pulls before reading; both refuse to run without the store unless `--no-sync`. `sync/README.md` covers setting up the box, connecting a machine and `sync/sync.py`. An error is the RMS
 over every state of the difference from the julia_cpu float64 finals, paired
 by exact grid value, over the trajectories neither side flags as errored.
 
