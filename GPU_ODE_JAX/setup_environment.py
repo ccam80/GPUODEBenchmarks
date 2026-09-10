@@ -44,7 +44,7 @@ def main():
 
     if platform.system() != CUDA_PLATFORM:
         print(f"Skipping: jax publishes no CUDA wheels for "
-              f"{platform.system()}. Set this suite up on Linux or WSL2.")
+              f"{platform.system()}. Set this suite up on Linux.")
         return 0
 
     # Check if Python is available
