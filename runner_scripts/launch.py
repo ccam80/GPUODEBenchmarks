@@ -1,5 +1,6 @@
 """The runner registry for bench.py: per package, the interpreter, script and environment that consume a trial file (`<runner argv> --trials <path> [--floor]`)."""
 
+import hashlib
 import os
 import platform
 import shlex
@@ -59,6 +60,50 @@ def julia_project():
     return os.environ.get("JULIA_PROJECT") or REPO_ROOT
 
 
+# The files the kernel package's pkgimage is built from, relative to a checkout.
+JULIA_SOURCES = ("Project.toml", "Manifest.toml", "GPU_ODE_JuliaKernels/Project.toml",
+                 "runner_scripts/problems.jl", "runner_scripts/algorithms.jl",
+                 "runner_scripts/julia_systems.jl", "runner_scripts/julia_prob.jl",
+                 "runner_scripts/problems.csv", "runner_scripts/julia_algorithms.csv")
+
+
+def _julia_source_files(root):
+    files = list(JULIA_SOURCES)
+    src = os.path.join(root, "GPU_ODE_JuliaKernels", "src")
+    if os.path.isdir(src):
+        files += sorted("GPU_ODE_JuliaKernels/src/" + name for name in os.listdir(src) if name.endswith(".jl"))
+    return files
+
+
+def _digest(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def julia_sources_differing(project, root=REPO_ROOT):
+    """The Julia source files whose bytes differ between a project checkout and this one."""
+    names = sorted(set(_julia_source_files(root)) | set(_julia_source_files(project)))
+    return [name for name in names
+            if _digest(os.path.join(root, name)) != _digest(os.path.join(project, name))]
+
+
+def check_julia_project(root=REPO_ROOT):
+    """Exit when JULIA_PROJECT names another checkout whose precompiled Julia sources differ from this one's."""
+    project = julia_project()
+    if os.path.normcase(os.path.abspath(project)) == os.path.normcase(os.path.abspath(root)) \
+            or not os.path.isdir(project):
+        return project
+    differing = julia_sources_differing(project, root)
+    if differing:
+        raise SystemExit(
+            "JULIA_PROJECT={0}: its precompiled Julia sources differ from this checkout's ({1}). "
+            "Unset JULIA_PROJECT and run again to use this checkout's files; it precompiles its own "
+            "kernel package and leaves {0} untouched.".format(project, ", ".join(differing)))
+    return project
+
+
 def _script(path):
     return os.path.join(REPO_ROOT, *path.split("/"))
 
@@ -93,6 +138,8 @@ def runner_command(package, trials_path, floor=False):
     if package not in RUNNERS:
         raise ValueError("no runner registered for '{0}' (known: {1})".format(
             package, ", ".join(PACKAGES)))
+    if package in ("julia_gpu", "julia_cpu"):
+        check_julia_project()
     argv = list(RUNNERS[package]()) + ["--trials", trials_path]
     if floor:
         argv.append("--floor")

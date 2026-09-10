@@ -361,6 +361,8 @@ class Run:
     def execute(self):
         by_package = plan_trials(self.plan, self.key, self.data_root,
                                  self.args.resume, self.args.no_overwrite)
+        if any(package.startswith("julia") for package in by_package):
+            launch.check_julia_project()
         paths = write_plan(self.log_dir, by_package)
         print("Dataset key : " + self.key)
         print("Sets        : " + ", ".join(self.plan["sets"]))

@@ -239,6 +239,32 @@ class LaunchTests(unittest.TestCase):
             if saved is not None:
                 os.environ["JULIA_PROJECT"] = saved
 
+    def test_a_shared_project_whose_julia_sources_differ_stops_the_julia_runners(self):
+        other = tempfile.mkdtemp(prefix="julia_project_")
+        self.addCleanup(shutil.rmtree, other, True)
+        for name in launch._julia_source_files(ROOT):
+            target = os.path.join(other, name)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(os.path.join(ROOT, name), target)
+        saved = os.environ.pop("JULIA_PROJECT", None)
+        os.environ["JULIA_PROJECT"] = other
+        try:
+            self.assertEqual(launch.julia_sources_differing(other), [])
+            self.assertEqual(launch.check_julia_project(), other)
+            self.assertIn("--project=" + other, launch.runner_command("julia_cpu", "x.jsonl").argv)
+            with open(os.path.join(other, "runner_scripts", "julia_systems.jl"), "a") as handle:
+                handle.write("# edited\n")
+            self.assertEqual(launch.julia_sources_differing(other), ["runner_scripts/julia_systems.jl"])
+            with self.assertRaises(SystemExit) as caught:
+                launch.runner_command("julia_gpu", "x.jsonl")
+            self.assertIn("julia_systems.jl", str(caught.exception))
+            self.assertIn("Unset JULIA_PROJECT", str(caught.exception))
+            launch.runner_command("cubie", "x.jsonl")
+        finally:
+            os.environ.pop("JULIA_PROJECT", None)
+            if saved is not None:
+                os.environ["JULIA_PROJECT"] = saved
+
 
 class HardExitTests(unittest.TestCase):
     """The runner loop against a fake runner: a hard exit abandons the leg's higher ordinals and the rest re-runs."""
