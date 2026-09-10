@@ -168,6 +168,7 @@ def main(argv=None):
     p.add_argument("--x", choices=AXES, required=True, help="the axis")
     args = p.parse_args(argv)
     shared.check_selection(args)
+    shared.pull_store(args)
     store = store_mod.Store(args.root)
     written, skipped = run(store, args.x, args.set, args.where, args.out)
     for path in written:

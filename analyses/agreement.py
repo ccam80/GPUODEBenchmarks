@@ -164,6 +164,7 @@ def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
 def main(argv=None):
     args = shared.parser(__doc__).parse_args(argv)
     shared.check_selection(args)
+    shared.pull_store(args)
     store = store_mod.Store(args.root)
     written = run(store, args.set, args.where, args.out)
     for path in written:
