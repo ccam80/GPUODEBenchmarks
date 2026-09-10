@@ -3,7 +3,7 @@
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists; --controller takes a spec controller or a set token such as matched.
---resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
+--resume runs the transfers rows that are missing; --no-overwrite those missing or NaN; a trial keeps asking finals once a row of its carries them; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
@@ -145,24 +145,27 @@ def resolve(args):
 # ------------------------------------------------------------------ planning
 
 def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
-    """Trials still to run: under resume the solve trials with a missing transfers row, under no_overwrite those with a NaN or missing row; warm and optimize trials follow their leg."""
+    """Trials still to run: a solve trial keeps the transfers whose row is missing (resume) or missing or NaN (no_overwrite); one that asks finals, or whose recorded row carries them, runs its last transfers again while no row carries finals and asks them; warm and optimize trials follow their leg."""
     if not (resume or no_overwrite):
         return list(trial_list)
-    recorded = {}
-    for row in store.Store(root).rows(key=key):
-        recorded[row["run_id"]] = math.isfinite(row["min_ms"])
-    kept = []
+    recorded = {row["run_id"]: row for row in store.Store(root).rows(key=key)}
+    kept = {}
     live_legs = set()
     for trial in trial_list:
         if trial["kind"] != "solve":
             continue
-        status = [recorded.get(run) for run in run_ids(trial, key).values()]
-        covered = all(s is not None for s in status) if resume else all(status)
-        if not covered:
-            kept.append(trial)
-            live_legs.add(trial["leg"])
-    return [t for t in trial_list if t["kind"] == "solve" and t in kept
-            or t["kind"] != "solve" and t["leg"] in live_legs]
+        rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
+        missing = [t for t in trial["transfers"]
+                   if rows[t] is None or (no_overwrite and not math.isfinite(rows[t]["min_ms"]))]
+        has_finals = any(r is not None and r["finals"] for r in rows.values())
+        finals = bool(trial["finals"]) or has_finals
+        if not missing and (not finals or has_finals):
+            continue
+        kept[trial["trial_id"]] = dict(trial, transfers=missing or trial["transfers"][-1:], finals=finals)
+        live_legs.add((trial["package"], trial["leg"]))
+    return [kept[t["trial_id"]] if t["kind"] == "solve" else t for t in trial_list
+            if t["kind"] == "solve" and t["trial_id"] in kept
+            or t["kind"] != "solve" and (t["package"], t["leg"]) in live_legs]
 
 
 def plan_trials(plan, key, root, resume=False, no_overwrite=False):

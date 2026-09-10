@@ -221,7 +221,7 @@ bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
 ```
 
 - `-p -s -g --mode --controller -n --tol --dt` narrow the expanded specs; `-n` replaces the perf `n` list.
-- `--resume` drops trials whose every requested transfers row exists; `--no-overwrite` those whose rows are all finite.
+- `--resume` runs the transfers rows that are missing; `--no-overwrite` those missing or NaN; a trial keeps asking finals once a row of its carries them.
 - `plan` writes `trials/<key>/<package>.jsonl` and prints counts per package and leg.
 - `run` writes the same under `logs/<key>_<stamp>/`, drives runners per 1.5 (6), keeps the clock guard, manifest and summary; no analysis.
 
