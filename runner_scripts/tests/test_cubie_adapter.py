@@ -338,10 +338,11 @@ class OptimizeStoreTests(unittest.TestCase):
         solver = ProbeSolver(500.0)
         self.assertAlmostEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.1 * 20.0 / 50.0)
         self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True), (0.1, True)])
-        # 1/100 already takes 40 ms: it alone is timed and scales down.
+        # 1/100 already takes 40 ms: it alone is timed and the duration stays at the 1/100 floor.
         solver = ProbeSolver(4000.0)
-        self.assertAlmostEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.01 * 20.0 / 40.0)
+        self.assertEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.01)
         self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True)])
+        self.assertEqual(adapter.optimize_duration(ProbeSolver(4000.0), "i", "p", 3.0, target_ms=20.0), 0.03)
         # A fast kernel scales past the duration and is clamped to it.
         solver = ProbeSolver(1.0)
         self.assertEqual(adapter.optimize_duration(solver, "i", "p", 2.0, target_ms=20.0), 2.0)

@@ -351,7 +351,7 @@ def optimize_batch(solver, initial_values, parameters, duration, waves=OPTIMIZE_
 
 def optimize_duration(solver, initial_values, parameters, duration, target_ms=OPTIMIZE_LAUNCH_MS,
                       fractions=PROBE_FRACTIONS):
-    """The solve duration whose launch on the batch takes about target_ms: probes of the fractions run until one takes target_ms, and that probe scaled to target_ms, at most the duration; the first probe runs untimed once from the host and once on the device."""
+    """The solve duration whose launch on the batch takes about target_ms: probes of the fractions run until one takes target_ms, and that probe scaled to target_ms, kept between the first fraction and the duration; the first probe runs untimed once from the host and once on the device."""
     duration = float(duration)
     probe = duration * fractions[0]
     solve(solver, initial_values, parameters, probe)
@@ -366,7 +366,7 @@ def optimize_duration(solver, initial_values, parameters, duration, target_ms=OP
             break
     if elapsed_ms <= 0.0:
         return duration
-    return min(duration, probe * target_ms / elapsed_ms)
+    return min(duration, max(duration * fractions[0], probe * target_ms / elapsed_ms))
 
 
 def _replace(trial, key, root, row):
