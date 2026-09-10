@@ -158,10 +158,10 @@ def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
         if not missing and (not finals or has_finals):
             continue
         kept[trial["trial_id"]] = dict(trial, transfers=missing or trial["transfers"][-1:], finals=finals)
-        live_legs.add(trial["leg"])
+        live_legs.add((trial["package"], trial["leg"]))
     return [kept[t["trial_id"]] if t["kind"] == "solve" else t for t in trial_list
             if t["kind"] == "solve" and t["trial_id"] in kept
-            or t["kind"] != "solve" and t["leg"] in live_legs]
+            or t["kind"] != "solve" and (t["package"], t["leg"]) in live_legs]
 
 
 def plan_trials(plan, key, root, resume=False, no_overwrite=False):

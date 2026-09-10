@@ -145,6 +145,16 @@ class PlanTests(unittest.TestCase):
         self.assertIn((partial["trial_id"], "solve"), ids)
         kept = {t["trial_id"]: t for t in fresh if t["kind"] == "solve"}
         self.assertEqual(kept[nan_row["trial_id"]]["transfers"], ["both", "none"])
+        # A leg name repeats across packages; a covered package's warm line is dropped while another's stays.
+        both = self.plan("--set", "perf", "-p", "cpp,pytorch", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")
+        for t in both["cpp"]:
+            if t["kind"] == "solve":
+                spec = {f: t[f] for f in store.TRIAL_FIELDS}
+                for transfers in ("both", "none"):
+                    data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0))
+        mixed = bench.continue_filter(both["pytorch"] + both["cpp"], KEY, self.root, resume=True)
+        self.assertEqual({t["package"] for t in mixed}, {"pytorch"})
+        self.assertEqual([t["kind"] for t in mixed], ["warm", "solve"])
         # A trial that asks finals over rows without them runs its last transfers again.
         wants = dict(recorded, finals=True)
         again = bench.continue_filter([wants], KEY, self.root, resume=True)
