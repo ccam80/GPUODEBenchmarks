@@ -39,8 +39,9 @@ python bench.py run  --set perf --floor         # rerun; the lower time per row 
 
 `-p`, `-s`, `-g`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
 expanded specs; `-n` replaces every grid's trajectory list. `--resume`
-drops trials whose rows all exist, `--no-overwrite` those whose rows are
-all finite. A run pins the GPU clocks to the row for this card in
+runs the transfers rows that are missing, `--no-overwrite` those missing
+or NaN; a trial keeps asking finals once a row of its carries them. A run
+pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
 new card), samples them at 1 Hz, and writes `logs/<key>_<stamp>/` with one

@@ -126,18 +126,33 @@ class PlanTests(unittest.TestCase):
             spec = {f: nan_row[f] for f in store.TRIAL_FIELDS}
             data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=NAN, reason="error: x"))
         spec = {f: partial[f] for f in store.TRIAL_FIELDS}
-        data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0))
+        data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0, finals="finals/p.parquet"))
         resumed = bench.continue_filter(cpp, KEY, self.root, resume=True)
         ids = {(t["trial_id"], t["kind"]) for t in resumed}
         self.assertNotIn((recorded["trial_id"], "solve"), ids)
         self.assertNotIn((nan_row["trial_id"], "solve"), ids)
         self.assertIn((partial["trial_id"], "solve"), ids)
         self.assertIn((solves[3]["trial_id"], "solve"), ids)
+        # A partial trial runs its missing transfers alone and keeps asking finals once a row carries them.
+        kept = {t["trial_id"]: t for t in resumed if t["kind"] == "solve"}
+        self.assertEqual((kept[partial["trial_id"]]["transfers"], kept[partial["trial_id"]]["finals"]),
+                         (["none"], True))
+        self.assertEqual(kept[solves[3]["trial_id"]]["transfers"], ["both", "none"])
         fresh = bench.continue_filter(cpp, KEY, self.root, no_overwrite=True)
         ids = {(t["trial_id"], t["kind"]) for t in fresh}
         self.assertNotIn((recorded["trial_id"], "solve"), ids)
         self.assertIn((nan_row["trial_id"], "solve"), ids)
         self.assertIn((partial["trial_id"], "solve"), ids)
+        kept = {t["trial_id"]: t for t in fresh if t["kind"] == "solve"}
+        self.assertEqual(kept[nan_row["trial_id"]]["transfers"], ["both", "none"])
+        # A trial that asks finals over rows without them runs its last transfers again.
+        wants = dict(recorded, finals=True)
+        again = bench.continue_filter([wants], KEY, self.root, resume=True)
+        self.assertEqual([(t["transfers"], t["finals"]) for t in again], [(["none"], True)])
+        for transfers in ("both", "none"):
+            spec = {f: recorded[f] for f in store.TRIAL_FIELDS}
+            data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, finals="finals/r.parquet"))
+        self.assertEqual(bench.continue_filter([wants], KEY, self.root, resume=True), [])
         # Warm trials follow their leg: a fully recorded leg loses its warm trial.
         leg = recorded["leg"]
         other = [t for t in cpp if t["kind"] == "solve" and t["leg"] == leg and t is not recorded]
