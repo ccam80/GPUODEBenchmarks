@@ -338,6 +338,28 @@ class LegTests(AdapterCase):
         self.assertTrue(lines[0].startswith("package,key,problem,algorithm,mode,controller,gains,"))
         leg.close()
 
+    def test_a_point_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
+        line = trial(n=64, kind="optimize", transfers=(), axis="n")
+        leg = self.adapter.build_leg(trial(n=8))
+        self.adapter.optimize(leg, line, self.values(64))
+        self.adapter.optimize(leg, line, self.values(64))
+        self.assertEqual(len(leg.solver.optimized), 1)
+        self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
+        self.assertEqual(leg.solver.compiled[-1], (64, 1.0))
+        path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
+        source = cubie_adapter.source_hash(leg.solver)
+        with open(path) as handle:
+            text = handle.read()
+        self.assertIn(source, text)
+        # A row from another source is replaced by a fresh optimize.
+        with open(path, "w") as handle:
+            handle.write(text.replace(source, "0" * 16))
+        self.adapter.optimize(leg, line, self.values(64))
+        self.assertEqual(len(leg.solver.optimized), 2)
+        with open(path) as handle:
+            self.assertEqual(handle.read().count(source), 1)
+        leg.close()
+
     def test_a_cold_leg_builds_in_a_fresh_cache_root_and_restores_it(self):
         from cubie.cache_root import get_cache_root_override
         before = get_cache_root_override()

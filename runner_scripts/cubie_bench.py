@@ -208,16 +208,25 @@ class CubieAdapter:
         leg.solver.compile(initials, parameters, duration=leg.duration)
 
     def optimize(self, leg, trial, values):
-        """Solver.optimize on the line's batch, the winner applied to the leg's solver and recorded under the package and key."""
+        """The point's recorded settings from the same source applied to the leg's solver and compiled, else Solver.optimize on the line's batch with the winner applied and recorded under the package, key and source."""
         leg.apply(trial)
         leg.host_result = None
         leg.resident_n = None
         initials, parameters = leg.grid(values)
         mode, setting = optimize_setting(trial)
+        source = adapter.source_hash(leg.solver)
+        tuned = adapter.load_optimized(self.package, self.key, leg.row, trial["algorithm"], mode, setting,
+                                       states=leg.row["states"], root=self.root,
+                                       controller=trial["controller"], gains=trial["gains"], source=source)
+        if tuned is not None:
+            adapter.apply_optimized(leg.solver, tuned)
+            leg.solver.compile(initials, parameters, duration=leg.duration)
+            print("optimized {0}: recorded".format(runner.label(trial)), flush=True)
+            return
         row = adapter.optimize_point(leg.solver, leg.row, initials, parameters, self.package,
                                      self.key, trial["algorithm"], mode, setting,
                                      states=leg.row["states"], root=self.root, force=True,
-                                     controller=trial["controller"], gains=trial["gains"])
+                                     controller=trial["controller"], gains=trial["gains"], source=source)
         print("optimized {0}: {1}".format(runner.label(trial), row["label"]), flush=True)
 
     def solve(self, leg, trial, values, transfers):
