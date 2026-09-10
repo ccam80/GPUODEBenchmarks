@@ -2,8 +2,8 @@
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
--p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits when no grid of the named sets lists one; --controller takes a spec controller or a set token such as matched.
-A point every set file declares runs under one contract whatever sets are named or their order: cold build, finals, per-leg optimize, transfers and the watchdog budget each true or largest over its declarations.
+-p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
+A point declared by several set files runs under one contract whatever sets are named: cold, finals, per-leg optimize, transfers and the watchdog budget each true or largest over its declarations.
 --resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimize lines; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
@@ -155,7 +155,7 @@ def source_hashes(package, systems):
 
 
 def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
-    """Trials still to run: a solve trial keeps the transfers the store lacks a complete row for (completeness.audit: a row, finite under no_overwrite, its cold build time, a readable finals file while finals are wanted, a valid optimize record), every one when its optimize record is stale, its last one alone for missing finals; a warm line follows its leg and an optimize line the solves it governs."""
+    """Trials still to run: a solve trial keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a warm line follows its leg, an optimize line the solves it governs."""
     if not (resume or no_overwrite):
         return list(trial_list)
     mode = "no_overwrite" if no_overwrite else "resume"

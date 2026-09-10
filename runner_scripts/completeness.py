@@ -1,4 +1,4 @@
-"""Completeness of canonical trials against the store under one key: every solve trial's transfers rows, the cold build time when its leg builds cold, a readable finals file when it keeps finals, and a valid optimize record for the optimize line that governs it. `audit()` says what each trial still lacks; the planner reruns that alone and the analyses report it."""
+"""What the store lacks of each canonical solve trial under one key: transfers rows, the cold build time of a cold leg, a readable finals file, a valid record for the optimize line governing it."""
 
 import math
 
@@ -74,7 +74,7 @@ def optimize_systems(trial_list):
 
 
 def optimize_status(line, key, rows, mode, source):
-    """None when the line's optimize.csv record stands, else why not: 'absent', 'timeout' (no settings recorded; a lack under no_overwrite alone), 'source <recorded>' when it was recorded from another source than `source`."""
+    """None when the line's optimize.csv record stands, else 'absent', 'timeout' (a lack under no_overwrite alone) or 'source <recorded>' when recorded from another source than `source`."""
     row = cubie_adapter.find_optimized(rows, cubie_adapter.optimize_ident(line, key))
     if row is None:
         return "absent"
@@ -86,7 +86,7 @@ def optimize_status(line, key, rows, mode, source):
 
 
 def audit(trial_list, key, store, mode=None, sources=None):
-    """{solve trial_id: Missing} of a trial list under a key. `mode` None counts a row present whatever its time, 'resume' likewise, 'no_overwrite' wants a finite time; `sources(package, systems)` gives the current source hash per cubie system, and None leaves every recorded optimize source valid."""
+    """{solve trial_id: Missing} under a key; 'no_overwrite' wants a finite time, None and 'resume' any row; `sources(package, systems)` gives the current source hash per cubie system, None accepts any recorded source."""
     if mode not in MODES:
         raise ValueError("mode is one of None, resume, no_overwrite")
     recorded = {row["run_id"]: row for row in store.rows(key=key)}

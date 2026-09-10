@@ -129,14 +129,14 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 | leg | `<problem>/<system_params>/<algorithm>/<controller>/<precision>/<axis>` |
 | axis | `n`, `dt`, `tol`, `states` |
 | ordinal | cost order within the leg |
-| cold | `true` on the `warm` line of a leg one of whose points a `build = "cold"` set declares: fresh cache directory, `build_s` recorded |
+| cold | `true` on the `warm` line of a leg with a `build = "cold"` point: fresh cache directory, `build_s` recorded |
 | watchdog_s | the soft cap in seconds: the largest `watchdog` over the point's sets, else `[watchdog] seconds` |
-| sets | the names of every set file declaring the point (the leg's points, on a `warm` line) |
+| sets | the set files declaring the point; on a `warm` line, the leg's points |
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
 - A leg is one `warm` line (the cheapest spec), one `optimize` line when any of its points asks `per = "leg"`, an `optimize` line before every solve that asks `per = "solve"`, then the `solve` lines.
 - `warm` trials are never recorded; `optimize` trials (cubie) apply the point's `optimize.csv` row when one was recorded from the same source (system hash, cubie source and version) and compile, else run `Solver.optimize` and replace the row.
-- One `trial_id` is one contract, merged over every declaration of the point in every set file under `sets/`, not only the sets named on the command line, so a request of any set in any order builds, optimizes and records the point the same way: `transfers` union; `finals` true over false; `cold` true over false; optimize per leg when any declaration says leg, else per solve when any says solve, else none, with the largest integer `n` among the declarations of that kind, else `"solve"`; the largest `watchdog_s`; the axis of highest priority `states` > `n` > `dt` > `tol` (a states leg is the point's own cold build at its own `n`, so its `build_s` is that binary's; an `n` leg holds one stepping, so its per-leg optimize is the point's); `sets` the declaring names. A leg's `warm` line is cold when any of its points is, and its per-leg optimize line takes the largest `n` over its per-leg points.
+- One `trial_id` is one contract over its declarations in every set file under `sets/`, whatever sets are named: `transfers` union; `finals` and `cold` true over false; optimize per leg when any declaration says leg, else per solve when any says solve, else none, `n` the largest integer among the declarations of that kind, else `"solve"`; the largest `watchdog_s`; the axis of highest priority `states` > `n` > `dt` > `tol`; `sets` the declaring names. A leg's `warm` line is cold when any of its points is; its per-leg optimize line takes the largest `n` over its per-leg points.
 
 ### 1.5 Runner contract
 
@@ -221,8 +221,8 @@ bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms]
                   [--resume | --no-overwrite] [--floor] [--cooldown S] [clock flags]
 ```
 
-- `-p -s -g --mode --controller -n --tol --dt` narrow the expanded specs; `-n` keeps, in each grid, the counts it lists among those named, and exits when a named count is listed by no grid of the named sets (a count one grid lists and another package's grid does not, such as `-n 128,1024,131072` over perf and golden_grid for any one package, narrows without error).
-- `--resume` runs what the store lacks of each canonical trial (`completeness.audit`): a transfers row; a finite `build_s` on the row when the leg builds cold; a finals file that exists and reads when the trial keeps finals or a recorded row of its carries them; an `optimize.csv` record for the optimize line governing the solve (the last one before it in its leg) that was recorded from the current source, the package interpreter's hash of the leg's system, cubie source and version, or is labelled `timeout`. A stale or absent record reruns every transfers of the solve; a missing finals file its last transfers with finals asked; a missing `build_s` that row. `--no-overwrite` also reruns rows with a NaN time and optimize lines labelled `timeout`. A warm line follows its leg; an optimize line the solves it governs.
+- `-p -s -g --mode --controller -n --tol --dt` narrow the expanded specs; `-n` keeps in each grid the counts it lists among those named and exits for a count no grid of the named sets lists.
+- `--resume` runs what the store lacks of each canonical trial (`completeness.audit`): a transfers row; a finite `build_s` on the row of a cold leg; a readable finals file when the trial keeps finals or a recorded row carries them; an `optimize.csv` record for the line governing the solve (the last optimize line before it in its leg), recorded from the current source (`cubie_adapter.py sources`: the system, cubie source and version hashed by the package interpreter) or labelled `timeout`. An absent or stale record reruns every transfers of the solve; a missing finals file its last transfers with finals; a missing `build_s` that row. `--no-overwrite` also reruns NaN rows and `timeout` optimize lines. A warm line follows its leg; an optimize line the solves it governs.
 - `plan` writes `trials/<key>/<package>.jsonl` and prints counts per package and leg.
 - `run` writes the same under `logs/<key>_<stamp>/`, drives runners per 1.5 (6), keeps the clock guard, manifest and summary; no analysis.
 
@@ -252,7 +252,7 @@ Shipped sets (`precision = "float32"`, `build = "warm"`, Newton `1e-6` fixed and
 - `golden_of(row)`: the julia_cpu `float64` finals row with the same `problem`, `system_params` and `duration` under any key; None when absent; raises naming the rows when more than one exists.
 - `error(row)` = `compare(row, golden_of(row))`.
 
-Two scripts, each taking `--set <name>` (repeatable) or `--where "<sql over the spec columns>"`, resolved to `trial_id`s with the grid fields ignored, under every key. With `--set`, each key's store is first audited against the sets' canonical trials (1.4, `completeness.audit` with no current source, so any recorded optimize source stands): every trial lacking a row, a cold build time, a readable finals file or an optimize record is printed per package with what it lacks and written to `plots/<key>/incomplete.csv`, and the script exits 1 after writing its outputs; `group_id` pairs rows across packages and grids only after that report.
+Two scripts, each taking `--set <name>` (repeatable) or `--where "<sql over the spec columns>"`, resolved to `trial_id`s with the grid fields ignored, under every key. With `--set`, each key's store is first audited against the sets' canonical trials (1.4; `completeness.audit` without a current source, so any recorded optimize source stands): what each trial lacks is printed per package and written to `plots/<key>/incomplete.csv`, and the script exits 1 after writing its outputs.
 - `timing.py --x n|error|states`: `min_ms` against the axis per (key, problem, `group_id`, transfers), one series per package; `--x error` computes `error(row)`; `--x states` adds `build_s`.
 - `agreement.py`: per `group_id`, `error(row)` for every package that ran it and `compare` between every pair of packages; CSV and figures per (key, problem).
 - Rows with `errored_pct > 10` are dropped where the column is a number; rows with NaN `min_ms` are dropped from timing axes.

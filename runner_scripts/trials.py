@@ -9,7 +9,7 @@ from store import TRIAL_FIELDS, trial_id
 
 KINDS = ("solve", "warm", "optimize")
 AXES = ("n", "dt", "tol", "states")
-# The leg a point shared by several axes joins: a states leg is the point's own cold build, an n leg holds one stepping, the swept legs share one.
+# The leg a point declared on several axes joins.
 AXIS_PRIORITY = ("states", "n", "dt", "tol")
 TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal", "cold",
                              "watchdog_s", "sets")
@@ -92,7 +92,7 @@ def _fold(entry, spec):
 
 
 def build_trials(specs, declared=None):
-    """Trial records from the requested specs: specs of one trial_id, in `specs` and among `declared` (every set file's specs, the requested ones when None), merge into one contract independent of their order (see _fold); per package leg, a warm line (cold when any of the leg's points builds cold), one optimize line when any point asks per leg, one before every solve that asks per solve, then the solves in cost order."""
+    """Trial records from the requested specs: specs of one trial_id, in `specs` and among `declared` (the requested ones when None), merge per _fold; per package leg, a warm line (cold when any point is), one optimize line when any point asks per leg, one before every solve asking per solve, then the solves in cost order."""
     merged = {}
     order = []
     for spec in specs:

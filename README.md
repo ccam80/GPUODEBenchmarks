@@ -39,15 +39,14 @@ python bench.py run  --set perf --floor         # rerun; the lower time per row 
 
 `-p`, `-s`, `-g`, `-n`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
 expanded specs; `-n` names counts of the grids' trajectory lists and exits
-only for a count no grid of the named sets lists. A point declared by more
-than one set file runs under one contract whichever sets are named and in
-whatever order: it builds cold, keeps finals, optimizes per leg and times
-every transfers mode as soon as any declaration asks, on the leg of the
-declaration whose axis ranks highest (states, then n, then the swept dt or
-tolerance). `--resume` runs what the store lacks of each trial: a transfers
-row, the cold build time, a readable finals file, an optimize record from
-the current cubie source; `--no-overwrite` also reruns NaN rows and
-timed-out optimize lines. A run
+for a count no grid of the named sets lists. A point declared by several
+set files runs under one contract whichever sets are named: cold build,
+finals, per-leg optimize and each transfers mode when any declaration asks,
+on the leg of the highest-ranking axis (states, n, then dt or tolerance).
+`--resume` runs what the store lacks of each trial: a transfers row, the
+cold build time, a readable finals file, an optimize record from the
+current cubie source; `--no-overwrite` also reruns NaN rows and timed-out
+optimize lines. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
@@ -86,11 +85,10 @@ python analyses/agreement.py --set golden_grid          # errors and package-pai
 `data/` is an untracked mirror of the store; the analyses pull it before reading.
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, each
-key's store is first checked against the set's canonical trials: whatever it
-lacks (rows, cold build times, finals files, optimize records) is printed
-per package, listed in `plots/<key>/incomplete.csv`, and makes the script
-exit 1 after writing its outputs.
+and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, what
+each key's store lacks of the set (rows, cold build times, finals files,
+optimize records) is printed per package, written to
+`plots/<key>/incomplete.csv`, and exits the script 1 after its outputs.
 
 ## Using the store
 
