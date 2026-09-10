@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a leg is one system and one Solver whose stepping follows each trial; a warm line compiles (in a fresh cache directory when cold), an optimize line runs Solver.optimize on its batch and records the winner, a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a leg is one system and one Solver whose stepping follows each trial; a warm line compiles when no optimize line follows (in a fresh cache directory when cold), an optimize line runs Solver.optimize on its batch and records the winner, a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
 
 import gc
 import importlib.metadata

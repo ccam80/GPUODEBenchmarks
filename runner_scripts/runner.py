@@ -198,12 +198,13 @@ class Runner:
             for trial in members:
                 write_progress(progress_path, trial)
                 if leg is None:
-                    # The first line builds the leg; a warm line also compiles, and a cold one is timed as build_s.
+                    # The first line builds the leg; a warm line compiles unless an optimize line follows, and a cold one is timed as build_s.
                     cold = trial["kind"] == "warm" and bool(trial["cold"])
+                    optimized = len(members) > 1 and members[1]["kind"] == "optimize"
                     started = timeit.default_timer()
                     try:
                         leg = self.adapter.build_leg(trial, cold)
-                        if trial["kind"] == "warm":
+                        if trial["kind"] == "warm" and (cold or not optimized):
                             self.adapter.compile(leg, trial, grid_mod.grid(trial))
                     except Exception as exc:  # noqa: BLE001 - the leg's rows carry the reason
                         reason = failure_reason(classify(exc), exc)
