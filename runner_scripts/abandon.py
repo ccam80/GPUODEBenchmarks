@@ -92,7 +92,7 @@ def remaining(data, key, trial_list, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial. A hard exit while solving records the named trial and every harder one of its family as abandoned (each requested transfers row still absent); one during its optimize records an optimize.csv row labelled timeout and drops the optimize from that line and, per kernel, from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
