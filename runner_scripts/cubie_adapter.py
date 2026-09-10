@@ -15,7 +15,7 @@ PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "algorithm", "mode",
                    "controller", "gains", "setting_kind", "setting", "states",
-                   "n", "label", "best_ms", "blocksize", "resident_blocks",
+                   "source", "n", "label", "best_ms", "blocksize", "resident_blocks",
                    "settings", "recorded_utc")
 
 # Controller keys a caller may pass; everything else in a defaults table configures the step.
@@ -231,14 +231,26 @@ def _decode(text):
     return settings
 
 
+def source_hash(solver):
+    """Identity of the code a solver's kernel is built from: the system's function hash, the installed cubie source and its version."""
+    import hashlib
+    import cubie
+    from cubie._utils import package_source_hash
+    text = "|".join((str(getattr(solver.system, "fn_hash", "")), package_source_hash(),
+                     str(getattr(cubie, "__version__", ""))))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 def load_optimized(package, key, problem, algorithm, mode, setting,
-                   states=None, root=None, controller="", gains=""):
-    """{'settings', 'resident_blocks'} recorded for a point, or None."""
+                   states=None, root=None, controller="", gains="", source=None):
+    """{'settings', 'resident_blocks'} recorded for a point, or None; with `source`, only a row recorded from that source."""
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states,
                    controller, gains)
     with _Lock(path):
         recorded = _load(path)
+    if source is not None:
+        recorded = [row for row in recorded if row.get("source", "") == source]
     rows = [row for row in recorded if _same(row, ident)]
     if not rows and ident["setting"]:
         rows = [row for row in recorded if _same(row, dict(ident, setting=""))]
@@ -250,14 +262,23 @@ def load_optimized(package, key, problem, algorithm, mode, setting,
             "resident_blocks": int(resident) if resident else None}
 
 
+def apply_optimized(solver, tuned):
+    """Apply a recorded point's settings and resident block count to a solver."""
+    if tuned["settings"]:
+        solver.update(tuned["settings"])
+    kernel = getattr(solver, "kernel", None)
+    if tuned["resident_blocks"] is not None and kernel is not None:
+        kernel.resident_blocks = tuned["resident_blocks"]
+
+
 def record_optimized(package, key, problem, algorithm, mode, setting, result,
-                     states=None, n=None, root=None, controller="", gains=""):
+                     states=None, n=None, root=None, controller="", gains="", source=""):
     """Replace the optimize row for a point with the result's best launch."""
     path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states,
                    controller, gains)
     best = result.best
-    row = dict(ident, n="" if n is None else str(int(n)), label=best.label,
+    row = dict(ident, source=source, n="" if n is None else str(int(n)), label=best.label,
                best_ms="{0:.6g}".format(best.best_ms),
                blocksize=str(best.blocksize),
                resident_blocks=("" if best.resident_blocks is None
@@ -287,7 +308,7 @@ def record_optimize_timeout(trial, key, root=None):
     path = optimize_path(trial["package"], key, root)
     ident = _ident(trial["package"], key, trial["problem"], trial["algorithm"], mode, setting,
                    params.get("states"), trial["controller"], trial["gains"])
-    row = dict(ident, n=str(int(trial["n"])), label="timeout", best_ms="nan", blocksize="",
+    row = dict(ident, source="", n=str(int(trial["n"])), label="timeout", best_ms="nan", blocksize="",
                resident_blocks="", settings="",
                recorded_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     with _Lock(path):
@@ -299,8 +320,8 @@ def record_optimize_timeout(trial, key, root=None):
 
 def optimize_point(solver, problem, initial_values, parameters, package, key,
                    algorithm, mode, setting, states=None, verbose=True,
-                   root=None, force=False, controller="", gains=""):
-    """Run Solver.optimize on the point's batch, apply the winner to the solver and record it; `force` varies settings an earlier optimize applied."""
+                   root=None, force=False, controller="", gains="", source=""):
+    """Run Solver.optimize on the point's batch, apply the winner to the solver and record it under `source`; `force` varies settings an earlier optimize applied."""
     row = as_problem(problem)
     result = solver.optimize(initial_values, parameters,
                              duration=row["duration"], verbose=verbose,
@@ -311,7 +332,7 @@ def optimize_point(solver, problem, initial_values, parameters, package, key,
     return record_optimized(package, key, row, algorithm, mode, setting,
                             result, states=states,
                             n=int(initial_values.shape[1]), root=root,
-                            controller=controller, gains=gains)
+                            controller=controller, gains=gains, source=source)
 
 
 def clear_optimized(package, key, algorithm=None, problem=None, root=None):

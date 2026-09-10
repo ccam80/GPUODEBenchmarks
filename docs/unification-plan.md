@@ -134,7 +134,7 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 
 - Ordinal order: `n` ascending, `dt` descending, `tol` descending, `states` ascending.
 - A leg is one `warm` line (the cheapest spec), the `optimize` lines of `[set.optimize]`, then the `solve` lines.
-- `warm` trials are never recorded; `optimize` trials (cubie) record to `optimize.csv` and apply to the leg's later solves.
+- `warm` trials are never recorded; `optimize` trials (cubie) apply the point's `optimize.csv` row when one was recorded from the same source (system hash, cubie source and version) and compile, else run `Solver.optimize` and replace the row.
 - Specs with one `trial_id` across sets merge: first set's leg and axis, `transfers` union, `finals` true over false, the larger `watchdog_s`.
 
 ### 1.5 Runner contract
@@ -151,7 +151,7 @@ One JSONL file per package, the runner's only input; one line per trial: the 1.2
 6. Exit 0 when the loop completed; 3 on a watchdog hard exit (`wp_common.run_watchdogged`, `watchdog.jl`); other on a crash. On 3 the driver reads the progress file, records `reason = "abandoned: hard-exit at ordinal k"` for the leg's ordinal k and every higher one (each requested transfers row still absent), and re-invokes the runner with the trials that still have no row. When the progress file names an `optimize` line, the driver records an `optimize.csv` row labelled `timeout`, drops that line and re-invokes the runner, so the leg's solves run at the solver's own geometry.
 7. `errored_pct`: `store.errored_pct` over the trial's finals, `t_final` and `retcode`.
 8. `finals = true`: all n rows through `record_finals` with each trajectory's `t_final` and `retcode`.
-9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves. Build and compile-only warm lines run without a cap; a warm line that solves hard-exits 30 s after the trial's cap; an optimize line hard-exits after `[watchdog] optimize_seconds`.
+9. `warm` trials: cubie `Solver.compile(...)`; jax `jit(f).lower(args).compile()` at the trial's n; MPGOS nvcc into the build cache; Myokit `load_model`; julia_gpu one solve at n = 8 in the leg's process, off the GPU lock; pytorch none. A warm line followed by an `optimize` line builds without compiling. A `cold` warm line builds in a fresh cache directory and its wall time is the leg's `build_s`. `optimize` trials: cubie `Solver.optimize` on the line's n-trajectory batch, the winning launch geometry applied to the leg's later solves. Build and compile-only warm lines run without a cap; a warm line that solves hard-exits 30 s after the trial's cap; an optimize line hard-exits after `[watchdog] optimize_seconds`.
 10. `package_version` and `suite_rev` on every row.
 11. Reads `protocol.toml` for `[repeats]` and `[watchdog]` (`seconds`, `exit_code`, `optimize_seconds`); no environment variables.
 12. Applies `dt_min` and `dt_max` only when they are not NaN; a NaN leaves the package's own floor and cap in place.
