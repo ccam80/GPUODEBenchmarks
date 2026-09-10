@@ -55,7 +55,7 @@ class ListingTests(unittest.TestCase):
         return path
 
     def test_builds_are_one_binary_per_problem_solver_n_states_and_precision(self):
-        trial_list = cpp_trials(["perf", "golden_grid", "states"])
+        trial_list = cpp_trials(["perf", "golden_grid", "states"], n=(8, 32, 131072))
         builds = mpgos_trials.builds(trial_list)
         keys = [(b["problem"], b["solver"], b["nt"], b["sd"], b["precision"]) for b in builds]
         self.assertEqual(len(keys), len(set(keys)))
@@ -63,16 +63,18 @@ class ListingTests(unittest.TestCase):
         self.assertEqual({b["solver"] for b in builds}, {"RK4", "RKCK45"})
         lorenz = [b for b in builds if b["problem"] == "lorenz"]
         self.assertEqual(sorted((b["solver"], b["nt"]) for b in lorenz),
-                         [("RK4", 8), ("RK4", 32), ("RKCK45", 8), ("RKCK45", 32)])
+                         [("RK4", 8), ("RK4", 32), ("RK4", 131072), ("RKCK45", 8), ("RKCK45", 32),
+                          ("RKCK45", 131072)])
         self.assertTrue(all(b["sd"] == "-" and not b["cold"] for b in lorenz))
         # 32 states merged into perf's warm n leg.
         states = [b for b in builds if b["problem"] == "lorenz96" and b["cold"]]
         self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 64, 128])
+        self.assertEqual({b["nt"] for b in states}, {131072})
         for b in states:
             self.assertIn('{"states":' + b["sd"] + "}", b["leg"])
             self.assertTrue(b["leg"].endswith("/states"))
         merged = [b for b in builds if b["problem"] == "lorenz96" and b["sd"] == "32"]
-        self.assertEqual(len(merged), 4)
+        self.assertEqual(len(merged), 6)
         self.assertTrue(all(not b["cold"] and b["leg"].endswith("/n") for b in merged))
         # Every solve trial has a build.
         for t in trial_list:
@@ -80,7 +82,7 @@ class ListingTests(unittest.TestCase):
                 self.assertIn(mpgos_trials.build_key(t), keys, t["leg"])
 
     def test_points_follow_the_file_order_with_the_build_key_transfers_and_finals(self):
-        trial_list = cpp_trials(["perf", "golden_grid"], problems=["lorenz"])
+        trial_list = cpp_trials(["perf", "golden_grid"], problems=["lorenz"], n=(8, 32, 131072))
         points = mpgos_trials.points(trial_list)
         solves = [t for t in trial_list if t["kind"] == "solve"]
         self.assertEqual([p["trial_id"] for p in points], [t["trial_id"] for t in solves])
@@ -95,10 +97,10 @@ class ListingTests(unittest.TestCase):
         self.assertIn("none", {p["transfers"] for p in points})
         self.assertTrue(any(p["finals"] for p in points))
         # The 2^-10 step merged into perf's n leg.
-        dt_leg = [p for p in points if p["leg"].endswith("/dt") and p["nt"] == 8 and p["solver"] == "RK4"]
+        dt_leg = [p for p in points if p["leg"].endswith("/dt") and p["nt"] == 131072 and p["solver"] == "RK4"]
         self.assertEqual(len(dt_leg), 12)
         self.assertEqual([p["ordinal"] for p in dt_leg], list(range(12)))
-        n_leg = [p for p in points if p["leg"].endswith("/n") and p["nt"] == 8 and p["solver"] == "RK4"]
+        n_leg = [p for p in points if p["leg"].endswith("/n") and p["nt"] == 131072 and p["solver"] == "RK4"]
         self.assertEqual(len(n_leg), 1)
         self.assertEqual((n_leg[0]["transfers"], n_leg[0]["finals"]), ("both,none", True))
 

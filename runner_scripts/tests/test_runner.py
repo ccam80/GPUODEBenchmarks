@@ -280,9 +280,21 @@ class LegTests(RunnerCase):
         table = {"n": 64, "per": "leg"}
         adapter = FakeAdapter({("optimize", 64): "error"})
         status, rows, _ = self.run_specs([spec(8, optimize=table), spec(32, optimize=table)], adapter)
-        self.assertEqual(adapter.calls[:3], [("build", 8, False), ("compile", 8, None), ("optimize", 64, None)])
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 64, None)])
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
+
+    def test_a_warm_line_compiles_only_without_an_optimize_line_or_when_cold(self):
+        adapter = FakeAdapter()
+        self.run_specs([spec(8, optimize={"n": 64, "per": "leg"}, build="cold")], adapter)
+        self.assertEqual(adapter.calls[:3], [("build", 8, True), ("compile", 8, None), ("optimize", 64, None)])
+        adapter = FakeAdapter()
+        self.run_specs([spec(8, optimize={"n": "solve", "per": "solve"}), spec(32, optimize={"n": "solve", "per": "solve"})], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, None)])
+        self.assertNotIn("compile", {c[0] for c in adapter.calls})
+        adapter = FakeAdapter()
+        self.run_specs([spec(8)], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("compile", 8, None)])
 
     def test_only_the_optimize_line_runs_under_the_watchdog(self):
         table = {"n": 64, "per": "leg"}
@@ -297,7 +309,7 @@ class LegTests(RunnerCase):
         self.addCleanup(setattr, runner, "run_watchdogged", saved)
         adapter = FakeAdapter()
         status, rows, path = self.run_specs([spec(8, optimize=table)], adapter)
-        self.assertEqual(adapter.calls[:3], [("build", 8, False), ("compile", 8, None), ("optimize", 64, None)])
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 64, None)])
         self.assertEqual(budgets, [runner.OPTIMIZE_SECONDS])
         self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
         with open(path + ".progress") as handle:

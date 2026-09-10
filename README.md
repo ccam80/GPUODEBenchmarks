@@ -37,8 +37,8 @@ python bench.py run  --set golden_grid --resume # only the trials with a missing
 python bench.py run  --set perf --floor         # rerun; the lower time per row stays
 ```
 
-`-p`, `-s`, `-g`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
-expanded specs; `-n` replaces every grid's trajectory list. `--resume`
+`-p`, `-s`, `-g`, `-n`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
+expanded specs; `-n` names counts of the grids' trajectory lists. `--resume`
 runs the transfers rows that are missing, `--no-overwrite` those missing
 or NaN; a trial keeps asking finals once a row of its carries them. A run
 pins the GPU clocks to the row for this card in
@@ -76,8 +76,14 @@ python analyses/timing.py --x error  --set golden_grid  # min_ms against error
 python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 ```
 
+`data/` is an untracked mirror of the store; the analyses pull it before reading.
+
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`. An error is the RMS
+and write figures and CSVs under `plots/<key>/<problem>/`.
+
+## Using the store
+
+The store is one `data/` tree on a store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners; an analysis pulls before reading; both refuse to run without the store unless `--no-sync`. `sync/README.md` covers setting up the box, connecting a machine and `sync/sync.py`. An error is the RMS
 over every state of the difference from the julia_cpu float64 finals, paired
 by exact grid value, over the trajectories neither side flags as errored.
 

@@ -539,11 +539,13 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertEqual({s["algorithm"] for s in specs}, {"euler", "tsit5"})
         self.assertEqual(sorted({s["n"] for s in specs}), [8, 32])
         self.assertEqual(len(specs), 2 * 2 * 2)
-        # -n replaces the n list of every set's grids.
+        # A grid keeps only the counts n names.
         golden = sets.expand(["golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"],
-                             algorithms=["kvaerno3"], n=[16])
-        self.assertEqual({s["n"] for s in golden}, {16})
+                             algorithms=["kvaerno3"], n=[16, 131072])
+        self.assertEqual({s["n"] for s in golden}, {131072})
         self.assertEqual({s["axis"] for s in golden}, {"dt", "tol"})
+        self.assertEqual(sets.expand(["golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"],
+                                     algorithms=["kvaerno3"], n=[16]), [])
 
     def test_narrowing_by_mode_controller_tol_and_dt(self):
         specs = sets.expand(["golden_grid"], KEY, self.root, packages=["cubie"], problems=["lorenz"],

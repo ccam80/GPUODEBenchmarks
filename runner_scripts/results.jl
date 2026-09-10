@@ -40,20 +40,13 @@ function _store_cmd(args; root = nothing)
     return Cmd(vcat(argv, String.(args)))
 end
 
-"`git rev-parse --short HEAD`, suffixed -dirty when tracked files have changed; unknown outside git."
+"`git rev-parse --short HEAD`; unknown outside git."
 function store_suite_rev(repo_root = STORE_REPO_ROOT)
-    rev = try
+    try
         strip(read(setenv(`git rev-parse --short HEAD`; dir = repo_root), String))
     catch
-        return "unknown"
+        "unknown"
     end
-    dirty = try
-        !isempty(strip(read(setenv(`git status --porcelain --untracked-files=no`;
-            dir = repo_root), String)))
-    catch
-        false
-    end
-    return rev * (dirty ? "-dirty" : "")
 end
 
 "The named spec fields of a trial or row Dict (extra keys ignored); every one must be present and the package known."

@@ -61,12 +61,26 @@ def parser(description):
                    help="a SQL predicate over the spec columns of the results view")
     p.add_argument("--root", default=DATA_DIR, help="the store root (default data/)")
     p.add_argument("--out", default=PLOTS_DIR, help="the output root (default plots/)")
+    p.add_argument("--no-sync", action="store_true", help="read --root as it is, without pulling the store")
     return p
 
 
 def check_selection(args):
     if bool(args.set) == bool(args.where):
         raise SystemExit("give --set NAME (repeatable) or --where \"<sql>\", not both")
+
+
+def pull_store(args):
+    """Pull the store into --root before reading it; SystemExit when the store is not set up or the pull fails, nothing under --no-sync."""
+    if args.no_sync:
+        return
+    sys.path.insert(0, os.path.join(ROOT, "sync"))
+    import sync
+    reason = sync.unavailable()
+    if reason:
+        raise SystemExit("store: {0}; pass --no-sync to read {1} as it is".format(reason, args.root))
+    if sync.run("pull", args.root, ""):
+        raise SystemExit("store: pull FAILED; pass --no-sync to read {0} as it is".format(args.root))
 
 
 # --------------------------------------------------------------- selection

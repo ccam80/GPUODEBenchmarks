@@ -27,6 +27,7 @@ failed. Each script can be run on its own and reuses an existing venv.
 - Locking GPU clocks needs an elevated shell (passwordless `sudo nvidia-smi`
   on Linux, an Administrator console on Windows); without it a run measures
   unlocked and reports the clocks it saw.
+- `rclone` with the `box:` remote (`sync/README.md`), or `--no-sync` on every run and analysis.
 
 On a fresh Linux machine:
 
@@ -34,9 +35,6 @@ On a fresh Linux machine:
 sudo apt install build-essential nvidia-cuda-toolkit python3-venv python3-pip git
 curl -fsSL https://install.julialang.org | sh -s -- --yes
 ```
-
-Inside WSL2 do not install Linux NVIDIA driver packages; the driver comes
-from Windows through `/usr/lib/wsl/lib`.
 
 ## Packages
 
@@ -63,7 +61,7 @@ cubie is imported.
 python GPU_ODE_JAX/setup_environment.py
 ```
 
-Linux only (WSL2 included); elsewhere the script prints a skip and exits 0.
+Linux only; elsewhere the script prints a skip and exits 0.
 Installs the pinned
 `jax[cuda13]`, Diffrax and Equinox with `pyarrow` and `tzdata`, and fails
 when jax-cuda plugins of two CUDA generations coexist in the venv.
