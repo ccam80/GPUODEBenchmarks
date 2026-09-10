@@ -293,7 +293,7 @@ class JaxAdapter:
     def compile(self, build, trial, values):
         build.compile(trial, values)
 
-    def optimize(self, build, trial, values):
+    def optimize(self, build, trial):
         raise NotImplementedError("jax has no launch geometry to optimize")
 
     def solve(self, build, trial, values, transfers):

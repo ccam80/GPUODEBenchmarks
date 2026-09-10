@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize runs Solver.optimize on the line's batch and records the winner; a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the line's recorded settings or runs Solver.optimize and records the winner; a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
 
 import gc
 import importlib.metadata
@@ -16,6 +16,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cubie_adapter as adapter  # noqa: E402
+import grid as grid_mod  # noqa: E402
 import runner  # noqa: E402
 from cubie_systems import final_states, output_types, variable_order  # noqa: E402
 from problems import as_problem  # noqa: E402
@@ -75,11 +76,6 @@ def make_solver(system, trial, solver_class=None):
     if gains:
         solver.update(gains)
     return solver
-
-
-def optimize_setting(trial):
-    """(mode, setting) of the optimize row a trial records: its dt or tolerance."""
-    return adapter.optimize_setting(trial)
 
 
 class Build:
@@ -204,28 +200,21 @@ class CubieAdapter:
         initials, parameters = build.grid(values)
         build.solver.compile(initials, parameters, duration=build.duration)
 
-    def optimize(self, build, trial, values):
-        """The point's recorded settings from the same source applied to the solver and compiled, else Solver.optimize on the line's batch with the winner applied and recorded under the package, key and source."""
+    def optimize(self, build, trial):
+        """The line's recorded settings from the same source applied to the solver and compiled, else Solver.optimize on the line's n with the winner applied and recorded; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
-        initials, parameters = build.grid(values)
-        mode, setting = optimize_setting(trial)
+        initials, parameters = build.grid(grid_mod.grid(trial))
         source = adapter.source_hash(build.solver)
-        tuned = adapter.load_optimized(self.package, self.key, build.row, trial["algorithm"], mode, setting,
-                                       states=build.row["states"], root=self.root,
-                                       controller=trial["controller"], gains=trial["gains"], source=source,
-                                       n=int(initials.shape[1]))
+        tuned = adapter.load_optimized(trial, self.key, root=self.root, source=source)
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
             build.solver.compile(initials, parameters, duration=build.duration)
-            print("optimized {0}: recorded".format(runner.label(trial)), flush=True)
-            return
-        row = adapter.optimize_point(build.solver, build.row, initials, parameters, self.package,
-                                     self.key, trial["algorithm"], mode, setting,
-                                     states=build.row["states"], root=self.root, force=True,
-                                     controller=trial["controller"], gains=trial["gains"], source=source)
-        print("optimized {0}: {1}".format(runner.label(trial), row["label"]), flush=True)
+            return "recorded"
+        row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key,
+                                     root=self.root, force=True, source=source)
+        return "{0} on {1} runs".format(row["label"], row["n"])
 
     def solve(self, build, trial, values, transfers):
         build.apply(trial)

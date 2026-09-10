@@ -271,7 +271,7 @@ class BuildTests(unittest.TestCase):
 
     def test_version_reads_myokit_and_optimize_is_refused(self):
         with self.assertRaises(NotImplementedError):
-            self.adapter.optimize(None, trial(), None)
+            self.adapter.optimize(None, trial())
 
 
 if __name__ == "__main__":

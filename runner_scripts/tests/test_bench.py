@@ -274,7 +274,7 @@ class CompletenessTests(unittest.TestCase):
     def test_an_optimize_record_must_exist_from_the_current_source(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
                          "-n", "8,32")["cubie"]
-        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, 8), (32, 32)])
+        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, "solve"), (32, "solve")])
         for trial in perf:
             for transfers in ("both", "none"):
                 self.record(trial, transfers)
@@ -285,18 +285,15 @@ class CompletenessTests(unittest.TestCase):
         audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "S" for x in s})
         self.assertEqual(audits[perf[0]["trial_id"]].reasons(), ["optimize:absent"])
         result = FakeOptimizeResult()
-        for batch in (8, 32):
-            cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
-                                           controller="fixed", gains="{}", source="S", n=batch)
+        for trial in perf:
+            cubie_adapter.record_optimized(trial, KEY, result, trial["n"], root=self.root, source="S")
         self.assertEqual(self.kept(perf, resume=True), {})
         self.assertEqual(self.kept(perf, no_overwrite=True), {})
-        # A record from another batch does not serve a line.
+        # A per-solve record serves its own n alone.
         cubie_adapter.clear_optimized("cubie", KEY, "tsit5", "lorenz", root=self.root)
-        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
-                                       controller="fixed", gains="{}", source="S", n=8)
+        cubie_adapter.record_optimized(perf[0], KEY, result, 8, root=self.root, source="S")
         self.assertEqual(list(self.kept(perf, resume=True)), [perf[1]["trial_id"]])
-        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
-                                       controller="fixed", gains="{}", source="S", n=32)
+        cubie_adapter.record_optimized(perf[1], KEY, result, 32, root=self.root, source="S")
         # Recorded from another source: stale, so both lines run again.
         stale = self.kept(perf, resume=True, sources=lambda p, s: {x: "T" for x in s})
         self.assertEqual(sorted(stale), sorted(t["trial_id"] for t in perf))
@@ -309,9 +306,8 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[perf[1]["trial_id"]].reasons(),
                          ["optimize:timeout"])
         # Without a current source (the analyses) a record of any source stands.
-        for batch in (8, 32):
-            cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10, result, root=self.root,
-                                           controller="fixed", gains="{}", source="old", n=batch)
+        for trial in perf:
+            cubie_adapter.record_optimized(trial, KEY, result, trial["n"], root=self.root, source="old")
         self.assertTrue(all(m.complete() for m in completeness.audit(perf, KEY, self.data).values()))
         # The source hashes are asked once per cubie package for the systems of its optimizing lines.
         asked = []
@@ -323,18 +319,17 @@ class CompletenessTests(unittest.TestCase):
                 bench.continue_filter(perf, KEY, self.root, resume=True)
         self.assertIn("no cubie", str(caught.exception))
 
-    def test_each_line_has_its_own_optimize_record(self):
+    def test_each_kernel_has_its_own_optimize_record(self):
         golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cubie"]
-        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, 131072), (0.25, 131072)])
+        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, "kernel"), (0.25, "kernel")])
         result = FakeOptimizeResult()
         for trial in golden:
             spec = {f: trial[f] for f in store.TRIAL_FIELDS}
             relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
             self.record(trial, "none", finals=relative)
-        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "classical-rk4", "fixed", 0.5, result,
-                                       root=self.root, controller="fixed", gains="{}", source="S", n=131072)
-        # The 0.5 line stands with its record; the 0.25 line runs again.
+        cubie_adapter.record_optimized(golden[0], KEY, result, 71680, root=self.root, source="S")
+        # The 0.5 kernel stands with its record at any batch; the 0.25 kernel runs again.
         self.assertEqual(list(self.kept(golden, resume=True)), [golden[1]["trial_id"]])
         self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume",
                                                                  lambda p, s: {x: "S" for x in s})),

@@ -216,7 +216,7 @@ class TorchAdapter:
     def compile(self, build, trial, values):
         """torchdiffeq runs eagerly; there is nothing to warm."""
 
-    def optimize(self, build, trial, values):
+    def optimize(self, build, trial):
         raise NotImplementedError("pytorch has no launch geometry to optimize")
 
     def solve(self, build, trial, values, transfers):

@@ -11,13 +11,23 @@ TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimiz
 TRANSFERS_ORDER = ("both", "none")
 # The fields one package build serves; a line whose values differ from the last needs a new build.
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
+# The fields one compiled kernel serves: the build plus every stepping value.
+KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
+# A line's optimize policy: once per compiled kernel, or once per line on its own n.
+OPTIMIZE_PER = ("kernel", "solve")
 
 
 def build_key(trial):
     """The build a trial runs on, as a tuple of BUILD_FIELDS."""
     return tuple(trial[f] for f in BUILD_FIELDS)
+
+
+def kernel_key(trial):
+    """The kernel a trial runs on, as a tuple of KERNEL_FIELDS with NaN as None."""
+    return tuple(None if isinstance(trial[f], float) and math.isnan(trial[f]) else trial[f]
+                 for f in KERNEL_FIELDS)
 
 
 def family_key(trial):
@@ -58,10 +68,10 @@ def _budget(spec):
     return float(spec.get("watchdog_s", WATCHDOG_SECONDS))
 
 
-def canonical_optimize(tables, n):
-    """The optimize batch size over every declaration's table: the largest, "solve" standing for the point's own n; None without a table."""
-    counts = [int(n) if t["n"] == "solve" else int(t["n"]) for t in tables if t is not None]
-    return max(counts) if counts else None
+def canonical_optimize(tables):
+    """The optimize policy over every declaration's table: solve over kernel; None without a table."""
+    policies = {t["per"] for t in tables if t is not None}
+    return "solve" if "solve" in policies else "kernel" if policies else None
 
 
 def _entry(spec):
@@ -87,7 +97,7 @@ def _record(entry):
     record["transfers"] = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
     record["finals"] = bool(entry["finals"])
     record["cold"] = bool(entry["cold"])
-    record["optimize"] = canonical_optimize(entry["tables"], spec["n"])
+    record["optimize"] = canonical_optimize(entry["tables"])
     record["watchdog_s"] = float(entry["watchdog_s"])
     record["sets"] = sorted(entry["sets"])
     return record
@@ -173,7 +183,13 @@ def read_jsonl(path):
     return trials
 
 
+def optimizes_of(trials):
+    """The optimize runs of a trial list: one per per-solve line, one per kernel among the per-kernel lines."""
+    kernels = {kernel_key(t) for t in trials if t["optimize"] == "kernel"}
+    return sum(1 for t in trials if t["optimize"] == "solve") + len(kernels)
+
+
 def counts(trials):
     """(solve count, optimize count, cold count, build count) of a trial list."""
-    return (sum(1 for t in trials if t["transfers"]), sum(1 for t in trials if t["optimize"]),
+    return (sum(1 for t in trials if t["transfers"]), optimizes_of(trials),
             sum(1 for t in trials if t["cold"]), len(builds_of(trials)))

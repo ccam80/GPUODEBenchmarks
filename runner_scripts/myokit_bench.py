@@ -266,7 +266,7 @@ class MyokitAdapter:
     def compile(self, build, trial, values):
         """The kernel compiles when the model is built; nothing more to warm."""
 
-    def optimize(self, build, trial, values):
+    def optimize(self, build, trial):
         raise NotImplementedError("myokit_cuda has no launch geometry to optimize")
 
     def solve(self, build, trial, values, transfers):

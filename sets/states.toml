@@ -11,7 +11,7 @@ build      = "cold"
 
 [set.optimize]
 packages = ["cubie", "cubie_mlir"]
-n = "solve"
+per = "kernel"
 
 [[grid]]
 packages = "all"

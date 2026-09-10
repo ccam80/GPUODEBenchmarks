@@ -201,11 +201,6 @@ class KeywordTests(unittest.TestCase):
         plain = cubie_bench.make_solver(FakeSystem(), trial(), solver_class=FakeSolver)
         self.assertEqual(plain.updates, [])
 
-    def test_optimize_setting_is_the_lines_step_or_tolerance(self):
-        self.assertEqual(cubie_bench.optimize_setting(trial()), ("fixed", 2.0 ** -10))
-        self.assertEqual(cubie_bench.optimize_setting(trial(dt=0.5)), ("fixed", 0.5))
-        self.assertEqual(cubie_bench.optimize_setting(trial(**adaptive())), ("adaptive", 1e-5))
-
     def test_controllers_version_and_states(self):
         import importlib.metadata
         self.assertEqual(cubie_bench.CONTROLLERS, ("fixed", "default", "i", "pi", "pid", "gustafsson"))
@@ -299,48 +294,50 @@ class BuildTests(AdapterCase):
         self.assertIs(device, result)
         leg.close()
 
-    def test_optimize_records_the_winner_at_the_lines_step_or_tolerance(self):
-        line = trial(n=8, optimize=64)
+    def test_optimize_records_the_winner_under_the_lines_kernel(self):
+        line = trial(n=64, optimize="kernel")
         leg = self.adapter.build(trial(n=8))
-        self.adapter.optimize(leg, line, self.values(64))
+        self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 64 runs")
         self.assertEqual(leg.solver.optimized, [(64, 1.0, True)])
-        tuned = cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -10,
-                                             root=self.root, controller="fixed", gains="{}")
+        tuned = cubie_adapter.load_optimized(line, KEY, root=self.root)
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
-        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", 2.0 ** -13,
-                                                       root=self.root, controller="fixed", gains="{}"))
+        self.assertIsNone(cubie_adapter.load_optimized(trial(dt=2.0 ** -13, optimize="kernel"), KEY, root=self.root))
         leg.close()
-        tol_line = trial(n=8, optimize=64, **adaptive(atol=1e-4, rtol=1e-4))
+        tol_line = trial(n=8, optimize="kernel", **adaptive(atol=1e-4, rtol=1e-4))
         leg = self.adapter.build(trial(**adaptive(atol=1e-4, rtol=1e-4)))
-        self.adapter.optimize(leg, tol_line, self.values(64))
-        self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
-                                                          root=self.root, controller="default", gains="{}"))
-        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-5,
-                                                       root=self.root, controller="default", gains="{}"))
+        self.adapter.optimize(leg, tol_line)
+        self.assertIsNotNone(cubie_adapter.load_optimized(tol_line, KEY, root=self.root))
+        self.assertIsNone(cubie_adapter.load_optimized(dict(tol_line, atol=1e-5, rtol=1e-5), KEY, root=self.root))
         # The controller and gains keep one algorithm's builds apart in the record.
-        pi_line = trial(n=8, optimize=64,
+        pi_line = trial(n=8, optimize="kernel",
                         **adaptive(atol=1e-4, rtol=1e-4, controller="pi", gains='{"integral_gain":0.3}'))
-        self.adapter.optimize(leg, pi_line, self.values(64))
-        self.assertIsNotNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
-                                                          root=self.root, controller="default", gains="{}"))
-        self.assertIsNotNone(cubie_adapter.load_optimized(
-            "cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4, root=self.root, controller="pi",
-            gains='{"integral_gain":0.3}'))
-        self.assertIsNone(cubie_adapter.load_optimized("cubie", KEY, "lorenz", "tsit5", "adaptive", 1e-4,
-                                                       root=self.root, controller="pi", gains="{}"))
+        self.adapter.optimize(leg, pi_line)
+        self.assertIsNotNone(cubie_adapter.load_optimized(tol_line, KEY, root=self.root))
+        self.assertIsNotNone(cubie_adapter.load_optimized(pi_line, KEY, root=self.root))
+        self.assertIsNone(cubie_adapter.load_optimized(dict(pi_line, gains="{}"), KEY, root=self.root))
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
         with open(path) as handle:
             lines = handle.read().splitlines()
         self.assertEqual(len(lines) - 1, 3)
-        self.assertTrue(lines[0].startswith("package,key,problem,algorithm,mode,controller,gains,"))
+        self.assertEqual(lines[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
         leg.close()
 
-    def test_a_point_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
-        line = trial(n=8, optimize=64)
+    def test_a_per_solve_line_optimizes_on_its_own_n(self):
         leg = self.adapter.build(trial(n=8))
-        self.adapter.optimize(leg, line, self.values(64))
-        self.adapter.optimize(leg, line, self.values(64))
+        self.adapter.optimize(leg, trial(n=8, optimize="solve"))
+        self.adapter.optimize(leg, trial(n=32, optimize="solve"))
+        self.assertEqual(leg.solver.optimized, [(8, 1.0, True), (32, 1.0, True)])
+        self.assertEqual(self.adapter.optimize(leg, trial(n=32, optimize="solve")), "recorded")
+        self.assertIsNone(cubie_adapter.load_optimized(trial(n=128, optimize="solve"), KEY, root=self.root))
+        self.assertIsNone(cubie_adapter.load_optimized(trial(n=8, optimize="kernel"), KEY, root=self.root))
+        leg.close()
+
+    def test_a_kernel_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
+        line = trial(n=8, optimize="kernel")
+        leg = self.adapter.build(trial(n=8))
+        self.adapter.optimize(leg, line)
+        self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize="kernel")), "recorded")
         self.assertEqual(len(leg.solver.optimized), 1)
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(leg.solver.compiled[-1], (64, 1.0))
@@ -352,7 +349,7 @@ class BuildTests(AdapterCase):
         # A row from another source is replaced by a fresh optimize.
         with open(path, "w") as handle:
             handle.write(text.replace(source, "0" * 16))
-        self.adapter.optimize(leg, line, self.values(64))
+        self.adapter.optimize(leg, line)
         self.assertEqual(len(leg.solver.optimized), 2)
         with open(path) as handle:
             self.assertEqual(handle.read().count(source), 1)

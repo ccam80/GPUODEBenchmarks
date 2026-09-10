@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize batch; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize batch; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize policy; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize policy; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -19,7 +19,7 @@ CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
             "optimize", "watchdog")
-OPTIMIZE_KEYS = ("packages", "n")
+OPTIMIZE_KEYS = ("packages", "per")
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -117,9 +117,8 @@ def load_set(name, sets_dir=SETS_DIR):
         _check_keys(optimize, OPTIMIZE_KEYS, where)
         optimize.setdefault("packages", "all")
         optimize["packages"] = _name_list(optimize["packages"], PACKAGES, where + " packages")
-        n = optimize.get("n")
-        if not (n == "solve" or (isinstance(n, int) and not isinstance(n, bool) and n >= 2)):
-            raise SetError(where + ": n must be an integer >= 2 or \"solve\"")
+        if optimize.get("per") not in ("kernel", "solve"):
+            raise SetError(where + ": per must be kernel or solve")
     head["optimize"] = optimize
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
@@ -367,10 +366,10 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
 # --------------------------------------------------------------- expansion
 
 def _optimize_for(table, package):
-    """{n} of the set's optimize table when it names the package, else None."""
+    """{per} of the set's optimize table when it names the package, else None."""
     if table is None or (table["packages"] != "all" and package not in table["packages"]):
         return None
-    return {"n": table["n"]}
+    return {"per": table["per"]}
 
 
 def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,

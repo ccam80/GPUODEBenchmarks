@@ -1,4 +1,4 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial, values)`, `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
@@ -215,12 +215,11 @@ class Runner:
             # Past OPTIMIZE_SECONDS the watchdog hard-exits; the driver drops the optimize from this line and re-runs it.
             write_progress(progress_path, trial, "optimize")
             started = timeit.default_timer()
-            batch = grid_mod.grid(dict(trial, n=int(trial["optimize"])))
             try:
-                watchdogged(lambda: self.adapter.optimize(build, trial, batch),
-                            "optimize " + label(trial), OPTIMIZE_SECONDS)
-                print("optimized {0} at n={1} in {2:.1f}s".format(
-                    label(trial), trial["optimize"], timeit.default_timer() - started), flush=True)
+                done = watchdogged(lambda: self.adapter.optimize(build, trial),
+                                   "optimize " + label(trial), OPTIMIZE_SECONDS)
+                print("optimized {0} per {1}: {2} in {3:.1f}s".format(
+                    label(trial), trial["optimize"], done, timeit.default_timer() - started), flush=True)
             except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
                 print("OPTIMIZE {0} failed: {1}".format(
                     label(trial), failure_reason(classify(exc), exc)), flush=True)

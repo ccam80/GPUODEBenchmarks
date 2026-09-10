@@ -85,19 +85,19 @@ class AbandonTests(unittest.TestCase):
                          [(8, 2.0 ** -10, "euler"), (128, 0.5, "tsit5")])
 
     def test_an_optimize_hard_exit_records_a_timeout_row_and_drops_the_optimize(self):
-        trial_list = trials.build_trials([spec(8, {"n": 64}), spec(32, {"n": 64})])
+        trial_list = trials.build_trials([spec(8, {"per": "solve"}), spec(32, {"per": "solve"})])
         self.progress_for(trial_list[0], "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual(self.data.rows(), [])
-        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, None), (32, 64)])
+        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, None), (32, "solve")])
         import csv
         with open(os.path.join(self.data.root, "key=" + KEY, "package=cubie", "optimize.csv"),
                   newline="", encoding="utf-8") as handle:
             recorded = list(csv.DictReader(handle))
         self.assertEqual(len(recorded), 1)
-        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["setting"],
-                          recorded[0]["mode"], recorded[0]["settings"]),
-                         ("timeout", "64", "0.0009765625", "fixed", ""))
+        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["per"],
+                          recorded[0]["stepping"].split(";")[0], recorded[0]["settings"]),
+                         ("timeout", "8", "solve", "dt=0.0009765625", ""))
 
     def test_the_stores_failures_abandon_the_harder_runs_before_they_spawn(self):
         trial_list = trials.build_trials([spec(8), spec(32), spec(128)])
