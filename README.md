@@ -19,7 +19,7 @@ specs as one JSONL trial file per package and hands each file to that
 package's runner, which builds once per leg, times every trial after one
 untimed warm-up, and records one row per (spec, transfers) in the parquet
 store under `data/`. The analyses compute every error offline from the
-finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`.
+finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`, `completeness.py` (what a stored trial must carry to be reused).
 
 ## Setup
 
@@ -38,9 +38,16 @@ python bench.py run  --set perf --floor         # rerun; the lower time per row 
 ```
 
 `-p`, `-s`, `-g`, `-n`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
-expanded specs; `-n` names counts of the grids' trajectory lists. `--resume`
-runs the transfers rows that are missing, `--no-overwrite` those missing
-or NaN; a trial keeps asking finals once a row of its carries them. A run
+expanded specs; `-n` names counts of the grids' trajectory lists and exits
+only for a count no grid of the named sets lists. A point declared by more
+than one set file runs under one contract whichever sets are named and in
+whatever order: it builds cold, keeps finals, optimizes per leg and times
+every transfers mode as soon as any declaration asks, on the leg of the
+declaration whose axis ranks highest (states, then n, then the swept dt or
+tolerance). `--resume` runs what the store lacks of each trial: a transfers
+row, the cold build time, a readable finals file, an optimize record from
+the current cubie source; `--no-overwrite` also reruns NaN rows and
+timed-out optimize lines. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
@@ -79,7 +86,11 @@ python analyses/agreement.py --set golden_grid          # errors and package-pai
 `data/` is an untracked mirror of the store; the analyses pull it before reading.
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`.
+and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, each
+key's store is first checked against the set's canonical trials: whatever it
+lacks (rows, cold build times, finals files, optimize records) is printed
+per package, listed in `plots/<key>/incomplete.csv`, and makes the script
+exit 1 after writing its outputs.
 
 ## Using the store
 

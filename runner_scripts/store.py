@@ -413,6 +413,19 @@ class Store:
                        pa.table(columns))
         return relative
 
+    def finals_readable(self, package, key, relative):
+        """True when a package-relative finals path names a parquet file whose metadata reads."""
+        if not relative:
+            return False
+        path = os.path.join(self.package_dir(package, key), *relative.split("/"))
+        if not os.path.isfile(path):
+            return False
+        try:
+            pq.read_metadata(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is a missing artifact
+            return False
+        return True
+
     def load_finals(self, package, key, relative):
         """(traj int32[m], states [m, k] in the stored precision, t_final float64[m], retcode str[m]) of a finals file by its package-relative path."""
         table = pq.read_table(os.path.join(self.package_dir(package, key),

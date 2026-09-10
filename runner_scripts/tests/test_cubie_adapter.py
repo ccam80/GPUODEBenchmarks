@@ -217,6 +217,40 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertIs(tuned["settings"]["unroll_other_small"],
                       UnrollChoice.ROLLED)
 
+    def test_find_optimized_reads_the_rows_an_optimize_line_identifies(self):
+        result = FakeResult(FakeLaunch(64, 2), {"blocksize": 64})
+        adapter.record_optimized("cubie", "k", self.problem, "tsit5", "fixed", None, result,
+                                 controller="fixed", gains="{}", source="S")
+        adapter.record_optimized("cubie", "k", self.problem, "kvaerno3", "adaptive", 1e-3, result,
+                                 controller="default", gains="{}", source="S")
+        rows = adapter.optimize_rows("cubie", "k")
+        self.assertEqual([r["algorithm"] for r in rows], ["tsit5", "kvaerno3"])
+        line = dict(package="cubie", problem="lorenz", algorithm="tsit5", controller="fixed", gains="{}",
+                    system_params="{}", axis="dt", dt=2.0 ** -10, atol=math.nan)
+        ident = adapter.optimize_ident(line, "k")
+        self.assertEqual((ident["mode"], ident["setting"], ident["states"], ident["controller"]),
+                         ("fixed", "0.0009765625", "3", "fixed"))
+        # The leg-wide tsit5 row serves the stepped line; kvaerno3 matches its own tolerance alone.
+        self.assertEqual(adapter.find_optimized(rows, ident)["source"], "S")
+        tol = dict(line, algorithm="kvaerno3", controller="default", axis="tol", dt=math.nan, atol=1e-3)
+        self.assertEqual(adapter.find_optimized(rows, adapter.optimize_ident(tol, "k"))["setting"], "0.001")
+        self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(tol, atol=1e-4), "k")))
+        self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(dict(line, system_params='{"states":4}'), "k")))
+        self.assertEqual(adapter.optimize_rows("cubie_mlir", "k"), [])
+
+    def test_source_hashes_come_from_the_package_interpreter(self):
+        systems = [("lorenz", "{}", "float32"), ("lorenz96", '{"states":8}', "float32"), ("lorenz", "{}", "float32")]
+        try:
+            hashes = adapter.source_hashes("cubie", systems)
+        except RuntimeError as exc:
+            self.skipTest("cubie is not importable by the package interpreter: {0}".format(exc))
+        self.assertEqual(set(hashes), set(systems))
+        self.assertEqual({len(h) for h in hashes.values()}, {16})
+        self.assertNotEqual(hashes[systems[0]], hashes[systems[1]])
+        self.assertEqual(adapter.source_hashes("cubie", []), {})
+        with self.assertRaises(RuntimeError):
+            adapter.source_hashes("cubie", [("nosuchproblem", "{}", "float32")])
+
     def test_optimize_point_records_the_batch_size(self):
         import numpy as np
 

@@ -1,4 +1,4 @@
-"""bench.py: flag resolution, the plan output, the continuation filters, the runner registry, and the watchdog hard-exit loop against a fake runner."""
+"""bench.py: flag resolution, the plan output, the -n check over heterogeneous grids, the completeness-aware continuation filters, the runner registry, and the watchdog hard-exit loop against a fake runner."""
 
 import json
 import os
@@ -7,6 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -14,6 +17,8 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 
 import bench  # noqa: E402
+import completeness  # noqa: E402
+import cubie_adapter  # noqa: E402
 import launch  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
@@ -159,9 +164,10 @@ class PlanTests(unittest.TestCase):
         wants = dict(recorded, finals=True)
         again = bench.continue_filter([wants], KEY, self.root, resume=True)
         self.assertEqual([(t["transfers"], t["finals"]) for t in again], [(["none"], True)])
+        spec = {f: recorded[f] for f in store.TRIAL_FIELDS}
+        relative = data.record_finals(dict(spec, key=KEY), np.zeros((8, 3)), np.full(8, 1.0))
         for transfers in ("both", "none"):
-            spec = {f: recorded[f] for f in store.TRIAL_FIELDS}
-            data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, finals="finals/r.parquet"))
+            data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, finals=relative))
         self.assertEqual(bench.continue_filter([wants], KEY, self.root, resume=True), [])
         # Warm trials follow their leg: a fully recorded leg loses its warm trial.
         leg = recorded["leg"]
@@ -174,6 +180,35 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn(leg, {t["leg"] for t in resumed})
         self.assertIn("warm", {t["kind"] for t in resumed})
         self.assertEqual(bench.continue_filter(cpp, KEY, self.root), cpp)
+
+    def test_n_is_checked_against_every_grid_of_the_named_sets_not_the_filtered_specs(self):
+        # The per-package smoke counts: 1024 is julia_cpu's golden_grid count, the others perf's.
+        julia = self.plan("--set", "perf,golden_grid", "-p", "julia_cpu", "-s", "lorenz", "-g", "tsit5",
+                          "-n", "128,1024,131072")
+        self.assertEqual(list(julia), ["julia_cpu"])
+        self.assertEqual({t["n"] for t in julia["julia_cpu"]}, {1024})
+        cpp = self.plan("--set", "perf,golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
+                        "-n", "128,1024,131072")
+        self.assertEqual({t["n"] for t in cpp["cpp"] if t["kind"] == "solve"}, {128, 131072})
+        # A count declared by a grid no filtered package uses yields no trials and no error.
+        self.assertEqual(self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-n", "1024"), {})
+        # A count no grid of the named sets lists exits.
+        for argv in (("--set", "perf,golden_grid", "-p", "julia_cpu", "-n", "16"),
+                     ("--set", "perf", "-p", "cpp", "-n", "1024"),
+                     ("--set", "states,golden", "-n", "8")):
+            with self.assertRaises(SystemExit, msg=argv) as caught:
+                self.plan(*argv)
+            self.assertIn("no grid of", str(caught.exception))
+
+    def test_plan_merges_a_point_with_its_declarations_in_every_set_file(self):
+        for argv in (("--set", "perf"), ("--set", "states"), ("--set", "golden_grid"),
+                     ("--set", "golden_grid,states,perf")):
+            by_package = self.plan(*argv, "-p", "cpp", "-s", "lorenz96", "-g", "classical-rk4", "-n", "131072",
+                                   "--mode", "fixed", "--dt", str(2.0 ** -10))
+            leg = [t for t in by_package["cpp"] if t["leg"].endswith("/states") and '"states":32' in t["leg"]]
+            self.assertEqual([(t["kind"], t["cold"], t["finals"], t["transfers"]) for t in leg],
+                             [("warm", True, False, []), ("solve", False, True, ["both", "none"])], argv)
+            self.assertEqual(leg[1]["sets"], ["golden_grid", "perf", "states"])
 
     def test_plan_cli_writes_the_trial_files_and_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "bench.py"), "plan", "--set", "perf",
@@ -189,6 +224,157 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(path))
         self.assertEqual(len(trials.read_jsonl(path)), 4)
         os.remove(path)
+
+
+class CompletenessTests(unittest.TestCase):
+    """continue_filter over partially populated rows: the cold build time, the finals file and the optimize record are artifacts a row needs before it is reused."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bench_complete_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = os.path.join(self.tmp, "data")
+        self.data = store.Store(self.root)
+
+    def plan(self, *argv):
+        return bench.plan_trials(bench.resolve(bench.parse_args(["plan"] + list(argv))), KEY, self.root)
+
+    def record(self, trial, transfers, **values):
+        spec = {f: trial[f] for f in store.TRIAL_FIELDS}
+        return self.data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, **values))
+
+    def kept(self, trial_list, **kw):
+        kw.setdefault("sources", lambda package, systems: {s: "S" for s in systems})
+        out = bench.continue_filter(trial_list, KEY, self.root, **kw)
+        return {(t["trial_id"], t["kind"]): t for t in out}
+
+    def test_a_cold_leg_needs_a_finite_build_time_on_every_row(self):
+        states = self.plan("--set", "states", "-p", "cpp", "-g", "classical-rk4")["cpp"]
+        solves = [t for t in states if t["kind"] == "solve"]
+        self.assertEqual(len(solves), 6)
+        for transfers in ("both", "none"):
+            self.record(solves[0], transfers)
+            self.record(solves[1], transfers, build_s=12.5 if transfers == "both" else NAN)
+            self.record(solves[2], transfers, build_s=12.5)
+        kept = self.kept(states, resume=True)
+        self.assertEqual(kept[(solves[0]["trial_id"], "solve")]["transfers"], ["both", "none"])
+        self.assertEqual(kept[(solves[1]["trial_id"], "solve")]["transfers"], ["none"])
+        self.assertNotIn((solves[2]["trial_id"], "solve"), kept)
+        self.assertNotIn((solves[2]["trial_id"], "warm"), kept)
+        self.assertIn((solves[1]["trial_id"], "warm"), kept)
+        audits = completeness.audit(states, KEY, self.data, "resume")
+        self.assertEqual(audits[solves[0]["trial_id"]].reasons(), ["build:both", "build:none"])
+        self.assertEqual(audits[solves[1]["trial_id"]].reasons(), ["build:none"])
+        self.assertTrue(audits[solves[2]["trial_id"]].complete())
+        # A warm leg's rows never need one.
+        perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")["cpp"]
+        for transfers in ("both", "none"):
+            self.record([t for t in perf if t["kind"] == "solve"][0], transfers)
+        self.assertEqual(self.kept(perf, resume=True), {})
+
+    def test_finals_need_a_readable_file(self):
+        golden = self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
+                           "--dt", "0.5,0.25")["cpp"]
+        solves = [t for t in golden if t["kind"] == "solve"]
+        self.assertEqual([t["finals"] for t in solves], [True, True])
+        spec = {f: solves[0][f] for f in store.TRIAL_FIELDS}
+        relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
+        self.record(solves[0], "none", finals=relative)
+        self.record(solves[1], "none", finals="finals/gone.parquet")
+        kept = self.kept(golden, resume=True)
+        self.assertNotIn((solves[0]["trial_id"], "solve"), kept)
+        self.assertEqual((kept[(solves[1]["trial_id"], "solve")]["transfers"], kept[(solves[1]["trial_id"], "solve")]["finals"]),
+                         (["none"], True))
+        self.assertEqual(completeness.audit(golden, KEY, self.data)[solves[1]["trial_id"]].reasons(), ["finals"])
+        # A corrupt file is as absent.
+        path = os.path.join(self.data.package_dir("cpp", KEY), *relative.split("/"))
+        with open(path, "wb") as handle:
+            handle.write(b"not parquet")
+        self.assertIn((solves[0]["trial_id"], "solve"), self.kept(golden, resume=True))
+        # A canonical finals requirement over rows recorded without finals reruns the last transfers.
+        perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "131072",
+                         "--mode", "fixed")["cpp"]
+        point = [t for t in perf if t["kind"] == "solve"][0]
+        self.assertTrue(point["finals"])
+        for transfers in ("both", "none"):
+            self.record(point, transfers)
+        kept = self.kept(perf, resume=True)
+        self.assertEqual((kept[(point["trial_id"], "solve")]["transfers"], kept[(point["trial_id"], "solve")]["finals"]),
+                         (["none"], True))
+
+    def test_an_optimize_record_must_exist_from_the_current_source(self):
+        perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
+                         "-n", "8,32")["cubie"]
+        self.assertEqual([t["kind"] for t in perf], ["warm", "optimize", "solve", "solve"])
+        solves = [t for t in perf if t["kind"] == "solve"]
+        for trial in solves:
+            for transfers in ("both", "none"):
+                self.record(trial, transfers)
+        # Complete rows, no record: every transfers of both solves runs again behind the optimize line.
+        kept = self.kept(perf, resume=True)
+        self.assertEqual(sorted(kind for _, kind in kept), ["optimize", "solve", "solve", "warm"])
+        self.assertEqual({t["transfers"][:] == ["both", "none"] for t in kept.values() if t["kind"] == "solve"}, {True})
+        audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "S" for x in s})
+        self.assertEqual(audits[solves[0]["trial_id"]].reasons(), ["optimize:absent"])
+        result = FakeOptimizeResult()
+        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", None, result, root=self.root,
+                                       controller="fixed", gains="{}", source="S")
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(self.kept(perf, no_overwrite=True), {})
+        # Recorded from another source: stale, so the leg runs again.
+        stale = self.kept(perf, resume=True, sources=lambda p, s: {x: "T" for x in s})
+        self.assertEqual(sorted(kind for _, kind in stale), ["optimize", "solve", "solve", "warm"])
+        audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "T" for x in s})
+        self.assertEqual(audits[solves[1]["trial_id"]].reasons(), ["optimize:source S"])
+        # A timed-out optimize line stands under --resume and is attempted again under --no-overwrite.
+        cubie_adapter.record_optimize_timeout(perf[1], KEY, self.root)
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(sorted(kind for _, kind in self.kept(perf, no_overwrite=True)),
+                         ["optimize", "solve", "solve", "warm"])
+        self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[solves[0]["trial_id"]].reasons(),
+                         ["optimize:timeout"])
+        # Without a current source (the analyses) a record of any source stands.
+        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "tsit5", "fixed", None, result, root=self.root,
+                                       controller="fixed", gains="{}", source="old")
+        self.assertTrue(all(m.complete() for m in completeness.audit(perf, KEY, self.data).values()))
+        # The source hashes are asked once per cubie package for the systems of its optimize lines.
+        asked = []
+        bench.continue_filter(perf, KEY, self.root, resume=True,
+                              sources=lambda p, s: asked.append((p, list(s))) or {x: "old" for x in s})
+        self.assertEqual(asked, [("cubie", [("lorenz", "{}", "float32")])])
+        with mock.patch.object(cubie_adapter, "source_hashes", side_effect=RuntimeError("no cubie")):
+            with self.assertRaises(SystemExit) as caught:
+                bench.continue_filter(perf, KEY, self.root, resume=True)
+        self.assertIn("no cubie", str(caught.exception))
+
+    def test_a_per_solve_line_governs_its_own_solve(self):
+        golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
+                           "--dt", "0.5,0.25")["cubie"]
+        self.assertEqual([t["kind"] for t in golden], ["warm", "optimize", "solve", "optimize", "solve"])
+        lines = completeness.governing_lines(golden)
+        self.assertEqual(lines[golden[2]["trial_id"]], golden[1])
+        self.assertEqual(lines[golden[4]["trial_id"]], golden[3])
+        result = FakeOptimizeResult()
+        for trial in (golden[2], golden[4]):
+            spec = {f: trial[f] for f in store.TRIAL_FIELDS}
+            relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
+            self.record(trial, "none", finals=relative)
+        cubie_adapter.record_optimized("cubie", KEY, "lorenz", "classical-rk4", "fixed", 0.5, result,
+                                       root=self.root, controller="fixed", gains="{}", source="S")
+        # The 0.5 point stands with its record; the 0.25 point runs again behind its own line alone.
+        kept = self.kept(golden, resume=True)
+        self.assertEqual([(t["kind"], t["dt"]) for t in golden if (t["trial_id"], t["kind"]) in kept],
+                         [("warm", 0.5), ("optimize", 0.25), ("solve", 0.25)])
+        self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume",
+                                                                 lambda p, s: {x: "S" for x in s})),
+                         {"optimize:absent": 1})
+
+
+class FakeOptimizeResult:
+    class Best:
+        label, best_ms, blocksize, resident_blocks = "state=shared @bs128", 1.0, 128, 2
+
+    best = Best()
+    applied_settings = {"blocksize": 128}
 
 
 class LaunchTests(unittest.TestCase):

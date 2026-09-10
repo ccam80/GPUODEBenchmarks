@@ -1,4 +1,4 @@
-"""Trial records: run specs merged by trial_id, grouped into legs, ordered by cost, each leg led by its build line and the optimize lines the set asks for, written one JSONL line per trial."""
+"""Trial records: run specs merged by trial_id into one canonical contract over every declaration of the point, grouped into legs, ordered by cost, each leg led by its build line and the optimize lines the contract asks for, written one JSONL line per trial."""
 
 import json
 import math
@@ -9,8 +9,10 @@ from store import TRIAL_FIELDS, trial_id
 
 KINDS = ("solve", "warm", "optimize")
 AXES = ("n", "dt", "tol", "states")
+# The leg a point shared by several axes joins: a states leg is the point's own cold build, an n leg holds one stepping, the swept legs share one.
+AXIS_PRIORITY = ("states", "n", "dt", "tol")
 TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "kind", "finals", "transfers", "leg", "axis", "ordinal", "cold",
-                             "watchdog_s")
+                             "watchdog_s", "sets")
 TRANSFERS_ORDER = ("both", "none")
 LEG_FIELDS = ("problem", "system_params", "algorithm", "controller", "precision")
 
@@ -35,7 +37,7 @@ def ordinal_key(spec):
             _states(spec))
 
 
-def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False, watchdog_s=None):
+def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False, watchdog_s=None, sets=()):
     record = {field: spec[field] for field in TRIAL_FIELDS}
     record["trial_id"] = trial_id(spec)
     record["kind"] = kind
@@ -46,6 +48,7 @@ def _record(spec, kind, transfers, finals, leg, axis, ordinal, cold=False, watch
     record["ordinal"] = int(ordinal)
     record["cold"] = bool(cold)
     record["watchdog_s"] = float(_budget(spec) if watchdog_s is None else watchdog_s)
+    record["sets"] = sorted(sets)
     return record
 
 
@@ -54,31 +57,57 @@ def _budget(spec):
     return float(spec.get("watchdog_s", WATCHDOG_SECONDS))
 
 
-def _optimize_record(entry, leg, axis, ordinal):
-    table = entry["optimize"]
+def _optimize_record(entry, table, leg, axis, ordinal):
     n = entry["spec"]["n"] if table["n"] == "solve" else int(table["n"])
     return _record(dict(entry["spec"], n=n), "optimize", [], False, leg, axis, ordinal,
-                   watchdog_s=entry["watchdog_s"])
+                   watchdog_s=entry["watchdog_s"], sets=entry["sets"])
 
 
-def build_trials(specs):
-    """Trial records from specs: same trial_id merges (first leg kept, transfers union, finals true wins, the larger watchdog budget); per package leg, a warm line (cold when the set builds cold), optimize lines once per leg or before every solve as the set's optimize table says, then the solves in cost order."""
+def canonical_optimize(tables):
+    """One optimize table from every declaration's: per leg when any says leg, else per solve when any says solve, else None; n the largest integer among the declarations of that per, else "solve"."""
+    tables = [t for t in tables if t is not None]
+    if not tables:
+        return None
+    per = "leg" if any(t["per"] == "leg" for t in tables) else "solve"
+    counts = [int(t["n"]) for t in tables if t["per"] == per and t["n"] != "solve"]
+    return {"n": max(counts) if counts else "solve", "per": per}
+
+
+def _entry(spec):
+    return {"spec": spec, "transfers": set(), "finals": False, "cold": False, "axis": spec["axis"],
+            "tables": [], "watchdog_s": 0.0, "sets": set()}
+
+
+def _fold(entry, spec):
+    """Fold one declaration of a point into its entry: transfers union, finals and cold true over false, every optimize table, the larger watchdog budget, the axis of highest priority, the set's name."""
+    entry["transfers"] |= set(spec["transfers"])
+    entry["finals"] = entry["finals"] or bool(spec["finals"])
+    entry["cold"] = entry["cold"] or spec["build"] == "cold"
+    entry["tables"].append(spec["optimize"])
+    entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
+    if AXIS_PRIORITY.index(spec["axis"]) < AXIS_PRIORITY.index(entry["axis"]):
+        entry["axis"] = spec["axis"]
+    if spec.get("set"):
+        entry["sets"].add(spec["set"])
+
+
+def build_trials(specs, declared=None):
+    """Trial records from the requested specs: specs of one trial_id, in `specs` and among `declared` (every set file's specs, the requested ones when None), merge into one contract independent of their order (see _fold); per package leg, a warm line (cold when any of the leg's points builds cold), one optimize line when any point asks per leg, one before every solve that asks per solve, then the solves in cost order."""
     merged = {}
     order = []
     for spec in specs:
         ident = trial_id(spec)
+        if ident not in merged:
+            merged[ident] = _entry(spec)
+            order.append(ident)
+        _fold(merged[ident], spec)
+    for spec in (specs if declared is None else declared):
+        ident = trial_id(spec)
         if ident in merged:
-            entry = merged[ident]
-            entry["transfers"] |= set(spec["transfers"])
-            entry["finals"] = entry["finals"] or bool(spec["finals"])
-            entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
-            continue
-        merged[ident] = {"spec": spec, "transfers": set(spec["transfers"]),
-                         "finals": bool(spec["finals"]), "axis": spec["axis"],
-                         "build": spec["build"], "optimize": spec["optimize"],
-                         "watchdog_s": _budget(spec),
-                         "leg": leg_name(spec, spec["axis"])}
-        order.append(ident)
+            _fold(merged[ident], spec)
+    for entry in merged.values():
+        entry["optimize"] = canonical_optimize(entry["tables"])
+        entry["leg"] = leg_name(entry["spec"], entry["axis"])
     # A leg name repeats across packages; each package's trial file holds its own legs.
     legs = {}
     for ident in order:
@@ -90,15 +119,19 @@ def build_trials(specs):
         first = entries[0]
         axis = first["axis"]
         trials.append(_record(first["spec"], "warm", [], False, leg, axis, 0,
-                              cold=first["build"] == "cold", watchdog_s=first["watchdog_s"]))
-        if first["optimize"] is not None and first["optimize"]["per"] == "leg":
-            trials.append(_optimize_record(first, leg, axis, 0))
+                              cold=any(e["cold"] for e in entries),
+                              watchdog_s=max(e["watchdog_s"] for e in entries),
+                              sets=set().union(*(e["sets"] for e in entries))))
+        leg_table = canonical_optimize([e["optimize"] for e in entries
+                                        if e["optimize"] is not None and e["optimize"]["per"] == "leg"])
+        if leg_table is not None:
+            trials.append(_optimize_record(first, leg_table, leg, axis, 0))
         for ordinal, entry in enumerate(entries):
             if entry["optimize"] is not None and entry["optimize"]["per"] == "solve":
-                trials.append(_optimize_record(entry, leg, axis, ordinal))
+                trials.append(_optimize_record(entry, entry["optimize"], leg, axis, ordinal))
             transfers = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
             trials.append(_record(entry["spec"], "solve", transfers, entry["finals"], leg,
-                                  axis, ordinal, watchdog_s=entry["watchdog_s"]))
+                                  axis, ordinal, watchdog_s=entry["watchdog_s"], sets=entry["sets"]))
     return trials
 
 
@@ -107,6 +140,14 @@ def by_package(trials):
     groups = {}
     for trial in trials:
         groups.setdefault(trial["package"], []).append(trial)
+    return groups
+
+
+def legs_of(trials):
+    """{(package, leg): trials} in first appearance, each leg's trials in file order."""
+    groups = {}
+    for trial in trials:
+        groups.setdefault((trial["package"], trial["leg"]), []).append(trial)
     return groups
 
 
@@ -121,7 +162,8 @@ def write_jsonl(path, trials):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         for trial in trials:
-            line = {key: _json_value(trial[key]) for key in TRIAL_KEYS}
+            line = {key: _json_value(trial.get("sets", []) if key == "sets" else trial[key])
+                    for key in TRIAL_KEYS}
             handle.write(json.dumps(line, allow_nan=False) + "\n")
     return path
 
@@ -140,6 +182,8 @@ def read_jsonl(path):
                     record[field] = float("nan")
             if record.get("watchdog_s") is None:
                 record["watchdog_s"] = WATCHDOG_SECONDS
+            if record.get("sets") is None:
+                record["sets"] = []
             trials.append(record)
     return trials
 

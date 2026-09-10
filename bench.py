@@ -2,15 +2,14 @@
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
--p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists; --controller takes a spec controller or a set token such as matched.
---resume runs the transfers rows that are missing; --no-overwrite those missing or NaN; a trial keeps asking finals once a row of its carries them; --floor lets runners keep the lower finite time.
+-p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits when no grid of the named sets lists one; --controller takes a spec controller or a set token such as matched.
+A point every set file declares runs under one contract whatever sets are named or their order: cold build, finals, per-leg optimize, transfers and the watchdog budget each true or largest over its declarations.
+--resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimize lines; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
 
 import argparse
-import json
-import math
 import os
 import platform
 import subprocess
@@ -39,11 +38,13 @@ def _under_suite_python():
 
 _under_suite_python()
 
+import completeness  # noqa: E402
+import cubie_adapter  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
 import sync  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit, run_ids  # noqa: E402
+from abandon import abandon_after_hard_exit  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
@@ -144,42 +145,60 @@ def resolve(args):
 
 # ------------------------------------------------------------------ planning
 
-def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
-    """Trials still to run: a solve trial keeps the transfers whose row is missing (resume) or missing or NaN (no_overwrite); one that asks finals, or whose recorded row carries them, runs its last transfers again while no row carries finals and asks them; warm and optimize trials follow their leg."""
+def source_hashes(package, systems):
+    """The current source hash of each cubie system, from the package's own interpreter; SystemExit when it cannot say."""
+    try:
+        return cubie_adapter.source_hashes(package, systems)
+    except (RuntimeError, OSError, ValueError) as exc:
+        raise SystemExit("cannot validate {0}'s optimize records without its source hashes: {1}".format(
+            package, exc))
+
+
+def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+    """Trials still to run: a solve trial keeps the transfers the store lacks a complete row for (completeness.audit: a row, finite under no_overwrite, its cold build time, a readable finals file while finals are wanted, a valid optimize record), every one when its optimize record is stale, its last one alone for missing finals; a warm line follows its leg and an optimize line the solves it governs."""
     if not (resume or no_overwrite):
         return list(trial_list)
-    recorded = {row["run_id"]: row for row in store.Store(root).rows(key=key)}
+    mode = "no_overwrite" if no_overwrite else "resume"
+    audits = completeness.audit(trial_list, key, store.Store(root), mode, sources)
+    governing = completeness.governing_lines(trial_list)
     kept = {}
     live_legs = set()
+    lines = set()
     for trial in trial_list:
         if trial["kind"] != "solve":
             continue
-        rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
-        missing = [t for t in trial["transfers"]
-                   if rows[t] is None or (no_overwrite and not math.isfinite(rows[t]["min_ms"]))]
-        has_finals = any(r is not None and r["finals"] for r in rows.values())
-        finals = bool(trial["finals"]) or has_finals
-        if not missing and (not finals or has_finals):
+        missing = audits[trial["trial_id"]]
+        if missing.complete():
             continue
-        kept[trial["trial_id"]] = dict(trial, transfers=missing or trial["transfers"][-1:], finals=finals)
+        kept[trial["trial_id"]] = dict(trial, transfers=missing.transfers(), finals=missing.wants_finals)
         live_legs.add((trial["package"], trial["leg"]))
+        if governing[trial["trial_id"]] is not None:
+            lines.add(id(governing[trial["trial_id"]]))
     return [kept[t["trial_id"]] if t["kind"] == "solve" else t for t in trial_list
             if t["kind"] == "solve" and t["trial_id"] in kept
-            or t["kind"] != "solve" and (t["package"], t["leg"]) in live_legs]
+            or t["kind"] == "warm" and (t["package"], t["leg"]) in live_legs
+            or t["kind"] == "optimize" and id(t) in lines]
 
 
-def plan_trials(plan, key, root, resume=False, no_overwrite=False):
-    """{package: trials} for the flags, in run order."""
-    specs = sets.expand(plan["sets"], key, root, packages=plan["packages"],
-                        problems=plan["problems"], algorithms=plan["algorithms"], n=plan["n"])
-    specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
-                        tols=plan["tols"], dts=plan["dts"])
-    unused = sorted(set(plan["n"] or []) - {spec["n"] for spec in specs})
-    if unused:
+def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
+    """The trials of the flags: the named sets' specs, narrowed, each merged with its declarations in every set file; SystemExit when -n names a count no grid of the named sets lists."""
+    unknown = sorted(set(plan["n"] or []) - set(sets.declared_counts(plan["sets"], sets_dir)))
+    if unknown:
         raise SystemExit("-n {0}: no grid of {1} lists {2}".format(
             ",".join(str(c) for c in plan["n"]), ",".join(plan["sets"]),
-            ", ".join(str(c) for c in unused)))
-    all_trials = continue_filter(trials_mod.build_trials(specs), key, root, resume, no_overwrite)
+            ", ".join(str(c) for c in unknown)))
+    narrowing = dict(packages=plan["packages"], problems=plan["problems"],
+                     algorithms=plan["algorithms"], n=plan["n"], sets_dir=sets_dir)
+    specs = sets.expand(plan["sets"], key, root, **narrowing)
+    specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
+                        tols=plan["tols"], dts=plan["dts"])
+    return trials_mod.build_trials(specs, sets.declarations(key, root, **narrowing))
+
+
+def plan_trials(plan, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+    """{package: trials} for the flags, in run order."""
+    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite,
+                                 sources)
     groups = trials_mod.by_package(all_trials)
     return {package: groups[package] for package in launch.ordered(list(groups))}
 

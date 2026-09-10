@@ -24,6 +24,7 @@ from algorithms import algorithm_facts, load_algorithms  # noqa: E402
 from problems import load_problems  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 DATA = os.path.join(ROOT, "data")
+NAN = float("nan")
 OPTIMIZE_N = 262144
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
@@ -152,6 +153,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(kind_counts(built, "jax"), {"solve": 360, "warm": 30})
         self.assertEqual(kind_counts(built, "julia_gpu"), {"solve": 960, "warm": 80})
         self.assertEqual({t["cold"] for t in built}, {False})
+        self.assertEqual({tuple(t["sets"]) for t in built}, {("perf",)})
         # One optimize per leg at the set's n, right after the warm line.
         cubie = [t for t in built if t["package"] == "cubie"]
         self.assertEqual([t["kind"] for t in cubie[:4]], ["warm", "optimize", "solve", "solve"])
@@ -341,6 +343,14 @@ class ShippedSetTests(unittest.TestCase):
                 self.assertEqual(set(spec), set(sets.SPEC_KEYS) | set(sets.EXTRA_KEYS), name)
                 store.spec_of(dict(spec, transfers=spec["transfers"][0], key=KEY))
 
+    def test_declarations_expand_every_set_file_and_declared_counts_union_the_grids(self):
+        every = sets.declarations(KEY, root=DATA, packages=["julia_cpu"], problems=["lorenz"])
+        self.assertEqual({s["set"] for s in every}, {"golden", "golden_grid"})
+        self.assertEqual({s["n"] for s in every}, {1024, 131072})
+        self.assertEqual(sets.declared_counts(["golden_grid"]), [1024, 131072])
+        self.assertEqual(sets.declared_counts(["perf", "golden_grid"]), sorted(set(PERF_N) | {1024}))
+        self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
+
     def test_set_module_cli_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "sets.py"), "golden", KEY],
                              capture_output=True, text=True, cwd=ROOT)
@@ -500,7 +510,8 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertEqual(len(shared), 1)
         self.assertEqual(shared[0]["transfers"], ["both", "none"])
         self.assertTrue(shared[0]["finals"])
-        # The first set's leg keeps the trial; the perf leg is on the n axis.
+        self.assertEqual(shared[0]["sets"], ["golden_grid", "perf"])
+        # The n axis outranks the swept one, whichever set comes first.
         self.assertEqual(shared[0]["leg"], "lorenz/{}/kvaerno3/fixed/float32/n")
         self.assertEqual(shared[0]["ordinal"], PERF_N.index(131072))
         dt_leg = [t for t in built if t["leg"] == "lorenz/{}/kvaerno3/fixed/float32/dt" and t["kind"] == "solve"]
@@ -508,12 +519,97 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertNotIn(2.0 ** -10, [t["dt"] for t in dt_leg])
         ids = [t["trial_id"] for t in built if t["kind"] == "solve"]
         self.assertEqual(len(ids), len(set(ids)))
-        # Reversed order: the golden_grid leg keeps it.
         reverse = trials.build_trials(sets.expand(["golden_grid", "perf"], KEY, self.root,
                                                   packages=["jax"], problems=["lorenz"]))
-        shared = [t for t in reverse if t["trial_id"] == shared[0]["trial_id"] and t["kind"] == "solve"][0]
-        self.assertEqual(shared["leg"], "lorenz/{}/kvaerno3/fixed/float32/dt")
-        self.assertEqual(shared["transfers"], ["both", "none"])
+        again = [t for t in reverse if t["trial_id"] == shared[0]["trial_id"] and t["kind"] == "solve"][0]
+        self.assertEqual(again, shared[0])
+        self.assertEqual(sorted(t["trial_id"] + t["kind"] for t in reverse),
+                         sorted(t["trial_id"] + t["kind"] for t in built))
+
+    def test_every_set_file_declares_the_contract_of_a_requested_point(self):
+        """The lorenz96 default-states point at n = 131072: perf (warm, n axis, per-leg optimize), states (cold, states axis) and golden_grid (finals, none, per-solve optimize) declare it; each request alone yields the same trial, leg and lines."""
+        declared = sets.declarations(KEY, self.root, packages=["cubie"], problems=["lorenz96"],
+                                     algorithms=["kvaerno3"])
+        expected = None
+        for names in (["perf"], ["states"], ["golden_grid"], ["golden_grid", "perf"], ["perf", "states", "golden_grid"]):
+            specs = sets.narrow(sets.expand(names, KEY, self.root, packages=["cubie"], problems=["lorenz96"],
+                                            algorithms=["kvaerno3"]), mode="fixed")
+            built = trials.build_trials(specs, declared)
+            point = [t for t in built if t["kind"] == "solve" and t["n"] == 131072
+                     and t["system_params"] == '{"states":32}' and t["dt"] == 2.0 ** -10]
+            self.assertEqual(len(point), 1, names)
+            leg = [t for t in built if t["leg"] == point[0]["leg"]]
+            contract = ([(t["kind"], t["n"], t["cold"], t["finals"], t["transfers"], t["watchdog_s"], t["sets"])
+                         for t in leg], point[0]["leg"], point[0]["ordinal"])
+            if expected is None:
+                expected = contract
+            self.assertEqual(contract, expected, names)
+        self.assertEqual(expected[1], 'lorenz96/{"states":32}/kvaerno3/fixed/float32/states')
+        self.assertEqual(expected[0], [
+            ("warm", 131072, True, False, [], protocol.WATCHDOG_SECONDS, ["golden_grid", "perf", "states"]),
+            ("optimize", OPTIMIZE_N, False, False, [], protocol.WATCHDOG_SECONDS, ["golden_grid", "perf", "states"]),
+            ("solve", 131072, False, True, ["both", "none"], protocol.WATCHDOG_SECONDS,
+             ["golden_grid", "perf", "states"])])
+        # perf alone: the n leg of the 32-state lorenz96 runs the other eleven counts warm.
+        perf = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
+                                                           problems=["lorenz96"], algorithms=["kvaerno3"]),
+                                               mode="fixed"), declared)
+        n_leg = [t for t in perf if t["leg"] == 'lorenz96/{"states":32}/kvaerno3/fixed/float32/n']
+        self.assertEqual([t["kind"] for t in n_leg], ["warm", "optimize"] + ["solve"] * 11)
+        self.assertEqual([t["n"] for t in n_leg if t["kind"] == "solve"], [n for n in PERF_N if n != 131072])
+        self.assertEqual({t["cold"] for t in n_leg}, {False})
+        # golden_grid alone: the dt leg keeps twelve steps and the 2^-10 point runs per leg on its states leg.
+        golden = trials.build_trials(sets.narrow(sets.expand(["golden_grid"], KEY, self.root, packages=["cubie"],
+                                                             problems=["lorenz96"], algorithms=["kvaerno3"]),
+                                                 mode="fixed"), declared)
+        dt_leg = [t for t in golden if t["leg"] == 'lorenz96/{"states":32}/kvaerno3/fixed/float32/dt']
+        self.assertEqual([t["kind"] for t in dt_leg], ["warm"] + ["optimize", "solve"] * 12)
+        self.assertNotIn(2.0 ** -10, [t["dt"] for t in dt_leg if t["kind"] == "solve"])
+        # Without the declarations the request alone decides, as before.
+        alone = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
+                                                            problems=["lorenz96"], algorithms=["kvaerno3"]),
+                                                mode="fixed"))
+        self.assertEqual({t["leg"].rsplit("/", 1)[1] for t in alone}, {"n"})
+        self.assertEqual({t["finals"] for t in alone}, {False})
+
+    def test_the_canonical_merge_is_true_or_largest_over_the_declarations(self):
+        base = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32", parameter="rho",
+                    grid_scale="linear", grid_min=0.0, grid_max=21.0, n=8, grid_dtype="float32",
+                    algorithm="tsit5", controller="fixed", dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN,
+                    rtol=NAN, gains="{}", newton_atol=NAN, newton_rtol=NAN, package="cubie")
+        a = dict(base, transfers=["none"], finals=True, axis="dt", build="warm", optimize={"n": "solve", "per": "solve"},
+                 watchdog_s=60.0, set="a", stepping="fixed")
+        b = dict(base, transfers=["both"], finals=False, axis="n", build="cold", optimize={"n": 64, "per": "leg"},
+                 watchdog_s=600.0, set="b", stepping="fixed")
+        c = dict(base, transfers=["both"], finals=False, axis="tol", build="warm", optimize=None,
+                 watchdog_s=30.0, set="c", stepping="fixed")
+        for order in ((a, b, c), (c, b, a), (b, a, c)):
+            built = trials.build_trials(list(order))
+            self.assertEqual([(t["kind"], t["n"], t["cold"]) for t in built],
+                             [("warm", 8, True), ("optimize", 64, False), ("solve", 8, False)], order)
+            solve = built[-1]
+            self.assertEqual((solve["transfers"], solve["finals"], solve["watchdog_s"], solve["sets"], solve["axis"]),
+                             (["both", "none"], True, 600.0, ["a", "b", "c"], "n"))
+            self.assertEqual(built[0]["watchdog_s"], 600.0)
+        # A point requested once and declared elsewhere takes the declarations; a declaration of another point is ignored.
+        other = dict(a, n=32, set="d", build="cold")
+        built = trials.build_trials([a], declared=[b, c, other])
+        self.assertEqual([(t["kind"], t["n"], t["cold"]) for t in built],
+                         [("warm", 8, True), ("optimize", 64, False), ("solve", 8, False)])
+        self.assertEqual(built[-1]["sets"], ["a", "b", "c"])
+        self.assertEqual(trials.canonical_optimize([None, {"n": "solve", "per": "solve"}]), {"n": "solve", "per": "solve"})
+        self.assertEqual(trials.canonical_optimize([{"n": 64, "per": "leg"}, {"n": 256, "per": "solve"}]),
+                         {"n": 64, "per": "leg"})
+        self.assertEqual(trials.canonical_optimize([{"n": 64, "per": "leg"}, {"n": 256, "per": "leg"}]),
+                         {"n": 256, "per": "leg"})
+        self.assertEqual(trials.canonical_optimize([{"n": "solve", "per": "leg"}, {"n": 256, "per": "solve"}]),
+                         {"n": "solve", "per": "leg"})
+        self.assertIsNone(trials.canonical_optimize([None, None]))
+        # A leg with a per-leg point and per-solve points carries the leg line and each per-solve line.
+        mixed = trials.build_trials([dict(a, n=8), dict(a, n=32, optimize={"n": 64, "per": "leg"}), dict(a, n=128)])
+        self.assertEqual([(t["kind"], t["n"]) for t in mixed],
+                         [("warm", 8), ("optimize", 64), ("optimize", 8), ("solve", 8), ("solve", 32),
+                          ("optimize", 128), ("solve", 128)])
 
     def test_ordinals_follow_the_cost_order(self):
         built = trials.build_trials(sets.expand(["golden_grid"], KEY, self.root, packages=["jax"],

@@ -1,8 +1,9 @@
-"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows."""
+"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows, `cubie_adapter.py sources <package> <systems.json>` prints the source hash of each listed system under the package's backend."""
 
 import csv
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -231,32 +232,87 @@ def _decode(text):
     return settings
 
 
-def source_hash(solver):
-    """Identity of the code a solver's kernel is built from: the system's function hash, the installed cubie source and its version."""
+def system_source_hash(system):
+    """Identity of the code a system's kernels are built from: its function hash, the installed cubie source and its version."""
     import hashlib
     import cubie
     from cubie._utils import package_source_hash
-    text = "|".join((str(getattr(solver.system, "fn_hash", "")), package_source_hash(),
+    text = "|".join((str(getattr(system, "fn_hash", "")), package_source_hash(),
                      str(getattr(cubie, "__version__", ""))))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def source_hash(solver):
+    """system_source_hash of a solver's system."""
+    return system_source_hash(solver.system)
+
+
+def system_key(trial):
+    """(problem, system_params, precision): the system a trial's kernels are built from."""
+    return (trial["problem"], trial["system_params"], trial["precision"])
+
+
+def _hash_systems(package, systems):
+    """The source hash of each (problem, system_params, precision) under the package's backend, built in this process."""
+    import numpy as np
+    select_backend(package)
+    out = []
+    for problem, params, precision in systems:
+        states = (json.loads(params) if params else {}).get("states")
+        system, _ = build_system(problem, package, np.float64 if precision == "float64" else np.float32,
+                                 states=states)
+        out.append(system_source_hash(system))
+    return out
+
+
+def source_hashes(package, systems):
+    """{(problem, system_params, precision): source hash} of the systems under a cubie package, computed by the package's own interpreter; RuntimeError when it cannot."""
+    import tempfile
+    from launch import venv_python
+    systems = sorted(set(tuple(s) for s in systems))
+    if not systems:
+        return {}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        json.dump(systems, handle)
+        path = handle.name
+    try:
+        proc = subprocess.run([venv_python(package), os.path.abspath(__file__), "sources", package, path],
+                              capture_output=True, text=True)
+    finally:
+        os.remove(path)
+    if proc.returncode != 0:
+        raise RuntimeError("{0} source hashes failed (exit {1}): {2}".format(
+            package, proc.returncode, proc.stderr.strip()[-2000:]))
+    hashes = json.loads(proc.stdout.strip().splitlines()[-1])
+    return dict(zip(systems, hashes))
+
+
+def optimize_rows(package, key, root=None):
+    """Every optimize.csv row of a package under a key."""
+    path = optimize_path(package, key, root)
+    with _Lock(path):
+        return _load(path)
+
+
+def find_optimized(rows, ident):
+    """The last row matching an identity, else the last row of the same leg recorded without a setting (it serves every stepping); None when neither exists."""
+    matched = [row for row in rows if _same(row, ident)]
+    if not matched and ident["setting"]:
+        matched = [row for row in rows if _same(row, dict(ident, setting=""))]
+    return matched[-1] if matched else None
 
 
 def load_optimized(package, key, problem, algorithm, mode, setting,
                    states=None, root=None, controller="", gains="", source=None):
     """{'settings', 'resident_blocks'} recorded for a point, or None; with `source`, only a row recorded from that source."""
-    path = optimize_path(package, key, root)
     ident = _ident(package, key, problem, algorithm, mode, setting, states,
                    controller, gains)
-    with _Lock(path):
-        recorded = _load(path)
+    recorded = optimize_rows(package, key, root)
     if source is not None:
         recorded = [row for row in recorded if row.get("source", "") == source]
-    rows = [row for row in recorded if _same(row, ident)]
-    if not rows and ident["setting"]:
-        rows = [row for row in recorded if _same(row, dict(ident, setting=""))]
-    if not rows:
+    row = find_optimized(recorded, ident)
+    if row is None:
         return None
-    row = rows[-1]
     resident = row.get("resident_blocks", "")
     return {"settings": _decode(row["settings"]),
             "resident_blocks": int(resident) if resident else None}
@@ -301,13 +357,18 @@ def optimize_setting(trial):
     return mode, float(trial["dt"] if mode == "fixed" else trial["atol"])
 
 
-def record_optimize_timeout(trial, key, root=None):
-    """Replace the optimize row of a trial with one labelled timeout and no settings, so the leg runs at the solver's own geometry."""
+def optimize_ident(trial, key):
+    """The optimize row identity an optimize line records under a key."""
     mode, setting = optimize_setting(trial)
     params = json.loads(trial["system_params"]) if trial["system_params"] else {}
+    return _ident(trial["package"], key, trial["problem"], trial["algorithm"], mode, setting,
+                  params.get("states"), trial["controller"], trial["gains"])
+
+
+def record_optimize_timeout(trial, key, root=None):
+    """Replace the optimize row of a trial with one labelled timeout and no settings, so the leg runs at the solver's own geometry."""
     path = optimize_path(trial["package"], key, root)
-    ident = _ident(trial["package"], key, trial["problem"], trial["algorithm"], mode, setting,
-                   params.get("states"), trial["controller"], trial["gains"])
+    ident = optimize_ident(trial, key)
     row = dict(ident, source="", n=str(int(trial["n"])), label="timeout", best_ms="nan", blocksize="",
                resident_blocks="", settings="",
                recorded_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -357,6 +418,11 @@ def _cli(argv):
         algorithm = argv[3] if len(argv) > 3 else None
         problem = argv[4] if len(argv) > 4 else None
         print(clear_optimized(package, key, algorithm, problem))
+        return 0
+    if len(argv) == 3 and argv[0] == "sources":
+        with open(argv[2], encoding="utf-8") as handle:
+            systems = [tuple(item) for item in json.load(handle)]
+        print(json.dumps(_hash_systems(argv[1], systems)))
         return 0
     print(__doc__)
     return 1

@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize step; expand() turns the named sets into run specs, each with its transfers, finals flag, axis, build mode and optimize choice. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize step; expand() turns the named sets into run specs, each with its transfers, finals flag, axis, build mode and optimize choice; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -448,6 +448,22 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["stepping"] = stepping["controller"]
                                         specs.append(spec)
     return specs
+
+
+def declarations(key, root="data", packages=None, problems=None, algorithms=None, n=None,
+                 sets_dir=SETS_DIR):
+    """The specs of every set file under sets_dir, narrowed like expand(): the declarations a requested point merges with."""
+    return expand(set_names(sets_dir), key, root, packages=packages, problems=problems,
+                  algorithms=algorithms, n=n, sets_dir=sets_dir)
+
+
+def declared_counts(names, sets_dir=SETS_DIR):
+    """The trajectory counts the grids of the named sets list, sorted."""
+    counts = set()
+    for name in names:
+        for grid in load_set(name, sets_dir)["grid"]:
+            counts.update(grid["n"])
+    return sorted(counts)
 
 
 def _close(value, wanted):

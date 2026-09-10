@@ -66,16 +66,18 @@ class ListingTests(unittest.TestCase):
                          [("RK4", 8), ("RK4", 32), ("RK4", 131072), ("RKCK45", 8), ("RKCK45", 32),
                           ("RKCK45", 131072)])
         self.assertTrue(all(b["sd"] == "-" and not b["cold"] for b in lorenz))
-        # 32 states merged into perf's warm n leg.
+        # Every states point, the default 32 included, is the cold warm line of its own states leg.
         states = [b for b in builds if b["problem"] == "lorenz96" and b["cold"]]
-        self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 64, 128])
+        self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 32, 64, 128])
         self.assertEqual({b["nt"] for b in states}, {131072})
         for b in states:
             self.assertIn('{"states":' + b["sd"] + "}", b["leg"])
             self.assertTrue(b["leg"].endswith("/states"))
         merged = [b for b in builds if b["problem"] == "lorenz96" and b["sd"] == "32"]
         self.assertEqual(len(merged), 6)
-        self.assertTrue(all(not b["cold"] and b["leg"].endswith("/n") for b in merged))
+        self.assertEqual(sorted((b["nt"], b["cold"], b["leg"].rsplit("/", 1)[1]) for b in merged),
+                         [(8, False, "n"), (8, False, "n"), (32, False, "n"), (32, False, "n"),
+                          (131072, True, "states"), (131072, True, "states")])
         # Every solve trial has a build.
         for t in trial_list:
             if t["kind"] == "solve":

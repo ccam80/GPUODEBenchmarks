@@ -1,4 +1,4 @@
-"""What the analysis scripts share: the suite interpreter, the --set/--where flags, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels and the figure style."""
+"""What the analysis scripts share: the suite interpreter, the --set/--where flags, the completeness report of a named set's canonical trials under every key, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels and the figure style."""
 
 import argparse
 import csv
@@ -92,6 +92,66 @@ def store_keys(store):
         parts = os.path.normpath(path).split(os.sep)
         keys.update(p[len("key="):] for p in parts if p.startswith("key="))
     return sorted(keys)
+
+
+def canonical_trials(store, set_names, key, sets_dir=None):
+    """The canonical trials the named sets expand to under a key: every point merged with its declarations in every set file."""
+    import sets
+    import trials
+    sets_dir = sets_dir or sets.SETS_DIR
+    return trials.build_trials(sets.expand(list(set_names), key, store.root, sets_dir=sets_dir),
+                               sets.declarations(key, store.root, sets_dir=sets_dir))
+
+
+INCOMPLETE_COLUMNS = ("key", "package", "trial_id", "leg", "problem", "system_params", "precision",
+                      "algorithm", "controller", "n", "dt", "atol", "sets", "missing")
+
+
+def incomplete(store, set_names, sets_dir=None):
+    """[(key, Missing)] of every canonical trial of the sets whose rows or artifacts the store lacks under that key, in key and file order."""
+    import completeness
+    out = []
+    for key in store_keys(store):
+        trial_list = canonical_trials(store, set_names, key, sets_dir)
+        audits = completeness.audit(trial_list, key, store)
+        out.extend((key, missing) for missing in audits.values() if not missing.complete())
+    return out
+
+
+def incomplete_rows(lacking):
+    """INCOMPLETE_COLUMNS rows of incomplete()'s result."""
+    rows = []
+    for key, missing in lacking:
+        trial = missing.trial
+        row = {c: trial.get(c) for c in INCOMPLETE_COLUMNS if c in trial}
+        row.update(key=key, sets=" ".join(trial.get("sets", [])), missing=" ".join(missing.reasons()))
+        rows.append(row)
+    return rows
+
+
+def report_incomplete(store, set_names, out, sets_dir=None):
+    """Print what the store lacks of the named sets under every key and write the trials to <out>/<key>/incomplete.csv; returns the count of incomplete trials."""
+    import completeness
+    lacking = incomplete(store, set_names, sets_dir)
+    by_key = {}
+    for key, missing in lacking:
+        by_key.setdefault(key, {}).setdefault(missing.trial["package"], []).append(missing)
+    for key in store_keys(store):
+        packages = by_key.get(key, {})
+        if not packages:
+            print("{0}: complete for {1}".format(key, ", ".join(set_names)))
+            continue
+        directory = os.path.join(out, key)
+        os.makedirs(directory, exist_ok=True)
+        path = write_csv(os.path.join(directory, "incomplete.csv"), INCOMPLETE_COLUMNS,
+                         incomplete_rows([(k, m) for k, m in lacking if k == key]))
+        print("{0}: {1} incomplete trial(s) of {2}; see {3}".format(
+            key, sum(len(m) for m in packages.values()), ", ".join(set_names), path))
+        for package, missing in sorted(packages.items()):
+            counts = completeness.summary({m.trial["trial_id"]: m for m in missing})
+            print("  {0}: {1} trial(s) lacking {2}".format(
+                package, len(missing), ", ".join("{0} x{1}".format(k, v) for k, v in counts.items())))
+    return len(lacking)
 
 
 def selection_pairs(store, set_names=(), where=""):

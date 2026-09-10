@@ -1,6 +1,7 @@
 """agreement.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
 Per stepping, each package's error against the golden and the difference between every package pair, from finals paired by grid value. Per (key, problem) under plots/<key>/<problem>/: agreement.csv (one row per trial), agreement_pairs.csv (one row per pair) and one figure per leg against the swept dt/tolerance. Rows with errored_pct above 10 are dropped.
+With --set, the store is first checked against the sets' canonical trials under every key: what it lacks is printed and written to plots/<key>/incomplete.csv, and the exit code is 1 while anything is lacking.
 """
 
 import math
@@ -166,12 +167,13 @@ def main(argv=None):
     shared.check_selection(args)
     shared.pull_store(args)
     store = store_mod.Store(args.root)
+    lacking = shared.report_incomplete(store, args.set, args.out) if args.set else 0
     written = run(store, args.set, args.where, args.out)
     for path in written:
         print(path)
     if not written:
         print("no rows with finals selected")
-    return 0
+    return 1 if lacking else 0
 
 
 if __name__ == "__main__":
