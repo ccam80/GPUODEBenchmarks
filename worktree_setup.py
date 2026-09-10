@@ -1,10 +1,6 @@
-"""Symlink the main checkout's suite venvs and caches into a worktree.
+"""Symlink the main checkout's ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and ``generated`` into a worktree, copy ``.claude/settings.local.json`` with ``JULIA_PROJECT`` set to the main checkout in its ``env``, abort on a junction; ``ORCA_WORKTREE_PATH`` and ``ORCA_ROOT_PATH`` override the paths."""
 
-Symlinks ``GPU_ODE_*/venv``, ``GPU_ODE_MPGOS/build_cache`` and
-``generated``; copies ``.claude/settings.local.json``; aborts on a
-junction. Env: ``ORCA_WORKTREE_PATH``, ``ORCA_ROOT_PATH``.
-"""
-
+import json
 import os
 import shutil
 import subprocess
@@ -83,6 +79,16 @@ def copy_local_files(root, worktree):
             print(f"copied {source} -> {target}")
 
 
+def set_julia_project(root, worktree):
+    """Point the worktree's Claude session at the main checkout's Julia project through settings.local.json."""
+    target = worktree / ".claude" / "settings.local.json"
+    settings = json.loads(target.read_text(encoding="utf-8")) if target.is_file() else {}
+    settings.setdefault("env", {})["JULIA_PROJECT"] = str(root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    print(f"JULIA_PROJECT {root} (settings.local.json env; export it in other shells)")
+
+
 def verify(worktree):
     cubie_python = worktree / "GPU_ODE_CUBIE" / "venv"
     cubie_python /= "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -102,6 +108,7 @@ def main():
     print(f"root       {root}")
     share_directories(root, worktree)
     copy_local_files(root, worktree)
+    set_julia_project(root, worktree)
     verify(worktree)
 
 

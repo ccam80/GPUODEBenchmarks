@@ -57,7 +57,7 @@ JULIA = ["julia", "+1.13"]
 
 def julia(code):
     """Run one snippet in the repo's Julia project."""
-    return run_command(JULIA + ["--project=.", "-e", code])
+    return run_command(JULIA + ["--project=" + os.environ.get("JULIA_PROJECT", "."), "-e", code])
 
 
 def add_packages(names):

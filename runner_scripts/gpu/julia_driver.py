@@ -15,6 +15,7 @@ import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
 from abandon import abandon_after_hard_exit  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
+from launch import check_julia_project, julia_project  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
@@ -23,8 +24,8 @@ DATA_ROOT = os.path.join(REPO_ROOT, "data")
 
 
 def julia_command():
-    """The julia launcher as argv: `julia +1.13`, or JULIA when set."""
-    return shlex.split(os.environ.get("JULIA", "julia +1.13")) + ["--project=."]
+    """The julia launcher as argv on the project of launch.julia_project(): `julia +1.13`, or JULIA when set."""
+    return shlex.split(os.environ.get("JULIA", "julia +1.13")) + ["--project=" + julia_project()]
 
 
 def _available_ram_gb():
@@ -162,6 +163,7 @@ def main(argv=None):
     if not any(t["kind"] == "solve" for t in trial_list):
         print("julia_gpu: no solve trials")
         return 0
+    check_julia_project()
     status = prepare()
     if status:
         print("julia_gpu: the Julia project could not be instantiated (exit {0})".format(status))

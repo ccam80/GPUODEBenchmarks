@@ -205,6 +205,7 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(launch.runner_command("julia_gpu", "x.jsonl").argv[1].endswith("julia_driver.py"))
         julia_cpu = launch.runner_command("julia_cpu", "x.jsonl").argv
         self.assertEqual(julia_cpu[:2], launch.julia_command())
+        self.assertIn("--project=" + launch.julia_project(), julia_cpu)
         self.assertTrue(julia_cpu[-3].endswith("bench_ode_cpu.jl"))
         cpp = launch.runner_command("cpp", "x.jsonl").argv
         self.assertTrue(cpp[-3].endswith("run_ode_cpp.ps1") or cpp[-3].endswith("run_ode_cpp.sh"))
@@ -222,6 +223,47 @@ class LaunchTests(unittest.TestCase):
             os.environ.pop("JULIA", None)
             if saved is not None:
                 os.environ["JULIA"] = saved
+
+    def test_the_julia_project_is_the_checkout_unless_JULIA_PROJECT_names_one(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "gpu"))
+        import julia_driver
+        saved = os.environ.pop("JULIA_PROJECT", None)
+        try:
+            self.assertEqual(launch.julia_project(), launch.REPO_ROOT)
+            os.environ["JULIA_PROJECT"] = "/srv/GPUODEBenchmarks"
+            self.assertEqual(launch.julia_project(), "/srv/GPUODEBenchmarks")
+            self.assertIn("--project=/srv/GPUODEBenchmarks", launch.runner_command("julia_cpu", "x.jsonl").argv)
+            self.assertEqual(julia_driver.julia_command()[-1], "--project=/srv/GPUODEBenchmarks")
+        finally:
+            os.environ.pop("JULIA_PROJECT", None)
+            if saved is not None:
+                os.environ["JULIA_PROJECT"] = saved
+
+    def test_a_shared_project_whose_julia_sources_differ_stops_the_julia_runners(self):
+        other = tempfile.mkdtemp(prefix="julia_project_")
+        self.addCleanup(shutil.rmtree, other, True)
+        for name in launch._julia_source_files(ROOT):
+            target = os.path.join(other, name)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(os.path.join(ROOT, name), target)
+        saved = os.environ.pop("JULIA_PROJECT", None)
+        os.environ["JULIA_PROJECT"] = other
+        try:
+            self.assertEqual(launch.julia_sources_differing(other), [])
+            self.assertEqual(launch.check_julia_project(), other)
+            self.assertIn("--project=" + other, launch.runner_command("julia_cpu", "x.jsonl").argv)
+            with open(os.path.join(other, "runner_scripts", "julia_systems.jl"), "a") as handle:
+                handle.write("# edited\n")
+            self.assertEqual(launch.julia_sources_differing(other), ["runner_scripts/julia_systems.jl"])
+            with self.assertRaises(SystemExit) as caught:
+                launch.runner_command("julia_gpu", "x.jsonl")
+            self.assertIn("julia_systems.jl", str(caught.exception))
+            self.assertIn("Unset JULIA_PROJECT", str(caught.exception))
+            launch.runner_command("cubie", "x.jsonl")
+        finally:
+            os.environ.pop("JULIA_PROJECT", None)
+            if saved is not None:
+                os.environ["JULIA_PROJECT"] = saved
 
 
 class HardExitTests(unittest.TestCase):
