@@ -4,7 +4,7 @@
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
 --resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
-run pulls the store into data/ before planning and pushes this key after the runners (runner_scripts/sync.py); a machine without the store refuses to run unless --no-sync.
+run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
 
@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "runner_scripts"))
+sys.path.insert(0, os.path.join(ROOT, "sync"))
 
 import launch  # noqa: E402
 

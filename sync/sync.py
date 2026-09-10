@@ -12,7 +12,7 @@ DEFAULT_REMOTE = "box:/srv/gpuode/data"
 TRANSIENT = ("*.partial", "*.lock", "*.lock/**")
 TOOLS = ("rclone", "rsync")
 COMMANDS = ("pull", "push", "sync", "prune", "check")
-SETUP_HINT = "README.md, Using the store"
+SETUP_HINT = "sync/README.md"
 
 
 def remote_default():
@@ -158,6 +158,7 @@ def _cli(argv):
     args = parser.parse_args(argv)
     key = args.key
     if not key:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
         from bench_key import dataset_key
         key = dataset_key()
         if key.endswith("_unknown-gpu"):

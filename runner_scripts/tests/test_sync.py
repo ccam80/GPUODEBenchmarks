@@ -9,13 +9,13 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "sync"))
 
 import sync  # noqa: E402
 
 KEY = "windows_RTX-4070-SUPER"
 OTHER = "linux_RTX-2060-SUPER"
-SYNC_PY = os.path.join(os.path.dirname(HERE), "sync.py")
+SYNC_PY = os.path.join(os.path.dirname(os.path.dirname(HERE)), "sync", "sync.py")
 REMOTE = "box:/srv/gpuode/data"
 
 

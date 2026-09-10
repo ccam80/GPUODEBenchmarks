@@ -102,9 +102,9 @@ class SelectionTests(AnalysesCase):
 
     def test_flags_need_a_set_or_a_predicate(self):
         with self.assertRaises(SystemExit):
-            timing.main(["--x", "n", "--root", self.root, "--out", self.out])
+            timing.main(["--no-sync", "--x", "n", "--root", self.root, "--out", self.out])
         with self.assertRaises(SystemExit):
-            agreement.main(["--set", "perf", "--where", "n = 8", "--root", self.root, "--out", self.out])
+            agreement.main(["--no-sync", "--set", "perf", "--where", "n = 8", "--root", self.root, "--out", self.out])
 
 
 class TimingTests(AnalysesCase):
@@ -221,7 +221,7 @@ class AgreementTests(AnalysesCase):
     def test_no_finals_writes_nothing(self):
         self.row(n=8)
         self.assertEqual(agreement.run(self.store, where="n = 8", out=self.out), [])
-        self.assertEqual(agreement.main(["--where", "n = 8", "--root", self.root, "--out", self.out]), 0)
+        self.assertEqual(agreement.main(["--no-sync", "--where", "n = 8", "--root", self.root, "--out", self.out]), 0)
 
 
 if __name__ == "__main__":

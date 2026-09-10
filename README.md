@@ -75,21 +75,14 @@ python analyses/timing.py --x error  --set golden_grid  # min_ms against error
 python analyses/agreement.py --set golden_grid          # errors and package-pair differences
 ```
 
-`data/` is an untracked mirror of the store; `python runner_scripts/sync.py pull` refreshes it.
+`data/` is an untracked mirror of the store; the analyses pull it before reading.
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
 and write figures and CSVs under `plots/<key>/<problem>/`.
 
 ## Using the store
 
-The store is one `data/` tree on the store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners, or refuses to run without the store unless `--no-sync`. Setup:
-
-1. Join the tailnet.
-2. Add the machine's public key to the store user's `authorized_keys` on the box.
-3. `ssh-keyscan -t rsa,ecdsa,ed25519 <box> >> ~/.ssh/known_hosts`
-4. `rclone config create box sftp host <box> user <user> key_file ~/.ssh/id_ed25519 known_hosts_file ~/.ssh/known_hosts`
-
-By hand: `runner_scripts/sync.py pull|push|sync|prune|check`. Push never deletes; `prune` mirrors your key after local deletions and refuses an empty partition. `GPUODE_STORE_REMOTE` overrides the remote; rsync over the `box` ssh host stands in when rclone is absent. An error is the RMS
+The store is one `data/` tree on a store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners; an analysis pulls before reading; both refuse to run without the store unless `--no-sync`. `sync/README.md` covers setting up the box, connecting a machine and `sync/sync.py`. An error is the RMS
 over every state of the difference from the julia_cpu float64 finals, paired
 by exact grid value, over the trajectories neither side flags as errored.
 
