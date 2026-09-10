@@ -222,7 +222,7 @@ def make_row(**fields):
 
 
 def suite_rev(repo_root=REPO_ROOT):
-    """`git rev-parse --short HEAD`, suffixed -dirty when tracked files have changed; 'unknown' outside git."""
+    """`git rev-parse --short HEAD`, suffixed -dirty when tracked files outside data/ have changed; 'unknown' outside git."""
     try:
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                              cwd=repo_root, capture_output=True, text=True,
@@ -230,7 +230,7 @@ def suite_rev(repo_root=REPO_ROOT):
         if rev.returncode != 0:
             return "unknown"
         status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
+            ["git", "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude)data"],
             cwd=repo_root, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return "unknown"

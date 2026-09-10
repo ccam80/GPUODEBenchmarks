@@ -609,6 +609,26 @@ class SuiteRevTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp, True)
         self.assertEqual(store.suite_rev(tmp), "unknown")
 
+    def test_suite_rev_is_dirty_for_changed_sources_not_changed_data(self):
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        os.makedirs(os.path.join(repo, "data"))
+        for name in ("bench.py", os.path.join("data", "rows.parquet")):
+            with open(os.path.join(repo, name), "w") as handle:
+                handle.write("one\n")
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t")
+        for argv in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "one"]):
+            subprocess.run(["git"] + argv, cwd=repo, check=True, env=env, capture_output=True)
+        clean = store.suite_rev(repo)
+        self.assertNotIn("-dirty", clean)
+        with open(os.path.join(repo, "data", "rows.parquet"), "w") as handle:
+            handle.write("two\n")
+        self.assertEqual(store.suite_rev(repo), clean)
+        with open(os.path.join(repo, "bench.py"), "w") as handle:
+            handle.write("two\n")
+        self.assertEqual(store.suite_rev(repo), clean + "-dirty")
+
 
 if __name__ == "__main__":
     unittest.main()
