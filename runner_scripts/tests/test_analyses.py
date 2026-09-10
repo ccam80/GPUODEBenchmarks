@@ -107,6 +107,66 @@ class SelectionTests(AnalysesCase):
             agreement.main(["--no-sync", "--set", "perf", "--where", "n = 8", "--root", self.root, "--out", self.out])
 
 
+class CompletenessTests(AnalysesCase):
+    """A named set is expanded and canonicalized under every key and what the store lacks of it is reported before anything is compared."""
+
+    SET = ('[set]\npackages = ["cpp"]\nproblems = ["lorenz"]\nalgorithms = ["classical-rk4"]\nfinals = {finals}\n'
+           'transfers = ["none"]\n[[grid]]\nn = [8, 32]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n')
+
+    def setUp(self):
+        super().setUp()
+        self.sets_dir = os.path.join(self.tmp, "sets")
+        os.makedirs(self.sets_dir)
+        with open(os.path.join(self.sets_dir, "tiny.toml"), "w", encoding="utf-8") as handle:
+            handle.write(self.SET.format(finals="false"))
+        with open(os.path.join(self.sets_dir, "keep.toml"), "w", encoding="utf-8") as handle:
+            handle.write(self.SET.format(finals="true").replace("n = [8, 32]", "n = [32]"))
+
+    def point(self, n, **overrides):
+        return spec(package="cpp", algorithm="classical-rk4", dt=0.5, transfers="none", n=n, **overrides)
+
+    def test_the_report_names_every_lacking_row_and_artifact_under_each_key(self):
+        trial_list = shared.canonical_trials(self.store, ["tiny"], KEY, self.sets_dir)
+        self.assertEqual([(t["n"], t["finals"], t["sets"]) for t in trial_list],
+                         [(8, False, ["tiny"]), (32, True, ["keep", "tiny"])])
+        self.store.record(dict(self.point(8), states=3, min_ms=1.0))
+        self.store.record(dict(self.point(32), states=3, min_ms=1.0))
+        self.store.record(dict(self.point(8, key=OTHER_KEY), states=3, min_ms=NAN))
+        lacking = shared.incomplete(self.store, ["tiny"], self.sets_dir)
+        self.assertEqual([(key, m.trial["n"], m.reasons()) for key, m in lacking],
+                         [(OTHER_KEY, 32, ["row:none", "finals"]), (KEY, 32, ["finals"])])
+        count = shared.report_incomplete(self.store, ["tiny"], self.out, self.sets_dir)
+        self.assertEqual(count, 2)
+        for key in (KEY, OTHER_KEY):
+            table = read_csv(os.path.join(self.out, key, "incomplete.csv"))
+            self.assertEqual(list(table[0]), list(shared.INCOMPLETE_COLUMNS))
+            self.assertEqual([(r["key"], r["package"], r["n"], r["sets"], r["missing"]) for r in table],
+                             [(key, "cpp", "32", "keep tiny", "row:none finals" if key == OTHER_KEY else "finals")])
+        # The 32-point's finals file completes this key; the other key still lacks its row.
+        fields = self.point(32)
+        relative = self.store.record_finals(fields, np.zeros((32, 3)), np.full(32, 1.0))
+        self.store.record(dict(fields, states=3, min_ms=1.0, finals=relative))
+        self.assertEqual([(key, m.trial["n"]) for key, m in shared.incomplete(self.store, ["tiny"], self.sets_dir)],
+                         [(OTHER_KEY, 32)])
+        other = self.point(32, key=OTHER_KEY)
+        self.store.record(dict(other, states=3, min_ms=NAN, finals=relative))
+        self.assertEqual([(key, m.reasons()) for key, m in shared.incomplete(self.store, ["tiny"], self.sets_dir)],
+                         [(OTHER_KEY, ["finals"])])
+        self.store.record_finals(other, np.zeros((32, 3)), np.full(32, 1.0))
+        self.assertEqual(shared.incomplete(self.store, ["tiny"], self.sets_dir), [])
+        self.assertEqual(shared.report_incomplete(self.store, ["tiny"], self.out, self.sets_dir), 0)
+
+    def test_the_scripts_report_a_shipped_set_the_store_lacks_and_exit_1(self):
+        self.row(n=8)
+        self.assertEqual(timing.main(["--no-sync", "--set", "perf", "--x", "n", "--root", self.root, "--out", self.out]), 1)
+        self.assertTrue(os.path.isfile(os.path.join(self.out, KEY, "incomplete.csv")))
+        self.assertEqual(agreement.main(["--no-sync", "--set", "golden", "--root", self.root, "--out", self.out]), 1)
+        table = read_csv(os.path.join(self.out, KEY, "incomplete.csv"))
+        self.assertEqual({r["package"] for r in table}, {"julia_cpu"})
+        self.assertEqual(len(table), 8)
+        self.assertEqual(agreement.main(["--no-sync", "--where", "n = 8", "--root", self.root, "--out", self.out]), 0)
+
+
 class TimingTests(AnalysesCase):
     def test_n_axis_one_figure_per_stepping_and_transfers_with_a_series_per_package(self):
         for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0)):

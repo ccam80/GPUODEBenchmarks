@@ -110,7 +110,7 @@ so a worktree shares its pkgimage instead of precompiling its own. A
 julia run stops when the shared project's Julia sources differ from the
 checkout's; unset the variable to run the checkout's own files.
 `runner_scripts/gpu/julia_driver.py` runs `Pkg.instantiate()` and
-`Pkg.precompile()` once before its legs. `bench_ode_cpu.jl` and
+`Pkg.precompile()` once before its builds. `bench_ode_cpu.jl` and
 `bench_ode_gpu.jl` record through `runner_scripts/results.jl`, which calls
 the store CLI under the suite interpreter, or under the `python` on PATH
 when the cubie venv is absent; that interpreter then needs `pyarrow` and

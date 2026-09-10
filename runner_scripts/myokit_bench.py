@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The myokit_cuda adapter for runner.py: a leg is one compiled Myokit CUDA model, its CellML picked or generated for the trial's problem and state count (compiled into a fresh CuPy kernel cache when cold); a solve runs the generated forward-Euler kernel for the trial's step count through host arrays (`both`) or on the resident device inputs (`none`), which the kernel integrates in place and `reset` restores before each repeat. The exported kernel is Euler in float32 at a fixed step, so `fixed` is the one controller a trial may name."""
+"""The myokit_cuda adapter for runner.py: a build is one compiled Myokit CUDA model, its CellML picked or generated for the trial's problem and state count (compiled into a fresh CuPy kernel cache when cold); a solve runs the generated forward-Euler kernel for the trial's step count through host arrays (`both`) or on the resident device inputs (`none`), which the kernel integrates in place and `reset` restores before each repeat. The exported kernel is Euler in float32 at a fixed step, so `fixed` is the one controller a trial may name."""
 
 import json
 import math
@@ -164,9 +164,9 @@ def load_model_class():
     return MyokitCudaModel
 
 
-# ---------------------------------------------------------------------- leg
+# ---------------------------------------------------------------------- build
 
-class Leg:
+class Build:
     """One compiled model; the host initial states and the resident device inputs of the current n."""
 
     def __init__(self, trial, cold=False, model_class=None):
@@ -260,27 +260,27 @@ class MyokitAdapter:
     def states(self, trial):
         return int(problem_row(trial)["states"])
 
-    def build_leg(self, trial, cold=False):
-        return Leg(trial, cold, self.model_class)
+    def build(self, trial, cold=False):
+        return Build(trial, cold, self.model_class)
 
-    def compile(self, leg, trial, values):
+    def compile(self, build, trial, values):
         """The kernel compiles when the model is built; nothing more to warm."""
 
-    def optimize(self, leg, trial, values):
+    def optimize(self, build, trial):
         raise NotImplementedError("myokit_cuda has no launch geometry to optimize")
 
-    def solve(self, leg, trial, values, transfers):
+    def solve(self, build, trial, values, transfers):
         if transfers == "both":
-            return leg.host_solve(trial, values)
-        return leg.device_solve(trial, values)
+            return build.host_solve(trial, values)
+        return build.device_solve(trial, values)
 
-    def reset(self, leg, trial, values, transfers):
+    def reset(self, build, trial, values, transfers):
         """Before a repeated resident solve, put the initial states back; a host solve uploads its own."""
         if transfers == "none":
-            leg.restore(int(values.shape[0]))
+            build.restore(int(values.shape[0]))
 
-    def finals(self, leg, result):
-        return leg.finals(result)
+    def finals(self, build, result):
+        return build.finals(result)
 
 
 def run(argv):

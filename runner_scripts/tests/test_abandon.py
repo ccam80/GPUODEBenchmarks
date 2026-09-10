@@ -1,4 +1,4 @@
-"""abandon.py: the rows a hard exit implies for a solve, a warm and an optimize line, and the trials left to run."""
+"""abandon.py: the abandon rule over a family, the rows a hard exit implies while solving or optimizing, the store-driven abandonment and the trials left to run."""
 
 import json
 import math
@@ -19,13 +19,15 @@ KEY = "windows_RTX-4070-SUPER"
 NAN = float("nan")
 
 
-def spec(n, optimize=None):
-    return dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
-                parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
-                grid_dtype="float32", algorithm="tsit5", controller="fixed", dt=2.0 ** -10,
-                dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}", newton_atol=NAN,
-                newton_rtol=NAN, package="cubie", transfers=["both", "none"], finals=False,
-                axis="n", build="warm", optimize=optimize, set="test", stepping="fixed")
+def spec(n, optimize=None, **overrides):
+    fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
+                  parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
+                  grid_dtype="float32", algorithm="tsit5", controller="fixed", dt=2.0 ** -10,
+                  dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}", newton_atol=NAN,
+                  newton_rtol=NAN, package="cubie", transfers=["both", "none"], finals=False,
+                  build="warm", optimize=optimize, set="test", stepping="fixed")
+    fields.update(overrides)
+    return fields
 
 
 class AbandonTests(unittest.TestCase):
@@ -35,57 +37,94 @@ class AbandonTests(unittest.TestCase):
         self.data = store.Store(os.path.join(self.tmp, "data"))
         self.progress = os.path.join(self.tmp, "cubie.jsonl.progress")
 
-    def progress_for(self, trial):
+    def progress_for(self, trial, stage="solve"):
         with open(self.progress, "w", encoding="utf-8") as handle:
-            json.dump({"trial_id": trial["trial_id"], "kind": trial["kind"], "started_utc": "x"}, handle)
+            json.dump({"trial_id": trial["trial_id"], "stage": stage, "started_utc": "x"}, handle)
 
     def record_ok(self, trial):
         fields = {f: trial[f] for f in store.TRIAL_FIELDS}
         for transfers in trial["transfers"]:
             self.data.record(dict(fields, transfers=transfers, key=KEY, states=3, min_ms=1.0))
 
-    def test_a_solve_hard_exit_abandons_the_higher_ordinals_and_keeps_the_rest(self):
-        trial_list = trials.build_trials([spec(8), spec(32), spec(128)])
-        solves = [t for t in trial_list if t["kind"] == "solve"]
-        self.record_ok(solves[0])
-        self.progress_for(solves[1])
+    def test_the_abandon_rule_gives_up_the_harder_runs_of_a_family(self):
+        def line(n, **overrides):
+            return trials.build_trials([spec(n, **overrides)])[0]
+
+        base = line(32)
+        failures = [(base, "timeout")]
+        self.assertIsNone(abandon.abandon_reason(line(8), failures))
+        self.assertIsNone(abandon.abandon_reason(line(32), failures))
+        self.assertEqual(abandon.abandon_reason(line(128), failures), "abandoned: timeout at " + base["trial_id"])
+        self.assertEqual(abandon.abandon_reason(line(32, dt=2.0 ** -12), failures), "abandoned: timeout at " + base["trial_id"])
+        self.assertIsNone(abandon.abandon_reason(line(128, dt=0.5), failures))
+        self.assertIsNone(abandon.abandon_reason(line(128, algorithm="euler"), failures))
+        self.assertIsNone(abandon.abandon_reason(line(128, precision="float64"), failures))
+        harder = line(32, problem="lorenz96", system_params='{"states":64}', parameter="F", grid_max=16.0)
+        easier = line(32, problem="lorenz96", system_params='{"states":32}', parameter="F", grid_max=16.0)
+        self.assertEqual(abandon.abandon_reason(harder, [(easier, "oom")]), "abandoned: oom at " + easier["trial_id"])
+        self.assertIsNone(abandon.abandon_reason(easier, [(harder, "oom")]))
+        history = abandon.History()
+        history.add(base, "none", "timeout")
+        history.add(line(8), "both", "error")
+        self.assertEqual(history.reason(line(128), "none"), "abandoned: timeout at " + base["trial_id"])
+        self.assertIsNone(history.reason(line(128), "both"))
+
+    def test_a_solve_hard_exit_abandons_the_harder_runs_and_keeps_the_rest(self):
+        trial_list = trials.build_trials([spec(8), spec(32), spec(128), spec(128, dt=0.5), spec(8, algorithm="euler")])
+        self.record_ok([t for t in trial_list if t["n"] == 8 and t["algorithm"] == "tsit5"][0])
+        hung = [t for t in trial_list if t["n"] == 32][0]
+        self.progress_for(hung)
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         rows = self.data.rows()
-        self.assertEqual(sorted((r["n"], r["transfers"]) for r in rows if math.isnan(r["min_ms"])),
-                         [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
+        self.assertEqual(sorted((r["n"], r["dt"], r["transfers"]) for r in rows if math.isnan(r["min_ms"])),
+                         [(32, 2.0 ** -10, "both"), (32, 2.0 ** -10, "none"), (128, 2.0 ** -10, "both"),
+                          (128, 2.0 ** -10, "none")])
         self.assertEqual({r["reason"] for r in rows if math.isnan(r["min_ms"])},
-                         {"abandoned: hard-exit at ordinal 1"})
-        self.assertEqual(remaining, [])
+                         {"abandoned: hard-exit at " + hung["trial_id"]})
+        self.assertEqual([(t["n"], t["dt"], t["algorithm"]) for t in remaining],
+                         [(8, 2.0 ** -10, "euler"), (128, 0.5, "tsit5")])
 
-    def test_an_optimize_hard_exit_records_nothing_and_drops_the_line(self):
-        table = {"n": 64, "per": "leg"}
-        trial_list = trials.build_trials([spec(8, table), spec(32, table)])
-        optimize = [t for t in trial_list if t["kind"] == "optimize"]
-        self.assertEqual(len(optimize), 1)
-        self.progress_for(optimize[0])
+    def test_an_optimize_hard_exit_records_a_timeout_row_and_drops_the_optimize(self):
+        trial_list = trials.build_trials([spec(8, {"per": "solve"}), spec(32, {"per": "solve"})])
+        self.progress_for(trial_list[0], "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual(self.data.rows(), [])
-        self.assertEqual([t["kind"] for t in remaining], ["warm", "solve", "solve"])
-        self.assertEqual([t["n"] for t in remaining if t["kind"] == "solve"], [8, 32])
+        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, None), (32, "solve")])
         import csv
         with open(os.path.join(self.data.root, "key=" + KEY, "package=cubie", "optimize.csv"),
                   newline="", encoding="utf-8") as handle:
             recorded = list(csv.DictReader(handle))
         self.assertEqual(len(recorded), 1)
-        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["setting"],
-                          recorded[0]["mode"], recorded[0]["settings"]),
-                         ("timeout", "64", "", "fixed", ""))
-
-    def test_a_per_solve_optimize_hard_exit_keeps_its_solve(self):
-        table = {"n": "solve", "per": "solve"}
-        trial_list = trials.build_trials([spec(8, table), spec(32, table)])
-        second = [t for t in trial_list if t["kind"] == "optimize"][1]
-        self.progress_for(second)
+        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["per"],
+                          recorded[0]["stepping"].split(";")[0], recorded[0]["settings"]),
+                         ("timeout", "8", "solve", "dt=0.0009765625", ""))
+        # A per-kernel optimize that hangs is dropped from every line of its kernel; other kernels keep theirs.
+        table = {"per": "kernel"}
+        trial_list = trials.build_trials([spec(8, table), spec(32, table), spec(8, table, dt=0.5),
+                                          spec(8, table, algorithm="euler")])
+        hung = [t for t in trial_list if t["algorithm"] == "tsit5" and t["dt"] == 2.0 ** -10 and t["n"] == 8][0]
+        self.progress_for(hung, "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
-        self.assertEqual(self.data.rows(), [])
-        self.assertEqual([(t["kind"], t["n"]) for t in remaining],
-                         [("warm", 8), ("optimize", 8), ("solve", 8), ("solve", 32)])
+        self.assertEqual([(t["n"], t["dt"], t["algorithm"], t["optimize"]) for t in remaining],
+                         [(8, 2.0 ** -10, "euler", "kernel"), (8, 0.5, "tsit5", "kernel"),
+                          (8, 2.0 ** -10, "tsit5", None), (32, 2.0 ** -10, "tsit5", None)])
 
+    def test_the_stores_failures_abandon_the_harder_runs_before_they_spawn(self):
+        trial_list = trials.build_trials([spec(8), spec(32), spec(128)])
+        fields = {f: trial_list[1][f] for f in store.TRIAL_FIELDS}
+        self.data.record(dict(fields, transfers="none", key=KEY, states=3, min_ms=NAN,
+                              reason="timeout: 130.0s over the 120s cap"))
+        self.data.record(dict(fields, transfers="both", key=KEY, states=3, min_ms=1.0))
+        kept = abandon.abandon_from_store(self.data, KEY, trial_list, "rev")
+        self.assertEqual([(t["n"], t["transfers"]) for t in kept],
+                         [(8, ["both", "none"]), (32, ["both", "none"]), (128, ["both"])])
+        rows = self.data.rows(n=128)
+        self.assertEqual([(r["transfers"], r["reason"]) for r in rows],
+                         [("none", "abandoned: timeout at " + trial_list[1]["trial_id"])])
+        self.assertEqual(rows[0]["suite_rev"], "rev")
+        # A second pass records the same abandonment over the same row.
+        self.assertEqual(abandon.abandon_from_store(self.data, KEY, trial_list, "rev"), kept)
+        self.assertEqual(len(self.data.rows(n=128)), 1)
     def test_a_progress_file_naming_no_trial_returns_none(self):
         trial_list = trials.build_trials([spec(8)])
         with open(self.progress, "w", encoding="utf-8") as handle:

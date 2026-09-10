@@ -1,4 +1,4 @@
-"""julia_driver.py --trials <path> [--floor] [--jobs N] [--min-free-gb G]: one bench_ode_gpu.jl process per leg, at most --jobs at once above the RAM floor, GPU timing serialised by a pidfile, hard exits abandoned from the leg's progress file and re-run; exit 1 when a leg crashed."""
+"""julia_driver.py --trials <path> [--floor] [--jobs N] [--min-free-gb G]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), at most --jobs at once above the RAM floor, GPU timing serialised by a pidfile, hard exits abandoned from the progress file and re-run, trials the store's timeouts and OOMs make hopeless abandoned before their process spawns; exit 1 when a process crashed."""
 
 import argparse
 import os
@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 
 import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit  # noqa: E402
+from abandon import abandon_after_hard_exit, abandon_from_store  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from launch import check_julia_project, julia_project  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
@@ -65,28 +65,25 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
-def leg_files(path, trial_list):
-    """[(leg, trials, file)]: the trial file split per leg in first appearance, written beside it as <stem>.leg<k>.jsonl."""
+def build_files(path, trial_list):
+    """[(name, trials, file)]: the trial file split per build in file order, written beside it as <stem>.build<k>.jsonl."""
     stem = os.path.splitext(path)[0]
-    legs = {}
-    for trial in trial_list:
-        legs.setdefault(trial["leg"], []).append(trial)
     out = []
-    for index, (leg, rows) in enumerate(legs.items(), start=1):
-        leg_path = "{0}.leg{1:03d}.jsonl".format(stem, index)
-        trials_mod.write_jsonl(leg_path, rows)
-        out.append((leg, rows, leg_path))
+    for index, (key, rows) in enumerate(trials_mod.builds_of(trial_list), start=1):
+        build_path = "{0}.build{1:03d}.jsonl".format(stem, index)
+        trials_mod.write_jsonl(build_path, rows)
+        out.append(("/".join(str(k) for k in key), rows, build_path))
     return out
 
 
 def prepare():
-    """Instantiate and precompile the Julia project once, before the legs; the kernel package builds here."""
+    """Instantiate and precompile the Julia project once, before the builds; the kernel package builds here."""
     return subprocess.call(julia_command() + ["-e", "using Pkg; Pkg.instantiate(); Pkg.precompile()"],
                            cwd=REPO_ROOT)
 
 
-class Leg:
-    """One leg's queue of trial files: the split file, then a retry file after each hard exit that leaves trials without a row."""
+class Build:
+    """One build's queue of trial files: the split file, then a retry file after each hard exit that leaves trials without a row."""
 
     def __init__(self, name, trial_list, path):
         self.name, self.trials, self.path = name, trial_list, path
@@ -104,7 +101,7 @@ class Leg:
         return argv
 
     def after_exit(self, code, data, key, suite_rev):
-        """True when the leg has more to run: a hard exit whose abandonment leaves trials without a row is re-queued with a retry file."""
+        """True when the build has more to run: a hard exit whose abandonment leaves trials without a row is re-queued with a retry file."""
         if code == 0:
             return False
         if code != WATCHDOG_EXIT_CODE:
@@ -134,34 +131,40 @@ def _ram_allows_spawn(running_count, min_free_gb):
     return free == 0.0 or free >= min_free_gb
 
 
-def run_legs(legs, lock_path, floor, jobs, min_free_gb, data, key, suite_rev):
-    """Run the legs' processes, at most `jobs` at once while RAM allows; returns the legs."""
-    pending = list(legs)
+def run_builds(builds, lock_path, floor, jobs, min_free_gb, data, key, suite_rev):
+    """Run the builds' processes, at most `jobs` at once while RAM allows, each spawned with the trials the store's failures leave; returns the builds."""
+    pending = list(builds)
     running = {}
     while pending or running:
         while pending and len(running) < jobs and _ram_allows_spawn(len(running), min_free_gb):
-            leg = pending.pop(0)
-            print("spawning {0} ({1} trials, {2})".format(leg.name, len(leg.trials), os.path.basename(leg.path)),
+            build = pending.pop(0)
+            if build.retries == 0:
+                build.trials = abandon_from_store(data, key, build.trials, suite_rev)
+                if not any(t["transfers"] for t in build.trials):
+                    print("{0}: every trial abandoned".format(build.name), flush=True)
+                    continue
+                trials_mod.write_jsonl(build.path, build.trials)
+            print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
                   flush=True)
-            proc = subprocess.Popen(leg.command(lock_path, floor), cwd=REPO_ROOT)
-            running[proc] = leg
+            proc = subprocess.Popen(build.command(lock_path, floor), cwd=REPO_ROOT)
+            running[proc] = build
         time.sleep(2)
         for proc in list(running):
             code = proc.poll()
             if code is None:
                 continue
-            leg = running.pop(proc)
-            print("{0}: exit {1}".format(leg.name, code), flush=True)
-            if leg.after_exit(code, data, key, suite_rev):
-                pending.insert(0, leg)
-    return legs
+            build = running.pop(proc)
+            print("{0}: exit {1}".format(build.name, code), flush=True)
+            if build.after_exit(code, data, key, suite_rev):
+                pending.insert(0, build)
+    return builds
 
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     trial_list = trials_mod.read_jsonl(args.trials)
-    if not any(t["kind"] == "solve" for t in trial_list):
-        print("julia_gpu: no solve trials")
+    if not any(t["transfers"] for t in trial_list):
+        print("julia_gpu: no trials with transfers")
         return 0
     check_julia_project()
     status = prepare()
@@ -169,7 +172,7 @@ def main(argv=None):
         print("julia_gpu: the Julia project could not be instantiated (exit {0})".format(status))
         return 1
     lock_path = args.trials + ".gpulock"
-    # A lock left by a previous run's killed process would block every leg.
+    # A lock left by a previous run's killed process would block every build.
     try:
         os.remove(lock_path)
     except OSError:
@@ -177,11 +180,11 @@ def main(argv=None):
     key = dataset_key()
     data = store.Store(DATA_ROOT)
     suite_rev = store.suite_rev(REPO_ROOT)
-    legs = [Leg(name, rows, path) for name, rows, path in leg_files(args.trials, trial_list)]
-    run_legs(legs, lock_path, args.floor, args.jobs, args.min_free_gb, data, key, suite_rev)
-    failed = [leg.name for leg in legs if leg.failed]
-    hard_exits = sum(leg.hard_exits for leg in legs)
-    print("julia_gpu: {0} legs, {1} hard exit(s), {2} failed".format(len(legs), hard_exits, len(failed)))
+    builds = [Build(name, rows, path) for name, rows, path in build_files(args.trials, trial_list)]
+    run_builds(builds, lock_path, args.floor, args.jobs, args.min_free_gb, data, key, suite_rev)
+    failed = [build.name for build in builds if build.failed]
+    hard_exits = sum(build.hard_exits for build in builds)
+    print("julia_gpu: {0} builds, {1} hard exit(s), {2} failed".format(len(builds), hard_exits, len(failed)))
     for name in failed:
         print("  failed: " + name)
     return 1 if failed else 0

@@ -256,7 +256,7 @@ static bool RepeatsDone(const std::vector<double>& Timed, int Floor, int Ceiling
 
 // ----------------------------------------------------------------- watchdog
 
-// A hung kernel ends with process exit 3; the driver records the abandoned rows.
+// A hung kernel ends with process exit 3; the driver abandons what the rule implies.
 static std::atomic<long long> WatchdogDeadlineMs(0);   // 0 = disarmed
 static std::string WatchdogLabel;
 
@@ -304,13 +304,13 @@ static const char* OutcomeName(Outcome outcome)
 	}
 }
 
-struct LegResult
+struct TimingResult
 {
 	Outcome outcome;
 	double min_ms;
 	std::vector<double> samples;
 	std::string reason;
-	LegResult() : outcome(Ok), min_ms(std::nan("")) {}
+	TimingResult() : outcome(Ok), min_ms(std::nan("")) {}
 };
 
 static bool IsOom(const std::string& name, const std::string& message)
@@ -343,10 +343,10 @@ void FillSolverObject(Solver& Scan, const std::vector<PRECISION>& Values, PRECIS
 	}
 }
 
-// Time one transfers leg (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule.
-static LegResult TimeLeg(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both)
+// Time one transfers mode (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule.
+static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both)
 {
-	LegResult result;
+	TimingResult result;
 	std::vector<double> Timed;
 	int Floor = 0, Ceiling = 0;
 	const double CapMs = WatchdogSeconds() * 1000.0;
@@ -429,23 +429,6 @@ static RowValues BaseValues(const Options& o)
 	return v;
 }
 
-// NaN rows for every higher ordinal of the leg that lists these transfers.
-static std::vector<std::string> AbandonRows(const Options& o, const std::vector<Trial>& trials,
-                                            const Trial& mine, const std::string& transfers, Outcome why)
-{
-	std::vector<std::string> rows;
-	RowValues v = BaseValues(o);
-	v.reason = std::string("abandoned: ") + OutcomeName(why) + " at ordinal " + std::to_string(mine.ordinal);
-	for (size_t i = 0; i < trials.size(); i++)
-	{
-		const Trial& t = trials[i];
-		if (t.kind != "solve" || t.leg != mine.leg || t.ordinal <= mine.ordinal || !t.Lists(transfers))
-			continue;
-		rows.push_back(RowText(t, transfers, o.key, v));
-	}
-	return rows;
-}
-
 struct OutcomeLog
 {
 	std::string path;
@@ -459,7 +442,7 @@ struct OutcomeLog
 	}
 };
 
-// Record one reason for every requested transfers leg.
+// Record one reason for every requested transfers timing.
 static int FailAll(const Options& o, const std::vector<Trial>& trials, const Trial& trial, OutcomeLog& log,
                    const std::string& reason, Outcome outcome)
 {
@@ -469,11 +452,6 @@ static int FailAll(const Options& o, const std::vector<Trial>& trials, const Tri
 	for (size_t i = 0; i < o.transfers.size(); i++)
 	{
 		rows.push_back(RowText(trial, o.transfers[i], o.key, v));
-		if (outcome == Oom || outcome == Timeout)
-		{
-			std::vector<std::string> more = AbandonRows(o, trials, trial, o.transfers[i], outcome);
-			rows.insert(rows.end(), more.begin(), more.end());
-		}
 	}
 	RecordRows(o, rows);
 	for (size_t i = 0; i < o.transfers.size(); i++)
@@ -506,11 +484,11 @@ int main(int argc, char* argv[])
 	std::vector<Trial> trials = ReadTrials(o.trials);
 	const Trial* found = NULL;
 	for (size_t i = 0; i < trials.size(); i++)
-		if (trials[i].kind == "solve" && trials[i].trial_id == o.trial_id)
+		if (trials[i].trial_id == o.trial_id)
 			found = &trials[i];
 	if (!found)
 	{
-		std::cerr << "no solve trial " << o.trial_id << " in " << o.trials << std::endl;
+		std::cerr << "no trial " << o.trial_id << " in " << o.trials << std::endl;
 		return 2;
 	}
 	const Trial& trial = *found;
@@ -577,13 +555,13 @@ int main(int argc, char* argv[])
 	for (size_t li = 0; li < o.transfers.size(); li++)
 	{
 		const std::string& transfers = o.transfers[li];
-		LegResult leg = TimeLeg(Scan, Values, Duration, transfers == "both");
+		TimingResult timing = TimeTransfers(Scan, Values, Duration, transfers == "both");
 		RowValues v = BaseValues(o);
-		v.min_ms = leg.min_ms;
-		v.samples_ms = leg.samples;
-		v.reason = leg.reason;
+		v.min_ms = timing.min_ms;
+		v.samples_ms = timing.samples;
+		v.reason = timing.reason;
 		std::vector<std::string> rows;
-		if (leg.outcome == Ok)
+		if (timing.outcome == Ok)
 		{
 			// Untimed full d2h for the final states and times of every trajectory.
 			Scan.SynchroniseFromDeviceToHost(All);
@@ -594,20 +572,15 @@ int main(int argc, char* argv[])
 			v.finals = finals;
 		}
 		rows.push_back(RowText(trial, transfers, o.key, v));
-		if (leg.outcome == Timeout || leg.outcome == Oom)
-		{
-			std::vector<std::string> more = AbandonRows(o, trials, trial, transfers, leg.outcome);
-			rows.insert(rows.end(), more.begin(), more.end());
-		}
 		RecordRows(o, rows);
-		log.Add(transfers, leg.outcome);
+		log.Add(transfers, timing.outcome);
 		std::cout << "cpp " << trial.problem << " " << trial.algorithm << " " << trial.controller
 		          << " n=" << NT << " " << transfers << ": ";
-		if (leg.outcome == Ok)
-			std::cout << leg.min_ms << " ms over " << leg.samples.size() - 1 << " timed runs, errored "
+		if (timing.outcome == Ok)
+			std::cout << timing.min_ms << " ms over " << timing.samples.size() - 1 << " timed runs, errored "
 			          << v.errored_pct << "%" << std::endl;
 		else
-			std::cout << leg.reason << std::endl;
+			std::cout << timing.reason << std::endl;
 	}
 	delete ScanPtr;
 	return 0;

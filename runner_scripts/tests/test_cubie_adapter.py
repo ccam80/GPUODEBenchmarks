@@ -1,6 +1,5 @@
 """Cubie adapter: backend selection, controller mappings and the optimize store."""
 
-import math
 import os
 import shutil
 import sys
@@ -115,6 +114,18 @@ class ControllerMappingTests(unittest.TestCase):
             adapter.pi_tier_controller(3), dirk))
 
 
+NAN = float("nan")
+
+
+def line(n=8, optimize="kernel", **overrides):
+    """A cubie trial line: lorenz, fixed tsit5 at dt 2^-10."""
+    fields = dict(package="cubie", problem="lorenz", system_params="{}", precision="float32", n=n,
+                  algorithm="tsit5", controller="fixed", gains="{}", dt=2.0 ** -10, dt_min=NAN, dt_max=NAN,
+                  atol=NAN, rtol=NAN, newton_atol=NAN, newton_rtol=NAN, duration=1.0, optimize=optimize)
+    fields.update(overrides)
+    return fields
+
+
 class OptimizeStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -131,73 +142,92 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual(os.path.relpath(path, self.tmp),
                          os.path.join("data", "key=k", "package=cubie_mlir", "optimize.csv"))
 
-    def test_a_row_without_a_setting_serves_every_setting_of_the_leg(self):
-        result = FakeResult(FakeLaunch(256, 3),
-                            {"state_location": "shared", "blocksize": 256})
-        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "fixed", None, result)
-        for setting in (2.0 ** -10, 0.0625, 2.0 ** -13):
-            tuned = adapter.load_optimized("cubie", "k", self.problem,
-                                           "tsit5", "fixed", setting)
-            self.assertEqual(tuned["settings"],
-                             {"state_location": "shared", "blocksize": 256})
+    def test_the_identity_is_the_kernel_and_the_policy(self):
+        ident = adapter.optimize_ident(line(), "k")
+        self.assertEqual(ident, {"package": "cubie", "key": "k", "problem": "lorenz", "states": "3",
+                                 "precision": "float32", "algorithm": "tsit5", "controller": "fixed",
+                                 "gains": "{}", "per": "kernel",
+                                 "stepping": "dt=0.0009765625;dt_min=;dt_max=;atol=;rtol=;newton_atol=;newton_rtol="})
+        solve = adapter.optimize_ident(line(n=64, optimize="solve"), "k")
+        self.assertEqual((solve["per"], solve["n"]), ("solve", "64"))
+        self.assertEqual(adapter.kernel_ident(line(n=64, optimize="solve"), "k"), adapter.kernel_ident(line(), "k"))
+        resized = adapter.optimize_ident(line(problem="lorenz96", system_params='{"states":8}'), "k")
+        self.assertEqual((resized["problem"], resized["states"]), ("lorenz96", "8"))
+        adaptive = adapter.optimize_ident(line(controller="default", dt=NAN, atol=1e-5, rtol=1e-5,
+                                               newton_atol=1e-6, newton_rtol=1e-6), "k")
+        self.assertEqual(adaptive["stepping"],
+                         "dt=;dt_min=;dt_max=;atol=1e-05;rtol=1e-05;newton_atol=1e-06;newton_rtol=1e-06")
+
+    def test_a_kernel_record_serves_every_n_and_a_solve_record_its_own(self):
+        result = FakeResult(FakeLaunch(256, 3), {"state_location": "shared", "blocksize": 256})
+        adapter.record_optimized(line(n=8), "k", result, 71680)
+        for n in (8, 32, 131072):
+            tuned = adapter.load_optimized(line(n=n), "k")
+            self.assertEqual(tuned["settings"], {"state_location": "shared", "blocksize": 256})
             self.assertEqual(tuned["resident_blocks"], 3)
+        self.assertIsNone(adapter.load_optimized(line(n=8, optimize="solve"), "k"))
+        adapter.record_optimized(line(n=8, optimize="solve"), "k",
+                                 FakeResult(FakeLaunch(64, None), {"blocksize": 64}), 8)
+        self.assertEqual(adapter.load_optimized(line(n=8, optimize="solve"), "k")["settings"], {"blocksize": 64})
+        self.assertIsNone(adapter.load_optimized(line(n=32, optimize="solve"), "k"))
+        self.assertEqual(adapter.load_optimized(line(n=32), "k")["resident_blocks"], 3)
+        rows = adapter.optimize_rows("cubie", "k")
+        self.assertEqual([(r["per"], r["n"]) for r in rows], [("kernel", "71680"), ("solve", "8")])
+        self.assertEqual(adapter.optimize_rows("cubie_mlir", "k"), [])
 
-    def test_implicit_rows_are_per_setting(self):
+    def test_every_stepping_value_precision_and_package_separate_kernels(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
-        adapter.record_optimized("cubie", "k", self.problem, "kvaerno3",
-                                 "adaptive", 1e-3, result)
-        self.assertIsNotNone(adapter.load_optimized(
-            "cubie", "k", self.problem, "kvaerno3", "adaptive", 1e-3))
-        self.assertIsNone(adapter.load_optimized(
-            "cubie", "k", self.problem, "kvaerno3", "adaptive", 1e-4))
-        self.assertIsNone(adapter.load_optimized(
-            "cubie_mlir", "k", self.problem, "kvaerno3", "adaptive", 1e-3))
+        base = line(algorithm="kvaerno3", controller="default", dt=NAN, atol=1e-3, rtol=1e-3,
+                    newton_atol=1e-6, newton_rtol=1e-6)
+        adapter.record_optimized(base, "k", result, 8)
+        self.assertIsNotNone(adapter.load_optimized(base, "k"))
+        self.assertIsNotNone(adapter.load_optimized(dict(base, n=131072, duration=7.0), "k"))
+        for other in (dict(atol=1e-4), dict(rtol=1e-4), dict(newton_atol=1e-7), dict(dt_min=1e-9),
+                      dict(dt=2.0 ** -10), dict(precision="float64"), dict(package="cubie_mlir"),
+                      dict(controller="pi"), dict(gains='{"integral_gain":0.3}'), dict(algorithm="kvaerno5"),
+                      dict(problem="lorenz96", system_params='{"states":4}')):
+            self.assertIsNone(adapter.load_optimized(dict(base, **other), "k"), other)
 
-    def test_states_and_rerecording_replace_by_identity(self):
+    def test_rerecording_replaces_by_identity(self):
         first = FakeResult(FakeLaunch(64, 2), {"blocksize": 64})
         second = FakeResult(FakeLaunch(128, None), {"blocksize": 128})
-        adapter.record_optimized("cubie", "k", "lorenz96", "tsit5", "fixed",
-                                 None, first, states=8)
-        adapter.record_optimized("cubie", "k", "lorenz96", "tsit5", "fixed",
-                                 None, second, states=8)
-        tuned = adapter.load_optimized("cubie", "k", "lorenz96", "tsit5",
-                                       "fixed", None, states=8)
+        resized = line(problem="lorenz96", system_params='{"states":8}')
+        adapter.record_optimized(resized, "k", first, 8)
+        adapter.record_optimized(resized, "k", second, 8)
+        tuned = adapter.load_optimized(resized, "k")
         self.assertEqual(tuned["settings"]["blocksize"], 128)
         self.assertIsNone(tuned["resident_blocks"])
-        self.assertIsNone(adapter.load_optimized(
-            "cubie", "k", "lorenz96", "tsit5", "fixed", None, states=16))
+        self.assertIsNone(adapter.load_optimized(dict(resized, system_params='{"states":16}'), "k"))
         with open(adapter.optimize_path("cubie", "k")) as handle:
             self.assertEqual(sum(1 for _ in handle) - 1, 1)
 
-    def test_controller_and_gains_separate_rows_of_one_algorithm(self):
-        result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
-        other = FakeResult(FakeLaunch(256, 1), {"blocksize": 256})
-        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "adaptive", None, result, controller="default",
-                                 gains="{}")
-        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "adaptive", None, other, controller="pi",
-                                 gains='{"integral_gain":0.3}')
-        shipped = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
-                                         "adaptive", 1e-5, controller="default",
-                                         gains="{}")
-        self.assertEqual(shipped["settings"]["blocksize"], 64)
-        tuned = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
-                                       "adaptive", 1e-5, controller="pi",
-                                       gains='{"integral_gain":0.3}')
-        self.assertEqual(tuned["settings"]["blocksize"], 256)
-        self.assertIsNone(adapter.load_optimized(
-            "cubie", "k", self.problem, "tsit5", "adaptive", 1e-5))
-        with open(adapter.optimize_path("cubie", "k")) as handle:
-            self.assertEqual(sum(1 for _ in handle) - 1, 2)
+    def test_a_source_narrows_the_rows_served(self):
+        result = FakeResult(FakeLaunch(64, 2), {"blocksize": 64})
+        adapter.record_optimized(line(), "k", result, 8, source="S")
+        self.assertEqual(adapter.load_optimized(line(), "k", source="S")["resident_blocks"], 2)
+        self.assertIsNone(adapter.load_optimized(line(), "k", source="T"))
+        self.assertEqual(adapter.load_optimized(line(), "k")["resident_blocks"], 2)
+        rows = adapter.optimize_rows("cubie", "k")
+        self.assertEqual(adapter.find_optimized(rows, adapter.optimize_ident(line(), "k"))["source"], "S")
+        self.assertIsNone(adapter.find_optimized(rows, adapter.optimize_ident(line(dt=0.5), "k")))
+
+    def test_a_timeout_row_replaces_the_lines_record_with_no_settings(self):
+        adapter.record_optimized(line(n=64, optimize="solve"), "k",
+                                 FakeResult(FakeLaunch(64, 2), {"blocksize": 64}), 64, source="S")
+        row = adapter.record_optimize_timeout(line(n=64, optimize="solve"), "k")
+        self.assertEqual((row["label"], row["n"], row["per"], row["settings"], row["source"]),
+                         ("timeout", "64", "solve", "", ""))
+        rows = adapter.optimize_rows("cubie", "k")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(adapter.load_optimized(line(n=64, optimize="solve"), "k"),
+                         {"settings": {}, "resident_blocks": None})
+        self.assertIsNone(adapter.load_optimized(line(n=64, optimize="solve"), "k", source="S"))
 
     def test_clear_narrows_by_algorithm_and_problem(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         for algorithm, problem in (("tsit5", "lorenz"), ("euler", "lorenz"),
                                    ("tsit5", "pollu")):
-            adapter.record_optimized("cubie", "k", problem, algorithm,
-                                     "fixed", None, result)
+            adapter.record_optimized(line(algorithm=algorithm, problem=problem), "k", result, 8)
         self.assertEqual(adapter.clear_optimized("cubie", "k", "tsit5",
                                                  "lorenz"), 1)
         self.assertEqual(adapter.clear_optimized("cubie", "k", "all",
@@ -210,12 +240,23 @@ class OptimizeStoreTests(unittest.TestCase):
         result = FakeResult(FakeLaunch(64, 1), {
             "unroll_other_small": UnrollChoice.ROLLED,
             "state_location": "local", "blocksize": 64})
-        adapter.record_optimized("cubie", "k", self.problem, "tsit5",
-                                 "adaptive", None, result)
-        tuned = adapter.load_optimized("cubie", "k", self.problem, "tsit5",
-                                       "adaptive", 1e-5)
+        adapter.record_optimized(line(), "k", result, 8)
+        tuned = adapter.load_optimized(line(), "k")
         self.assertIs(tuned["settings"]["unroll_other_small"],
                       UnrollChoice.ROLLED)
+
+    def test_source_hashes_come_from_the_package_interpreter(self):
+        systems = [("lorenz", "{}", "float32"), ("lorenz96", '{"states":8}', "float32"), ("lorenz", "{}", "float32")]
+        try:
+            hashes = adapter.source_hashes("cubie", systems)
+        except RuntimeError as exc:
+            self.skipTest("cubie is not importable by the package interpreter: {0}".format(exc))
+        self.assertEqual(set(hashes), set(systems))
+        self.assertEqual({len(h) for h in hashes.values()}, {16})
+        self.assertNotEqual(hashes[systems[0]], hashes[systems[1]])
+        self.assertEqual(adapter.source_hashes("cubie", []), {})
+        with self.assertRaises(RuntimeError):
+            adapter.source_hashes("cubie", [("nosuchproblem", "{}", "float32")])
 
     def test_optimize_point_records_the_batch_size(self):
         import numpy as np
@@ -228,18 +269,15 @@ class OptimizeStoreTests(unittest.TestCase):
                                   {"blocksize": 64})
 
         solver = Solver()
-        row = adapter.optimize_point(
-            solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
-            "cubie", "k", "tsit5", "fixed", None)
-        self.assertEqual(solver.seen, ((3, 512), self.problem["duration"], False))
-        self.assertEqual(row["n"], "512")
+        row = adapter.optimize_point(solver, line(n=8, optimize="solve", duration=7.0),
+                                     np.zeros((3, 512)), np.zeros((1, 512)), "k")
+        self.assertEqual(solver.seen, ((3, 512), 7.0, False))
+        self.assertEqual((row["n"], row["per"]), ("512", "solve"))
         self.assertEqual(float(row["best_ms"]), 2.5)
-        forced = adapter.optimize_point(
-            solver, self.problem, np.zeros((3, 512)), np.zeros((1, 512)),
-            "cubie", "k", "tsit5", "fixed", None, root=os.path.join(self.tmp, "elsewhere"),
-            force=True)
+        forced = adapter.optimize_point(solver, line(n=8), np.zeros((3, 512)), np.zeros((1, 512)), "k",
+                                        root=os.path.join(self.tmp, "elsewhere"), force=True, source="S")
         self.assertEqual(solver.seen[2], True)
-        self.assertEqual(forced["n"], "512")
+        self.assertEqual((forced["n"], forced["per"], forced["source"]), ("512", "kernel", "S"))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "elsewhere", "key=k", "package=cubie",
                                                     "optimize.csv")))
 

@@ -1,4 +1,4 @@
-# run_ode_cpp.ps1 --trials <jsonl> [--floor]: builds the binaries the file needs in the VS developer shell, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
+# run_ode_cpp.ps1 --trials <jsonl> [--floor]: builds the binaries the file needs in the VS developer shell, runs its trials through Bench.exe; exits the watchdog code when a trial never returned.
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Arguments
@@ -150,17 +150,25 @@ function ConvertFrom-Row {
     return $row
 }
 
-$BuildColumns = @('problem', 'solver', 'nt', 'sd', 'precision', 'cold', 'leg')
-$PointColumns = @('trial_id', 'leg', 'ordinal', 'problem', 'solver', 'nt', 'sd', 'precision', 'transfers', 'finals', 'reason')
+$BuildColumns = @('problem', 'solver', 'nt', 'sd', 'precision', 'cold')
+$PointColumns = @('trial_id', 'problem', 'solver', 'nt', 'sd', 'precision', 'transfers', 'finals', 'cold', 'reason')
 
 $Builds = @(Invoke-Listing @('builds', $Trials) | ForEach-Object { ConvertFrom-Row $_ $BuildColumns })
 $Points = @(Invoke-Listing @('points', $Trials) | ForEach-Object { ConvertFrom-Row $_ $PointColumns })
 
-# build_s per leg, from the cold builds.
+# build_s per binary, from the cold builds; a cold point carries its binary's.
 $BuildSeconds = @{}
 Invoke-WarmBuilds -Targets @($Builds | Where-Object { $_.cold -ne 'true' })
 foreach ($b in @($Builds | Where-Object { $_.cold -eq 'true' })) {
-    $BuildSeconds[$b.leg] = Invoke-ColdBuild -Target $b
+    $BuildSeconds[(Get-ExePath $b.problem $b.solver $b.nt $b.sd $b.precision)] = Invoke-ColdBuild -Target $b
+}
+
+function Get-BuildSeconds {
+    param([object]$Point)
+    if ($Point.cold -ne 'true') { return $null }
+    $exe = Get-ExePath $Point.problem $Point.solver $Point.nt $Point.sd $Point.precision
+    if ($BuildSeconds.ContainsKey($exe)) { return $BuildSeconds[$exe] }
+    return $null
 }
 
 # NaN rows for a point the script could not run.
@@ -168,18 +176,26 @@ function Add-NanRows {
     param([object]$Point, [string]$Transfers, [string]$Reason)
     $nanArgs = @('nan', $Trials, $Point.trial_id, $DatasetKey, $Transfers, $Reason)
     if ($Floor) { $nanArgs += '--floor' }
-    if ($BuildSeconds.ContainsKey($Point.leg)) { $nanArgs += @('--build-s', $BuildSeconds[$Point.leg]) }
+    $seconds = Get-BuildSeconds -Point $Point
+    if ($null -ne $seconds) { $nanArgs += @('--build-s', $seconds) }
     & $Python runner_scripts\mpgos_trials.py @nanArgs
     if ($LASTEXITCODE -ne 0) { Write-Host "mpgos_trials.py nan failed for $($Point.trial_id)"; Pop-Location; exit 1 }
-    Write-Host "cpp $($Point.problem) $($Point.leg) ordinal $($Point.ordinal) ${Transfers}: $Reason"
+    Write-Host "cpp $($Point.problem) $($Point.solver) n=$($Point.nt) ${Transfers}: $Reason"
 }
 
-# (leg|transfers) pairs abandoned after a timeout or oom outcome.
+# (trial_id|transfers) pairs the abandon rule gives up after a timeout or oom, with the reason.
 $Abandoned = @{}
 $Outcome = "$Trials.outcome"
 
 foreach ($p in $Points) {
-    $transfers = @($p.transfers -split ',' | Where-Object { $_ -and -not $Abandoned.ContainsKey("$($p.leg)|$_") })
+    $transfers = @()
+    foreach ($t in @($p.transfers -split ',' | Where-Object { $_ })) {
+        if ($Abandoned.ContainsKey("$($p.trial_id)|$t")) {
+            Add-NanRows -Point $p -Transfers $t -Reason $Abandoned["$($p.trial_id)|$t"]
+        } else {
+            $transfers += $t
+        }
+    }
     if ($transfers.Count -eq 0) { continue }
     $transfersText = $transfers -join ','
     if ($p.reason) {
@@ -196,8 +212,9 @@ foreach ($p in $Points) {
         '--transfers', $transfersText, '--python', $Python, '--package-version', $PackageVersion,
         '--suite-rev', $SuiteRev, '--outcome', $Outcome)
     if ($Floor) { $benchArgs += '--floor' }
-    if ($BuildSeconds.ContainsKey($p.leg)) { $benchArgs += @('--build-s', $BuildSeconds[$p.leg]) }
-    Write-Host "cpp $($p.leg) ordinal $($p.ordinal) n=$($p.nt) ($transfersText)"
+    $seconds = Get-BuildSeconds -Point $p
+    if ($null -ne $seconds) { $benchArgs += @('--build-s', $seconds) }
+    Write-Host "cpp $($p.problem) $($p.solver) n=$($p.nt) sd=$($p.sd) ($transfersText)"
     & $exe @benchArgs
     $code = $LASTEXITCODE
     if ($code -eq $WatchdogExit) {
@@ -209,12 +226,16 @@ foreach ($p in $Points) {
         foreach ($line in Get-Content $Outcome) {
             $which, $result = $line -split ' ', 2
             $done[$which] = $result
-            if ($result -eq 'timeout' -or $result -eq 'oom') { $Abandoned["$($p.leg)|$which"] = $true }
+            if ($result -eq 'timeout' -or $result -eq 'oom') {
+                foreach ($id in (Invoke-Listing @('harder', $Trials, $p.trial_id))) {
+                    $Abandoned["$id|$which"] = "abandoned: $result at $($p.trial_id)"
+                }
+            }
         }
     }
     if ($code -ne 0) {
         $missing = @($transfers | Where-Object { -not $done.ContainsKey($_) })
-        Write-Host "FAILED $($p.leg) ordinal $($p.ordinal): Bench.exe exit $code"
+        Write-Host "FAILED $($p.problem) $($p.solver) n=$($p.nt): Bench.exe exit $code"
         if ($missing.Count -gt 0) {
             Add-NanRows -Point $p -Transfers ($missing -join ',') -Reason "error: ProcessError: Bench.exe exit $code"
         }

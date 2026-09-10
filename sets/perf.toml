@@ -11,8 +11,7 @@ build      = "warm"
 
 [set.optimize]
 packages = ["cubie", "cubie_mlir"]
-n = 262144
-per = "leg"
+per = "solve"
 
 [[grid]]
 packages = "all"

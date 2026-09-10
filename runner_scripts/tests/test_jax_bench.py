@@ -114,7 +114,7 @@ class MemoryAndFinalsTests(unittest.TestCase):
         self.assertEqual(adapter.states(trial(problem="pleiades", parameter="m1", grid_min=0.5, grid_max=2.0,
                                               duration=3.0)), 28)
         with self.assertRaises(NotImplementedError):
-            adapter.optimize(None, trial(), None)
+            adapter.optimize(None, trial())
 
 
 if __name__ == "__main__":

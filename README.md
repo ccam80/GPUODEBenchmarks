@@ -16,10 +16,11 @@ A set under `sets/` expands to run specs. Each spec is one solve: problem,
 duration, precision, the swept parameter and its grid, the algorithm,
 controller, step or tolerance, and Newton tolerances. `bench.py` writes the
 specs as one JSONL trial file per package and hands each file to that
-package's runner, which builds once per leg, times every trial after one
-untimed warm-up, and records one row per (spec, transfers) in the parquet
+package's runner, which keeps one build while consecutive lines share a
+system, algorithm and controller, times every trial after one untimed
+warm-up, and records one row per (spec, transfers) in the parquet
 store under `data/`. The analyses compute every error offline from the
-finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`.
+finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`, `completeness.py` (what a stored trial must carry to be reused).
 
 ## Setup
 
@@ -38,9 +39,20 @@ python bench.py run  --set perf --floor         # rerun; the lower time per row 
 ```
 
 `-p`, `-s`, `-g`, `-n`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
-expanded specs; `-n` names counts of the grids' trajectory lists. `--resume`
-runs the transfers rows that are missing, `--no-overwrite` those missing
-or NaN; a trial keeps asking finals once a row of its carries them. A run
+expanded specs; `-n` names counts of the grids' trajectory lists and exits
+for a count no grid of the named sets lists. A trial is one line per point;
+a point several set files declare runs under one contract whichever sets
+are named: it builds cold, keeps finals, optimizes per solve over per
+kernel and times each transfers mode when any declaration asks. A cubie
+optimize runs once per compiled kernel (build plus stepping) or once per
+line on its own n, as the set's `[set.optimize] per` says. Lines run
+easiest first (states, then n, then step and tolerance loose to tight); a
+timeout or out-of-memory run abandons every harder run of its family (same
+problem, precision, algorithm, controller and gains; larger n or states,
+smaller step or tolerance) on the same transfers. `--resume` runs what the
+store lacks of each trial: a transfers row, the cold build time, a readable
+finals file, an optimize record from the current cubie source;
+`--no-overwrite` also reruns NaN rows and timed-out optimizes. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
@@ -58,8 +70,8 @@ log per package, `run_manifest.txt`, `summary.tsv` and `clocks.csv`. The
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
 refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
-trial's watchdog is recorded NaN with a reason and the rest of its leg is
-abandoned; a runner that never returns hard-exits and the driver re-invokes
+trial's watchdog is recorded NaN with a reason and every harder run of its
+family is abandoned; a runner that never returns hard-exits and the driver re-invokes
 it with the trials still missing.
 
 ## Data and analyses
@@ -79,7 +91,10 @@ python analyses/agreement.py --set golden_grid          # errors and package-pai
 `data/` is an untracked mirror of the store; the analyses pull it before reading.
 
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`.
+and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, what
+each key's store lacks of the set (rows, cold build times, finals files,
+optimize records) is printed per package, written to
+`plots/<key>/incomplete.csv`, and exits the script 1 after its outputs.
 
 ## Using the store
 

@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per leg, finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
 
 import argparse
 import csv
@@ -233,7 +233,7 @@ def suite_rev(repo_root=REPO_ROOT):
 
 
 class _Lock:
-    """A mkdir lock beside a leg file; a stale directory is taken over."""
+    """A mkdir lock beside a results file; a stale directory is taken over."""
 
     def __init__(self, path, timeout=LOCK_TIMEOUT_S, stale=LOCK_STALE_S):
         self.path = path + ".lock"
@@ -341,22 +341,22 @@ class Store:
     def package_dir(self, package, key):
         return os.path.join(self.root, "key=" + key, "package=" + package)
 
-    def leg_path(self, package, key, problem, algorithm):
+    def results_path(self, package, key, problem, algorithm):
         return os.path.join(self.package_dir(package, key), "results",
                             "{0}__{1}.parquet".format(problem, algorithm))
 
-    def _leg_of(self, row):
-        return self.leg_path(row["package"], row["key"], row["problem"],
+    def _results_of(self, row):
+        return self.results_path(row["package"], row["key"], row["problem"],
                              row["algorithm"])
 
     @staticmethod
-    def _read_leg(path):
+    def _read_results(path):
         if not os.path.isfile(path):
             return []
         return pq.read_table(path).to_pylist()
 
     @staticmethod
-    def _write_leg(path, rows):
+    def _write_results(path, rows):
         if not rows:
             if os.path.isfile(path):
                 os.remove(path)
@@ -368,18 +368,18 @@ class Store:
         return self.record_batch([row], floor=floor)[0]
 
     def record_batch(self, rows, floor=False):
-        """Record rows in order, one lock and one rewrite per leg file; returns the standing row of each."""
+        """Record rows in order, one lock and one rewrite per results file; returns the standing row of each."""
         made = [make_row(**row) for row in rows]
         standing = [None] * len(made)
         by_leg = {}
         for index, row in enumerate(made):
-            by_leg.setdefault(self._leg_of(row), []).append(index)
+            by_leg.setdefault(self._results_of(row), []).append(index)
         for path, indices in by_leg.items():
             with _Lock(path):
-                existing = self._read_leg(path)
+                existing = self._read_results(path)
                 for index in indices:
                     standing[index] = _place(existing, made[index], floor)
-                self._write_leg(path, existing)
+                self._write_results(path, existing)
         return standing
 
     def record_finals(self, spec, finals, t_final, retcode=None):
@@ -413,6 +413,19 @@ class Store:
                        pa.table(columns))
         return relative
 
+    def finals_readable(self, package, key, relative):
+        """True when a package-relative finals path names a parquet file whose metadata reads."""
+        if not relative:
+            return False
+        path = os.path.join(self.package_dir(package, key), *relative.split("/"))
+        if not os.path.isfile(path):
+            return False
+        try:
+            pq.read_metadata(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is a missing artifact
+            return False
+        return True
+
     def load_finals(self, package, key, relative):
         """(traj int32[m], states [m, k] in the stored precision, t_final float64[m], retcode str[m]) of a finals file by its package-relative path."""
         table = pq.read_table(os.path.join(self.package_dir(package, key),
@@ -438,17 +451,17 @@ class Store:
             return "finite"
         return "nan"
 
-    def leg_files(self):
+    def results_files(self):
         pattern = os.path.join(self.root, "key=*", "package=*", "results",
                                "*.parquet")
         return sorted(glob.glob(pattern))
 
     def _connect(self):
-        """A DuckDB connection with a `results` view over every leg file, in UTC."""
+        """A DuckDB connection with a `results` view over every results file, in UTC."""
         import duckdb
         con = duckdb.connect()
         con.execute("SET TimeZone = 'UTC'")
-        if self.leg_files():
+        if self.results_files():
             pattern = os.path.join(os.path.abspath(self.root), "key=*",
                                    "package=*", "results", "*.parquet")
             pattern = pattern.replace("\\", "/").replace("'", "''")
@@ -497,12 +510,12 @@ class Store:
         if unknown:
             raise ValueError("unknown columns: " + ", ".join(sorted(unknown)))
         dropped = 0
-        for path in self.leg_files():
+        for path in self.results_files():
             with _Lock(path):
-                rows = self._read_leg(path)
+                rows = self._read_results(path)
                 kept = [r for r in rows if not _matches(r, eq_filters)]
                 if len(kept) != len(rows):
-                    self._write_leg(path, kept)
+                    self._write_results(path, kept)
                     dropped += len(rows) - len(kept)
         return dropped
 

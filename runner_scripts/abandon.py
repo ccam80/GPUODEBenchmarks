@@ -1,9 +1,10 @@
-"""Watchdog hard-exit bookkeeping shared by the run loop and the julia driver: which transfers rows of a trial exist, the abandoned rows a runner's progress file implies, and the trials still to run."""
+"""The abandon rule shared by the runners and the drivers: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
 
 import json
 
 import cubie_adapter
 import store
+import trials as trials_mod
 from problems import get_problem
 
 
@@ -16,31 +17,82 @@ def states_of(trial):
 
 
 def run_ids(trial, key):
-    """{transfers: run_id} of a solve trial under a key."""
+    """{transfers: run_id} of a trial under a key."""
     return {t: store.run_id(dict(trial, transfers=t, key=key)) for t in trial["transfers"]}
 
 
 def recorded(data, key, trial):
-    """{transfers: True when a row exists} of a solve trial."""
+    """{transfers: True when a row exists} of a trial."""
     return {t: bool(data.rows(run_id=run)) for t, run in run_ids(trial, key).items()}
 
 
-def remaining(data, key, trial_list, doomed=()):
-    """The solve trials outside `doomed` with a transfers row still missing, and the warm and optimize lines of their legs, in file order."""
+def abandon_reason(trial, failures):
+    """'abandoned: <outcome> at <trial_id>' when a failure of the trial's family is no harder than it, else None; `failures` is [(trial, outcome)]."""
+    family = trials_mod.family_key(trial)
+    for failed, outcome in failures:
+        if trials_mod.family_key(failed) == family and trials_mod.harder(trial, failed):
+            return "abandoned: {0} at {1}".format(outcome, failed["trial_id"])
+    return None
+
+
+class History:
+    """The timeouts and OOMs seen so far, per transfers."""
+
+    def __init__(self):
+        self.failures = {}
+
+    def add(self, trial, transfers, outcome):
+        if outcome in ("timeout", "oom"):
+            self.failures.setdefault(transfers, []).append((trial, outcome))
+
+    def reason(self, trial, transfers):
+        return abandon_reason(trial, self.failures.get(transfers, []))
+
+
+def failed_runs(data, key, package):
+    """[(row as a trial, outcome)] of the package's rows under a key whose reason names a timeout or oom."""
+    out = []
+    for row in data.rows(key=key, package=package):
+        outcome = row["reason"].split(":")[0] if row["reason"] else ""
+        if outcome in ("timeout", "oom"):
+            out.append((dict(row, transfers=[row["transfers"]]), outcome, row["transfers"]))
+    return out
+
+
+def abandon_from_store(data, key, trial_list, suite_rev):
+    """Record as abandoned every transfers of the trials the store's timeouts and OOMs of their family give up, and return the trials with what is left to run."""
+    if not trial_list:
+        return []
+    by_transfers = {}
+    for failed, outcome, transfers in failed_runs(data, key, trial_list[0]["package"]):
+        by_transfers.setdefault(transfers, []).append((failed, outcome))
     kept = []
-    live_legs = set()
+    rows = []
     for trial in trial_list:
-        if trial["kind"] != "solve" or trial["trial_id"] in doomed:
-            continue
-        if not all(recorded(data, key, trial).values()):
-            kept.append(trial)
-            live_legs.add(trial["leg"])
-    return [t for t in trial_list if t["kind"] == "solve" and t in kept
-            or t["kind"] != "solve" and t["leg"] in live_legs]
+        live = []
+        for transfers in trial["transfers"]:
+            reason = abandon_reason(trial, by_transfers.get(transfers, []))
+            if reason is None:
+                live.append(transfers)
+                continue
+            spec = {field: trial[field] for field in store.TRIAL_FIELDS}
+            rows.append(dict(spec, transfers=transfers, key=key, states=states_of(trial), reason=reason,
+                             suite_rev=suite_rev))
+        if live or not trial["transfers"]:
+            kept.append(dict(trial, transfers=live))
+    if rows:
+        data.record_batch(rows)
+    return kept
+
+
+def remaining(data, key, trial_list, doomed=()):
+    """The trials outside `doomed` that list transfers and still lack a row for one of them, in file order."""
+    return [t for t in trial_list if t["transfers"] and t["trial_id"] not in doomed
+            and not all(recorded(data, key, t).values())]
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """Record the leg's ordinals from the one the progress file names as abandoned (every requested transfers row still absent); returns the trials still without a row, or None when the progress file names no trial. A hard exit on an optimize line records an optimize.csv row labelled timeout and drops that line, so the leg's solves run at the solver's own geometry."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -49,20 +101,25 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
         current = []
     if not current:
         return None
-    kind = progress.get("kind")
-    if kind == "optimize":
-        for line in current:
-            if line["kind"] == "optimize" and line["package"] in cubie_adapter.PACKAGES:
-                cubie_adapter.record_optimize_timeout(line, key, data.root)
-        return [t for t in remaining(data, key, trial_list)
-                if not (t["kind"] == "optimize" and t["trial_id"] == progress["trial_id"])]
-    current.sort(key=lambda t: t["kind"] != "solve")
-    leg, ordinal = current[0]["leg"], current[0]["ordinal"]
-    reason = "abandoned: hard-exit at ordinal {0}".format(ordinal)
-    rows = []
+    current = current[0]
+    if progress.get("stage") == "optimize":
+        if current["package"] in cubie_adapter.PACKAGES:
+            cubie_adapter.record_optimize_timeout(current, key, data.root)
+        kernel = trials_mod.kernel_key(current)
+
+        def dropped(trial):
+            return trial["trial_id"] == current["trial_id"] or (
+                current["optimize"] == "kernel" and trial["optimize"] == "kernel"
+                and trials_mod.kernel_key(trial) == kernel)
+
+        return [dict(t, optimize=None) if dropped(t) else t for t in remaining(data, key, trial_list)]
+    reason = "abandoned: hard-exit at " + current["trial_id"]
     doomed = set()
+    rows = []
     for trial in trial_list:
-        if trial["kind"] != "solve" or trial["leg"] != leg or trial["ordinal"] < ordinal:
+        if trial["trial_id"] != current["trial_id"] and not (
+                trials_mod.family_key(trial) == trials_mod.family_key(current)
+                and trials_mod.harder(trial, current)):
             continue
         doomed.add(trial["trial_id"])
         for transfers, present in recorded(data, key, trial).items():

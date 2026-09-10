@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_ode_cpp.sh --trials <jsonl> [--floor]: builds the binaries the file needs, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
+# run_ode_cpp.sh --trials <jsonl> [--floor]: builds the binaries the file needs, runs its trials through Bench.exe; exits the watchdog code when a trial never returned.
 set -e
 
 TRIALS=""
@@ -77,7 +77,7 @@ POINTS="$("$PYTHON" runner_scripts/mpgos_trials.py points "$TRIALS")"
 
 # Warm targets build in parallel; cold targets build serially and time build_s.
 JOBS=8
-while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
+while IFS=$'\t' read -r problem solver nt sd precision cold; do
 	[ -z "$problem" ] && continue
 	[ "$cold" = "true" ] && continue
 	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
@@ -85,68 +85,82 @@ while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
 done <<< "$BUILDS"
 wait
 declare -A BUILD_SECONDS
-while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
+while IFS=$'\t' read -r problem solver nt sd precision cold; do
 	[ "$cold" = "true" ] || continue
-	BUILD_SECONDS["$leg"]=$(cold_build "$problem" "$solver" "$nt" "$sd" "$precision")
+	BUILD_SECONDS["$(exe_path "$problem" "$solver" "$nt" "$sd" "$precision")"]=$(cold_build "$problem" "$solver" "$nt" "$sd" "$precision")
 done <<< "$BUILDS"
 
-# nan_rows <trial_id> <leg> <transfers> <reason>: record NaN rows for a point the script could not run.
-nan_rows() {
-	local trial_id=$1 leg=$2 transfers=$3 reason=$4
-	local extra=()
-	[ -n "$FLOOR" ] && extra+=(--floor)
-	[ -n "${BUILD_SECONDS[$leg]:-}" ] && extra+=(--build-s "${BUILD_SECONDS[$leg]}")
-	"$PYTHON" runner_scripts/mpgos_trials.py nan "$TRIALS" "$trial_id" "$DATASET_KEY" "$transfers" "$reason" "${extra[@]}"
-	echo "cpp $leg $transfers: $reason"
+# build_seconds <exe> <cold>: the cold build time a point carries, empty for a warm point.
+build_seconds() {
+	[ "$2" = "true" ] && echo "${BUILD_SECONDS[$1]:-}"
 }
 
-# (leg|transfers) pairs abandoned after a timeout or oom outcome.
+# nan_rows <trial_id> <label> <transfers> <reason> [<build_s>]: record NaN rows for a point the script could not run.
+nan_rows() {
+	local trial_id=$1 label=$2 transfers=$3 reason=$4 seconds=${5:-}
+	local extra=()
+	[ -n "$FLOOR" ] && extra+=(--floor)
+	[ -n "$seconds" ] && extra+=(--build-s "$seconds")
+	"$PYTHON" runner_scripts/mpgos_trials.py nan "$TRIALS" "$trial_id" "$DATASET_KEY" "$transfers" "$reason" "${extra[@]}"
+	echo "cpp $label $transfers: $reason"
+}
+
+# (trial_id|transfers) pairs the abandon rule gives up after a timeout or oom, with the reason.
 declare -A ABANDONED
 OUTCOME="$TRIALS.outcome"
 
-while IFS=$'\t' read -r trial_id leg ordinal problem solver nt sd precision transfers finals reason; do
+while IFS=$'\t' read -r trial_id problem solver nt sd precision transfers finals cold reason; do
 	[ -z "$trial_id" ] && continue
+	label="$problem $solver n=$nt sd=$sd"
+	exe=$(exe_path "$problem" "$solver" "$nt" "$sd" "$precision")
+	seconds=$(build_seconds "$exe" "$cold")
 	wanted=""
 	for t in ${transfers//,/ }; do
-		[ -n "${ABANDONED[$leg|$t]:-}" ] && continue
+		if [ -n "${ABANDONED[$trial_id|$t]:-}" ]; then
+			nan_rows "$trial_id" "$label" "$t" "${ABANDONED[$trial_id|$t]}" "$seconds"
+			continue
+		fi
 		wanted="${wanted:+$wanted,}$t"
 	done
 	[ -z "$wanted" ] && continue
 	if [ -n "$reason" ]; then
-		nan_rows "$trial_id" "$leg" "$wanted" "$reason"
+		nan_rows "$trial_id" "$label" "$wanted" "$reason" "$seconds"
 		continue
 	fi
-	exe=$(exe_path "$problem" "$solver" "$nt" "$sd" "$precision")
 	if [ ! -f "$exe" ]; then
-		nan_rows "$trial_id" "$leg" "$wanted" "error: BuildError: nvcc failed for $(basename "$exe")"
+		nan_rows "$trial_id" "$label" "$wanted" "error: BuildError: nvcc failed for $(basename "$exe")" "$seconds"
 		continue
 	fi
 	rm -f "$OUTCOME"
 	bench_args=(--trials "$TRIALS" --trial "$trial_id" --key "$DATASET_KEY" --transfers "$wanted"
 		--python "$PYTHON" --package-version "$PACKAGE_VERSION" --suite-rev "$SUITE_REV" --outcome "$OUTCOME")
 	[ -n "$FLOOR" ] && bench_args+=(--floor)
-	[ -n "${BUILD_SECONDS[$leg]:-}" ] && bench_args+=(--build-s "${BUILD_SECONDS[$leg]}")
-	echo "cpp $leg ordinal $ordinal n=$nt ($wanted)"
+	[ -n "$seconds" ] && bench_args+=(--build-s "$seconds")
+	echo "cpp $label ($wanted)"
 	rc=0
 	"$exe" "${bench_args[@]}" || rc=$?
 	if [ "$rc" -eq "$WATCHDOG_EXIT" ]; then
 		exit "$WATCHDOG_EXIT"
 	fi
-	done_legs=""
+	done_transfers=""
 	if [ -f "$OUTCOME" ]; then
 		while read -r which result; do
 			[ -z "$which" ] && continue
-			done_legs="$done_legs $which"
-			case "$result" in timeout|oom) ABANDONED["$leg|$which"]=1;; esac
+			done_transfers="$done_transfers $which"
+			case "$result" in timeout|oom)
+				while read -r id; do
+					[ -n "$id" ] && ABANDONED["$id|$which"]="abandoned: $result at $trial_id"
+				done <<< "$("$PYTHON" runner_scripts/mpgos_trials.py harder "$TRIALS" "$trial_id")";;
+			esac
 		done < "$OUTCOME"
 	fi
 	if [ "$rc" -ne 0 ]; then
-		echo "FAILED $leg ordinal $ordinal: Bench.exe exit $rc"
+		echo "FAILED $label: Bench.exe exit $rc"
 		missing=""
 		for t in ${wanted//,/ }; do
-			case " $done_legs " in *" $t "*) ;; *) missing="${missing:+$missing,}$t";; esac
+			case " $done_transfers " in *" $t "*) ;; *) missing="${missing:+$missing,}$t";; esac
 		done
-		[ -n "$missing" ] && nan_rows "$trial_id" "$leg" "$missing" "error: ProcessError: Bench.exe exit $rc"
+		[ -n "$missing" ] && nan_rows "$trial_id" "$label" "$missing" "error: ProcessError: Bench.exe exit $rc" "$seconds"
 	fi
 done <<< "$POINTS"
 

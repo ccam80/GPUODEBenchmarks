@@ -1,6 +1,7 @@
 """timing.py --x n|error|states (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
 min_ms against the axis: one figure and CSV per (key, problem, transfers, stepping) under plots/<key>/<problem>/, one series per package. The figure lets one field vary: n, the states of system_params, or the swept dt/tolerance with each row scored against the golden. --x states adds a build_s panel. Dropped: errored_pct above 10, no time, figures with one axis value.
+With --set, the store is first checked against the sets' canonical trials under every key: what it lacks is printed and written to plots/<key>/incomplete.csv, and the exit code is 1 while anything is lacking.
 """
 
 import math
@@ -17,7 +18,7 @@ shared.under_suite_python()
 
 import errors as errors_mod  # noqa: E402
 import store as store_mod  # noqa: E402
-from trials import ordinal_key  # noqa: E402
+from trials import difficulty  # noqa: E402
 
 AXES = ("n", "error", "states")
 # The columns that vary along each axis and so stay out of the figure identity.
@@ -67,7 +68,7 @@ def collect(rows, axis, errs):
         figures.setdefault(ident, {}).setdefault(row["package"], []).append((x, row))
     for figure in figures.values():
         for points in figure.values():
-            points.sort(key=lambda p: ordinal_key(p[1]))
+            points.sort(key=lambda p: difficulty(p[1]))
     for figure in builds.values():
         for points in figure.values():
             points.sort()
@@ -170,6 +171,7 @@ def main(argv=None):
     shared.check_selection(args)
     shared.pull_store(args)
     store = store_mod.Store(args.root)
+    lacking = shared.report_incomplete(store, args.set, args.out) if args.set else 0
     written, skipped = run(store, args.x, args.set, args.where, args.out)
     for path in written:
         print(path)
@@ -177,7 +179,7 @@ def main(argv=None):
         print("no timed rows selected")
     if skipped:
         print("{0} figure(s) with a single {1} value skipped".format(skipped, args.x))
-    return 0
+    return 1 if lacking else 0
 
 
 if __name__ == "__main__":

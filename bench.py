@@ -2,15 +2,14 @@
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
--p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists; --controller takes a spec controller or a set token such as matched.
---resume runs the transfers rows that are missing; --no-overwrite those missing or NaN; a trial keeps asking finals once a row of its carries them; --floor lets runners keep the lower finite time.
+-p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
+A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel, the watchdog budget the largest.
+--resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
 
 import argparse
-import json
-import math
 import os
 import platform
 import subprocess
@@ -39,11 +38,13 @@ def _under_suite_python():
 
 _under_suite_python()
 
+import completeness  # noqa: E402
+import cubie_adapter  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
 import sync  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit, run_ids  # noqa: E402
+from abandon import abandon_after_hard_exit  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
@@ -144,42 +145,49 @@ def resolve(args):
 
 # ------------------------------------------------------------------ planning
 
-def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
-    """Trials still to run: a solve trial keeps the transfers whose row is missing (resume) or missing or NaN (no_overwrite); one that asks finals, or whose recorded row carries them, runs its last transfers again while no row carries finals and asks them; warm and optimize trials follow their leg."""
+def source_hashes(package, systems):
+    """The current source hash of each cubie system, from the package's own interpreter; SystemExit when it cannot say."""
+    try:
+        return cubie_adapter.source_hashes(package, systems)
+    except (RuntimeError, OSError, ValueError) as exc:
+        raise SystemExit("cannot validate {0}'s optimize records without its source hashes: {1}".format(
+            package, exc))
+
+
+def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+    """Trials still to run: each keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a line without transfers never runs again."""
     if not (resume or no_overwrite):
         return list(trial_list)
-    recorded = {row["run_id"]: row for row in store.Store(root).rows(key=key)}
-    kept = {}
-    live_legs = set()
+    mode = "no_overwrite" if no_overwrite else "resume"
+    audits = completeness.audit(trial_list, key, store.Store(root), mode, sources)
+    kept = []
     for trial in trial_list:
-        if trial["kind"] != "solve":
+        missing = audits.get(trial["trial_id"])
+        if missing is None or missing.complete():
             continue
-        rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
-        missing = [t for t in trial["transfers"]
-                   if rows[t] is None or (no_overwrite and not math.isfinite(rows[t]["min_ms"]))]
-        has_finals = any(r is not None and r["finals"] for r in rows.values())
-        finals = bool(trial["finals"]) or has_finals
-        if not missing and (not finals or has_finals):
-            continue
-        kept[trial["trial_id"]] = dict(trial, transfers=missing or trial["transfers"][-1:], finals=finals)
-        live_legs.add((trial["package"], trial["leg"]))
-    return [kept[t["trial_id"]] if t["kind"] == "solve" else t for t in trial_list
-            if t["kind"] == "solve" and t["trial_id"] in kept
-            or t["kind"] != "solve" and (t["package"], t["leg"]) in live_legs]
+        kept.append(dict(trial, transfers=missing.transfers(), finals=missing.wants_finals))
+    return kept
 
 
-def plan_trials(plan, key, root, resume=False, no_overwrite=False):
-    """{package: trials} for the flags, in run order."""
-    specs = sets.expand(plan["sets"], key, root, packages=plan["packages"],
-                        problems=plan["problems"], algorithms=plan["algorithms"], n=plan["n"])
-    specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
-                        tols=plan["tols"], dts=plan["dts"])
-    unused = sorted(set(plan["n"] or []) - {spec["n"] for spec in specs})
-    if unused:
+def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
+    """The trials of the flags: the named sets' specs, narrowed, each merged with its declarations in every set file; SystemExit when -n names a count no grid of the named sets lists."""
+    unknown = sorted(set(plan["n"] or []) - set(sets.declared_counts(plan["sets"], sets_dir)))
+    if unknown:
         raise SystemExit("-n {0}: no grid of {1} lists {2}".format(
             ",".join(str(c) for c in plan["n"]), ",".join(plan["sets"]),
-            ", ".join(str(c) for c in unused)))
-    all_trials = continue_filter(trials_mod.build_trials(specs), key, root, resume, no_overwrite)
+            ", ".join(str(c) for c in unknown)))
+    narrowing = dict(packages=plan["packages"], problems=plan["problems"],
+                     algorithms=plan["algorithms"], n=plan["n"], sets_dir=sets_dir)
+    specs = sets.expand(plan["sets"], key, root, **narrowing)
+    specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
+                        tols=plan["tols"], dts=plan["dts"])
+    return trials_mod.build_trials(specs, sets.declarations(key, root, **narrowing))
+
+
+def plan_trials(plan, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+    """{package: trials} for the flags, in run order."""
+    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite,
+                                 sources)
     groups = trials_mod.by_package(all_trials)
     return {package: groups[package] for package in launch.ordered(list(groups))}
 
@@ -194,13 +202,13 @@ def write_plan(directory, by_package):
 def print_counts(by_package):
     total = 0
     for package, rows in by_package.items():
-        kinds, legs = trials_mod.counts(rows)
-        total += kinds["solve"]
-        print("{0}: {1} solve, {2} warm, {3} optimize trials in {4} legs".format(
-            package, kinds["solve"], kinds["warm"], kinds["optimize"], len(legs)))
-        for leg, count in legs.items():
-            print("  {0}  {1}".format(leg, count))
-    print("{0} solve trials".format(total))
+        solves, optimizes, colds, builds = trials_mod.counts(rows)
+        total += solves
+        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds".format(
+            package, solves, optimizes, colds, builds))
+        for key, lines in trials_mod.builds_of(rows):
+            print("  {0}  {1}".format("/".join(str(k) for k in key), len(lines)))
+    print("{0} trials".format(total))
 
 
 # ---------------------------------------------------------------------- run
@@ -351,7 +359,7 @@ class Run:
         print("Logs: " + self.log_dir)
         print("Clocks: {0}  (1 Hz log in {1})".format(self.clock_status, os.path.join(self.log_dir, "clocks.csv")))
         if self.partials:
-            print("{0} package(s) partial: a watchdog hard exit abandoned part of a leg.".format(self.partials))
+            print("{0} package(s) partial: a watchdog hard exit abandoned part of a build.".format(self.partials))
         if self.clock_failures:
             print("{0} runner(s) drifted; lower the lock in runner_scripts/gpu_clocks.conf and re-run them.".format(self.clock_failures))
         if self.failures:

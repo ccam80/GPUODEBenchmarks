@@ -1,4 +1,4 @@
-"""The parquet result store: spec columns, hashes against a hand fixture, upsert by run_id, floor, batches, the leg lock, finals in the run precision, DuckDB reads across keys, and the CLI."""
+"""The parquet result store: spec columns, hashes against a hand fixture, upsert by run_id, floor, batches, the results-file lock, finals in the run precision, DuckDB reads across keys, and the CLI."""
 
 import hashlib
 import json
@@ -77,7 +77,7 @@ class StoreCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.store = store.Store(self.tmp)
 
-    def leg_file(self, package="cubie", key=KEY, problem="lorenz", algorithm="tsit5"):
+    def results_file(self, package="cubie", key=KEY, problem="lorenz", algorithm="tsit5"):
         return os.path.join(self.tmp, "key=" + key, "package=" + package,
                             "results", "{0}__{1}.parquet".format(problem, algorithm))
 
@@ -115,7 +115,7 @@ class HashTests(unittest.TestCase):
                                              "run_id": FIXTURE_RUN_ID,
                                              "group_id": FIXTURE_GROUP_ID})
         # A trial dict with extra fields hashes the same.
-        self.assertEqual(store.trial_id(dict(spec(), kind="solve", finals=False, leg="x")),
+        self.assertEqual(store.trial_id(dict(spec(), finals=False, cold=False)),
                          FIXTURE_TRIAL_ID)
 
     def test_trial_id_ignores_transfers_and_key_and_run_id_does_not(self):
@@ -184,11 +184,11 @@ class HashTests(unittest.TestCase):
 
 
 class SchemaTests(StoreCase):
-    def test_a_leg_file_carries_every_column_with_its_arrow_type(self):
+    def test_a_results_file_carries_every_column_with_its_arrow_type(self):
         self.store.record(row(min_ms=1.5, samples_ms=[9.0, 2.0, 1.5], errored_pct=0.0,
                               build_s=2.5, package_version="cubie 0.12.0+numba-cuda",
                               suite_rev="abc1234"))
-        table = pq.read_table(self.leg_file())
+        table = pq.read_table(self.results_file())
         self.assertEqual(table.schema.names, list(store.COLUMNS))
         self.assertEqual(table.schema, store.SCHEMA)
         stored = table.to_pylist()[0]
@@ -240,7 +240,7 @@ class SchemaTests(StoreCase):
 
 
 class UpsertTests(StoreCase):
-    def test_the_same_run_id_replaces_and_every_stepping_shares_the_leg_file(self):
+    def test_the_same_run_id_replaces_and_every_stepping_shares_the_results_file(self):
         self.store.record(row(min_ms=1.5))
         self.store.record(row(min_ms=2.5, errored_pct=12.5))
         self.store.record(row(n=32, min_ms=4.0))
@@ -248,7 +248,7 @@ class UpsertTests(StoreCase):
         self.store.record(row(dt=2.0 ** -8, min_ms=0.9))
         self.store.record(row(**adaptive(), min_ms=9.0))
         self.store.record(row(system_params={"states": 4}, min_ms=9.5))
-        rows = pq.read_table(self.leg_file()).to_pylist()
+        rows = pq.read_table(self.results_file()).to_pylist()
         self.assertEqual(len(rows), 6)
         first = [r for r in rows if r["run_id"] == FIXTURE_RUN_ID][0]
         self.assertEqual((first["min_ms"], first["errored_pct"]), (2.5, 12.5))
@@ -260,7 +260,7 @@ class UpsertTests(StoreCase):
     def test_floats_that_differ_by_rounding_are_different_rows(self):
         self.store.record(row(dt=0.0625, min_ms=1.0))
         self.store.record(row(dt=0.0625 * (1 + 1e-10), min_ms=2.0))
-        rows = pq.read_table(self.leg_file()).to_pylist()
+        rows = pq.read_table(self.results_file()).to_pylist()
         self.assertEqual(sorted(r["min_ms"] for r in rows), [1.0, 2.0])
 
     def test_floor_keeps_the_lower_finite_time_and_nan_never_wins(self):
@@ -268,18 +268,18 @@ class UpsertTests(StoreCase):
         self.store.record(row(min_ms=2.5), floor=True)
         self.store.record(row(min_ms=NAN, reason="error: x"), floor=True)
         self.assertEqual(self.store.status(spec()), "finite")
-        stored = pq.read_table(self.leg_file()).to_pylist()[0]
+        stored = pq.read_table(self.results_file()).to_pylist()[0]
         self.assertEqual(stored["min_ms"], 1.5)
         self.assertEqual(stored["reason"], "")
         self.store.record(row(min_ms=1.4), floor=True)
-        self.assertEqual(pq.read_table(self.leg_file()).to_pylist()[0]["min_ms"], 1.4)
+        self.assertEqual(pq.read_table(self.results_file()).to_pylist()[0]["min_ms"], 1.4)
         # A NaN row is replaced by a finite one under floor, and a NaN by a later NaN.
         self.store.record(row(n=32, min_ms=NAN, reason="abandoned: oom at ordinal 3"))
         self.store.record(row(n=32, min_ms=9.0), floor=True)
         self.assertEqual(self.store.status(spec(n=32)), "finite")
         self.store.record(row(n=128, min_ms=NAN, reason="first"))
         self.store.record(row(n=128, min_ms=NAN, reason="second"), floor=True)
-        rows = {r["n"]: r for r in pq.read_table(self.leg_file()).to_pylist()}
+        rows = {r["n"]: r for r in pq.read_table(self.results_file()).to_pylist()}
         self.assertEqual(rows[128]["reason"], "second")
         # Without floor a NaN replaces a finite time outright.
         self.store.record(row(n=32, min_ms=NAN))
@@ -295,16 +295,16 @@ class UpsertTests(StoreCase):
         self.assertEqual(self.store.status(store.run_id(spec(transfers="none"))), "finite")
         self.assertEqual(self.store.status(spec(controller="pi")), "absent")
 
-    def test_record_batch_locks_and_rewrites_each_leg_once_in_order(self):
+    def test_record_batch_locks_and_rewrites_each_file_once_in_order(self):
         writes = []
-        original = store.Store._write_leg
+        original = store.Store._write_results
 
         def spy(path, rows):
             writes.append(os.path.basename(path))
             return original(path, rows)
 
-        store.Store._write_leg = staticmethod(spy)
-        self.addCleanup(setattr, store.Store, "_write_leg", staticmethod(original))
+        store.Store._write_results = staticmethod(spy)
+        self.addCleanup(setattr, store.Store, "_write_results", staticmethod(original))
         standing = self.store.record_batch([
             row(min_ms=3.0), row(n=32, min_ms=4.0), row(min_ms=2.0),
             row(problem="pollu", parameter="k1", grid_scale="log", grid_min=3.5e-2,
@@ -313,7 +313,7 @@ class UpsertTests(StoreCase):
         self.assertEqual(writes, ["lorenz__tsit5.parquet", "pollu__tsit5.parquet",
                                   "lorenz__vern7.parquet"])
         self.assertEqual([r["min_ms"] for r in standing], [3.0, 4.0, 2.0, 7.0, 8.0])
-        rows = pq.read_table(self.leg_file()).to_pylist()
+        rows = pq.read_table(self.results_file()).to_pylist()
         self.assertEqual(sorted(r["min_ms"] for r in rows), [2.0, 4.0])
         self.assertEqual(len(self.store.rows()), 4)
         floored = self.store.record_batch([row(min_ms=5.0), row(n=32, min_ms=1.0)], floor=True)
@@ -328,18 +328,18 @@ class UpsertTests(StoreCase):
         self.store.record(row(**adaptive(), min_ms=4.0))
         self.assertEqual(self.store.clear(problem="lorenz", n=32), 1)
         self.assertEqual(self.store.clear(problem="pollu"), 1)
-        self.assertFalse(os.path.exists(self.leg_file(problem="pollu")))
+        self.assertFalse(os.path.exists(self.results_file(problem="pollu")))
         self.assertEqual(self.store.clear(problem="pollu"), 0)
         self.assertEqual(self.store.clear(controller="default", atol=1e-5), 1)
         self.assertEqual(self.store.clear(dt_min=NAN, run_id=FIXTURE_RUN_ID), 1)
-        self.assertFalse(os.path.exists(self.leg_file()))
+        self.assertFalse(os.path.exists(self.results_file()))
         with self.assertRaises(ValueError):
             self.store.clear(analysis="times")
 
 
 class LockTests(StoreCase):
     def test_a_fresh_lock_blocks_until_the_timeout(self):
-        path = self.leg_file()
+        path = self.results_file()
         os.makedirs(os.path.dirname(path))
         os.mkdir(path + ".lock")
         with self.assertRaises(TimeoutError):
@@ -348,7 +348,7 @@ class LockTests(StoreCase):
         self.assertTrue(os.path.isdir(path + ".lock"))
 
     def test_a_stale_lock_is_taken_over_and_released(self):
-        path = self.leg_file()
+        path = self.results_file()
         os.makedirs(os.path.dirname(path))
         os.mkdir(path + ".lock")
         old = time.time() - 2 * store.LOCK_STALE_S
@@ -359,16 +359,16 @@ class LockTests(StoreCase):
         self.assertEqual(self.store.status(spec()), "finite")
 
     def test_the_lock_is_held_while_the_file_is_rewritten(self):
-        path = self.leg_file()
+        path = self.results_file()
         seen = []
-        original = store.Store._write_leg
+        original = store.Store._write_results
 
         def spy(p, rows):
             seen.append(os.path.isdir(path + ".lock"))
             return original(p, rows)
 
-        store.Store._write_leg = staticmethod(spy)
-        self.addCleanup(setattr, store.Store, "_write_leg", staticmethod(original))
+        store.Store._write_results = staticmethod(spy)
+        self.addCleanup(setattr, store.Store, "_write_results", staticmethod(original))
         self.store.record(row(min_ms=1.0))
         self.assertEqual(seen, [True])
         self.assertFalse(os.path.exists(path + ".lock"))

@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize step; expand() turns the named sets into run specs, each with its transfers, finals flag, axis, build mode and optimize choice. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize policy; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize policy; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -19,7 +19,7 @@ CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
             "optimize", "watchdog")
-OPTIMIZE_KEYS = ("packages", "n", "per")
+OPTIMIZE_KEYS = ("packages", "per")
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -30,7 +30,7 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "axis", "build", "optimize", "watchdog_s", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "build", "optimize", "watchdog_s", "set", "stepping")
 
 
 class SetError(ValueError):
@@ -116,13 +116,9 @@ def load_set(name, sets_dir=SETS_DIR):
             raise SetError(where + " must be a table")
         _check_keys(optimize, OPTIMIZE_KEYS, where)
         optimize.setdefault("packages", "all")
-        optimize.setdefault("per", "leg")
         optimize["packages"] = _name_list(optimize["packages"], PACKAGES, where + " packages")
-        n = optimize.get("n")
-        if not (n == "solve" or (isinstance(n, int) and not isinstance(n, bool) and n >= 2)):
-            raise SetError(where + ": n must be an integer >= 2 or \"solve\"")
-        if optimize["per"] not in ("leg", "solve"):
-            raise SetError(where + ": per must be leg or solve")
+        if optimize.get("per") not in ("kernel", "solve"):
+            raise SetError(where + ": per must be kernel or solve")
     head["optimize"] = optimize
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
@@ -235,21 +231,6 @@ def _system_params(grid, problem, where):
         return [problem.system_params(s) for s in states]
     except ValueError as exc:
         raise SetError("{0}: {1}".format(where, exc))
-
-
-def _axis(grid, stepping):
-    """The leg axis a grid and stepping declare: states, then the swept stepping value, else n."""
-    if grid["system_params"]:
-        return "states"
-    if stepping["controller"] == "fixed":
-        dt = stepping["dt"]
-        count = len(dt.get("duration_times_2_pow", dt.get("duration_times", [None]))) \
-            if isinstance(dt, dict) else len(dt) if isinstance(dt, list) else 1
-        if count > 1:
-            return "dt"
-    elif isinstance(stepping["tol"], list) and len(stepping["tol"]) > 1:
-        return "tol"
-    return "n"
 
 
 def _narrow(names, requested):
@@ -385,10 +366,10 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
 # --------------------------------------------------------------- expansion
 
 def _optimize_for(table, package):
-    """{n, per} of the set's optimize table when it names the package, else None."""
+    """{per} of the set's optimize table when it names the package, else None."""
     if table is None or (table["packages"] != "all" and package not in table["packages"]):
         return None
-    return {"n": table["n"], "per": table["per"]}
+    return {"per": table["per"]}
 
 
 def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,
@@ -406,7 +387,6 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
             for si, stepping in enumerate(loaded["stepping"]):
                 swhere = "{0} [[stepping]] {1}".format(loaded["path"], si + 1)
                 kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
-                axis = _axis(grid, stepping)
                 chosen = _narrow(_narrow(head["packages"], grid["packages"]), stepping["packages"])
                 if packages is not None:
                     chosen = [p for p in chosen if p in packages]
@@ -440,7 +420,6 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["package"] = package
                                         spec["transfers"] = list(head["transfers"])
                                         spec["finals"] = bool(head["finals"])
-                                        spec["axis"] = axis
                                         spec["build"] = head["build"]
                                         spec["optimize"] = _optimize_for(head["optimize"], package)
                                         spec["watchdog_s"] = head["watchdog"]
@@ -448,6 +427,22 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["stepping"] = stepping["controller"]
                                         specs.append(spec)
     return specs
+
+
+def declarations(key, root="data", packages=None, problems=None, algorithms=None, n=None,
+                 sets_dir=SETS_DIR):
+    """The specs of every set file under sets_dir, narrowed like expand(): the declarations a requested point merges with."""
+    return expand(set_names(sets_dir), key, root, packages=packages, problems=problems,
+                  algorithms=algorithms, n=n, sets_dir=sets_dir)
+
+
+def declared_counts(names, sets_dir=SETS_DIR):
+    """The trajectory counts the grids of the named sets list, sorted."""
+    counts = set()
+    for name in names:
+        for grid in load_set(name, sets_dir)["grid"]:
+            counts.update(grid["n"])
+    return sorted(counts)
 
 
 def _close(value, wanted):

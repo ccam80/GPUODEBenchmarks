@@ -101,7 +101,7 @@ class FinalsTests(unittest.TestCase):
         self.assertEqual(adapter.states(trial(problem="lorenz96", system_params='{"states":16}', parameter="F",
                                               grid_max=16.0)), 16)
         with self.assertRaises(NotImplementedError):
-            adapter.optimize(None, trial(), None)
+            adapter.optimize(None, trial())
 
 
 if __name__ == "__main__":

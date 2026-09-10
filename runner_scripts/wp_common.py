@@ -34,14 +34,14 @@ def run_watchdogged(run, on_breach, budget_s=None):
 
 
 def repeat_bounds(first_s, cap):
-    """(floor, ceiling) repeats for a leg whose first timed run took first_s seconds, both capped at cap."""
+    """(floor, ceiling) repeats for a run whose first timed run took first_s seconds, both capped at cap."""
     for limit, floor, ceiling in REPEAT_SCHEDULE:
         if first_s < limit:
             return min(floor, cap), min(ceiling, cap)
 
 
 def repeats_done(timed_s, floor, ceiling):
-    """True when the timed runs so far settle the leg's minimum: the ceiling is reached, or the floor is and median/min - 1 is within REPEAT_SPREAD."""
+    """True when the timed runs so far settle the run's minimum: the ceiling is reached, or the floor is and median/min - 1 is within REPEAT_SPREAD."""
     if len(timed_s) >= ceiling:
         return True
     if len(timed_s) < floor:
