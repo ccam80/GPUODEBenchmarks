@@ -393,7 +393,7 @@ def _optimize_for(table, package):
 
 def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,
            sets_dir=SETS_DIR):
-    """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems` and `algorithms` narrow; `n` replaces every grid's n list."""
+    """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems`, `algorithms` and `n` narrow; a grid keeps the counts of its n list that `n` names."""
     catalogue = load_algorithms()
     problem_rows = load_problems()
     specs = []
@@ -402,7 +402,7 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
         head = loaded["set"]
         for gi, grid in enumerate(loaded["grid"]):
             gwhere = "{0} [[grid]] {1}".format(loaded["path"], gi + 1)
-            n_list = list(n) if n else list(grid["n"])
+            n_list = [count for count in grid["n"] if n is None or count in n]
             for si, stepping in enumerate(loaded["stepping"]):
                 swhere = "{0} [[stepping]] {1}".format(loaded["path"], si + 1)
                 kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"

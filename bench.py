@@ -2,7 +2,7 @@
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
--p -s -g --mode --controller --tol --dt narrow the expanded specs; -n replaces every grid's n list; --controller takes a spec controller or a set token such as matched.
+-p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists; --controller takes a spec controller or a set token such as matched.
 --resume drops trials whose every transfers row exists; --no-overwrite those whose rows are all finite; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
@@ -171,6 +171,11 @@ def plan_trials(plan, key, root, resume=False, no_overwrite=False):
                         problems=plan["problems"], algorithms=plan["algorithms"], n=plan["n"])
     specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
                         tols=plan["tols"], dts=plan["dts"])
+    unused = sorted(set(plan["n"] or []) - {spec["n"] for spec in specs})
+    if unused:
+        raise SystemExit("-n {0}: no grid of {1} lists {2}".format(
+            ",".join(str(c) for c in plan["n"]), ",".join(plan["sets"]),
+            ", ".join(str(c) for c in unused)))
     all_trials = continue_filter(trials_mod.build_trials(specs), key, root, resume, no_overwrite)
     groups = trials_mod.by_package(all_trials)
     return {package: groups[package] for package in launch.ordered(list(groups))}

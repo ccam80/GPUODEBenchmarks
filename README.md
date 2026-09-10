@@ -37,8 +37,8 @@ python bench.py run  --set golden_grid --resume # only the trials with a missing
 python bench.py run  --set perf --floor         # rerun; the lower time per row stays
 ```
 
-`-p`, `-s`, `-g`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
-expanded specs; `-n` replaces every grid's trajectory list. `--resume`
+`-p`, `-s`, `-g`, `-n`, `--mode`, `--controller`, `--tol` and `--dt` narrow the
+expanded specs; `-n` names counts of the grids' trajectory lists. `--resume`
 drops trials whose rows all exist, `--no-overwrite` those whose rows are
 all finite. A run pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
