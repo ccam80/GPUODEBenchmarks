@@ -85,7 +85,7 @@ and write figures and CSVs under `plots/<key>/<problem>/`.
 The store is one `data/` tree on the store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners, or refuses to run without the store unless `--no-sync`. Setup:
 
 1. Join the tailnet.
-2. Add the machine's public key to the store user's `authorized_keys` on the box.
+2. On the box: `sudo bash runner_scripts/store_box.sh <user> <machine>.pub` sets up key-only sshd for `<user>` from the tailnet, `/srv/gpuode/data`, and the machine's public key; rerun it per machine key.
 3. `ssh-keyscan -t rsa,ecdsa,ed25519 <box> >> ~/.ssh/known_hosts`
 4. `rclone config create box sftp host <box> user <user> key_file ~/.ssh/id_ed25519 known_hosts_file ~/.ssh/known_hosts`
 
