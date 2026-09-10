@@ -44,7 +44,7 @@ def main():
 
     if platform.system() != CUDA_PLATFORM:
         print(f"Skipping: jax publishes no CUDA wheels for "
-              f"{platform.system()}. Set this suite up on Linux or WSL2.")
+              f"{platform.system()}. Set this suite up on Linux.")
         return 0
 
     # Check if Python is available
@@ -89,14 +89,14 @@ def main():
 
     venv_uv = venv_path / "bin" / "uv"
 
-    # One resolve for the whole stack, so diffrax cannot pull a different jax.
+    # One resolve for the whole stack; pyarrow and tzdata serve the result store.
     print(f"Installing {jax_spec}, diffrax {DIFFRAX_VERSION}, "
           f"equinox {EQUINOX_VERSION}...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         jax_spec,
                         f"diffrax=={DIFFRAX_VERSION}",
                         f"equinox=={EQUINOX_VERSION}",
-                        "numpy", "scipy"]):
+                        "numpy", "scipy", "pyarrow", "tzdata"]):
         print("Failed to install the JAX stack")
         return 1
 

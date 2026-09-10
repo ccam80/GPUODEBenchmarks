@@ -110,6 +110,13 @@ def main():
         print("Failed to install cubie")
         return 1
 
+    # The suite interpreter: the result store needs pyarrow and DuckDB, the analyses matplotlib.
+    print("Installing the result-store and analysis dependencies (pyarrow, duckdb, matplotlib)...")
+    if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
+                        "pyarrow", "duckdb", "matplotlib"]):
+        print("Failed to install pyarrow, duckdb and matplotlib")
+        return 1
+
     # Verify each backend resolves under its env var. The backend is read once
     # at import time, so each check runs in a fresh interpreter.
     for backend, expect_mlir in (("numba-cuda", False), ("mlir", True)):
@@ -129,6 +136,12 @@ def main():
     if not run_command([str(venv_python), "-c",
                         "import numba.cuda; print('CUDA available:', numba.cuda.is_available())"]):
         print("Warning: CUDA verification failed")
+
+    if not run_command([str(venv_python), "-c",
+                        "import pyarrow, duckdb; print('pyarrow', pyarrow.__version__, "
+                        "'duckdb', duckdb.__version__)"]):
+        print("Failed to import pyarrow and duckdb")
+        return 1
 
     print("\nCUBIE environment setup complete!")
     print("Both backends live in this one venv; select with "

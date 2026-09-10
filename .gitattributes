@@ -1,4 +1,4 @@
-# Shell scripts must stay LF — they are executed by bash on Linux/WSL,
+# Shell scripts must stay LF — they are executed by bash on Linux,
 # where CRLF endings are a syntax error.
 *.sh text eol=lf
 # Windows batch and PowerShell scripts use CRLF

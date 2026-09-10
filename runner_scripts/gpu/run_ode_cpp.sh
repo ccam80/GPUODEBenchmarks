@@ -1,231 +1,153 @@
 #!/bin/bash
+# run_ode_cpp.sh --trials <jsonl> [--floor]: builds the binaries the file needs, runs its solve trials through Bench.exe; exits the watchdog code when a trial never returned.
 set -e
-. "$(dirname "$0")/../parse_args.sh" "$@"
+
+TRIALS=""
+FLOOR=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--trials) TRIALS="$2"; shift 2;;
+		--floor) FLOOR=1; shift;;
+		*) echo "run_ode_cpp.sh: unknown argument '$1'"; exit 1;;
+	esac
+done
+if [ -z "$TRIALS" ]; then echo "run_ode_cpp.sh --trials <jsonl> [--floor]"; exit 1; fi
+TRIALS="$(cd "$(dirname "$TRIALS")" && pwd)/$(basename "$TRIALS")"
 
 # Load modules eagerly so the first-launch cubin load stays out of timed regions.
 export CUDA_MODULE_LOADING=EAGER
 
-# MPGOS solvers: RK4 (classical-rk4, fixed) and RKCK45 (cash-karp-54, adaptive).
-SOLVERS=""
-case "$ALGORITHM" in
-    all) SOLVERS="RK4 RKCK45";;
-    classical-rk4) SOLVERS="RK4";;
-    cash-karp-54) SOLVERS="RKCK45";;
-    *) echo "MPGOS does not support algorithm '$ALGORITHM'; skipping."; exit 0;;
-esac
+cd "$(dirname "$0")/../.."
 
-DATASET_KEY=$(bash ./runner_scripts/bench_key.sh)
+# The suite interpreter runs the store.
+PYTHON=python3
+if [ -x GPU_ODE_CUBIE/venv/bin/python3 ]; then PYTHON="$PWD/GPU_ODE_CUBIE/venv/bin/python3"; fi
 
-# BENCH_RESUME / BENCH_NO_OVERWRITE / BENCH_RESUME_FROM: skip covered points via runner_scripts/resume.py.
-RESUME_ACTIVE=""
-[ -n "${BENCH_RESUME:-}${BENCH_NO_OVERWRITE:-}${BENCH_RESUME_FROM:-}" ] && RESUME_ACTIVE=1
-
-# BENCH_FLOOR: re-run and merge, keeping the lower recorded time; deletes nothing.
-FLOOR_ACTIVE=""
-case "${BENCH_FLOOR:-}" in ""|0) ;; *) FLOOR_ACTIVE=1;; esac
-
-mode_for() { if [ "$1" == "RK4" ]; then echo fixed; else echo adaptive; fi; }
-alg_for() { if [ "$1" == "RK4" ]; then echo classical-rk4; else echo cash-karp-54; fi; }
-
-# nan_row <file> <key> [extra]: append one NaN row (errored 100%), merging under --floor; creates the problem directory.
-nan_row() {
-	local file=$1 key=$2 extra=${3:-}
-	mkdir -p "$(dirname "$file")"
-	if [ -n "$FLOOR_ACTIVE" ]; then
-		python3 ./runner_scripts/resume.py merge "$file" tab "$key" nan nan ${extra:+"$extra"} 100
-	elif [ -n "$extra" ]; then
-		printf '%s\tnan\tnan\t%s\t100\n' "$key" "$extra" >> "$file"
-	else
-		printf '%s\tnan\tnan\t100\n' "$key" >> "$file"
-	fi
-}
-
-# resume_skip <times|states|wp> <problem> <solver> [N]: true when covered.
-resume_skip() {
-	[ -n "$RESUME_ACTIVE" ] || return 1
-	local kind=$1 problem=$2 solver=$3 n=${4:-}
-	local mode alg outfile
-	mode=$(mode_for "$solver")
-	alg=$(alg_for "$solver")
-	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
-	if [ "$kind" == "wp" ]; then
-		[ "$(python3 ./runner_scripts/resume.py leg "$problem" "$alg" "$mode" "$outfile")" == "skip" ]
-	else
-		[ "$(python3 ./runner_scripts/resume.py point "$problem" "$alg" "$mode" "$n" "$outfile")" == "skip" ]
-	fi
-}
-
-# resume_prune <times|states> <problem> <solver> <N>: drop a retried point's stale rows.
-resume_prune() {
-	[ -n "$RESUME_ACTIVE" ] || return 0
-	local kind=$1 problem=$2 solver=$3 n=$4
-	local mode alg outfile
-	mode=$(mode_for "$solver")
-	alg=$(alg_for "$solver")
-	outfile="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_${kind}_${mode}_${alg}.txt"
-	python3 ./runner_scripts/resume.py prune "$n" "$outfile"
-}
-
-# Built binaries are cached per source hash, machine and build constants.
-SRC_HASH=$( (cat GPU_ODE_MPGOS/Bench.cu GPU_ODE_MPGOS/makefile; \
-             find GPU_ODE_MPGOS/problems GPU_ODE_MPGOS/SourceCodes -type f | sort | xargs cat) \
-            | sha256sum | cut -c1-12)
+CONTEXT="$("$PYTHON" runner_scripts/mpgos_trials.py context)"
+context_value() { printf '%s\n' "$CONTEXT" | awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }'; }
+DATASET_KEY=$(context_value key)
+SRC_HASH=$(context_value source_hash)
+PACKAGE_VERSION=$(context_value package_version)
+SUITE_REV=$(context_value suite_rev)
+WATCHDOG_EXIT=$(context_value watchdog_exit)
 CACHE_DIR="GPU_ODE_MPGOS/build_cache/${DATASET_KEY}"
 
-# build_fresh <problem> <solver> <NT> [SD]: always run nvcc, no cache.
-build_fresh() {
-	make clean --directory=./GPU_ODE_MPGOS/
-	make --directory=./GPU_ODE_MPGOS/ PROBLEM="$1" SOLVER="$2" NT="$3" ${4:+SD="$4"}
+# Binaries are cached per source hash, machine and build constants.
+exe_path() {
+	local problem=$1 solver=$2 nt=$3 sd=$4 precision=$5 sdtag=""
+	[ "$sd" != "-" ] && sdtag="_SD$sd"
+	echo "${CACHE_DIR}/Bench_${problem}_${solver}_NT${nt}${sdtag}_${precision}_${SRC_HASH}.exe"
 }
 
-# build <problem> <solver> <NT> [SD]: reuse the cached binary or run nvcc.
-build() {
-	local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
-	if [ -f "$exe" ]; then
-		cp "$exe" GPU_ODE_MPGOS/Bench.exe
-		echo "Cached build: $(basename "$exe")"
-		return
-	fi
-	build_fresh "$@"
-	mkdir -p "$CACHE_DIR"
-	cp GPU_ODE_MPGOS/Bench.exe "$exe"
-}
-
-# warm_build <problem> <solver> <NT> [SD]: nvcc straight into the cache.
-warm_build() {
-	local exe="${CACHE_DIR}/Bench_$1_$2_NT$3${4:+_SD$4}_${SRC_HASH}.exe"
-	[ -f "$exe" ] && return 0
-	echo "building $(basename "$exe")"
+# nvcc_build <exe> <problem> <solver> <nt> <sd> <precision>
+nvcc_build() {
+	local exe=$1 problem=$2 solver=$3 nt=$4 sd=$5 precision=$6 type=float
+	[ "$precision" = "float64" ] && type=double
 	nvcc -o "$exe" GPU_ODE_MPGOS/Bench.cu \
 		-IGPU_ODE_MPGOS/SourceCodes -IGPU_ODE_MPGOS \
-		-DPROBLEM_HEADER="\"problems/$1.cuh\"" -DSOLVER_CHOICE="$2" \
-		-DNT_VALUE="$3" ${4:+-DPROBLEM_SD=$4} \
-		-O3 -std=c++11 --ptxas-options=-v --gpu-architecture=native \
-		-lineinfo -maxrregcount=128 > /dev/null 2>&1 \
-		|| { rm -f "$exe"; echo "FAILED $(basename "$exe")"; }
+		-DPROBLEM_HEADER="\"problems/$problem.cuh\"" -DSOLVER_CHOICE="$solver" \
+		-DNT_VALUE="$nt" -DPRECISION_TYPE="$type" $( [ "$sd" != "-" ] && echo "-DPROBLEM_SD=$sd" ) \
+		-O3 -std=c++17 --ptxas-options=-v --gpu-architecture=native \
+		-lineinfo -maxrregcount=128
 }
 
-# warm_nt_builds: every (problem, solver, NT) binary, in parallel.
-warm_nt_builds() {
-	local jobs=${BENCH_WARM_JOBS:-8}
-	mkdir -p "$CACHE_DIR"
-	local nts
-	nts=$(echo "$NLIST 131072" | tr ' ' '\n' | sort -un)
-	for problem in $PROBLEMS; do
-		for solver in $SOLVERS; do
-			for a in $nts; do
-				while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do wait -n; done
-				warm_build "$problem" "$solver" "$a" &
-			done
-		done
-	done
-	wait
+# warm_build <problem> <solver> <nt> <sd> <precision>: nvcc straight into the cache, quietly.
+warm_build() {
+	local exe
+	exe=$(exe_path "$@")
+	[ -f "$exe" ] && return 0
+	echo "building $(basename "$exe")"
+	nvcc_build "$exe" "$@" > /dev/null 2>&1 || { rm -f "$exe"; echo "FAILED $(basename "$exe")"; }
 }
 
-if [ "$ANALYSIS" == "states" ]; then
-	STATES_N=131072
-	GRID=$(python3 ./runner_scripts/problems.py --states-grid)
-	# A resumed or --floor run appends to what earlier runs recorded.
-	if [ -z "$RESUME_ACTIVE" ] && [ -z "$FLOOR_ACTIVE" ]; then
-		rm -f "./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_"*.txt
-	fi
-	for solver in $SOLVERS
-	do
-		BREACHED=""
-		STATES_FILE="./data/CPP/${DATASET_KEY}/lorenz96/MPGOS_states_$(mode_for "$solver")_$(alg_for "$solver").txt"
-		for n in $GRID
-		do
-			if resume_skip states lorenz96 "$solver" "$n"; then
-				echo "-- resume: skipping lorenz96 states=$n ($solver) (already covered)"
-				continue
-			fi
-			resume_prune states lorenz96 "$solver" "$n"
-			echo "lorenz96 states = $n ($solver, N=$STATES_N)"
-			T0=$(date +%s.%N)
-			build_fresh lorenz96 "$solver" "$STATES_N" "$n"
-			BUILD_S=$(echo "$T0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}')
-			# After a breach: keep the build time, NaN the solve.
-			if [ -n "$BREACHED" ]; then
-				nan_row "$STATES_FILE" "$n" "$BUILD_S"
-				echo "WATCHDOG lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): skipped after breach"
-				continue
-			fi
-			rc=0
-			./GPU_ODE_MPGOS/Bench.exe states "$BUILD_S" || rc=$?
-			if [ "$rc" -eq 42 ]; then
-				BREACHED=1
-			elif [ "$rc" -ne 0 ]; then
-				# A failed point is a NaN row with its build time; the grid goes on.
-				echo "FAILED lorenz96 states=$n $(mode_for "$solver") $(alg_for "$solver"): Bench.exe exit $rc"
-				nan_row "$STATES_FILE" "$n" "$BUILD_S"
-			fi
-		done
+# cold_build <problem> <solver> <nt> <sd> <precision>: a fresh serial build; prints its wall seconds.
+cold_build() {
+	local exe t0
+	exe=$(exe_path "$@")
+	rm -f "$exe"
+	echo "cold build $(basename "$exe")" >&2
+	t0=$(date +%s.%N)
+	nvcc_build "$exe" "$@" >&2 || { rm -f "$exe"; echo "FAILED $(basename "$exe")" >&2; }
+	echo "$t0 $(date +%s.%N)" | awk '{printf "%.3f", $2 - $1}'
+}
+
+mkdir -p "$CACHE_DIR"
+BUILDS="$("$PYTHON" runner_scripts/mpgos_trials.py builds "$TRIALS")"
+POINTS="$("$PYTHON" runner_scripts/mpgos_trials.py points "$TRIALS")"
+
+# Warm targets build in parallel; cold targets build serially and time build_s.
+JOBS=8
+while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
+	[ -z "$problem" ] && continue
+	[ "$cold" = "true" ] && continue
+	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
+	warm_build "$problem" "$solver" "$nt" "$sd" "$precision" &
+done <<< "$BUILDS"
+wait
+declare -A BUILD_SECONDS
+while IFS=$'\t' read -r problem solver nt sd precision cold leg; do
+	[ "$cold" = "true" ] || continue
+	BUILD_SECONDS["$leg"]=$(cold_build "$problem" "$solver" "$nt" "$sd" "$precision")
+done <<< "$BUILDS"
+
+# nan_rows <trial_id> <leg> <transfers> <reason>: record NaN rows for a point the script could not run.
+nan_rows() {
+	local trial_id=$1 leg=$2 transfers=$3 reason=$4
+	local extra=()
+	[ -n "$FLOOR" ] && extra+=(--floor)
+	[ -n "${BUILD_SECONDS[$leg]:-}" ] && extra+=(--build-s "${BUILD_SECONDS[$leg]}")
+	"$PYTHON" runner_scripts/mpgos_trials.py nan "$TRIALS" "$trial_id" "$DATASET_KEY" "$transfers" "$reason" "${extra[@]}"
+	echo "cpp $leg $transfers: $reason"
+}
+
+# (leg|transfers) pairs abandoned after a timeout or oom outcome.
+declare -A ABANDONED
+OUTCOME="$TRIALS.outcome"
+
+while IFS=$'\t' read -r trial_id leg ordinal problem solver nt sd precision transfers finals reason; do
+	[ -z "$trial_id" ] && continue
+	wanted=""
+	for t in ${transfers//,/ }; do
+		[ -n "${ABANDONED[$leg|$t]:-}" ] && continue
+		wanted="${wanted:+$wanted,}$t"
 	done
-	exit 0
-fi
-
-PROBLEMS=$(python3 ./runner_scripts/mpgos_problems.py "$PROBLEM")
-if [ -z "$PROBLEMS" ]; then
-	echo "MPGOS runs none of the requested problems; skipping."
-	exit 0
-fi
-
-if [ "$ANALYSIS" == "warm" ]; then
-	warm_nt_builds
-	echo "MPGOS warm build cache populated."
-	exit 0
-fi
-
-# All binaries compile in parallel before anything is timed.
-[ "$ANALYSIS" == "performance" ] && warm_nt_builds
-
-for problem in $PROBLEMS
-do
-	if [ "$ANALYSIS" == "work-precision" ]; then
-		for solver in $SOLVERS
-		do
-			if resume_skip wp "$problem" "$solver"; then
-				echo "-- resume: skipping wp $problem ($solver) (already covered)"
-				continue
-			fi
-			build "$problem" "$solver" 131072
-			# 42 = watchdog breach; the wp sweep NaN-fills in-process. Any other failure ends this leg only.
-			rc=0
-			./GPU_ODE_MPGOS/Bench.exe wp || rc=$?
-			if [ "$rc" -ne 0 ] && [ "$rc" -ne 42 ]; then
-				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") wp: Bench.exe exit $rc"
-			fi
-		done
+	[ -z "$wanted" ] && continue
+	if [ -n "$reason" ]; then
+		nan_rows "$trial_id" "$leg" "$wanted" "$reason"
 		continue
 	fi
-	for solver in $SOLVERS
-	do
-		BREACHED=""
-		TIMES_FILE="./data/CPP/${DATASET_KEY}/${problem}/MPGOS_times_$(mode_for "$solver")_$(alg_for "$solver").txt"
-		for a in $NLIST
-		do
-			if resume_skip times "$problem" "$solver" "$a"; then
-				echo "-- resume: skipping N=$a ($problem, $solver) (already covered)"
-				continue
-			fi
-			resume_prune times "$problem" "$solver" "$a"
-			# A breached leg's larger sizes are recorded as NaN without running.
-			if [ -n "$BREACHED" ]; then
-				nan_row "$TIMES_FILE" "$a"
-				echo "WATCHDOG $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: skipped after breach"
-				continue
-			fi
-			echo "No. of trajectories = $a ($problem, $solver)"
-			build "$problem" "$solver" "$a"
-			rc=0
-			./GPU_ODE_MPGOS/Bench.exe || rc=$?
-			if [ "$rc" -eq 42 ]; then
-				BREACHED=1
-			elif [ "$rc" -ne 0 ]; then
-				# A failed point (OOM, launch error) is a NaN row; the sweep goes on.
-				echo "FAILED $problem $(mode_for "$solver") $(alg_for "$solver") N=$a: Bench.exe exit $rc"
-				nan_row "$TIMES_FILE" "$a"
-			fi
+	exe=$(exe_path "$problem" "$solver" "$nt" "$sd" "$precision")
+	if [ ! -f "$exe" ]; then
+		nan_rows "$trial_id" "$leg" "$wanted" "error: BuildError: nvcc failed for $(basename "$exe")"
+		continue
+	fi
+	rm -f "$OUTCOME"
+	bench_args=(--trials "$TRIALS" --trial "$trial_id" --key "$DATASET_KEY" --transfers "$wanted"
+		--python "$PYTHON" --package-version "$PACKAGE_VERSION" --suite-rev "$SUITE_REV" --outcome "$OUTCOME")
+	[ -n "$FLOOR" ] && bench_args+=(--floor)
+	[ -n "${BUILD_SECONDS[$leg]:-}" ] && bench_args+=(--build-s "${BUILD_SECONDS[$leg]}")
+	echo "cpp $leg ordinal $ordinal n=$nt ($wanted)"
+	rc=0
+	"$exe" "${bench_args[@]}" || rc=$?
+	if [ "$rc" -eq "$WATCHDOG_EXIT" ]; then
+		exit "$WATCHDOG_EXIT"
+	fi
+	done_legs=""
+	if [ -f "$OUTCOME" ]; then
+		while read -r which result; do
+			[ -z "$which" ] && continue
+			done_legs="$done_legs $which"
+			case "$result" in timeout|oom) ABANDONED["$leg|$which"]=1;; esac
+		done < "$OUTCOME"
+	fi
+	if [ "$rc" -ne 0 ]; then
+		echo "FAILED $leg ordinal $ordinal: Bench.exe exit $rc"
+		missing=""
+		for t in ${wanted//,/ }; do
+			case " $done_legs " in *" $t "*) ;; *) missing="${missing:+$missing,}$t";; esac
 		done
-	done
-done
+		[ -n "$missing" ] && nan_rows "$trial_id" "$leg" "$missing" "error: ProcessError: Bench.exe exit $rc"
+	fi
+done <<< "$POINTS"
+
+exit 0

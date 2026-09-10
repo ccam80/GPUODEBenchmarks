@@ -1,4 +1,4 @@
-"""The problem axis: one row per benchmark ODE/DAE in problems.csv, read the same way by problems.jl."""
+"""The problem catalogue: one row per benchmark ODE/DAE in problems.csv with its default state count, duration, sweep range, golden algorithm and the packages that implement it."""
 
 import csv
 import os
@@ -8,29 +8,15 @@ PROBLEMS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 DEFAULT_PROBLEM = "lorenz"
 
-# The states sweep resizes this problem; see STATES_GRID in wp_common.py.
-STATES_PROBLEM = "lorenz96"
-
-
-def states_row(n):
-    """The lorenz96 row resized to n states."""
-    row = get_problem(STATES_PROBLEM)
-    return Problem({**row, "states": n})
+# The one problem whose state count is a construction parameter.
+RESIZABLE_PROBLEM = "lorenz96"
 
 _INT_FIELDS = ("states",)
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
-# Dyadic dt-grid exponents as duration fractions; mirrored in problems.jl.
-WP_K = (4, 13)
-# Euler runs a finer grid than the higher-order methods.
-EULER_K = (8, 17)
-NE_K = (1, 13)
-# Timed N-sweep fixed step: duration * 2^-10.
-TIMING_DT_K = 10
-
 
 class Problem(dict):
-    """One row of problems.csv with its derived grids."""
+    """One row of problems.csv."""
 
     @property
     def name(self):
@@ -40,35 +26,21 @@ class Problem(dict):
     def duration(self):
         return self["duration"]
 
-    @property
-    def timing_dt(self):
-        """Fixed step used by the N-sweep: duration * 2^-10."""
-        return self["duration"] * 2.0 ** -TIMING_DT_K
+    def supports(self, package):
+        return package in self["frameworks"]
 
-    def dts(self, algorithm=None):
-        """Fixed-step dt grid for the work-precision sweep."""
-        lo, hi = EULER_K if algorithm == "euler" else WP_K
-        return [self["duration"] * 2.0 ** -k for k in range(lo, hi + 1)]
+    def system_params(self, states=None):
+        """The canonical construction parameters: {"states": n} for the resizable problem, {} otherwise."""
+        if self.name == RESIZABLE_PROBLEM:
+            return {"states": int(self["states"] if states is None else states)}
+        if states is not None and int(states) != self["states"]:
+            raise ValueError("{0} has {1} states; it cannot be resized".format(
+                self.name, self["states"]))
+        return {}
 
-    def ne_dts(self):
-        """Fixed-step dt grid for the numerical-equivalence sweep."""
-        return [self["duration"] * 2.0 ** -k
-                for k in range(NE_K[0], NE_K[1] + 1)]
-
-    def sweep(self, n, dtype=None):
-        """The ensemble parameter grid: n values over the sweep range."""
-        import numpy as np
-        lo, hi = self["sweep_min"], self["sweep_max"]
-        if self["sweep_scale"] == "log":
-            if lo <= 0.0:
-                raise SystemExit(
-                    "problem '{0}': a log sweep needs sweep_min > 0"
-                    .format(self.name))
-            return np.logspace(np.log10(lo), np.log10(hi), n, dtype=dtype)
-        return np.linspace(lo, hi, n, dtype=dtype)
-
-    def supports(self, framework):
-        return framework in self["frameworks"]
+    def resized(self, states):
+        """A copy of the row with another state count."""
+        return Problem({**self, "states": int(states)})
 
 
 def load_problems():
@@ -99,24 +71,26 @@ def get_problem(name):
         name, ", ".join(problem_names())))
 
 
-def resolve_problems(request, framework=None):
-    """Resolve "all" or a comma list to the problems a framework runs."""
+def as_problem(problem):
+    """The problem row for a row or a name."""
+    return problem if isinstance(problem, dict) else get_problem(problem)
+
+
+def resolve_problems(request, package=None):
+    """Resolve "all" or a comma list to the problems a package implements."""
     if request in (None, "", "all"):
         selected = load_problems()
     else:
         selected = [get_problem(name) for name in request.split(",") if name]
-    if framework is not None:
-        selected = [row for row in selected if row.supports(framework)]
+    if package is not None:
+        selected = [row for row in selected if row.supports(package)]
     return selected
 
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--states-grid":
-        from wp_common import STATES_GRID
-        print(" ".join(str(n) for n in STATES_GRID))
-    elif len(sys.argv) > 1:
-        # <framework> [request]: the resolved problem names, one per line.
+    if len(sys.argv) > 1:
+        # <package> [request]: the resolved problem names, one per line.
         request = sys.argv[2] if len(sys.argv) > 2 else "all"
         for row in resolve_problems(request, sys.argv[1]):
             print(row["problem"])

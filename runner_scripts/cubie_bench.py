@@ -1,620 +1,254 @@
 #!/usr/bin/env python
 
-"""Cubie ensemble benchmark shared by the CUBIE and CUBIE_MLIR suites; the backend comes from CUBIE_CUDA_BACKEND."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a leg is one system and one Solver whose stepping follows each trial; a warm line compiles when no optimize line follows (in a fresh cache directory when cold), an optimize line runs Solver.optimize on its batch and records the winner, a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
 
 import gc
+import importlib.metadata
+import json
+import math
 import os
+import shutil
 import sys
+import tempfile
 
 import numpy as np
 
-from algorithms import supported_for
-from bench_key import dataset_key, data_dir
-from cubie_systems import (build_system, final_states, output_types,
-                           sweep_parameters)
-from resume import (active as resume_active, floor_enabled, prune_reruns,
-                    skip_point, skip_wp_leg, write_times_row, write_wp_row)
-from wp_common import (TIMING_TOL, errored_pct, parse_bench_args,
-                       times_outfile)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Repeat ceiling; the count per leg follows its first timed run's duration.
-REPEATS = 20
+import cubie_adapter as adapter  # noqa: E402
+import runner  # noqa: E402
+from cubie_systems import final_states, output_types, variable_order  # noqa: E402
+from problems import as_problem  # noqa: E402
 
-PRECISION = np.float32
-
-
-def _make_fixed_solver(system, problem, algorithm, dt=None):
-    import cubie as qb
-    return qb.Solver(
-        system,
-        algorithm=algorithm,
-        dt=problem.timing_dt if dt is None else dt,
-        save_every=problem["duration"],
-        step_controller='fixed',
-        output_types=output_types(system),
-        time_logging_level=None,
-    )
+PRECISIONS = {"float32": np.float32, "float64": np.float64}
+# The controller names a trial may carry: cubie's own step controllers plus the two shared tokens.
+CONTROLLERS = ("fixed", "default", "i", "pi", "pid", "gustafsson")
+# The trial fields that reach the Solver only when finite.
+PINNED = ("dt", "dt_min", "dt_max", "newton_atol", "newton_rtol")
+STEPPING = ("controller",) + PINNED + ("atol", "rtol", "gains")
 
 
-def _make_adaptive_solver(system, problem, algorithm, tol=TIMING_TOL):
-    """No step controller passed: cubie runs its shipped defaults."""
-    import cubie as qb
-    return qb.Solver(
-        system,
-        algorithm=algorithm,
-        atol=tol,
-        rtol=tol,
-        dt=problem.timing_dt,
-        save_every=problem["duration"],
-        output_types=output_types(system),
-        time_logging_level=None,
-    )
+def _finite(value):
+    return isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def _release(solver):
-    """One solver at a time: close and free before the next is built."""
-    solver.close()
-    gc.collect()
+def problem_row(trial):
+    """The catalogue row of a trial, resized to its system_params states."""
+    row = as_problem(trial["problem"])
+    params = json.loads(trial["system_params"]) if trial["system_params"] else {}
+    if "states" in params:
+        row = row.resized(params["states"])
+    return row
 
 
-def _grid_builder(problem, initial_conditions):
-    """Per-size ensemble grids; only the current size's arrays are held."""
-    cache = {}
-
-    def build(solver, n):
-        if cache.get("n") != n:
-            cache.clear()
-            parameters = sweep_parameters(problem, n, PRECISION)
-            cache["n"] = n
-            cache["arrays"] = solver.build_grid(
-                initial_values=initial_conditions, parameters=parameters)
-        return cache["arrays"]
-
-    return build
-
-
-def _run_problem(problem, opts):
-    """Every requested algorithm for one problem."""
-    system, initial_conditions = build_system(
-        problem, PRECISION, name_suffix=opts["name_suffix"])
-    grid = _grid_builder(problem, initial_conditions)
-
-    if opts["analysis"] == "wp":
-        _run_wp(problem, opts, system, grid)
-        return
-
-    _run_times(problem, opts, system, grid)
+def stepping_kwargs(trial):
+    """The Solver keywords a trial's stepping sets: the controller, atol and rtol when adaptive, and each pin that is not NaN; a NaN leaves cubie's own value in place."""
+    kwargs = {}
+    if trial["controller"] == "fixed":
+        kwargs["step_controller"] = "fixed"
+    else:
+        kwargs["atol"] = float(trial["atol"])
+        kwargs["rtol"] = float(trial["rtol"])
+        if trial["controller"] != "default":
+            kwargs["step_controller"] = trial["controller"]
+    for key in PINNED:
+        if _finite(trial[key]):
+            kwargs[key] = float(trial[key])
+    return kwargs
 
 
-def _failed(exc, what):
-    """An algorithm that cannot run this system is a NaN row, not an abort."""
-    print("FAILED {0}: {1}".format(what, exc))
-    return float("nan")
+def gains_of(trial):
+    """The explicit controller parameters of a trial as a dict."""
+    return json.loads(trial["gains"]) if trial["gains"] else {}
 
 
-def _device_leg(solver, duration, repeats):
-    """(best_ms, samples) on the resident inputs with results left on the device; best_ms is None on a breach."""
-    from wp_common import timed_min_ms
-
-    # Raises after a chunked host leg.
-    d_initials = solver.device_initial_values
-    d_parameters = solver.device_parameters
-
-    def device_only(blocksize=64):
-        result = solver.solve(
-            initial_values=d_initials,
-            parameters=d_parameters,
-            blocksize=blocksize,
-            duration=duration,
-            on_device=True,
-        )
-        # on_device solves return before the stream drains.
-        result.stream.synchronize()
-
-    best, _, samples = timed_min_ms(device_only, repeats)
-    return best, samples
+def make_solver(system, trial, solver_class=None):
+    """A Solver for a trial's algorithm and stepping; explicit gains are applied after construction."""
+    if solver_class is None:
+        import cubie
+        solver_class = cubie.Solver
+    kwargs = dict(algorithm=trial["algorithm"], save_every=float(trial["duration"]),
+                  output_types=output_types(system), time_logging_level=None)
+    kwargs.update(stepping_kwargs(trial))
+    solver = solver_class(system, **kwargs)
+    gains = gains_of(trial)
+    if gains:
+        solver.update(gains)
+    return solver
 
 
-def _run_wp(problem, opts, system, grid):
-    """dt / tolerance sweep at N = N_WP; see runner_scripts/wp_common.py."""
-    from wp_common import (dts_for, TOLS, N_WP, append_samples, load_golden,
-                           ensemble_error, reset_samples, sample_point,
-                           samples_outfile, timed_min_ms, wp_outfile)
-
-    duration = problem["duration"]
-    golden = load_golden(problem)
-
-    def bench_solver(solver, repeats=REPEATS):
-        """(best_ms, err, errored_percent, samples); best_ms is None when a run breaches the watchdog."""
-        initials_array, parameter_array = grid(solver, N_WP)
-
-        def run():
-            return solver.solve(
-                initial_values=initials_array,
-                parameters=parameter_array,
-                blocksize=64,
-                duration=duration,
-            )
-        best_ms, solution, samples = timed_min_ms(run, repeats)
-        if best_ms is None:
-            return None, float("nan"), 100.0, samples
-        view = final_states(system, solution, problem)
-        err = ensemble_error(view, golden)
-        return best_ms, err, errored_pct(view), samples
-
-    def sweep(mode, make_solver, settings):
-        outfile = wp_outfile(opts["framework_dir"], opts["prefix"], mode,
-                             algorithm, opts["dataset_key"], problem)
-        if skip_wp_leg(problem.name, algorithm, mode, outfile):
-            print(f"-- resume: skipping wp {problem.name} {mode} "
-                  f"{algorithm} (already covered)")
-            return
-        samples_file = samples_outfile(opts["framework_dir"], opts["prefix"],
-                                       "wp", mode, algorithm,
-                                       opts["dataset_key"], problem)
-        setting_kind = "dt" if mode == "fixed" else "tol"
-        # --floor merges the new times in; the log gains a fresh series.
-        if not floor_enabled():
-            reset_samples(samples_file)
-        with open(outfile, "a" if floor_enabled() else "w") as f:
-            breached = False
-            for setting in settings:
-                t_ms, err = float("nan"), float("nan")
-                pct = 100.0
-                solver = None
-                if not breached:
-                    try:
-                        solver = make_solver(setting)
-                        t_ms, err, pct, samples = bench_solver(solver)
-                        append_samples(samples_file, sample_point(
-                            "wp", problem.name, algorithm, mode, N_WP,
-                            problem["states"], setting_kind, setting),
-                            "both", samples)
-                    except Exception as exc:
-                        t_ms = err = _failed(
-                            exc, f"{problem.name} {mode} {algorithm} "
-                            f"setting={setting:g}")
-                        pct = 100.0
-                    if t_ms is None:
-                        # Later settings are slower, so the leg is abandoned.
-                        print(f"WATCHDOG {problem.name} {mode} {algorithm} "
-                              f"setting={setting:g}: run exceeded the cap")
-                        breached = True
-                        t_ms = float("nan")
-                print(f"wp {problem.name} {mode} {algorithm} "
-                      f"setting={setting:g}: {t_ms:.2f} ms, err={err:.3e}, "
-                      f"errored={pct:.1f}%")
-                write_wp_row(f, outfile, setting, t_ms, err, pct)
-                if solver is not None:
-                    _release(solver)
-
-    for algorithm in opts["algorithms"]:
-        if not problem.supports(opts["framework"]):
-            continue
-        if algorithm in opts["fixed"]:
-            sweep("fixed",
-                  lambda dt: _make_fixed_solver(system, problem, algorithm,
-                                                dt),
-                  dts_for(algorithm, problem))
-        if algorithm in opts["adaptive"]:
-            sweep("adaptive",
-                  lambda tol: _make_adaptive_solver(system, problem,
-                                                    algorithm, tol),
-                  TOLS)
+def optimize_setting(trial):
+    """(mode, setting) of the optimize row a trial records: the setting is None on an n or states axis, where one row serves the leg, and the trial's dt or tolerance otherwise."""
+    mode = "fixed" if trial["controller"] == "fixed" else "adaptive"
+    if trial["axis"] in ("n", "states"):
+        return mode, None
+    return mode, float(trial["dt"] if mode == "fixed" else trial["atol"])
 
 
-def _run_times(problem, opts, system, grid):
-    """N-sweep timing: each (algorithm, mode) leg walks the sizes ascending on one solver."""
-    from wp_common import (append_samples, sample_point, samples_outfile,
-                           timed_min_ms)
+class Leg:
+    """One system and one Solver; the grid arrays of the current n and the resident device inputs of the last host solve."""
 
-    duration = problem["duration"]
-    dataset = opts["dataset_key"]
-    ns = opts["ns"]
-    # The pairwise numerical cross-check reads these fixed CSV names.
-    numerical_names = {("fixed", "classical-rk4"): "_unadaptive.csv",
-                       ("adaptive", "tsit5"): "_adaptive.csv"}
-
-    def host_leg(solver, n, want_finals):
-        """(best_ms, finals, errored_percent, samples) through host arrays; best_ms is None on a breach, finals a copy or None."""
-        initials_array, parameter_array = grid(solver, n)
-
-        def with_transfers(blocksize=64):
-            return solver.solve(
-                initial_values=initials_array,
-                parameters=parameter_array,
-                blocksize=blocksize,
-                duration=duration
-            )
-
-        best, solution, samples = timed_min_ms(with_transfers, REPEATS)
-        finals = None
-        pct = 100.0
-        if best is not None:
-            view = final_states(system, solution, problem)
-            pct = errored_pct(view)
-            if want_finals:
-                # A copy: the view aliases the buffer the next solve reuses.
-                finals = np.array(view)
-        return best, finals, pct, samples
-
-    def save_numerical(finals, name):
-        """Final states for the 32768-run numerical cross-check."""
-        np.savetxt(os.path.join(
-            data_dir("numerical", dataset, problem=problem), name),
-            finals, delimiter=',')
-
-    def nan_rows(file, outfile, sizes):
-        for n in sizes:
-            write_times_row(file, outfile, n,
-                            (float("nan"), float("nan"), 100.0))
-
-    for algorithm in opts["algorithms"]:
-        if not problem.supports(opts["framework"]):
-            continue
-        for mode in ("fixed", "adaptive"):
-            if algorithm not in opts[mode]:
-                continue
-            outfile = times_outfile(opts["framework_dir"], opts["prefix"],
-                                    mode, algorithm, dataset, problem)
-            samples_file = samples_outfile(
-                opts["framework_dir"], opts["prefix"], "times", mode,
-                algorithm, dataset, problem)
-            run_ns = [n for n in ns
-                      if not skip_point(problem.name, algorithm, mode, n,
-                                        outfile)]
-            if not run_ns:
-                print(f"-- resume: skipping {problem.name} {mode} "
-                      f"{algorithm} (already covered)")
-                continue
-            if len(run_ns) < len(ns):
-                print(f"-- resume: {problem.name} {mode} {algorithm} "
-                      f"runs N={','.join(str(n) for n in run_ns)}")
-            # Drop stale rows for the points about to rerun.
-            prune_reruns(outfile, run_ns)
-            solver = None
-            try:
-                solver = (_make_fixed_solver(system, problem, algorithm)
-                          if mode == "fixed"
-                          else _make_adaptive_solver(system, problem,
-                                                     algorithm))
-            except Exception as exc:
-                _failed(exc, f"{problem.name} {mode} {algorithm}")
-                with open(outfile, "a+") as file:
-                    nan_rows(file, outfile, run_ns)
-                continue
-            with open(outfile, "a+") as file:
-                # A device-only breach abandons that column alone.
-                device_breached = False
-                for index, n in enumerate(run_ns):
-                    print(f"Running {problem.name}, {n} trajectories, "
-                          f"{mode} dt, {algorithm}...")
-                    label = f"{problem.name} {mode} {algorithm} N={n}"
-                    point = sample_point("times", problem.name, algorithm,
-                                         mode, n, problem["states"])
-                    want_finals = (n == 32768
-                                   and (mode, algorithm) in numerical_names)
-                    finals = None
-                    pct = 100.0
-                    try:
-                        best, finals, pct, samples = host_leg(
-                            solver, n, want_finals)
-                        append_samples(samples_file, point, "both", samples)
-                    except Exception as exc:
-                        best = _failed(exc, label)
-                    if best is None:
-                        # Larger sizes are slower, so the leg is abandoned.
-                        print(f"WATCHDOG {label}: run exceeded the cap")
-                        nan_rows(file, outfile, run_ns[index:])
-                        break
-                    # The device leg runs only after a host-path time.
-                    best_dev = float("nan")
-                    if np.isnan(best):
-                        print(f"SKIP {label} device-only: no host-path time")
-                    elif device_breached:
-                        print(f"SKIP {label} device-only: breached at a "
-                              "smaller size")
-                    else:
-                        try:
-                            best_dev, samples = _device_leg(
-                                solver, duration, REPEATS)
-                            append_samples(samples_file, point, "none",
-                                           samples)
-                        except Exception as exc:
-                            best_dev = _failed(exc, label + " device-only")
-                        if best_dev is None:
-                            device_breached = True
-                            best_dev = float("nan")
-                            print(f"WATCHDOG {label} device-only: run "
-                                  "exceeded the cap")
-                    if not np.isnan(best):
-                        print(f"{n} ODE solves ({algorithm}, {mode}) "
-                              f"completed in {best:.1f} ms ({best_dev:.1f} ms "
-                              "without transfers)")
-                    write_times_row(file, outfile, n, (best, best_dev, pct))
-                    if finals is not None:
-                        save_numerical(finals, opts["numerical_tag"]
-                                       + numerical_names[(mode, algorithm)])
-                    gc.collect()
-            _release(solver)
-
-
-def _warm_legs(opts, problems):
-    """Every (problem, mode, algorithm, setting) compile task, in a
-    deterministic order shared by the parent and its shard children."""
-    from wp_common import TOLS
-
-    legs = []
-    for problem in problems:
-        for algorithm in opts["algorithms"]:
-            if not problem.supports(opts["framework"]):
-                continue
-            if algorithm in opts["fixed"]:
-                legs.append((problem.name, "fixed", algorithm, None))
-                for dt in problem.dts(algorithm):
-                    legs.append((problem.name, "fixed", algorithm, dt))
-            if algorithm in opts["adaptive"]:
-                legs.append((problem.name, "adaptive", algorithm, None))
-                for tol in TOLS:
-                    legs.append((problem.name, "adaptive", algorithm, tol))
-    return legs
-
-
-# Legs per shard child before it exits and is respawned; numba dispatchers
-# stay resident, so long-lived children grow without bound.
-WARM_RECYCLE = 32
-
-
-def _run_warm(opts, problems, argv):
-    """Compile each leg once at a tiny ensemble; BENCH_WARM_JOBS>1 stripes
-    the legs across that many shard children, recycled every WARM_RECYCLE
-    legs to cap their memory."""
-    import subprocess
-    from timeit import default_timer
-
-    # Each shard holds several GB of host RAM; 4 fits in 32 GB.
-    jobs = int(os.environ.get("BENCH_WARM_JOBS", "4"))
-    shard = opts.get("warm_shard")
-    legs = _warm_legs(opts, problems)
-
-    if shard is None and jobs > 1 and len(legs) > 1:
-        count = min(jobs, len(legs))
-        cursors = [0] * count
-        stripe_sizes = [len(legs[index::count]) for index in range(count)]
-        while any(cursors[i] < stripe_sizes[i] for i in range(count)):
-            children = []
-            for index in range(count):
-                if cursors[index] >= stripe_sizes[index]:
-                    continue
-                children.append(subprocess.Popen(
-                    [sys.executable, sys.argv[0]] + argv
-                    + ["--warm-shard",
-                       f"{index}/{count}/{cursors[index]}/{WARM_RECYCLE}"]))
-                cursors[index] += WARM_RECYCLE
-            for child in children:
-                child.wait()
-        return
-
-    if shard is not None:
-        index, count, offset, limit = shard
-        legs = legs[index::count][offset:offset + limit]
-
-    rows = {p.name: p for p in problems}
-    systems = {}
-
-    def system_for(name):
-        if name not in systems:
-            systems[name] = build_system(
-                rows[name], PRECISION, name_suffix=opts["name_suffix"])
-        return systems[name]
-
-    for name, mode, algorithm, setting in legs:
-        row = rows[name]
-        tag = ("" if setting is None else
-               (f" dt={setting:g}" if mode == "fixed" else
-                f" tol={setting:g}"))
-        label = f"{name} {mode} {algorithm}{tag}"
-        solver = None
-        started = default_timer()
+    def __init__(self, package, key, root, trial, cold=False, solver_class=None):
+        self.package, self.key, self.root = package, key, root
+        self.solver_class = solver_class
+        self.row = problem_row(trial)
+        self.precision = PRECISIONS[trial["precision"]]
+        self.duration = float(trial["duration"])
+        self.states = len(variable_order(self.row))
+        self.cache_dir = None
+        self.saved_cache_root = None
+        self.solver = None
+        self.grid_n = None
+        self.grid_arrays = None
+        self.resident_n = None
+        self.host_result = None
+        if cold:
+            from cubie.cache_root import get_cache_root_override, set_cache_root
+            self.saved_cache_root = get_cache_root_override()
+            self.cache_dir = tempfile.mkdtemp(prefix="cubie_cold_")
+            set_cache_root(self.cache_dir)
         try:
-            system, conditions = system_for(name)
-            if mode == "fixed":
-                solver = (_make_fixed_solver(system, row, algorithm)
-                          if setting is None else
-                          _make_fixed_solver(system, row, algorithm,
-                                             setting))
-            else:
-                solver = (_make_adaptive_solver(system, row, algorithm)
-                          if setting is None else
-                          _make_adaptive_solver(system, row, algorithm,
-                                                setting))
-            initials, params = solver.build_grid(
-                initial_values=conditions,
-                parameters=sweep_parameters(row, 64, PRECISION))
-            solver.solve(initial_values=initials, parameters=params,
-                         blocksize=64, duration=row["duration"])
-            print("warmed {0} in {1:.1f}s".format(
-                label, default_timer() - started), flush=True)
-        except Exception as exc:
-            _failed(exc, "warm {0}".format(label))
-        if solver is not None:
-            _release(solver)
+            # A resized system keeps its own generated-code cache under a states suffix.
+            params = json.loads(trial["system_params"]) if trial["system_params"] else {}
+            self.system, self.initial_conditions = adapter.build_system(
+                self.row, package, self.precision, states=params.get("states"))
+            self.solver = make_solver(self.system, trial, solver_class)
+        except BaseException:
+            self.close()
+            raise
+        self.applied = {key: trial[key] for key in STEPPING}
+
+    def apply(self, trial):
+        """Follow a trial's stepping: a changed controller or gains rebuilds the solver, changed steps or tolerances update it; either drops the resident inputs with the kernel."""
+        stepping = {key: trial[key] for key in STEPPING}
+        if all(_same(stepping[key], self.applied[key]) for key in STEPPING):
+            return
+        self.host_result = None
+        self.grid_arrays = None
+        self.grid_n = None
+        self.resident_n = None
+        if stepping["controller"] != self.applied["controller"] \
+                or stepping["gains"] != self.applied["gains"]:
+            self.solver.close()
+            self.solver = None
+            gc.collect()
+            self.solver = make_solver(self.system, trial, self.solver_class)
+        else:
+            self.solver.update(stepping_kwargs(trial))
+        self.applied = stepping
+
+    def grid(self, values):
+        """(initial_values, parameters) arrays for a grid of the swept parameter; rebuilt only when n changes."""
+        n = int(values.shape[0])
+        if self.grid_n != n:
+            self.grid_arrays = None
+            parameters = {self.row["sweep_parameter"]: np.asarray(values, dtype=self.precision)}
+            self.grid_arrays = self.solver.build_grid(initial_values=self.initial_conditions,
+                                                      parameters=parameters)
+            self.grid_n = n
+        return self.grid_arrays
+
+    def host_solve(self, values):
+        """One solve through host arrays; its result is kept for the finals and its inputs stay resident."""
+        self.host_result = None
+        initials, parameters = self.grid(values)
+        self.host_result = adapter.solve(self.solver, initials, parameters, self.duration)
+        self.resident_n = int(values.shape[0])
+        return self.host_result
+
+    def device_solve(self, values):
+        """One solve on the resident inputs, uploading through a host solve first when they are not this grid's; returns the host result whose finals the device run reproduces."""
+        if self.resident_n != int(values.shape[0]) or self.host_result is None:
+            self.host_solve(values)
+        adapter.solve(self.solver, self.solver.device_initial_values,
+                      self.solver.device_parameters, self.duration, on_device=True)
+        return self.host_result
+
+    def close(self):
+        self.host_result = None
+        self.grid_arrays = None
+        if self.solver is not None:
+            self.solver.close()
+            self.solver = None
+        gc.collect()
+        if self.cache_dir is not None:
+            from cubie.cache_root import set_cache_root
+            set_cache_root(self.saved_cache_root)
+            shutil.rmtree(self.cache_dir, ignore_errors=True)
+            self.cache_dir = None
 
 
-def _run_states(opts):
-    """Runtime-by-states sweep: lorenz96 resized along STATES_GRID, timed at
-    one fixed ensemble size."""
-    import tempfile
-    from timeit import default_timer
-
-    from cubie.cache_root import set_cache_root
-    from problems import STATES_PROBLEM, states_row
-    from wp_common import (STATES_N, append_samples, reset_samples,
-                           sample_point, samples_outfile, states_outfile,
-                           timed_min_ms)
-
-    # Throwaway cache root: every states compile runs cold.
-    set_cache_root(tempfile.mkdtemp(prefix="cubie_states_"))
-
-    n = STATES_N
-    grid = opts["ns"]
-    systems = {}
-
-    def system_for(nstates):
-        if nstates not in systems:
-            systems[nstates] = build_system(
-                states_row(nstates), PRECISION,
-                name_suffix="{0}_s{1}".format(opts["name_suffix"], nstates))
-        return systems[nstates]
-
-    for algorithm in opts["algorithms"]:
-        for mode in ("fixed", "adaptive"):
-            if algorithm not in opts[mode]:
-                continue
-            outfile = states_outfile(opts["framework_dir"], opts["prefix"],
-                                     mode, algorithm, opts["dataset_key"])
-            run_grid = [s for s in grid
-                        if not skip_point(STATES_PROBLEM, algorithm, mode, s,
-                                          outfile)]
-            if not run_grid:
-                print(f"-- resume: skipping states {mode} {algorithm} "
-                      "(already covered)")
-                continue
-            samples_file = samples_outfile(
-                opts["framework_dir"], opts["prefix"], "states", mode,
-                algorithm, opts["dataset_key"], STATES_PROBLEM)
-            # A resumed or --floor leg appends to what earlier runs recorded.
-            if not (resume_active() or floor_enabled()):
-                reset_samples(samples_file)
-            prune_reruns(outfile, run_grid)
-            with open(outfile, "a" if resume_active() or floor_enabled()
-                      else "w") as file:
-                # A device-only breach abandons that column alone.
-                device_breached = False
-                for index, nstates in enumerate(run_grid):
-                    row = states_row(nstates)
-                    duration = row["duration"]
-                    print(f"Running lorenz96 states={nstates}, "
-                          f"{n} trajectories, {mode} dt, {algorithm}...")
-                    label = (f"lorenz96 states={nstates} {mode} {algorithm} "
-                             f"N={n}")
-                    point = sample_point("states", STATES_PROBLEM,
-                                         algorithm, mode, n, nstates)
-                    t_ms = t_dev = build_s = float("nan")
-                    pct = 100.0
-                    breached = False
-                    solver = None
-                    try:
-                        started = default_timer()
-                        system, initial_conditions = system_for(nstates)
-                        solver = (_make_fixed_solver(system, row, algorithm)
-                                  if mode == "fixed"
-                                  else _make_adaptive_solver(system, row,
-                                                             algorithm))
-                        initials_array, parameter_array = solver.build_grid(
-                            initial_values=initial_conditions,
-                            parameters=sweep_parameters(row, n, PRECISION))
-
-                        def with_transfers(blocksize=64):
-                            return solver.solve(
-                                initial_values=initials_array,
-                                parameters=parameter_array,
-                                blocksize=blocksize,
-                                duration=duration,
-                            )
-
-                        with_transfers()
-                        build_s = default_timer() - started
-                        best, solution, samples = timed_min_ms(with_transfers,
-                                                               REPEATS)
-                        append_samples(samples_file, point, "both", samples)
-                        breached = best is None
-                        if not breached:
-                            t_ms = best
-                            pct = errored_pct(
-                                final_states(system, solution, row))
-                    except Exception as exc:
-                        _failed(exc, label)
-                    # The device leg runs only after a host-path time.
-                    if not np.isnan(t_ms):
-                        if device_breached:
-                            print(f"SKIP {label} device-only: breached at a "
-                                  "smaller size")
-                        else:
-                            try:
-                                best_dev, samples = _device_leg(
-                                    solver, duration, REPEATS)
-                                append_samples(samples_file, point, "none",
-                                               samples)
-                                if best_dev is None:
-                                    device_breached = True
-                                    print(f"WATCHDOG {label} device-only: "
-                                          "run exceeded the cap")
-                                else:
-                                    t_dev = best_dev
-                            except Exception as exc:
-                                _failed(exc, label + " device-only")
-                        print(f"{n} ODE solves (lorenz96 "
-                              f"states={nstates}, {algorithm}, {mode}) "
-                              f"completed in {t_ms:.1f} ms ({t_dev:.1f} "
-                              "ms without transfers)")
-                    write_times_row(file, outfile, nstates,
-                                    (t_ms, t_dev, build_s, pct))
-                    if solver is not None:
-                        _release(solver)
-                    if breached:
-                        # Larger systems are slower, so the leg is abandoned.
-                        print(f"WATCHDOG {label}: run exceeded the cap")
-                        nan = float("nan")
-                        for rest in run_grid[index + 1:]:
-                            write_times_row(file, outfile, rest,
-                                            (nan, nan, nan, 100.0))
-                        break
+def _same(a, b):
+    if isinstance(a, float) and isinstance(b, float):
+        return a == b or (math.isnan(a) and math.isnan(b))
+    return a == b
 
 
-def run(argv, framework, framework_dir, prefix, numerical_tag,
-        name_suffix=""):
-    """Entry point: parse the CLI and run every requested problem."""
+class CubieAdapter:
+    """The runner adapter of one cubie package on one machine."""
+
+    controllers = CONTROLLERS
+
+    def __init__(self, package, key, root, solver_class=None):
+        self.package, self.key, self.root = package, key, root
+        self.solver_class = solver_class
+
+    def version(self):
+        return importlib.metadata.version("cubie") + "+" + adapter.BACKENDS[self.package]
+
+    def states(self, trial):
+        return len(variable_order(problem_row(trial)))
+
+    def build_leg(self, trial, cold=False):
+        return Leg(self.package, self.key, self.root, trial, cold, self.solver_class)
+
+    def compile(self, leg, trial, values):
+        leg.apply(trial)
+        initials, parameters = leg.grid(values)
+        leg.solver.compile(initials, parameters, duration=leg.duration)
+
+    def optimize(self, leg, trial, values):
+        """The point's recorded settings from the same source applied to the leg's solver and compiled, else Solver.optimize on the line's batch with the winner applied and recorded under the package, key and source."""
+        leg.apply(trial)
+        leg.host_result = None
+        leg.resident_n = None
+        initials, parameters = leg.grid(values)
+        mode, setting = optimize_setting(trial)
+        source = adapter.source_hash(leg.solver)
+        tuned = adapter.load_optimized(self.package, self.key, leg.row, trial["algorithm"], mode, setting,
+                                       states=leg.row["states"], root=self.root,
+                                       controller=trial["controller"], gains=trial["gains"], source=source)
+        if tuned is not None:
+            adapter.apply_optimized(leg.solver, tuned)
+            leg.solver.compile(initials, parameters, duration=leg.duration)
+            print("optimized {0}: recorded".format(runner.label(trial)), flush=True)
+            return
+        row = adapter.optimize_point(leg.solver, leg.row, initials, parameters, self.package,
+                                     self.key, trial["algorithm"], mode, setting,
+                                     states=leg.row["states"], root=self.root, force=True,
+                                     controller=trial["controller"], gains=trial["gains"], source=source)
+        print("optimized {0}: {1}".format(runner.label(trial), row["label"]), flush=True)
+
+    def solve(self, leg, trial, values, transfers):
+        leg.apply(trial)
+        if transfers == "both":
+            return leg.host_solve(values)
+        return leg.device_solve(values)
+
+    def finals(self, leg, result):
+        """(finals, t_final, retcode) of a host result: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
+        from cubie.result_codes import decode_status_codes
+        finals = np.array(final_states(leg.system, result, leg.row))
+        codes = np.asarray(result.status_codes).reshape(-1)
+        names = decode_status_codes(codes)
+        retcode = ["|".join(names[index]) if index in names else "" for index in range(codes.shape[0])]
+        t_final = np.where(codes == 0, leg.duration, np.nan)
+        return finals, t_final, retcode
+
+
+def run(argv, package):
+    """Entry point of a cubie suite: select the backend, then run the trial file through runner.main."""
+    adapter.select_backend(package)
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
-
-    argv = list(argv)
-    warm_shard = None
-    if "--warm-shard" in argv:
-        position = argv.index("--warm-shard")
-        warm_shard = tuple(int(t) for t in argv[position + 1].split("/"))
-        del argv[position:position + 2]
-
-    ns, analysis, algorithms, problems = parse_bench_args(argv, framework)
-    if not problems:
-        print("{0} runs none of the requested problems; skipping."
-              .format(framework))
-        return 0
-    opts = {
-        "ns": ns,
-        "analysis": analysis,
-        "framework": framework,
-        "algorithms": algorithms,
-        "framework_dir": framework_dir,
-        "prefix": prefix,
-        "numerical_tag": numerical_tag,
-        "name_suffix": name_suffix,
-        "fixed": supported_for(framework, "fixed"),
-        "adaptive": supported_for(framework, "adaptive"),
-        "dataset_key": dataset_key(),
-        "warm_shard": warm_shard,
-    }
-    if analysis == "warm":
-        _run_warm(opts, problems, argv)
-        return 0
-    if analysis == "states":
-        from problems import STATES_PROBLEM
-        if not any(p.name == STATES_PROBLEM for p in problems):
-            print("{0} does not run {1}; skipping the states sweep."
-                  .format(framework, STATES_PROBLEM))
-            return 0
-        _run_states(opts)
-        return 0
-    for problem in problems:
-        _run_problem(problem, opts)
-    return 0
+    return runner.main(argv, lambda key, root: CubieAdapter(package, key, root))

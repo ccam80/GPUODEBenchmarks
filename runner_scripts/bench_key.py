@@ -1,21 +1,5 @@
-"""Shared dataset-key helper for the Python benchmark writers.
+"""The dataset key "<os>_<gpu>" of this machine: the nvidia-smi GPU name tokenised on non-alphanumerics, "NVIDIA"/"GeForce" dropped, joined with '-' (RTX-2060-SUPER); `python bench_key.py` prints it."""
 
-Produces a key "<os>_<gpu>" identifying the current machine so benchmark output
-files can be additively populated across machines. The GPU name comes from
-nvidia-smi (the single source of truth shared by every framework) and is
-sanitised identically everywhere: tokenise on non-alphanumeric characters, drop
-the "NVIDIA"/"GeForce" vendor words, and join the rest with '-'.
-e.g. "NVIDIA GeForce RTX 2060 SUPER" -> "RTX-2060-SUPER".
-
-Import from a benchmark script with::
-
-    import os, sys
-    sys.path.insert(0, os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner_scripts"))
-    from bench_key import dataset_key
-"""
-
-import os
 import platform
 import re
 import subprocess
@@ -51,26 +35,6 @@ def _os_key():
 def dataset_key():
     """Return "<os>_<gpu>" for this machine."""
     return "{0}_{1}".format(_os_key(), _sanitize_gpu(_gpu_name_raw()))
-
-
-def data_dir(package, key=None, root="", problem=None):
-    """Directory holding one machine's files for a package and problem; creates it."""
-    d = os.path.join(root, "data", package, key or dataset_key())
-    if problem is not None:
-        d = os.path.join(d, problem["problem"] if isinstance(problem, dict)
-                         else problem)
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def group_dir(group, problem=None):
-    """Directory holding one group's plots and reports; creates it."""
-    d = os.path.join("plots", group)
-    if problem is not None:
-        d = os.path.join(d, problem["problem"] if isinstance(problem, dict)
-                         else problem)
-    os.makedirs(d, exist_ok=True)
-    return d
 
 
 if __name__ == "__main__":

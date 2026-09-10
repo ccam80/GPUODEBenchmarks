@@ -5,10 +5,8 @@
 #define PROBLEM_NAME "ring_modulator"
 #define PROBLEM_SD 15
 #define PROBLEM_NCP 1
-#define PROBLEM_DURATION 1.0e-3
-#define PROBLEM_SWEEP_MIN 2.0e-13
-#define PROBLEM_SWEEP_MAX 2.0e-9
-#define PROBLEM_SWEEP_LOG 1
+// The parameter the ensemble sweeps into cPAR[0].
+#define PROBLEM_PARAMETER "Cs"
 
 #define RM_C 1.6e-8
 #define RM_CP 1.0e-8

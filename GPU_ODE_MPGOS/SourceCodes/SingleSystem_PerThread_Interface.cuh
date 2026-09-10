@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <fstream>
 #include <string>
+#include <stdexcept>
 #include <cuda_runtime.h>
 
 #define gpuErrCHK(call)                                                                          \
@@ -1336,11 +1337,10 @@ DataType* AllocateDeviceMemory(size_t N)
 	
 	Error = cudaMalloc((void**)&MemoryAddressInDevice, N * sizeof(DataType));
     
+	// Throws so the caller records the failure.
 	if (Error != cudaSuccess)
-    {
-        std::cerr << "Failed to allocate Memory on the DEVICE!\n";
-        exit(EXIT_FAILURE);
-    }
+		throw std::runtime_error(std::string("cudaMalloc: ") + cudaGetErrorName(Error) + ": "
+		                         + cudaGetErrorString(Error));
     return MemoryAddressInDevice;
 }
 

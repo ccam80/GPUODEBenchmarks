@@ -1,0 +1,31 @@
+# The float64 reference finals: julia_cpu runs each problem's golden algorithm at its golden tolerance on the full grid, every step-size pin left to the package, a day per solve.
+
+[set]
+packages   = ["julia_cpu"]
+problems   = "all"
+algorithms = "golden_algorithm"
+precision  = "float64"
+finals     = true
+transfers  = ["none"]
+build      = "warm"
+watchdog   = 86400
+
+[[grid]]
+packages = "all"
+parameter = "default"
+scale = "default"
+min = "default"
+max = "default"
+n = [131072]
+system_params = {}
+
+[[stepping]]
+packages = "all"
+algorithms = "golden_algorithm"
+controller = "default"
+tol = "golden_tol"
+dt0 = "none"
+dt_min = "none"
+dt_max = "none"
+newton = "none"
+gains = {}

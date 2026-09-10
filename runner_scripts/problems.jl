@@ -1,16 +1,10 @@
-# The problem axis: one row per benchmark ODE/DAE in problems.csv, mirrored by problems.py.
+# The problem catalogue: one row per benchmark ODE/DAE in problems.csv, mirrored by problems.py.
 
 const PROBLEMS_CSV = joinpath(@__DIR__, "problems.csv")
 const DEFAULT_PROBLEM = "lorenz"
 
 const _INT_FIELDS = ("states",)
 const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
-
-# Dyadic dt-grid exponents as duration fractions; mirrored in problems.py.
-const WP_K = (4, 13)
-const EULER_K = (8, 17)
-const NE_K = (1, 13)
-const TIMING_DT_K = 10
 
 "Every problem in declaration order, as a vector of Dict{String,Any}."
 function load_problems()
@@ -47,39 +41,16 @@ function get_problem(name)
           join(problem_names(), ", ") * ")")
 end
 
-"Resolve \"all\" or a comma list to the problems a framework runs."
-function resolve_problems(request, framework = nothing)
+"Resolve \"all\" or a comma list to the problems a package implements."
+function resolve_problems(request, package = nothing)
     selected = if request === nothing || request == "" || request == "all"
         load_problems()
     else
         [get_problem(String(name)) for name in split(request, ',') if !isempty(name)]
     end
-    framework === nothing && return selected
-    return [row for row in selected if framework in row["frameworks"]]
+    package === nothing && return selected
+    return [row for row in selected if package in row["frameworks"]]
 end
 
-"True when the framework runs this problem."
-problem_supports(row, framework) = framework in row["frameworks"]
-
-"Fixed step used by the N-sweep: duration * 2^-10."
-problem_timing_dt(problem) = problem["duration"] * 2.0^-TIMING_DT_K
-
-"Fixed-step dt grid for the work-precision sweep."
-function problem_dts(problem, algorithm = nothing)
-    lo, hi = algorithm == "euler" ? EULER_K : WP_K
-    return [problem["duration"] * 2.0^-k for k in lo:hi]
-end
-
-"Fixed-step dt grid for the numerical-equivalence sweep."
-problem_ne_dts(problem) = [problem["duration"] * 2.0^-k
-                           for k in NE_K[1]:NE_K[2]]
-
-"The ensemble parameter grid: n values over the sweep range."
-function problem_sweep(problem, n)
-    lo, hi = problem["sweep_min"], problem["sweep_max"]
-    if problem["sweep_scale"] == "log"
-        lo > 0 || error("problem '$(problem["problem"])': a log sweep needs sweep_min > 0")
-        return 10 .^ range(log10(lo), stop = log10(hi), length = n)
-    end
-    return range(lo, stop = hi, length = n)
-end
+"True when the package implements this problem."
+problem_supports(row, package) = package in row["frameworks"]

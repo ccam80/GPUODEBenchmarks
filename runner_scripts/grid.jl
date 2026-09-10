@@ -1,0 +1,37 @@
+# The ensemble grid, bit for bit with runner_scripts/grid.py.
+
+const GRID_SCALES = ("linear", "log")
+
+"v[0..n-1]: Float64 arithmetic, last point pinned to grid_max, cast to Float32."
+function grid_values(scale, grid_min, grid_max, n)
+    scale in GRID_SCALES || throw(ArgumentError("grid_scale '$(scale)' is not linear or log"))
+    n = Int(n)
+    n >= 2 || throw(ArgumentError("a grid needs n >= 2, got $(n)"))
+    lo, hi = Float64(grid_min), Float64(grid_max)
+    (isfinite(lo) && isfinite(hi)) || throw(ArgumentError("grid_min and grid_max must be finite"))
+    values = Vector{Float64}(undef, n)
+    if scale == "linear"
+        step = (hi - lo) / (n - 1)
+        for i in 0:(n - 1)
+            values[i + 1] = lo + i * step
+        end
+    else
+        (lo > 0.0 && hi > 0.0) || throw(ArgumentError("a log grid needs grid_min > 0 and grid_max > 0"))
+        a, b = log10(lo), log10(hi)
+        step = (b - a) / (n - 1)
+        for i in 0:(n - 1)
+            values[i + 1] = 10.0^(a + i * step)
+        end
+    end
+    values[n] = hi
+    return Float32.(values)
+end
+
+"The grid of a run spec in its precision: the Float32 values, widened for float64 runs."
+function grid(spec)
+    values = grid_values(spec["grid_scale"], spec["grid_min"], spec["grid_max"], spec["n"])
+    precision = get(spec, "precision", "float32")
+    precision == "float32" && return values
+    precision == "float64" && return Float64.(values)
+    throw(ArgumentError("precision '$(precision)' is not float32 or float64"))
+end

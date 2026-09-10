@@ -15,56 +15,47 @@ include(joinpath(REPO_ROOT, "runner_scripts", "problems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "algorithms.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_systems.jl"))
 include(joinpath(REPO_ROOT, "runner_scripts", "julia_prob.jl"))
-# Changing a registry CSV re-precompiles this package.
+# Changing a catalogue CSV re-precompiles this package.
 Base.include_dependency(PROBLEMS_CSV)
-Base.include_dependency(ALGORITHMS_CSV)
+Base.include_dependency(JULIA_ALGORITHMS_CSV)
 
 SYSTEMS_CODEGEN = (expression = Val(false), eval_expression = true,
     eval_module = @__MODULE__)
 
-# Entries built at precompile time; `sys` is unused and stays out of the image.
-for row in resolve_problems("all", "julia")
-    entry = _ENTRY_BUILDERS[row["problem"]]()
-    _ENTRIES[row["problem"]] = Base.structdiff(entry, NamedTuple{(:sys,)})
+# Float32 entries built at precompile time; `sys` is unused and stays out of the image.
+for row in resolve_problems("all", "julia_gpu")
+    entry = _ENTRY_BUILDERS[row["problem"]](Float32)
+    _ENTRIES[(row["problem"], Float32)] = Base.structdiff(entry, NamedTuple{(:sys,)})
 end
 const ENTRIES = _ENTRIES
 
-# Mirrors TIMING_TOL in runner_scripts/wp_common.py and bench_ode_gpu.jl.
-const TIMING_TOL = 1.0f-5
 # Trajectory count is runtime data, not a kernel specialization axis.
 const WORKLOAD_N = 4
+const WORKLOAD_TOL = 1.0f-5
 
-"One solve per supported mode, with the bench writer's exact call shape."
+"One fixed and one adaptive solve through the shared kernel-path functions."
 function _warm_leg(row, algorithm)
     solver = gpu_solver(algorithm)
-    system, prob, duration = build_prob_parts(ENTRIES[row["problem"]], row)
-    dt0 = Float32(problem_timing_dt(row))
+    system = ENTRIES[(row["problem"], Float32)]
     # Kernels specialize on types, so a zero-step tspan warms them in bounded time.
-    prob = remake(prob, tspan = (0.0f0, 0.0f0))
-    probs_host, probs = build_ensemble(system, prob, row, WORKLOAD_N)
-    if algorithm in supported_algorithms("julia", "fixed")
-        sol = CUDA.@sync DiffEqGPU.vectorized_solve(probs, prob, solver;
-            saveat = 0.0f0, save_everystep = false, dt = dt0)
-        Array(sol[1])
-        Array(sol[2])
-    end
-    if algorithm in supported_algorithms("julia", "adaptive")
-        sol = CUDA.@sync DiffEqGPU.vectorized_asolve(probs, prob, solver;
-            saveat = 0.0f0, save_everystep = false,
-            reltol = TIMING_TOL, abstol = TIMING_TOL, dt = dt0)
+    prob = remake(build_prob(system, row["duration"]), tspan = (0.0f0, 0.0f0))
+    probs_host, probs = build_ensemble(system, prob,
+        range(row["sweep_min"], row["sweep_max"], length = WORKLOAD_N))
+    dt = Float32(row["duration"]) * 2.0f0^-10
+    for (controller, dt0, tol) in (("fixed", dt, NaN), ("default", NaN, WORKLOAD_TOL))
+        sol = CUDA.@sync gpu_solve(probs, prob, solver, controller, dt0, tol, tol;
+            saveat = 0.0f0)
         Array(sol[1])
         Array(sol[2])
     end
     return nothing
 end
 
-# States-sweep grid sizes stay with julia_driver.py's cancellation control.
 @setup_workload begin
     if CUDA.functional()
         @compile_workload begin
-            for row in resolve_problems("all", "julia")
-                for algorithm in supported_algorithms("julia")
-                    problem_supports(row, "julia") || continue
+            for row in resolve_problems("all", "julia_gpu")
+                for algorithm in package_algorithms("julia_gpu")
                     elapsed = @elapsed try
                         _warm_leg(row, algorithm)
                     catch err

@@ -1,0 +1,26 @@
+algorithm,julia_cpu,julia_gpu,notes
+tsit5,Tsit5(),GPUTsit5(),
+cash-karp-54,ExplicitRK(tableau = construct_cash_karp_54(T)),,published tableau (runner_scripts/julia_tableaus.jl) via OrdinaryDiffEq ExplicitRK in the run's element type; constructors were removed from DiffEqDevTools 3.x
+rosenbrock23_sciml,Rosenbrock23(),GPURosenbrock23(autodiff=Val(false)),
+kvaerno3,Kvaerno3(),GPUKvaerno3(autodiff=Val(false)),
+radau_iia_5,RadauIIA5(),,
+bogacki-shampine-32,BS3(),,
+dormand-prince-54,DP5(),,
+fehlberg-45,ExplicitRK(tableau = construct_fehlberg_45(T)),,published tableau (runner_scripts/julia_tableaus.jl) via OrdinaryDiffEq ExplicitRK in the run's element type; constructors were removed from DiffEqDevTools 3.x
+dormand-prince-853,DP8(),,
+vern7,Vern7(),GPUVern7(),
+backwards_euler,ImplicitEuler(),,
+crank_nicolson,Trapezoid(),,
+trapezoidal_dirk,Trapezoid(),,no embedded pair in cubie's ESDIRK trapezoidal tableau
+implicit_midpoint,ImplicitMidpoint(),,Gauss-Legendre 2 tableau is errorless
+sdirk_2_2,SDIRK22(),,Alexander's tableau carries no error estimate in cubie
+l_stable_sdirk_4,Hairer4(),,
+radau_iia_3,RadauIIA3(),,
+radau_iia_9,RadauIIA9(),,
+ros3p,ROS3P(),,
+rodas3p,Rodas3P(),,
+kvaerno5,Kvaerno5(),GPUKvaerno5(autodiff=Val(false)),
+Vern9,Vern9(),,golden reference algorithm named by problems.csv
+Rodas5P,Rodas5P(),,golden reference algorithm named by problems.csv
+RadauIIA9,RadauIIA9(),,golden reference algorithm named by problems.csv
+RadauIIA5,RadauIIA5(),,golden reference algorithm named by problems.csv
