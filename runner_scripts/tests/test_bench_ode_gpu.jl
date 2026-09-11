@@ -21,7 +21,6 @@ function load_helpers()
     end
     watchdogged_min_ms(f, on_breach, repeats; cap_s = 120.0) = (1.5, [2.0, 1.5], f())
     run_watchdogged(f, on_breach; budget_s = 270.0) = f()
-    mkpidlock(path; kwargs...) = nothing
     const STORE_PYTHON = Ref("")
     """
     Base.include_string(Main, stubs * body, "bench_ode_gpu_helpers.jl")
@@ -47,8 +46,8 @@ end
 
 @testset "bench_ode_gpu.jl helpers" begin
     @testset "the CLI" begin
-        cli = parse_cli(["--trials", "x.jsonl", "--gpu-lock", "x.lock", "--floor"])
-        @test cli.trials == "x.jsonl" && cli.lock == "x.lock" && cli.floor
+        cli = parse_cli(["--trials", "x.jsonl", "--floor"])
+        @test cli.trials == "x.jsonl" && cli.floor
         @test !parse_cli(["--trials", "x.jsonl"]).floor
         parse_cli(["--trials", "x.jsonl", "--store-python", "C:/venv/python.exe"])
         @test STORE_PYTHON[] == "C:/venv/python.exe"

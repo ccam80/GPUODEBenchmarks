@@ -1,4 +1,4 @@
-"""julia_driver.py against a fake julia: one process per build with the lock and floor flags, the hard-exit abandonment and retry, the store-driven abandonment, a crashed build, the spawn cap and the RAM gate."""
+"""julia_driver.py against a fake julia: one process per build with the floor flag, the hard-exit abandonment and retry, the store-driven abandonment, a crashed build, and the builds run one at a time in file order."""
 
 import json
 import os
@@ -79,8 +79,7 @@ class DriverTests(unittest.TestCase):
         trials.write_jsonl(self.path, self.trials)
         for patch in (mock.patch.object(julia_driver, "DATA_ROOT", self.root),
                       mock.patch.object(julia_driver, "dataset_key", lambda: KEY),
-                      mock.patch.object(julia_driver, "julia_command", lambda: [sys.executable, self.fake]),
-                      mock.patch.object(julia_driver.time, "sleep", lambda _s: None)):
+                      mock.patch.object(julia_driver, "julia_command", lambda: [sys.executable, self.fake])):
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -102,7 +101,7 @@ class DriverTests(unittest.TestCase):
     def rows(self):
         return store.Store(self.root).rows()
 
-    def test_one_process_per_build_with_the_lock_and_floor_flags(self):
+    def test_one_process_per_build_with_the_floor_flag(self):
         status, calls = self.run_driver(None, "--floor")
         self.assertEqual(status, 0)
         self.assertEqual(len(trials.builds_of(self.trials)), 4)
@@ -111,7 +110,6 @@ class DriverTests(unittest.TestCase):
         for call in calls:
             argv = call["argv"]
             self.assertTrue(argv[0].endswith("bench_ode_gpu.jl"))
-            self.assertEqual(argv[argv.index("--gpu-lock") + 1], self.path + ".gpulock")
             self.assertEqual(argv[argv.index("--store-python") + 1], sys.executable)
             self.assertEqual(argv[-1], "--floor")
             build_path = argv[argv.index("--trials") + 1]
@@ -191,7 +189,6 @@ class DriverTests(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(len(rows), 18)
         self.assertNotIn(("vern7", "fixed"), {(r["algorithm"], r["controller"]) for r in rows})
-        self.assertFalse(os.path.isfile(self.path + ".gpulock"))
 
     def test_no_trials_with_transfers_is_a_no_op(self):
         trials.write_jsonl(self.path, [dict(t, transfers=[]) for t in self.trials])
@@ -200,55 +197,30 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
-class FakeProc:
-    """A leg process that exits 0 after `ticks` polls."""
-
-    def __init__(self, ticks=2):
-        self.ticks = ticks
-
-    def poll(self):
-        self.ticks -= 1
-        return None if self.ticks > 0 else 0
-
-
-class SpawnTests(unittest.TestCase):
-    """The spawn cap and the RAM gate, with the processes faked."""
+class SerialTests(unittest.TestCase):
+    """The builds run one after another in file order, with the processes faked."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="jd_spawn_")
+        self.tmp = tempfile.mkdtemp(prefix="jd_serial_")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.live = []
-        self.peak = 0
-        self.free_gb = 999.0
+        self.started = []
 
-        def fake_popen(argv, cwd=None):
-            proc = FakeProc()
-            self.live = [p for p in self.live if p.poll() is None] + [proc]
-            self.peak = max(self.peak, len(self.live))
-            return proc
+        def fake_call(argv, cwd=None):
+            self.started.append(argv[argv.index("--trials") + 1])
+            return 0
 
-        for patch in (mock.patch.object(julia_driver.subprocess, "Popen", fake_popen),
-                      mock.patch.object(julia_driver.time, "sleep", lambda _s: None),
-                      mock.patch.object(julia_driver, "_available_ram_gb", lambda: self.free_gb)):
-            patch.start()
-            self.addCleanup(patch.stop)
+        patch = mock.patch.object(julia_driver.subprocess, "call", fake_call)
+        patch.start()
+        self.addCleanup(patch.stop)
         path = os.path.join(self.tmp, "julia_gpu.jsonl")
         self.builds = [julia_driver.Build(name, rows, build_path)
                        for name, rows, build_path in julia_driver.build_files(path, plan_julia())]
 
-    def drive(self, jobs):
+    def test_the_builds_run_one_at_a_time_in_file_order(self):
         data = store.Store(os.path.join(self.tmp, "data"))
-        return julia_driver.run_builds(self.builds, "lock", False, jobs, 10.0, data, KEY, "rev")
-
-    def test_at_most_jobs_builds_run_at_once(self):
-        self.drive(2)
-        self.assertEqual(self.peak, 2)
+        julia_driver.run_builds(self.builds, False, data, KEY, "rev")
+        self.assertEqual(self.started, [build.path for build in self.builds])
         self.assertTrue(all(not build.failed for build in self.builds))
-
-    def test_low_ram_serialises_the_spawns(self):
-        self.free_gb = 5.0
-        self.drive(4)
-        self.assertEqual(self.peak, 1)
 
     def test_the_build_files_hold_one_build_each_in_file_order(self):
         self.assertEqual([build.name for build in self.builds],

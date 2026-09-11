@@ -1,11 +1,10 @@
-"""julia_driver.py --trials <path> [--floor] [--jobs N] [--min-free-gb G]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), at most --jobs at once above the RAM floor, GPU timing serialised by a pidfile, hard exits abandoned from the progress file and re-run, trials the store's timeouts and OOMs make hopeless abandoned before their process spawns; exit 1 when a process crashed."""
+"""julia_driver.py --trials <path> [--floor]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), one process at a time, hard exits abandoned from the progress file and re-run, trials the store's timeouts and OOMs make hopeless abandoned before their process spawns; exit 1 when a process crashed."""
 
 import argparse
 import os
 import shlex
 import subprocess
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -28,40 +27,10 @@ def julia_command():
     return shlex.split(os.environ.get("JULIA", "julia +1.13")) + ["--project=" + julia_project()]
 
 
-def _available_ram_gb():
-    """Free physical memory in GB, 0.0 when unknown."""
-    if os.name == "nt":
-        import ctypes
-
-        class MemoryStatusEx(ctypes.Structure):
-            _fields_ = [("dwLength", ctypes.c_uint32),
-                        ("dwMemoryLoad", ctypes.c_uint32),
-                        ("ullTotalPhys", ctypes.c_uint64),
-                        ("ullAvailPhys", ctypes.c_uint64),
-                        ("ullTotalPageFile", ctypes.c_uint64),
-                        ("ullAvailPageFile", ctypes.c_uint64),
-                        ("ullTotalVirtual", ctypes.c_uint64),
-                        ("ullAvailVirtual", ctypes.c_uint64),
-                        ("ullAvailExtendedVirtual", ctypes.c_uint64)]
-
-        stat = MemoryStatusEx()
-        stat.dwLength = ctypes.sizeof(stat)
-        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
-            return stat.ullAvailPhys / 2 ** 30
-        return 0.0
-    try:
-        return (os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-                / 2 ** 30)
-    except (ValueError, OSError, AttributeError):
-        return 0.0
-
-
 def parse_args(argv):
     p = argparse.ArgumentParser(prog="julia_driver.py")
     p.add_argument("--trials", required=True)
     p.add_argument("--floor", action="store_true")
-    p.add_argument("--jobs", type=int, default=4)
-    p.add_argument("--min-free-gb", type=float, default=10.0)
     return p.parse_args(argv)
 
 
@@ -92,10 +61,9 @@ class Build:
         self.hard_exits = 0
         self.failed = False
 
-    def command(self, lock_path, floor):
+    def command(self, floor):
         # This interpreter is the suite's; the runner records through the store CLI under it.
-        argv = julia_command() + [BENCH, "--trials", self.path, "--gpu-lock", lock_path,
-                                  "--store-python", sys.executable]
+        argv = julia_command() + [BENCH, "--trials", self.path, "--store-python", sys.executable]
         if floor:
             argv.append("--floor")
         return argv
@@ -123,40 +91,23 @@ class Build:
         return True
 
 
-def _ram_allows_spawn(running_count, min_free_gb):
-    """One kernel compile can take tens of GB; hold spawns while free RAM is below the floor (unknown counts as enough)."""
-    if running_count == 0:
-        return True
-    free = _available_ram_gb()
-    return free == 0.0 or free >= min_free_gb
-
-
-def run_builds(builds, lock_path, floor, jobs, min_free_gb, data, key, suite_rev):
-    """Run the builds' processes, at most `jobs` at once while RAM allows, each spawned with the trials the store's failures leave; returns the builds."""
+def run_builds(builds, floor, data, key, suite_rev):
+    """Run the builds' processes one after another, each spawned with the trials the store's failures leave; returns the builds."""
     pending = list(builds)
-    running = {}
-    while pending or running:
-        while pending and len(running) < jobs and _ram_allows_spawn(len(running), min_free_gb):
-            build = pending.pop(0)
-            if build.retries == 0:
-                build.trials = abandon_from_store(data, key, build.trials, suite_rev)
-                if not any(t["transfers"] for t in build.trials):
-                    print("{0}: every trial abandoned".format(build.name), flush=True)
-                    continue
-                trials_mod.write_jsonl(build.path, build.trials)
-            print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
-                  flush=True)
-            proc = subprocess.Popen(build.command(lock_path, floor), cwd=REPO_ROOT)
-            running[proc] = build
-        time.sleep(2)
-        for proc in list(running):
-            code = proc.poll()
-            if code is None:
+    while pending:
+        build = pending.pop(0)
+        if build.retries == 0:
+            build.trials = abandon_from_store(data, key, build.trials, suite_rev)
+            if not any(t["transfers"] for t in build.trials):
+                print("{0}: every trial abandoned".format(build.name), flush=True)
                 continue
-            build = running.pop(proc)
-            print("{0}: exit {1}".format(build.name, code), flush=True)
-            if build.after_exit(code, data, key, suite_rev):
-                pending.insert(0, build)
+            trials_mod.write_jsonl(build.path, build.trials)
+        print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
+              flush=True)
+        code = subprocess.call(build.command(floor), cwd=REPO_ROOT)
+        print("{0}: exit {1}".format(build.name, code), flush=True)
+        if build.after_exit(code, data, key, suite_rev):
+            pending.insert(0, build)
     return builds
 
 
@@ -171,17 +122,11 @@ def main(argv=None):
     if status:
         print("julia_gpu: the Julia project could not be instantiated (exit {0})".format(status))
         return 1
-    lock_path = args.trials + ".gpulock"
-    # A lock left by a previous run's killed process would block every build.
-    try:
-        os.remove(lock_path)
-    except OSError:
-        pass
     key = dataset_key()
     data = store.Store(DATA_ROOT)
     suite_rev = store.suite_rev(REPO_ROOT)
     builds = [Build(name, rows, path) for name, rows, path in build_files(args.trials, trial_list)]
-    run_builds(builds, lock_path, args.floor, args.jobs, args.min_free_gb, data, key, suite_rev)
+    run_builds(builds, args.floor, data, key, suite_rev)
     failed = [build.name for build in builds if build.failed]
     hard_exits = sum(build.hard_exits for build in builds)
     print("julia_gpu: {0} builds, {1} hard exit(s), {2} failed".format(len(builds), hard_exits, len(failed)))
