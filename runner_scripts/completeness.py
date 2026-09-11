@@ -9,7 +9,7 @@ MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose row has no cold build time), `finals` (no readable finals file while finals are wanted), `optimize` (the line's optimize record is absent or stale)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose row has no cold build time), `finals` (no readable finals file while finals are wanted; rows all NaN want none), `optimize` (the line's optimize record is absent or stale)."""
 
     def __init__(self, trial, wants_finals):
         self.trial = trial
@@ -82,7 +82,8 @@ def audit(trial_list, key, store, mode=None, sources=None):
             continue
         rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
         carried = [r["finals"] for r in rows.values() if r is not None and r["finals"]]
-        missing = Missing(trial, bool(trial["finals"]) or bool(carried))
+        nan_only = all(r is not None and not _finite(r["min_ms"]) for r in rows.values())
+        missing = Missing(trial, bool(carried) or (bool(trial["finals"]) and not nan_only))
         for transfers, row in rows.items():
             if row is None or (mode == "no_overwrite" and not _finite(row["min_ms"])):
                 missing.rows.append(transfers)
