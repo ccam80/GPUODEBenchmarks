@@ -55,8 +55,8 @@ def is_admin():
             return False
     if os.geteuid() == 0:
         return True
-    return _smi(["-L"])[0] == 0 and subprocess.run(
-        ["sudo", "-n", "true"], capture_output=True).returncode == 0
+    # Per-command sudoers rules admit nvidia-smi alone, so probe with it.
+    return _privileged(["-L"])[0]
 
 
 def supported(kind, mhz):
