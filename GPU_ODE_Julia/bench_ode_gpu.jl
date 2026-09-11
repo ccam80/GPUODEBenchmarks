@@ -1,4 +1,4 @@
-# The julia_gpu runner: `bench_ode_gpu.jl --trials <path> [--floor] [--gpu-lock <pidfile>] [--store-python <exe>]` runs one build's trials on the DiffEqGPU kernel path, recording each through results.jl; exit 0 when done, the watchdog code when a run never returned.
+# The julia_gpu runner: `bench_ode_gpu.jl --trials <path> [--floor] [--store-python <exe>]` runs one build's trials on the DiffEqGPU kernel path, recording each through results.jl; exit 0 when done, the watchdog code when a run never returned.
 
 using CUDA
 using DiffEqGPU
@@ -7,7 +7,6 @@ using StaticArrays
 using Dates
 using JSON
 using TOML
-using FileWatching.Pidfile: mkpidlock
 using GPU_ODE_JuliaKernels
 
 const REPO_ROOT = dirname(@__DIR__)
@@ -36,7 +35,6 @@ const CONTROLLERS = ("fixed", "default")
 function parse_cli(args)
     trials = ""
     floor = false
-    lock = ""
     i = 1
     while i <= length(args)
         tok = args[i]
@@ -46,10 +44,6 @@ function parse_cli(args)
             trials = args[i]
         elseif tok == "--floor"
             floor = true
-        elseif tok == "--gpu-lock"
-            i += 1
-            i <= length(args) || error("--gpu-lock requires a path")
-            lock = args[i]
         elseif tok == "--store-python"
             i += 1
             i <= length(args) || error("--store-python requires a path")
@@ -60,7 +54,7 @@ function parse_cli(args)
         i += 1
     end
     isempty(trials) && error("--trials <path> is required")
-    return (trials = trials, floor = floor, lock = lock)
+    return (trials = trials, floor = floor)
 end
 
 "The trial records of a JSONL file in file order; null floats come back as NaN."
@@ -202,16 +196,6 @@ function classify(err)
     return kind, "$(kind): $(nameof(typeof(err))): $(message)"
 end
 
-function with_gpu_lock(f, path)
-    isempty(path) && return f()
-    gpu_lock = mkpidlock(path; wait = true, stale_age = 120)
-    try
-        return f()
-    finally
-        close(gpu_lock)
-    end
-end
-
 "One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error."
 function timed(f, label, cap_s)
     on_breach = () -> begin
@@ -228,7 +212,7 @@ function timed(f, label, cap_s)
     end
 end
 
-"One solve at n = 8 off the GPU lock, under the watchdog's hard exit; the kernel compile lands here."
+"One solve at n = 8 under the watchdog's hard exit; the kernel compile lands here."
 function warm_build(parts, trial, label)
     values = grid_values(trial["grid_scale"], trial["grid_min"], trial["grid_max"], WARM_N)
     probs_host, probs = build_ensemble(parts.system, parts.prob, values)
@@ -281,9 +265,7 @@ function run_solve(trial, parts, failure, failures, build_s, cli, version, rev, 
                         trial["controller"], trial["dt"], trial["atol"], trial["rtol"]) :
                     () -> gpu_solve_device(probs, parts.prob, parts.solver,
                         trial["controller"], trial["dt"], trial["atol"], trial["rtol"])
-                with_gpu_lock(cli.lock) do
-                    timed(solve, "$(label) $(transfers)", trial["watchdog_s"])
-                end
+                timed(solve, "$(label) $(transfers)", trial["watchdog_s"])
             end
         end
         note_failure!(failures, trial, transfers, outcome.kind)
