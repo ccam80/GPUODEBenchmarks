@@ -151,7 +151,7 @@ function ConvertFrom-Row {
 }
 
 $BuildColumns = @('problem', 'solver', 'nt', 'sd', 'precision', 'cold')
-$PointColumns = @('trial_id', 'problem', 'solver', 'nt', 'sd', 'precision', 'transfers', 'finals', 'cold', 'reason')
+$PointColumns = @('trial_id', 'problem', 'solver', 'nt', 'sd', 'precision', 'transfers', 'finals', 'cold', 'timed', 'reason')
 
 $Builds = @(Invoke-Listing @('builds', $Trials) | ForEach-Object { ConvertFrom-Row $_ $BuildColumns })
 $Points = @(Invoke-Listing @('points', $Trials) | ForEach-Object { ConvertFrom-Row $_ $PointColumns })
@@ -212,6 +212,7 @@ foreach ($p in $Points) {
         '--transfers', $transfersText, '--python', $Python, '--package-version', $PackageVersion,
         '--suite-rev', $SuiteRev, '--outcome', $Outcome)
     if ($Floor) { $benchArgs += '--floor' }
+    if ($p.timed -eq 'false') { $benchArgs += '--untimed' }
     $seconds = Get-BuildSeconds -Point $p
     if ($null -ne $seconds) { $benchArgs += @('--build-s', $seconds) }
     Write-Host "cpp $($p.problem) $($p.solver) n=$($p.nt) sd=$($p.sd) ($transfersText)"

@@ -88,6 +88,7 @@ class ListingTests(unittest.TestCase):
             self.assertEqual(p["transfers"], ",".join(t["transfers"]))
             self.assertEqual(p["finals"], t["finals"])
             self.assertEqual(p["cold"], t["cold"])
+            self.assertEqual(p["timed"], t["timed"])
             self.assertEqual(p["reason"], "")
         self.assertIn("both,none", {p["transfers"] for p in points})
         self.assertIn("none", {p["transfers"] for p in points})
@@ -170,7 +171,7 @@ class ListingTests(unittest.TestCase):
         rows = [line.split("\t") for line in points.stdout.splitlines()]
         self.assertEqual(len(rows), 2)
         self.assertEqual([len(r) for r in rows], [len(mpgos_trials.POINT_COLUMNS)] * 2)
-        self.assertEqual(rows[0][6:], ["both,none", "false", "false", ""])
+        self.assertEqual(rows[0][6:], ["both,none", "false", "false", "true", ""])
         harder = subprocess.run([sys.executable, SCRIPT, "harder", path, rows[0][0]], capture_output=True, text=True)
         self.assertEqual((harder.returncode, harder.stdout), (0, ""))
 

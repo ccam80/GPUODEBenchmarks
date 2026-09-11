@@ -110,7 +110,7 @@ nan_rows() {
 declare -A ABANDONED
 OUTCOME="$TRIALS.outcome"
 
-while IFS=$'\t' read -r trial_id problem solver nt sd precision transfers finals cold reason; do
+while IFS=$'\t' read -r trial_id problem solver nt sd precision transfers finals cold timed reason; do
 	[ -z "$trial_id" ] && continue
 	label="$problem $solver n=$nt sd=$sd"
 	exe=$(exe_path "$problem" "$solver" "$nt" "$sd" "$precision")
@@ -136,6 +136,7 @@ while IFS=$'\t' read -r trial_id problem solver nt sd precision transfers finals
 	bench_args=(--trials "$TRIALS" --trial "$trial_id" --key "$DATASET_KEY" --transfers "$wanted"
 		--python "$PYTHON" --package-version "$PACKAGE_VERSION" --suite-rev "$SUITE_REV" --outcome "$OUTCOME")
 	[ -n "$FLOOR" ] && bench_args+=(--floor)
+	[ "$timed" = "false" ] && bench_args+=(--untimed)
 	[ -n "$seconds" ] && bench_args+=(--build-s "$seconds")
 	echo "cpp $label ($wanted)"
 	rc=0

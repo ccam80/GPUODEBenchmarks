@@ -13,6 +13,9 @@ build      = "warm"
 packages = ["cubie", "cubie_mlir"]
 per = "kernel"
 
+[set.untimed]
+packages = ["julia_cpu"]
+
 [[grid]]
 packages = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
 parameter = "default"

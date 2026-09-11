@@ -196,13 +196,19 @@ function classify(err)
     return kind, "$(kind): $(nameof(typeof(err))): $(message)"
 end
 
-"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error."
-function timed(f, label, cap_s)
+"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error; an untimed line runs once with no warm-up."
+function timed(f, label, cap_s, is_timed = true)
     on_breach = () -> begin
         println("WATCHDOG $(label): run never returned")
         flush(stdout)
     end
     try
+        if !is_timed
+            elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0)
+            ms = elapsed * 1000.0
+            elapsed > cap_s || return Outcome("ok", ms, [ms], "", result)
+            return Outcome("timeout", NaN, [ms], "timeout: run exceeded $(cap_s)s", result)
+        end
         ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
         isnan(ms) && return Outcome("timeout", NaN, samples,
             "timeout: run exceeded $(cap_s)s", result)
@@ -265,7 +271,7 @@ function run_solve(trial, parts, failure, failures, build_s, cli, version, rev, 
                         trial["controller"], trial["dt"], trial["atol"], trial["rtol"]) :
                     () -> gpu_solve_device(probs, parts.prob, parts.solver,
                         trial["controller"], trial["dt"], trial["atol"], trial["rtol"])
-                timed(solve, "$(label) $(transfers)", trial["watchdog_s"])
+                timed(solve, "$(label) $(transfers)", trial["watchdog_s"], get(trial, "timed", true))
             end
         end
         note_failure!(failures, trial, transfers, outcome.kind)
