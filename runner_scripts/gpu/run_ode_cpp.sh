@@ -92,7 +92,8 @@ done <<< "$BUILDS"
 
 # build_seconds <exe> <cold>: the cold build time a point carries, empty for a warm point.
 build_seconds() {
-	[ "$2" = "true" ] && echo "${BUILD_SECONDS[$1]:-}"
+	[ "$2" = "true" ] || return 0
+	echo "${BUILD_SECONDS[$1]:-}"
 }
 
 # nan_rows <trial_id> <label> <transfers> <reason> [<build_s>]: record NaN rows for a point the script could not run.
