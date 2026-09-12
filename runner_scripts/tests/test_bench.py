@@ -215,7 +215,9 @@ class CompletenessTests(unittest.TestCase):
 
     def record(self, trial, transfers, **values):
         spec = {f: trial[f] for f in store.TRIAL_FIELDS}
-        return self.data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0, **values))
+        row = dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0)
+        row.update(values)
+        return self.data.record(row)
 
     def kept(self, trial_list, **kw):
         kw.setdefault("sources", lambda package, systems: {s: "S" for s in systems})
@@ -237,6 +239,12 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(audits[states[0]["trial_id"]].reasons(), ["build:both", "build:none"])
         self.assertEqual(audits[states[1]["trial_id"]].reasons(), ["build:none"])
         self.assertTrue(audits[states[2]["trial_id"]].complete())
+        # A cold line recorded NaN wants no build time: complete under --resume, its rows under --no-overwrite.
+        for transfers in ("both", "none"):
+            self.record(states[3], transfers, min_ms=NAN, reason="error: BuildError: out of memory")
+        self.assertNotIn(states[3]["trial_id"], self.kept(states, resume=True))
+        self.assertEqual(completeness.audit(states, KEY, self.data, "no_overwrite")[states[3]["trial_id"]].reasons(),
+                         ["row:both", "row:none"])
         # A warm line's rows never need one.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")["cpp"]
         for transfers in ("both", "none"):
