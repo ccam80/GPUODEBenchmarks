@@ -2,6 +2,15 @@
 
 include(joinpath(@__DIR__, "protocol.jl"))
 
+"Exit without unwinding; on Windows through TerminateProcess, which skips the DLL detach a live kernel blocks."
+function hard_exit(code)
+    if Sys.iswindows()
+        handle = ccall((:GetCurrentProcess, "kernel32"), Ptr{Cvoid}, ())
+        ccall((:TerminateProcess, "kernel32"), Cint, (Ptr{Cvoid}, Cuint), handle, code)
+    end
+    ccall(:_exit, Cvoid, (Cint,), code)
+end
+
 "Run f() under the watchdog; when it has not returned after budget_s (the soft cap plus 30 s), run on_breach() and hard-exit."
 function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0)
     finished = Threads.Atomic{Bool}(false)
@@ -13,7 +22,7 @@ function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0)
             flush(stdout)
             flush(stderr)
             # A hung kernel blocks every exit path except a hard exit.
-            ccall(:_exit, Cvoid, (Cint,), WATCHDOG_EXIT_CODE)
+            hard_exit(WATCHDOG_EXIT_CODE)
         end
     end
     try
