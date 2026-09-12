@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings and the optimize policy; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize policy; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the optimize policy and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize policy; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -18,8 +18,9 @@ NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
-            "optimize", "watchdog")
+            "optimize", "watchdog", "untimed")
 OPTIMIZE_KEYS = ("packages", "per")
+UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -30,7 +31,7 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "build", "optimize", "watchdog_s", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "build", "optimize", "watchdog_s", "timed", "set", "stepping")
 
 
 class SetError(ValueError):
@@ -120,6 +121,15 @@ def load_set(name, sets_dir=SETS_DIR):
         if optimize.get("per") not in ("kernel", "solve"):
             raise SetError(where + ": per must be kernel or solve")
     head["optimize"] = optimize
+    untimed = head.get("untimed")
+    if untimed is not None:
+        where = path + " [set.untimed]"
+        if not isinstance(untimed, dict):
+            raise SetError(where + " must be a table")
+        _check_keys(untimed, UNTIMED_KEYS, where)
+        untimed.setdefault("packages", "all")
+        untimed["packages"] = _name_list(untimed["packages"], PACKAGES, where + " packages")
+    head["untimed"] = untimed
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
     if not grids or not steppings:
@@ -423,6 +433,8 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                                         spec["build"] = head["build"]
                                         spec["optimize"] = _optimize_for(head["optimize"], package)
                                         spec["watchdog_s"] = head["watchdog"]
+                                        spec["timed"] = head["untimed"] is None \
+                                            or package not in head["untimed"]["packages"]
                                         spec["set"] = loaded["name"]
                                         spec["stepping"] = stepping["controller"]
                                         specs.append(spec)

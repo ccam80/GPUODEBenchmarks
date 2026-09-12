@@ -156,6 +156,19 @@ class OutcomeTests(RunnerCase):
         self.assertEqual(progress["stage"], "solve")
         self.assertTrue(progress["started_utc"].endswith("Z"))
 
+    def test_an_untimed_line_runs_once_with_no_warm_up(self):
+        adapter = FakeAdapter()
+        status, rows, path = self.run_specs([spec(8, timed=False)], adapter)
+        self.assertEqual(status, 0)
+        self.assertEqual(sorted(rows), [(8, "both"), (8, "none")])
+        for row in rows.values():
+            self.assertEqual(len(row["samples_ms"]), 1)
+            self.assertEqual(row["min_ms"], row["samples_ms"][0])
+            self.assertEqual(row["reason"], "")
+        self.assertEqual([(n, t) for _, n, t in [c for c in adapter.calls if c[0] == "solve"]],
+                         [(8, "both"), (8, "none")])
+        self.assertEqual([t["timed"] for t in trials.read_jsonl(path)], [False])
+
     def test_timeout_abandons_the_harder_runs_of_the_same_transfers(self):
         adapter = FakeAdapter({(32, "none"): "slow"})
         status, rows, _ = self.run_specs([spec(8), spec(32), spec(128)], adapter)

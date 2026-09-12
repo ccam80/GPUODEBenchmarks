@@ -1,4 +1,4 @@
-"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog), written in difficulty order one JSON object per line."""
+"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog, timed), written in difficulty order one JSON object per line."""
 
 import json
 import math
@@ -7,7 +7,7 @@ import os
 from protocol import WATCHDOG_SECONDS
 from store import TRIAL_FIELDS, trial_id
 
-TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimize", "watchdog_s", "sets")
+TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimize", "watchdog_s", "timed", "sets")
 TRANSFERS_ORDER = ("both", "none")
 # The fields one package build serves; a line whose values differ from the last needs a new build.
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
@@ -76,16 +76,17 @@ def canonical_optimize(tables):
 
 def _entry(spec):
     return {"spec": spec, "transfers": set(), "finals": False, "cold": False, "tables": [],
-            "watchdog_s": 0.0, "sets": set()}
+            "watchdog_s": 0.0, "timed": False, "sets": set()}
 
 
 def _fold(entry, spec):
-    """Fold one declaration of a point into its entry: transfers union, finals and cold true over false, every optimize table, the larger watchdog budget, the set's name."""
+    """Fold one declaration of a point into its entry: transfers union, finals, cold and timed true over false, every optimize table, the larger watchdog budget, the set's name."""
     entry["transfers"] |= set(spec["transfers"])
     entry["finals"] = entry["finals"] or bool(spec["finals"])
     entry["cold"] = entry["cold"] or spec["build"] == "cold"
     entry["tables"].append(spec["optimize"])
     entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
+    entry["timed"] = entry["timed"] or bool(spec.get("timed", True))
     if spec.get("set"):
         entry["sets"].add(spec["set"])
 
@@ -99,6 +100,7 @@ def _record(entry):
     record["cold"] = bool(entry["cold"])
     record["optimize"] = canonical_optimize(entry["tables"])
     record["watchdog_s"] = float(entry["watchdog_s"])
+    record["timed"] = bool(entry["timed"])
     record["sets"] = sorted(entry["sets"])
     return record
 
@@ -179,6 +181,7 @@ def read_jsonl(path):
                 record["sets"] = []
             record.setdefault("optimize", None)
             record.setdefault("cold", False)
+            record.setdefault("timed", True)
             trials.append(record)
     return trials
 

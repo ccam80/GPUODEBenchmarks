@@ -43,7 +43,9 @@ expanded specs; `-n` names counts of the grids' trajectory lists and exits
 for a count no grid of the named sets lists. A trial is one line per point;
 a point several set files declare runs under one contract whichever sets
 are named: it builds cold, keeps finals, optimizes per solve over per
-kernel and times each transfers mode when any declaration asks. A cubie
+kernel and times each transfers mode when any declaration asks; a package
+every declaration lists under `[set.untimed]` runs each line once with no
+warm-up. A cubie
 optimize runs once per compiled kernel (build plus stepping) on
 `[optimize] waves` occupancy waves of the kernel, or once per line on its
 own n, as the set's `[set.optimize] per` says; either times launches at

@@ -37,7 +37,7 @@ function trial(; overrides...)
         "dt_max" => NaN, "atol" => NaN, "rtol" => NaN, "gains" => "{}", "newton_atol" => NaN,
         "newton_rtol" => NaN, "package" => "julia_gpu", "trial_id" => "0123456789abcdef",
         "finals" => false, "transfers" => ["both", "none"], "cold" => false, "optimize" => nothing,
-        "watchdog_s" => 120.0, "sets" => ["perf"])
+        "watchdog_s" => 120.0, "timed" => true, "sets" => ["perf"])
     for (name, value) in overrides
         record[String(name)] = value
     end

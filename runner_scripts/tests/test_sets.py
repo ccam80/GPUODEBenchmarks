@@ -527,12 +527,12 @@ class MergeAndNarrowTests(unittest.TestCase):
             point = [t for t in built if t["n"] == 131072 and t["system_params"] == '{"states":32}'
                      and t["dt"] == 2.0 ** -10]
             self.assertEqual(len(point), 1, names)
-            contract = {k: point[0][k] for k in ("cold", "finals", "transfers", "optimize", "watchdog_s", "sets")}
+            contract = {k: point[0][k] for k in ("cold", "finals", "transfers", "optimize", "watchdog_s", "timed", "sets")}
             if expected is None:
                 expected = contract
             self.assertEqual(contract, expected, names)
         self.assertEqual(expected, {"cold": True, "finals": True, "transfers": ["both", "none"], "optimize": "solve",
-                                    "watchdog_s": protocol.WATCHDOG_SECONDS,
+                                    "watchdog_s": protocol.WATCHDOG_SECONDS, "timed": True,
                                     "sets": ["golden_grid", "perf", "states"]})
         # perf alone: the other eleven counts of the 32-state build stay warm and unshared.
         perf = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
@@ -554,18 +554,18 @@ class MergeAndNarrowTests(unittest.TestCase):
                     algorithm="tsit5", controller="fixed", dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN,
                     rtol=NAN, gains="{}", newton_atol=NAN, newton_rtol=NAN, package="cubie")
         a = dict(base, transfers=["none"], finals=True, build="warm", optimize={"per": "kernel"},
-                 watchdog_s=60.0, set="a", stepping="fixed")
+                 watchdog_s=60.0, timed=False, set="a", stepping="fixed")
         b = dict(base, transfers=["both"], finals=False, build="cold", optimize={"per": "solve"},
-                 watchdog_s=600.0, set="b", stepping="fixed")
+                 watchdog_s=600.0, timed=True, set="b", stepping="fixed")
         c = dict(base, transfers=["both"], finals=False, build="warm", optimize=None,
-                 watchdog_s=30.0, set="c", stepping="fixed")
+                 watchdog_s=30.0, timed=False, set="c", stepping="fixed")
         for order in ((a, b, c), (c, b, a), (b, a, c)):
             built = trials.build_trials(list(order))
             self.assertEqual(len(built), 1, order)
             line = built[0]
-            self.assertEqual({k: line[k] for k in ("n", "cold", "transfers", "finals", "watchdog_s", "sets", "optimize")},
+            self.assertEqual({k: line[k] for k in ("n", "cold", "transfers", "finals", "watchdog_s", "timed", "sets", "optimize")},
                              {"n": 8, "cold": True, "transfers": ["both", "none"], "finals": True, "watchdog_s": 600.0,
-                              "sets": ["a", "b", "c"], "optimize": "solve"}, order)
+                              "timed": True, "sets": ["a", "b", "c"], "optimize": "solve"}, order)
         # A point requested once and declared elsewhere takes the declarations; a declaration of another point is ignored.
         other = dict(a, n=32, set="d", build="cold")
         built = trials.build_trials([a], declared=[b, c, other])
@@ -671,7 +671,9 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(loaded["grid"][0]["parameter"], "default")
         self.assertEqual(loaded["stepping"][0]["newton"], "none")
         self.assertIsNone(head["optimize"])
+        self.assertIsNone(head["untimed"])
         specs = sets.expand(["s"], KEY, sets_dir=self.tmp)
+        self.assertEqual({s["timed"] for s in specs}, {True})
         self.assertEqual(len(specs), len(capable("jax", "fixed")))
         self.assertEqual({s["dt"] for s in specs}, {0.5})
         self.assertTrue(all(np.isnan(s["newton_atol"]) for s in specs))
@@ -681,6 +683,20 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual({t["watchdog_s"] for t in built}, {protocol.WATCHDOG_SECONDS})
         self.assertEqual({t["optimize"] for t in built}, {None})
         self.assertEqual(len(built), len(specs))
+
+    def test_untimed_names_the_packages_whose_lines_run_once(self):
+        self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["jax"]\n'))
+        loaded = sets.load_set("s", self.tmp)
+        self.assertEqual(loaded["set"]["untimed"], {"packages": ["jax"]})
+        specs = sets.expand(["s"], KEY, sets_dir=self.tmp)
+        self.assertEqual({s["timed"] for s in specs}, {False})
+        self.assertEqual({t["timed"] for t in trials.build_trials(specs)}, {False})
+        self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["nobody"]\n'))
+        with self.assertRaises(sets.SetError):
+            sets.load_set("s", self.tmp)
+        # The shipped golden_grid times every package but the reference.
+        specs = sets.expand(["golden_grid"], KEY, packages=["julia_cpu", "cpp"], problems=["lorenz"])
+        self.assertEqual({(s["package"], s["timed"]) for s in specs}, {("julia_cpu", False), ("cpp", True)})
 
     def test_optimize_table_names_the_policy(self):
         text = self.MINIMAL.replace("[[grid]]\nn = [8]", "[[grid]]\nn = [8, 32]") + \

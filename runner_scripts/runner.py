@@ -111,7 +111,7 @@ class Runner:
 
     # ------------------------------------------------------------- timing
     def time(self, build, trial, values, transfers):
-        """(outcome, best_ms, samples, result, exc, elapsed_s) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog."""
+        """(outcome, best_ms, samples, result, exc, elapsed_s) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog; an untimed line runs once with no warm-up."""
         def run():
             return self.adapter.solve(build, trial, values, transfers)
 
@@ -119,6 +119,8 @@ class Runner:
             print("WATCHDOG hard exit: {0} never returned".format(label(trial, transfers)),
                   flush=True)
 
+        if not trial.get("timed", True):
+            return self.once(run, breach, trial)
         reset = getattr(self.adapter, "reset", None)
         setup = None if reset is None else (lambda: reset(build, trial, values, transfers))
         try:
@@ -129,6 +131,18 @@ class Runner:
         if best is None:
             return "timeout", NAN, samples, result, None, samples[-1] / 1000.0
         return "ok", best, samples, result, None, samples[-1] / 1000.0
+
+    def once(self, run, breach, trial):
+        """(outcome, ms, [ms], result, exc, elapsed_s) of a single solve under the watchdog."""
+        started = timeit.default_timer()
+        try:
+            result = run_watchdogged(run, breach, budget_s=budget_of(trial) + 30.0)
+        except Exception as exc:  # noqa: BLE001 - every failure is a row
+            return classify(exc), NAN, [], None, exc, NAN
+        ms = (timeit.default_timer() - started) * 1000.0
+        if ms > budget_of(trial) * 1000.0:
+            return "timeout", NAN, [ms], result, None, ms / 1000.0
+        return "ok", ms, [ms], result, None, ms / 1000.0
 
     def finals(self, build, trial, result):
         """(errored_pct, finals path) of a solve's result; the finals file is written when the trial keeps finals."""

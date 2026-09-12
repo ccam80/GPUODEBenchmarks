@@ -29,7 +29,7 @@ HASH_HEX = 12
 
 BUILD_COLUMNS = ("problem", "solver", "nt", "sd", "precision", "cold")
 POINT_COLUMNS = ("trial_id", "problem", "solver", "nt", "sd", "precision", "transfers", "finals",
-                 "cold", "reason")
+                 "cold", "timed", "reason")
 
 
 def source_files():
@@ -123,7 +123,7 @@ def builds(trial_list):
 
 
 def points(trial_list):
-    """The trials in file order with build key, transfers, finals, cold and the reason they cannot run ('' when they can)."""
+    """The trials in file order with build key, transfers, finals, cold, timed and the reason they cannot run ('' when they can)."""
     out = []
     for trial in trial_list:
         reason = unrunnable(trial)
@@ -132,7 +132,8 @@ def points(trial_list):
         out.append({"trial_id": trial["trial_id"], "problem": trial["problem"], "solver": solver,
                     "nt": int(trial["n"]), "sd": "-" if given is None else str(given),
                     "precision": trial["precision"], "transfers": ",".join(trial["transfers"]),
-                    "finals": trial["finals"], "cold": bool(trial["cold"]), "reason": reason})
+                    "finals": trial["finals"], "cold": bool(trial["cold"]),
+                    "timed": bool(trial.get("timed", True)), "reason": reason})
     return out
 
 

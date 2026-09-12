@@ -1,4 +1,4 @@
-// One MPGOS trial per process: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none --python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]; problem, algorithm, n, states and precision are build constants.
+// One MPGOS trial per process: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none --python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--untimed] [--build-s <s>]; problem, algorithm, n, states and precision are build constants.
 #include <iostream>
 #include <vector>
 #include <string>
@@ -65,15 +65,15 @@ struct Options
 {
 	std::string trials, trial_id, key, python, package_version, suite_rev, outcome;
 	std::vector<std::string> transfers;
-	bool floor;
+	bool floor, untimed;
 	double build_s;
-	Options() : floor(false), build_s(std::nan("")) {}
+	Options() : floor(false), untimed(false), build_s(std::nan("")) {}
 };
 
 static void Usage()
 {
 	std::cerr << "usage: Bench.exe --trials <jsonl> --trial <trial_id> --key <key> --transfers both,none "
-	             "--python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--build-s <s>]"
+	             "--python <exe> --package-version <v> --suite-rev <r> --outcome <path> [--floor] [--untimed] [--build-s <s>]"
 	          << std::endl;
 	exit(2);
 }
@@ -85,6 +85,7 @@ static Options ParseOptions(int argc, char* argv[])
 	{
 		std::string flag = argv[i];
 		if (flag == "--floor") { o.floor = true; continue; }
+		if (flag == "--untimed") { o.untimed = true; continue; }
 		if (i + 1 >= argc) Usage();
 		std::string value = argv[++i];
 		if (flag == "--trials") o.trials = value;
@@ -343,8 +344,8 @@ void FillSolverObject(Solver& Scan, const std::vector<PRECISION>& Values, PRECIS
 	}
 }
 
-// Time one transfers mode (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule.
-static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both)
+// Time one transfers mode (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule; Untimed runs once with no warm-up.
+static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both, bool Untimed)
 {
 	TimingResult result;
 	std::vector<double> Timed;
@@ -388,6 +389,7 @@ static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Va
 			result.reason = text;
 			return result;
 		}
+		if (Untimed) { result.min_ms = Ms; break; }
 		if (r == 0) continue;   // r == 0 is warm-up
 		Timed.push_back(Ms);
 		if (std::isnan(result.min_ms) || Ms < result.min_ms) result.min_ms = Ms;
@@ -555,7 +557,7 @@ int main(int argc, char* argv[])
 	for (size_t li = 0; li < o.transfers.size(); li++)
 	{
 		const std::string& transfers = o.transfers[li];
-		TimingResult timing = TimeTransfers(Scan, Values, Duration, transfers == "both");
+		TimingResult timing = TimeTransfers(Scan, Values, Duration, transfers == "both", o.untimed);
 		RowValues v = BaseValues(o);
 		v.min_ms = timing.min_ms;
 		v.samples_ms = timing.samples;

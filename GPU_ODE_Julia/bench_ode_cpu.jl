@@ -240,10 +240,17 @@ is_oom(err) = root_error(err) isa OutOfMemoryError
 error_reason(err) = (e = root_error(err);
     "error: $(typeof(e).name.name): " * first(sprint(showerror, e), 200))
 
-"(min_ms, samples, result, outcome, reason) of timing f under the watchdog with the trial's cap: ok, timeout (the cap passed but the run returned), oom or error."
-function time_trial(f, label, cap_s)
+"(min_ms, samples, result, outcome, reason) of timing f under the watchdog with the trial's cap: ok, timeout (the cap passed but the run returned), oom or error; an untimed line runs once with no warm-up."
+function time_trial(f, label, cap_s, is_timed = true)
     on_breach = () -> println("WATCHDOG $(label): run never returned")
     try
+        if !is_timed
+            elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0)
+            ms = elapsed * 1000.0
+            elapsed > cap_s || return ms, [ms], result, "ok", ""
+            return NaN, [ms], result, "timeout",
+                @sprintf("timeout: %.1f s over the %g s cap", elapsed, cap_s)
+        end
         ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
         isnan(ms) || return ms, samples, result, "ok", ""
         reason = @sprintf("timeout: %.1f s over the %g s cap", samples[end] / 1000, cap_s)
@@ -343,7 +350,8 @@ function run_build(ctx, lines, failures)
             end
             nothing
         end
-        if built !== nothing && isempty(rejection(lead, built[2]))
+        if built !== nothing && isempty(rejection(lead, built[2])) &&
+           any(get(l, "timed", true) for l in lines)
             points = grid(merge(lead, Dict("n" => WARM_N)))
             try
                 ensemble_solve(built[1], built[3], built[2], points, solve_kwargs(lead, T))
@@ -391,7 +399,7 @@ function run_build(ctx, lines, failures)
             end
             ms, samples, result, outcome, why = time_trial(
                 () -> ensemble_solve(system, prob, alg, points, kwargs), "$(label) $(transfers)",
-                trial["watchdog_s"])
+                trial["watchdog_s"], get(trial, "timed", true))
             pct = NaN
             if result !== nothing
                 finals, t_final, retcode = result

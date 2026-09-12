@@ -1,4 +1,4 @@
-# The float64 reference finals: julia_cpu runs each problem's golden algorithm at its golden tolerance on the full grid, every step-size pin left to the package, a day per solve.
+# The float64 reference finals: julia_cpu runs each problem's golden algorithm at its golden tolerance on the full grid, every step-size pin left to the package, a day per solve, untimed.
 
 [set]
 packages   = ["julia_cpu"]
@@ -9,6 +9,9 @@ finals     = true
 transfers  = ["none"]
 build      = "warm"
 watchdog   = 86400
+
+[set.untimed]
+packages = "all"
 
 [[grid]]
 packages = "all"
