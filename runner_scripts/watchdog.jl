@@ -20,7 +20,10 @@ h = ccall((:OpenProcess, "kernel32"), Ptr{Cvoid}, (UInt32, Cint, UInt32), 0x0010
 h == C_NULL && exit()
 while true
     sleep(1)
-    ccall((:WaitForSingleObject, "kernel32"), UInt32, (Ptr{Cvoid}, UInt32), h, 0) == 0 && exit()
+    if ccall((:WaitForSingleObject, "kernel32"), UInt32, (Ptr{Cvoid}, UInt32), h, 0) == 0
+        rm(PATH; force = true)
+        exit()
+    end
     deadline = try parse(Float64, read(PATH, String)) catch; 0.0 end
     if deadline > 0 && time() > deadline
         ccall((:TerminateProcess, "kernel32"), Cint, (Ptr{Cvoid}, UInt32), h, CODE)
