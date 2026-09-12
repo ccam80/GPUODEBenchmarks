@@ -11,8 +11,57 @@ function hard_exit(code)
     ccall(:_exit, Cvoid, (Cint,), code)
 end
 
-"Run f() under the watchdog; when it has not returned after budget_s (the soft cap plus 30 s), run on_breach() and hard-exit."
-function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0)
+const DEADLINE_PATH = Ref("")
+const KILLER = Ref{Union{Nothing, Base.Process}}(nothing)
+
+# The killer's loop: every second, exit when the parent is gone, else end it with the watchdog code once the deadline file's time has passed.
+const KILLER_SCRIPT = """
+h = ccall((:OpenProcess, "kernel32"), Ptr{Cvoid}, (UInt32, Cint, UInt32), 0x00100001, 0, PID)
+h == C_NULL && exit()
+while true
+    sleep(1)
+    if ccall((:WaitForSingleObject, "kernel32"), UInt32, (Ptr{Cvoid}, UInt32), h, 0) == 0
+        rm(PATH; force = true)
+        exit()
+    end
+    deadline = try parse(Float64, read(PATH, String)) catch; 0.0 end
+    if deadline > 0 && time() > deadline
+        ccall((:TerminateProcess, "kernel32"), Cint, (Ptr{Cvoid}, UInt32), h, CODE)
+        rm(PATH; force = true)
+        exit()
+    end
+end
+"""
+
+"On Windows, start the killer process once; it ends this process from outside when an armed deadline passes."
+function start_killer()
+    Sys.iswindows() || return
+    KILLER[] === nothing || return
+    DEADLINE_PATH[] = joinpath(tempdir(), "watchdog_$(getpid()).deadline")
+    write(DEADLINE_PATH[], "0")
+    script = replace(KILLER_SCRIPT, "PID" => string(getpid()), "PATH" => repr(DEADLINE_PATH[]),
+                     "CODE" => string(WATCHDOG_EXIT_CODE))
+    KILLER[] = run(`$(Base.julia_cmd()) --threads=1 --startup-file=no -e $script`; wait = false)
+    atexit() do
+        KILLER[] === nothing || kill(KILLER[])
+        rm(DEADLINE_PATH[]; force = true)
+    end
+end
+
+"Set the killer's deadline budget_s from now."
+function arm_deadline(budget_s)
+    start_killer()
+    isempty(DEADLINE_PATH[]) || write(DEADLINE_PATH[], string(time() + budget_s))
+end
+
+"Clear the killer's deadline."
+function clear_deadline()
+    isempty(DEADLINE_PATH[]) || write(DEADLINE_PATH[], "0")
+end
+
+"Run f() under the watchdog; when it has not returned after budget_s (the soft cap plus 30 s), run on_breach() and hard-exit. `external` also arms the killer, which a caller timing f arms itself outside the timed call."
+function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0, external = true)
+    external && arm_deadline(budget_s)
     finished = Threads.Atomic{Bool}(false)
     timer = Timer(budget_s) do _
         finished[] && return
@@ -30,6 +79,7 @@ function run_watchdogged(f, on_breach; budget_s = WATCHDOG_SECONDS + 30.0)
     finally
         finished[] = true
         close(timer)
+        external && clear_deadline()
     end
 end
 
@@ -62,7 +112,9 @@ function watchdogged_min_ms(f, on_breach, repeats; cap_s = WATCHDOG_SECONDS)
     lo = hi = 0
     result = nothing
     while true
-        elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0)
+        arm_deadline(cap_s + 30.0)
+        elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0, external = false)
+        clear_deadline()
         push!(samples, elapsed * 1000.0)
         elapsed > cap_s && return (NaN, samples, result)
         length(samples) == 1 && continue   # the warm-up carries the compile
