@@ -35,6 +35,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 using namespace std;
 
@@ -286,7 +289,12 @@ static void WatchdogMain()
 		long long deadline = WatchdogDeadlineMs;
 		if (deadline == 0 || NowMs() < deadline) continue;
 		std::cout << "WATCHDOG " << WatchdogLabel << ": run never returned" << std::endl;
+#ifdef _WIN32
+		// TerminateProcess skips the DLL detach that would wait on the live kernel.
+		TerminateProcess(GetCurrentProcess(), WatchdogExitCode);
+#else
 		std::_Exit(WatchdogExitCode);
+#endif
 	}
 }
 
