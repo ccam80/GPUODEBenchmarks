@@ -270,6 +270,16 @@ class CompletenessTests(unittest.TestCase):
             self.record(point, transfers)
         kept = self.kept(perf, resume=True)
         self.assertEqual((kept[point["trial_id"]]["transfers"], kept[point["trial_id"]]["finals"]), (["none"], True))
+        # Rows all NaN carry no finals: complete under --resume, the row alone under --no-overwrite.
+        timed_out = self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
+                              "--dt", "0.125")["cpp"]
+        spec = {f: timed_out[0][f] for f in store.TRIAL_FIELDS}
+        self.data.record(dict(spec, transfers="none", key=KEY, states=3, min_ms=NAN,
+                              reason="timeout: 130000.0 ms exceeded the 120 s cap"))
+        self.assertEqual(self.kept(timed_out, resume=True), {})
+        self.assertTrue(completeness.audit(timed_out, KEY, self.data)[timed_out[0]["trial_id"]].complete())
+        self.assertEqual(completeness.audit(timed_out, KEY, self.data, "no_overwrite")[timed_out[0]["trial_id"]].reasons(),
+                         ["row:none"])
 
     def test_an_optimize_record_must_exist_from_the_current_source(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
