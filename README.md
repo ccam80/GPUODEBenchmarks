@@ -103,7 +103,7 @@ optimize records) is printed per package, written to
 
 ## Using the store
 
-The store is one `data/` tree on a store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners; an analysis pulls before reading; both refuse to run without the store unless `--no-sync`. `sync/README.md` covers setting up the box, connecting a machine and `sync/sync.py`. An error is the RMS
+The store is one `data/` tree on a store box over Tailscale; a machine writes its own key and clocks files. A run pulls the tree before planning and pushes its key after the runners, refusing to start while its key holds files the box lacks or differs from (a pull keeps newer local files); an analysis pulls before reading; both refuse to run without the store unless `--no-sync`. `sync/README.md` covers setting up the box, connecting a machine and `sync/sync.py`. An error is the RMS
 over every state of the difference from the julia_cpu float64 finals, paired
 by exact grid value, over the trajectories neither side flags as errored.
 

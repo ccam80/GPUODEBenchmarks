@@ -21,14 +21,15 @@ A `Host box` entry in `~/.ssh/config` serves rsync when rclone is absent. `GPUOD
 
 ## Sync
 
-`bench.py run` pulls before planning and pushes this key after the runners; the analyses pull before reading; both refuse to run without the store unless `--no-sync`. By hand:
+`bench.py run` pulls before planning and pushes this key after the runners; the analyses pull before reading; both refuse to run without the store unless `--no-sync`. A pull never replaces a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from (`unpushed` below), until they are pushed or the partition deleted. By hand:
 
 ```
-python sync/sync.py pull     # the whole tree into data/, nothing deleted
+python sync/sync.py pull     # the whole tree into data/, nothing deleted, newer local files kept
 python sync/sync.py push     # this key and its clocks files up, nothing deleted
 python sync/sync.py sync     # push, then pull
 python sync/sync.py prune    # this key mirrored: files gone locally are deleted on the box; refuses an empty partition
 python sync/sync.py check    # the differences under this key, exit 1 when there are any
+python sync/sync.py unpushed # this key's local files missing from or differing on the box, exit 1 when there are any
 ```
 
 `--root`, `--remote`, `--key`, `--tool rclone|rsync` and `--dry-run` override the tree, the remote, the machine key, the program and whether anything is written. `*.partial` files and `*.lock` directories are never shipped.

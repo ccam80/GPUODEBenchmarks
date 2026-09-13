@@ -1,4 +1,4 @@
-"""sync.py: the argv of every command for both tools, the availability checks, and a real rclone round trip between two local trees: push copies this key and its clocks without deleting, pull brings the whole tree back, prune deletes what is gone locally, check reports drift."""
+"""sync.py: the argv of every command for both tools, the availability checks, and a real rclone round trip between two local trees: push copies this key and its clocks without deleting, pull brings the whole tree back and keeps a newer local file, prune deletes what is gone locally, check reports drift, unpushed reports only what the box lacks."""
 
 import io
 import os
@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -47,12 +48,17 @@ class Commands(unittest.TestCase):
         self.assertEqual(clocks[-2:], ["--include", "*_" + KEY + ".csv"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rclone")
         self.assertEqual(pull[:3], ["rclone", "copy", REMOTE])
+        self.assertIn("--update", pull)
         self.assertNotIn("key=" + KEY + "/**", pull)
         (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rclone")
         self.assertEqual(prune[:2], ["rclone", "sync"])
         self.assertEqual(prune[3], REMOTE + "/key=" + KEY)
         (check,) = sync.commands("check", "d", KEY, REMOTE, "rclone")
         self.assertEqual(check[:2], ["rclone", "check"])
+        self.assertNotIn("--one-way", check)
+        (unpushed,) = sync.commands("unpushed", "d", KEY, REMOTE, "rclone")
+        self.assertEqual(unpushed[:4], check[:4])
+        self.assertIn("--one-way", unpushed)
         self.assertIn("--dry-run", sync.commands("push", "d", KEY, "r:/p", "rclone", dry_run=True)[0])
         self.assertEqual(len(sync.commands("sync", "d", KEY, "r:/p", "rclone")), 3)
 
@@ -64,6 +70,7 @@ class Commands(unittest.TestCase):
         self.assertEqual(push[-1], REMOTE + "/key=" + KEY + "/")
         self.assertEqual(clocks[2:6], ["--include", "*_" + KEY + ".csv", "--exclude", "*"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rsync")
+        self.assertEqual(pull[1], "-au")
         self.assertNotIn("key=" + KEY + "/", pull)
         self.assertEqual(pull[-2], REMOTE + "/")
         (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rsync")
@@ -72,6 +79,10 @@ class Commands(unittest.TestCase):
         (check,) = sync.commands("check", "d", KEY, REMOTE, "rsync")
         self.assertIn("--dry-run", check)
         self.assertIn("--itemize-changes", check)
+        (unpushed,) = sync.commands("unpushed", "d", KEY, REMOTE, "rsync")
+        self.assertIn("--dry-run", unpushed)
+        self.assertNotIn("--delete", unpushed)
+        self.assertEqual(unpushed[-2:], check[-2:])
 
     def test_remote_host(self):
         self.assertEqual(sync.remote_host(REMOTE), "box")
@@ -108,7 +119,9 @@ class RcloneRoundTrip(unittest.TestCase):
         _touch(self.local, "clocks/calibration_{0}.csv".format(OTHER), "mine-not-to-push")
         _touch(self.remote, "key={0}/package=cubie/results/gone.parquet".format(KEY))
         _touch(self.remote, "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER))
-        _touch(self.remote, "key={0}/package=jax/results/stale.parquet".format(OTHER), "new")
+        newer = _touch(self.remote, "key={0}/package=jax/results/stale.parquet".format(OTHER), "new")
+        # The box's copy is newer than the local one by a clear margin.
+        os.utime(newer, (time.time() + 60, time.time() + 60))
         _touch(self.remote, "clocks/lightload_{0}.csv".format(OTHER))
 
     def tearDown(self):
@@ -150,6 +163,24 @@ class RcloneRoundTrip(unittest.TestCase):
                                "stale.parquet")) as handle:
             self.assertEqual(handle.read(), "new")
 
+    def test_pull_keeps_a_newer_local_file(self):
+        # The newer local lorenz__tsit5 stays; the older local stale.parquet is replaced.
+        mine = _touch(self.local, "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY), "unpushed rows")
+        theirs = _touch(self.remote, "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY), "box")
+        now = time.time()
+        os.utime(mine, (now, now))
+        os.utime(theirs, (now - 3600, now - 3600))
+        stale = os.path.join(self.local, "key=" + OTHER, "package=jax", "results", "stale.parquet")
+        os.utime(stale, (now - 3600, now - 3600))
+        code, text = self.run_sync("pull")
+        self.assertEqual(code, 0, text)
+        with open(mine) as handle:
+            self.assertEqual(handle.read(), "unpushed rows")
+        with open(stale) as handle:
+            self.assertEqual(handle.read(), "new")
+        self.assertTrue(sync.partition_has_files(self.local, KEY))
+        self.assertFalse(sync.partition_has_files(self.local, "no-such-key"))
+
     def test_prune_and_check(self):
         code, text = self.run_sync("check")
         self.assertNotEqual(code, 0, text)
@@ -162,6 +193,32 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY), _files(self.remote))
         code, text = self.run_sync("check")
         self.assertEqual(code, 0, text)
+
+    def test_unpushed_ignores_files_only_the_box_has(self):
+        # A box-only file is not unpushed, though check reports it.
+        os.remove(os.path.join(self.local, "key=" + KEY, "package=cubie", "finals", "abc.parquet"))
+        os.remove(os.path.join(self.local, "key=" + KEY, "package=cubie", "results", "lorenz__tsit5.parquet"))
+        _touch(self.remote, "key={0}/package=cubie/finals/abc.parquet".format(KEY))
+        _touch(self.local, "key={0}/package=cubie/finals/abc.parquet".format(KEY))
+        code, text = self.run_sync("unpushed")
+        self.assertEqual(code, 0, text)
+        code, text = self.run_sync("check")
+        self.assertNotEqual(code, 0, text)
+        # A local-only file and a file that differs are both unpushed.
+        _touch(self.local, "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY))
+        code, text = self.run_sync("unpushed")
+        self.assertNotEqual(code, 0, text)
+        code, text = self.run_sync("push")
+        self.assertEqual(code, 0, text)
+        code, text = self.run_sync("unpushed")
+        self.assertEqual(code, 0, text)
+        _touch(self.local, "key={0}/package=cubie/finals/abc.parquet".format(KEY), "rewritten")
+        code, text = self.run_sync("unpushed")
+        self.assertNotEqual(code, 0, text)
+        shutil.rmtree(os.path.join(self.local, "key=" + KEY))
+        code, text = self.run_sync("unpushed")
+        self.assertEqual(code, 0, text)
+        self.assertIn("nothing under", text)
 
     def test_prune_needs_a_partition_with_files(self):
         shutil.rmtree(os.path.join(self.local, "key=" + KEY))
