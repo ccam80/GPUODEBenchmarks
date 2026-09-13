@@ -532,5 +532,50 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(WATCHDOG_EXIT_CODE, 3)
 
 
+class PullStore(unittest.TestCase):
+    """bench.pull_store: a mirror without this key's files pulls at once; one with files asks the box for unpushed files first and any refuses the run before anything is pulled."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.calls = []
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def pull(self, check_code=0):
+        def fake_run(command, root, key, *args, **kwargs):
+            self.calls.append(command)
+            return check_code if command == "unpushed" else 0
+        with mock.patch.object(bench.sync, "unavailable", return_value=""),                 mock.patch.object(bench.sync, "run", side_effect=fake_run):
+            bench.pull_store(KEY, self.root)
+
+    def test_empty_partition_pulls_without_a_check(self):
+        os.makedirs(os.path.join(self.root, "key=" + KEY, "package=cubie"))
+        self.pull()
+        self.assertEqual(self.calls, ["pull"])
+
+    def test_matching_partition_is_checked_then_pulled(self):
+        path = os.path.join(self.root, "key=" + KEY, "package=cubie", "results", "lorenz__rk4.parquet")
+        os.makedirs(os.path.dirname(path))
+        open(path, "w").close()
+        self.pull()
+        self.assertEqual(self.calls, ["unpushed", "pull"])
+
+    def test_differing_partition_refuses_before_pulling(self):
+        path = os.path.join(self.root, "key=" + KEY, "package=cubie", "results", "lorenz__rk4.parquet")
+        os.makedirs(os.path.dirname(path))
+        open(path, "w").close()
+        with self.assertRaises(SystemExit) as raised:
+            self.pull(check_code=1)
+        self.assertIn("files the box lacks or differs from", str(raised.exception))
+        self.assertIn("sync/sync.py push", str(raised.exception))
+        self.assertEqual(self.calls, ["unpushed"])
+
+    def test_no_sync_skips_the_store(self):
+        with mock.patch.object(bench.sync, "run") as run:
+            bench.pull_store(KEY, self.root, skip=True)
+        run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
