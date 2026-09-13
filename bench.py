@@ -5,7 +5,7 @@ plan writes trials/<key>/<package>.jsonl and prints counts; run writes them unde
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel (a cubie optimize runs on protocol.toml's [optimize] waves of the kernel or the line's n, timed at launch_ms), the watchdog budget the largest.
 --resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
-run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's, and a run refuses to start while this key's local partition holds files the box lacks or differs from (rows a killed run never pushed: push them, or delete the partition); a machine without the store refuses to run unless --no-sync.
+run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
 
@@ -426,9 +426,8 @@ def pull_store(key, root=DATA_DIR, skip=False):
         print("Store       : unpushed check of key={0} against {1}".format(key, remote), flush=True)
         if sync.run("unpushed", root, key):
             raise SystemExit(
-                "Store       : data/key={0} holds files the box lacks or differs from (rows a killed run never "
-                "pushed, or a box changed under it); `python sync/sync.py push` keeps the local rows, deleting "
-                "data/key={0} takes the box's; pass --no-sync to run without the store".format(key))
+                "Store       : data/key={0} holds files the box lacks or differs from; `python sync/sync.py push` "
+                "keeps them, deleting data/key={0} takes the box's; pass --no-sync to run without the store".format(key))
     print("Store       : pull from " + remote, flush=True)
     if sync.run("pull", root, key):
         raise SystemExit("Store       : pull FAILED; pass --no-sync to run without it")

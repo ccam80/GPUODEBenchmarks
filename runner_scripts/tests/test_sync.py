@@ -162,8 +162,7 @@ class RcloneRoundTrip(unittest.TestCase):
             self.assertEqual(handle.read(), "new")
 
     def test_pull_keeps_a_newer_local_file(self):
-        # A killed run rewrote lorenz__tsit5 locally after the box's copy; the pull leaves it and still
-        # replaces stale.parquet, which is older locally.
+        # The newer local lorenz__tsit5 stays; the older local stale.parquet is replaced.
         mine = _touch(self.local, "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY), "unpushed rows")
         theirs = _touch(self.remote, "key={0}/package=cubie/results/lorenz__tsit5.parquet".format(KEY), "box")
         now = time.time()
@@ -194,7 +193,7 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertEqual(code, 0, text)
 
     def test_unpushed_ignores_files_only_the_box_has(self):
-        # gone.parquet is on the box alone: no unpushed file, though check reports the drift.
+        # A box-only file is not unpushed, though check reports it.
         os.remove(os.path.join(self.local, "key=" + KEY, "package=cubie", "finals", "abc.parquet"))
         os.remove(os.path.join(self.local, "key=" + KEY, "package=cubie", "results", "lorenz__tsit5.parquet"))
         _touch(self.remote, "key={0}/package=cubie/finals/abc.parquet".format(KEY))
