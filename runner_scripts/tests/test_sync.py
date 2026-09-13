@@ -119,7 +119,9 @@ class RcloneRoundTrip(unittest.TestCase):
         _touch(self.local, "clocks/calibration_{0}.csv".format(OTHER), "mine-not-to-push")
         _touch(self.remote, "key={0}/package=cubie/results/gone.parquet".format(KEY))
         _touch(self.remote, "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER))
-        _touch(self.remote, "key={0}/package=jax/results/stale.parquet".format(OTHER), "new")
+        newer = _touch(self.remote, "key={0}/package=jax/results/stale.parquet".format(OTHER), "new")
+        # The box's copy is newer than the local one by a clear margin.
+        os.utime(newer, (time.time() + 60, time.time() + 60))
         _touch(self.remote, "clocks/lightload_{0}.csv".format(OTHER))
 
     def tearDown(self):
