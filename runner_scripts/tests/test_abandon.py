@@ -73,9 +73,12 @@ class AbandonTests(unittest.TestCase):
         trial_list = trials.build_trials([spec(8), spec(32), spec(128), spec(128, dt=0.5), spec(8, algorithm="euler")])
         self.record_ok([t for t in trial_list if t["n"] == 8 and t["algorithm"] == "tsit5"][0])
         hung = [t for t in trial_list if t["n"] == 32][0]
+        self.record_ok(hung)
         self.progress_for(hung)
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         rows = self.data.rows()
+        # The hung trial's earlier rows give way to the hard exit; the n = 8 rows stand.
+        self.assertEqual(sorted(r["n"] for r in rows if not math.isnan(r["min_ms"])), [8, 8])
         self.assertEqual(sorted((r["n"], r["dt"], r["transfers"]) for r in rows if math.isnan(r["min_ms"])),
                          [(32, 2.0 ** -10, "both"), (32, 2.0 ** -10, "none"), (128, 2.0 ** -10, "both"),
                           (128, 2.0 ** -10, "none")])

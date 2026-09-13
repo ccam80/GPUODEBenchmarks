@@ -92,7 +92,7 @@ def remaining(data, key, trial_list, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -117,13 +117,13 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
     doomed = set()
     rows = []
     for trial in trial_list:
-        if trial["trial_id"] != current["trial_id"] and not (
-                trials_mod.family_key(trial) == trials_mod.family_key(current)
-                and trials_mod.harder(trial, current)):
+        hung = trial["trial_id"] == current["trial_id"]
+        if not hung and not (trials_mod.family_key(trial) == trials_mod.family_key(current)
+                             and trials_mod.harder(trial, current)):
             continue
         doomed.add(trial["trial_id"])
         for transfers, present in recorded(data, key, trial).items():
-            if present:
+            if present and not (hung and transfers in trial["transfers"]):
                 continue
             spec = {field: trial[field] for field in store.TRIAL_FIELDS}
             rows.append(dict(spec, transfers=transfers, key=key, states=states_of(trial),
