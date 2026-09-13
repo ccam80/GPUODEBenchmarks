@@ -85,10 +85,10 @@ def abandon_from_store(data, key, trial_list, suite_rev):
     return kept
 
 
-def remaining(data, key, trial_list, doomed=()):
-    """The trials outside `doomed` that list transfers and still lack a row for one of them, in file order."""
-    return [t for t in trial_list if t["transfers"] and t["trial_id"] not in doomed
-            and not all(recorded(data, key, t).values())]
+def remaining(trial_list, current, doomed=()):
+    """The trials from `current` on in file order, outside `doomed`, that list transfers: a runner takes its file in order, so every line before the hung one has run, whatever rows the store held before the run."""
+    index = next(i for i, t in enumerate(trial_list) if t["trial_id"] == current["trial_id"])
+    return [t for t in trial_list[index:] if t["transfers"] and t["trial_id"] not in doomed]
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
@@ -112,7 +112,7 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
                 current["optimize"] == "kernel" and trial["optimize"] == "kernel"
                 and trials_mod.kernel_key(trial) == kernel)
 
-        return [dict(t, optimize=None) if dropped(t) else t for t in remaining(data, key, trial_list)]
+        return [dict(t, optimize=None) if dropped(t) else t for t in remaining(trial_list, current)]
     reason = "abandoned: hard-exit at " + current["trial_id"]
     doomed = set()
     rows = []
@@ -130,4 +130,4 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
                              reason=reason, suite_rev=suite_rev))
     if rows:
         data.record_batch(rows)
-    return remaining(data, key, trial_list, doomed)
+    return remaining(trial_list, current, doomed)

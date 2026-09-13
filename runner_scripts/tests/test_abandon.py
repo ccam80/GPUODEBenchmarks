@@ -71,7 +71,11 @@ class AbandonTests(unittest.TestCase):
 
     def test_a_solve_hard_exit_abandons_the_harder_runs_and_keeps_the_rest(self):
         trial_list = trials.build_trials([spec(8), spec(32), spec(128), spec(128, dt=0.5), spec(8, algorithm="euler")])
-        self.record_ok([t for t in trial_list if t["n"] == 8 and t["algorithm"] == "tsit5"][0])
+        # File order: the two n = 8 lines ran before the hung n = 32 line; the n = 128, dt = 0.5 line after it
+        # already holds rows from an earlier run and runs again all the same.
+        for trial in trial_list:
+            if trial["n"] == 8 or trial["dt"] == 0.5:
+                self.record_ok(trial)
         hung = [t for t in trial_list if t["n"] == 32][0]
         self.progress_for(hung)
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
@@ -81,8 +85,9 @@ class AbandonTests(unittest.TestCase):
                           (128, 2.0 ** -10, "none")])
         self.assertEqual({r["reason"] for r in rows if math.isnan(r["min_ms"])},
                          {"abandoned: hard-exit at " + hung["trial_id"]})
-        self.assertEqual([(t["n"], t["dt"], t["algorithm"]) for t in remaining],
-                         [(8, 2.0 ** -10, "euler"), (128, 0.5, "tsit5")])
+        self.assertEqual(sorted((r["n"], r["dt"]) for r in rows if not math.isnan(r["min_ms"])),
+                         [(8, 2.0 ** -10)] * 4 + [(128, 0.5)] * 2)
+        self.assertEqual([(t["n"], t["dt"], t["algorithm"]) for t in remaining], [(128, 0.5, "tsit5")])
 
     def test_an_optimize_hard_exit_records_a_timeout_row_and_drops_the_optimize(self):
         trial_list = trials.build_trials([spec(8, {"per": "solve"}), spec(32, {"per": "solve"})])
@@ -98,7 +103,8 @@ class AbandonTests(unittest.TestCase):
         self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["per"],
                           recorded[0]["stepping"].split(";")[0], recorded[0]["settings"]),
                          ("timeout", "8", "solve", "dt=0.0009765625", ""))
-        # A per-kernel optimize that hangs is dropped from every line of its kernel; other kernels keep theirs.
+        # A per-kernel optimize that hangs is dropped from every later line of its kernel; the euler and
+        # dt = 0.5 lines before it in the file have run.
         table = {"per": "kernel"}
         trial_list = trials.build_trials([spec(8, table), spec(32, table), spec(8, table, dt=0.5),
                                           spec(8, table, algorithm="euler")])
@@ -106,8 +112,7 @@ class AbandonTests(unittest.TestCase):
         self.progress_for(hung, "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual([(t["n"], t["dt"], t["algorithm"], t["optimize"]) for t in remaining],
-                         [(8, 2.0 ** -10, "euler", "kernel"), (8, 0.5, "tsit5", "kernel"),
-                          (8, 2.0 ** -10, "tsit5", None), (32, 2.0 ** -10, "tsit5", None)])
+                         [(8, 2.0 ** -10, "tsit5", None), (32, 2.0 ** -10, "tsit5", None)])
 
     def test_the_stores_failures_abandon_the_harder_runs_before_they_spawn(self):
         trial_list = trials.build_trials([spec(8), spec(32), spec(128)])
