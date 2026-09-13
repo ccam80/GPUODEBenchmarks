@@ -148,20 +148,19 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(sorted(r["n"] for r in abandoned), [8, 8, 32, 32, 128, 128])
         self.assertEqual({r["reason"] for r in abandoned}, {"abandoned: hard-exit at " + first["trial_id"]})
 
-    def test_a_hard_exit_reruns_the_builds_trials_still_without_a_row(self):
-        skipped = self.solve("tsit5", "default", 8)
+    def test_a_hard_exit_reruns_the_lines_after_the_hung_one_only(self):
+        # The runner takes its file in order: a line it passed over before the hung one is not run again,
+        # whatever the store holds for it, and a build whose later lines are all abandoned needs no retry.
+        passed = self.solve("tsit5", "default", 8)
         hung = self.solve("tsit5", "default", 32)
-        status, calls = self.run_driver({skipped["trial_id"]: "skip", hung["trial_id"]: "hang"})
+        status, calls = self.run_driver({passed["trial_id"]: "skip", hung["trial_id"]: "hang"})
         self.assertEqual(status, 0)
         paths = sorted(c["path"] for c in calls)
-        self.assertEqual(len(paths), 5)
-        retry = [p for p in paths if ".retry1." in p]
-        self.assertEqual(len(retry), 1)
-        back = trials.read_jsonl(os.path.join(os.path.dirname(self.path), retry[0]))
-        self.assertEqual([t["n"] for t in back], [8])
+        self.assertEqual(len(paths), 4)
+        self.assertFalse([p for p in paths if ".retry" in p])
         rows = [r for r in self.rows() if r["algorithm"] == "tsit5" and r["controller"] == "default"]
         self.assertEqual(sorted((r["n"], r["min_ms"] == r["min_ms"]) for r in rows),
-                         [(8, True), (8, True), (32, False), (32, False), (128, False), (128, False)])
+                         [(32, False), (32, False), (128, False), (128, False)])
 
     def test_the_stores_timeouts_abandon_the_harder_runs_before_a_build_spawns(self):
         failed = self.solve("vern7", "fixed", 32)
