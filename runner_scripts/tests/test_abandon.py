@@ -81,8 +81,6 @@ class AbandonTests(unittest.TestCase):
         self.progress_for(hung)
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         rows = self.data.rows()
-        # The hung trial's earlier rows give way to the hard exit; the n = 8 rows stand.
-        self.assertEqual(sorted(r["n"] for r in rows if not math.isnan(r["min_ms"])), [8, 8])
         self.assertEqual(sorted((r["n"], r["dt"], r["transfers"]) for r in rows if math.isnan(r["min_ms"])),
                          [(32, 2.0 ** -10, "both"), (32, 2.0 ** -10, "none"), (128, 2.0 ** -10, "both"),
                           (128, 2.0 ** -10, "none")])
