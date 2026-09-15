@@ -357,7 +357,7 @@ def record_optimize_timeout(trial, key, root=None):
 
 def optimize_point(solver, trial, initial_values, parameters, key, root=None, force=False,
                    source="", verbose=True, auto_size=True):
-    """Run Solver.optimize for the trial's duration, apply the winner to the solver and record it under `source`; with `auto_size` cubie sizes the batch and duration it times, else it times the given grid at the trial's duration; `force` varies settings an earlier optimize applied."""
+    """Run Solver.optimize (cubie sizes the batch and duration under `auto_size`, else times the grid as given), apply the winner and record it under `source`; `force` varies settings an earlier optimize applied."""
     result = solver.optimize(initial_values, parameters, duration=float(trial["duration"]), verbose=verbose,
                              force=force, auto_size=auto_size)
     if result.best is None:

@@ -201,7 +201,7 @@ class CubieAdapter:
         build.solver.compile(initials, parameters, duration=build.duration)
 
     def optimize(self, build, trial):
-        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the line's grid, sized by cubie's own batch and duration selection (per kernel) or as given at the trial's duration (per solve), and record the winner; returns what was done."""
+        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the line's grid (cubie-sized per kernel, as given per solve) and record the winner; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None

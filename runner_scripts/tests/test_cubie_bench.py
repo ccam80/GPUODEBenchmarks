@@ -308,7 +308,7 @@ class BuildTests(AdapterCase):
     def test_optimize_records_the_winner_under_the_lines_kernel(self):
         line = trial(n=64, optimize="kernel")
         leg = self.adapter.build(trial(n=8))
-        # Cubie sizes the batch and duration itself from the line's own grid; the runner compiles and solves nothing.
+        # Cubie sizes the batch and duration from the line's own grid; the runner compiles and solves nothing.
         self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 71680 runs over 0.04")
         self.assertEqual(leg.solver.optimized, [(64, 1.0, True, True)])
         self.assertEqual(leg.solver.compiled, [])
