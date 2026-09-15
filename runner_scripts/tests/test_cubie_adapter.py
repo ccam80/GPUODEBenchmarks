@@ -22,9 +22,11 @@ class FakeLaunch:
 
 
 class FakeResult:
-    def __init__(self, best, settings):
+    def __init__(self, best, settings, runs=8, duration=1.0):
         self.best = best
         self.applied_settings = settings
+        self.runs = runs
+        self.duration = duration
 
 
 class BackendTests(unittest.TestCase):
@@ -159,15 +161,15 @@ class OptimizeStoreTests(unittest.TestCase):
                          "dt=;dt_min=;dt_max=;atol=1e-05;rtol=1e-05;newton_atol=1e-06;newton_rtol=1e-06")
 
     def test_a_kernel_record_serves_every_n_and_a_solve_record_its_own(self):
-        result = FakeResult(FakeLaunch(256, 3), {"state_location": "shared", "blocksize": 256})
-        adapter.record_optimized(line(n=8), "k", result, 71680)
+        result = FakeResult(FakeLaunch(256, 3), {"state_location": "shared", "blocksize": 256}, runs=71680)
+        adapter.record_optimized(line(n=8), "k", result)
         for n in (8, 32, 131072):
             tuned = adapter.load_optimized(line(n=n), "k")
             self.assertEqual(tuned["settings"], {"state_location": "shared", "blocksize": 256})
             self.assertEqual(tuned["resident_blocks"], 3)
         self.assertIsNone(adapter.load_optimized(line(n=8, optimize="solve"), "k"))
         adapter.record_optimized(line(n=8, optimize="solve"), "k",
-                                 FakeResult(FakeLaunch(64, None), {"blocksize": 64}), 8)
+                                 FakeResult(FakeLaunch(64, None), {"blocksize": 64}))
         self.assertEqual(adapter.load_optimized(line(n=8, optimize="solve"), "k")["settings"], {"blocksize": 64})
         self.assertIsNone(adapter.load_optimized(line(n=32, optimize="solve"), "k"))
         self.assertEqual(adapter.load_optimized(line(n=32), "k")["resident_blocks"], 3)
@@ -179,7 +181,7 @@ class OptimizeStoreTests(unittest.TestCase):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         base = line(algorithm="kvaerno3", controller="default", dt=NAN, atol=1e-3, rtol=1e-3,
                     newton_atol=1e-6, newton_rtol=1e-6)
-        adapter.record_optimized(base, "k", result, 8)
+        adapter.record_optimized(base, "k", result)
         self.assertIsNotNone(adapter.load_optimized(base, "k"))
         self.assertIsNotNone(adapter.load_optimized(dict(base, n=131072, duration=7.0), "k"))
         for other in (dict(atol=1e-4), dict(rtol=1e-4), dict(newton_atol=1e-7), dict(dt_min=1e-9),
@@ -192,8 +194,8 @@ class OptimizeStoreTests(unittest.TestCase):
         first = FakeResult(FakeLaunch(64, 2), {"blocksize": 64})
         second = FakeResult(FakeLaunch(128, None), {"blocksize": 128})
         resized = line(problem="lorenz96", system_params='{"states":8}')
-        adapter.record_optimized(resized, "k", first, 8)
-        adapter.record_optimized(resized, "k", second, 8)
+        adapter.record_optimized(resized, "k", first)
+        adapter.record_optimized(resized, "k", second)
         tuned = adapter.load_optimized(resized, "k")
         self.assertEqual(tuned["settings"]["blocksize"], 128)
         self.assertIsNone(tuned["resident_blocks"])
@@ -203,7 +205,7 @@ class OptimizeStoreTests(unittest.TestCase):
 
     def test_a_source_narrows_the_rows_served(self):
         result = FakeResult(FakeLaunch(64, 2), {"blocksize": 64})
-        adapter.record_optimized(line(), "k", result, 8, source="S")
+        adapter.record_optimized(line(), "k", result, source="S")
         self.assertEqual(adapter.load_optimized(line(), "k", source="S")["resident_blocks"], 2)
         self.assertIsNone(adapter.load_optimized(line(), "k", source="T"))
         self.assertEqual(adapter.load_optimized(line(), "k")["resident_blocks"], 2)
@@ -213,7 +215,7 @@ class OptimizeStoreTests(unittest.TestCase):
 
     def test_a_timeout_row_replaces_the_lines_record_with_no_settings(self):
         adapter.record_optimized(line(n=64, optimize="solve"), "k",
-                                 FakeResult(FakeLaunch(64, 2), {"blocksize": 64}), 64, source="S")
+                                 FakeResult(FakeLaunch(64, 2), {"blocksize": 64}, runs=64), source="S")
         row = adapter.record_optimize_timeout(line(n=64, optimize="solve"), "k")
         self.assertEqual((row["label"], row["n"], row["per"], row["settings"], row["source"]),
                          ("timeout", "64", "solve", "", ""))
@@ -227,7 +229,7 @@ class OptimizeStoreTests(unittest.TestCase):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         for algorithm, problem in (("tsit5", "lorenz"), ("euler", "lorenz"),
                                    ("tsit5", "pollu")):
-            adapter.record_optimized(line(algorithm=algorithm, problem=problem), "k", result, 8)
+            adapter.record_optimized(line(algorithm=algorithm, problem=problem), "k", result)
         self.assertEqual(adapter.clear_optimized("cubie", "k", "tsit5",
                                                  "lorenz"), 1)
         self.assertEqual(adapter.clear_optimized("cubie", "k", "all",
@@ -240,7 +242,7 @@ class OptimizeStoreTests(unittest.TestCase):
         result = FakeResult(FakeLaunch(64, 1), {
             "unroll_other_small": UnrollChoice.ROLLED,
             "state_location": "local", "blocksize": 64})
-        adapter.record_optimized(line(), "k", result, 8)
+        adapter.record_optimized(line(), "k", result)
         tuned = adapter.load_optimized(line(), "k")
         self.assertIs(tuned["settings"]["unroll_other_small"],
                       UnrollChoice.ROLLED)
@@ -258,98 +260,33 @@ class OptimizeStoreTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             adapter.source_hashes("cubie", [("nosuchproblem", "{}", "float32")])
 
-    def test_optimize_point_records_the_batch_size(self):
+    def test_optimize_point_records_the_runs_and_duration_cubie_timed(self):
         import numpy as np
 
         class Solver:
-            def optimize(self, initial_values, parameters, duration,
-                         verbose, force=False):
-                self.seen = (initial_values.shape, duration, force)
-                return FakeResult(FakeLaunch(64, None, 2.5),
-                                  {"blocksize": 64})
+            """auto_size times 71680 runs over 1/25 of the duration; given sizing times the grid at the duration."""
+
+            def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=True):
+                self.seen = (initial_values.shape, duration, force, auto_size)
+                runs = 71680 if auto_size else initial_values.shape[1]
+                timed = duration / 25.0 if auto_size else duration
+                return FakeResult(FakeLaunch(64, None, 2.5), {"blocksize": 64}, runs=runs, duration=timed)
 
         solver = Solver()
         row = adapter.optimize_point(solver, line(n=8, optimize="solve", duration=7.0),
-                                     np.zeros((3, 512)), np.zeros((1, 512)), "k")
-        self.assertEqual(solver.seen, ((3, 512), 7.0, False))
+                                     np.zeros((3, 512)), np.zeros((1, 512)), "k", auto_size=False)
+        self.assertEqual(solver.seen, ((3, 512), 7.0, False, False))
         self.assertEqual((row["n"], row["per"], row["duration"]), ("512", "solve", "7"))
         self.assertEqual(float(row["best_ms"]), 2.5)
-        forced = adapter.optimize_point(solver, line(n=8), np.zeros((3, 512)), np.zeros((1, 512)), "k",
-                                        root=os.path.join(self.tmp, "elsewhere"), force=True, source="S",
-                                        duration=0.25)
-        self.assertEqual(solver.seen, ((3, 512), 0.25, True))
-        self.assertEqual((forced["n"], forced["per"], forced["source"], forced["duration"]),
-                         ("512", "kernel", "S", "0.25"))
+        sized = adapter.optimize_point(solver, line(n=8, duration=1.0), np.zeros((3, 512)), np.zeros((1, 512)), "k",
+                                       root=os.path.join(self.tmp, "elsewhere"), force=True, source="S")
+        self.assertEqual(solver.seen, ((3, 512), 1.0, True, True))
+        self.assertEqual((sized["n"], sized["per"], sized["source"], sized["duration"]),
+                         ("71680", "kernel", "S", "0.04"))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "elsewhere", "key=k", "package=cubie",
                                                     "optimize.csv")))
-
-    def test_optimize_batch_fills_the_waves_of_the_compiled_kernel(self):
-        class Kernel:
-            kernel = "dispatcher"
-            compile_settings = type("S", (), {"blocksize": 32})()
-            single_integrator = type("I", (), {"threads_per_step": 1})()
-
-            def launch_geometry(self, blocksize):
-                return int(blocksize), 16512
-
-        class Solver:
-            kernel = Kernel()
-
-            def __init__(self):
-                self.compiled = []
-
-            def compile(self, initial_values, parameters, duration):
-                self.compiled.append((initial_values, duration))
-
-        seen = []
-        for name, fake in (("_occupancy", lambda kernel, blocksize, dynamic: seen.append((blocksize, dynamic)) or 5),
-                           ("_multiprocessors", lambda: 56)):
-            self.addCleanup(setattr, adapter, name, getattr(adapter, name))
-            setattr(adapter, name, fake)
-        solver = Solver()
-        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=5), 5 * 56 * 5 * 32)
-        self.assertEqual(solver.compiled, [("i", 1.0)])
-        self.assertEqual(seen, [(32, 16512)])
-        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=2), 2 * 56 * 5 * 32)
-        # Two threads per run halve the runs a block holds.
-        Kernel.single_integrator = type("I", (), {"threads_per_step": 2})()
-        self.assertEqual(adapter.optimize_batch(solver, "i", "p", 1.0, waves=5), 5 * 56 * 5 * 16)
-
-    def test_optimize_duration_ramps_probes_to_the_target(self):
-        class ProbeSolver:
-            """A device solve of a probe takes ms_per_unit milliseconds per unit of duration."""
-
-            device_initial_values = "resident inits"
-            device_parameters = "resident params"
-
-            def __init__(self, ms_per_unit):
-                self.ms_per_unit = ms_per_unit
-                self.solves = []
-
-            def solve(self, initial_values, parameters, duration, on_device=False):
-                self.solves.append((duration, on_device))
-                ticks.append(ticks[-1] + (duration * self.ms_per_unit / 1000.0 if on_device else 0.0))
-                return type("R", (), {"stream": type("S", (), {"synchronize": staticmethod(lambda: None)})()})()
-
-        ticks = [0.0]
-        self.addCleanup(setattr, adapter.timeit, "default_timer", adapter.timeit.default_timer)
-        adapter.timeit.default_timer = lambda: ticks[-1]
-        # 1/100 of the duration takes 5 ms, 1/10 takes 50 ms: the 1/10 probe scales to 20 ms.
-        solver = ProbeSolver(500.0)
-        self.assertAlmostEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.1 * 20.0 / 50.0)
-        self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True), (0.1, True)])
-        # 1/100 already takes 40 ms: it alone is timed and the duration stays at the 1/100 floor.
-        solver = ProbeSolver(4000.0)
-        self.assertEqual(adapter.optimize_duration(solver, "i", "p", 1.0, target_ms=20.0), 0.01)
-        self.assertEqual(solver.solves, [(0.01, False), (0.01, True), (0.01, True)])
-        self.assertEqual(adapter.optimize_duration(ProbeSolver(4000.0), "i", "p", 3.0, target_ms=20.0), 0.03)
-        # A fast kernel scales past the duration and is clamped to it.
-        solver = ProbeSolver(1.0)
-        self.assertEqual(adapter.optimize_duration(solver, "i", "p", 2.0, target_ms=20.0), 2.0)
-        self.assertEqual(solver.solves, [(0.02, False), (0.02, True), (0.02, True), (0.2, True)])
-        # A zero-time probe yields the duration.
-        self.assertEqual(adapter.optimize_duration(ProbeSolver(0.0), "i", "p", 3.0, target_ms=20.0), 3.0)
-
+        for gone in ("optimize_batch", "optimize_duration", "PROBE_FRACTIONS"):
+            self.assertFalse(hasattr(adapter, gone), gone)
 
 if __name__ == "__main__":
     unittest.main()
