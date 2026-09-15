@@ -22,8 +22,6 @@ from cubie_systems import final_states, output_types, variable_order  # noqa: E4
 from problems import as_problem  # noqa: E402
 
 PRECISIONS = {"float32": np.float32, "float64": np.float64}
-# Runs in the grid a per-kernel optimize compiles on: at least one full block at any block size.
-GEOMETRY_RUNS = 1024
 # The controller names a trial may carry: cubie's own step controllers plus the two shared tokens.
 CONTROLLERS = ("fixed", "default", "i", "pi", "pid", "gustafsson")
 # The trial fields that reach the Solver only when finite.
@@ -203,24 +201,19 @@ class CubieAdapter:
         build.solver.compile(initials, parameters, duration=build.duration)
 
     def optimize(self, build, trial):
-        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the waves batch (per kernel) or the line's n (per solve) at the duration optimize_duration sizes and record the winner; returns what was done."""
+        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the line's grid, sized by cubie's own batch and duration selection (per kernel) or as given at the trial's duration (per solve), and record the winner; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
         source = adapter.source_hash(build.solver)
         tuned = adapter.load_optimized(trial, self.key, root=self.root, source=source)
+        initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile(*build.grid(grid_mod.grid(trial)), duration=build.duration)
+            build.solver.compile(initials, parameters, duration=build.duration)
             return "recorded"
-        batch = int(trial["n"])
-        if trial["optimize"] == "kernel":
-            geometry = build.grid(grid_mod.grid(dict(trial, n=max(batch, GEOMETRY_RUNS))))
-            batch = adapter.optimize_batch(build.solver, *geometry, build.duration)
-        initials, parameters = build.grid(grid_mod.grid(dict(trial, n=batch)))
-        duration = adapter.optimize_duration(build.solver, initials, parameters, build.duration)
-        row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key,
-                                     root=self.root, force=True, source=source, duration=duration)
+        row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
+                                     force=True, source=source, auto_size=trial["optimize"] == "kernel")
         return "{0} on {1} runs over {2}".format(row["label"], row["n"], row["duration"])
 
     def solve(self, build, trial, values, transfers):

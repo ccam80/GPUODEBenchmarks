@@ -86,22 +86,18 @@ class FakeLaunch:
 
 
 class FakeOptimizeResult:
-    def __init__(self):
+    """The winner over the runs and duration the optimize timed."""
+
+    def __init__(self, runs, duration):
         self.best = FakeLaunch()
         self.applied_settings = {"blocksize": 128, "state_location": "shared"}
+        self.runs = runs
+        self.duration = duration
 
 
-class FakeKernel:
-    """A block size of 64, one thread per run and 1024 dynamic shared bytes at any launch."""
-
-    kernel = "dispatcher"
-
-    def __init__(self):
-        self.compile_settings = type("Settings", (), {"blocksize": 64})()
-        self.single_integrator = type("Integrator", (), {"threads_per_step": 1})()
-
-    def launch_geometry(self, blocksize):
-        return int(blocksize), 1024
+# The batch and duration cubie's auto_size settles on: five waves of the kernel, timed over 1/25 of the duration.
+SIZED_RUNS = 71680
+SIZED_FRACTION = 0.04
 
 
 class FakeSolver:
@@ -119,7 +115,6 @@ class FakeSolver:
         self.resident = None
         self.closed = False
         self.codes = None
-        self.kernel = FakeKernel()
         FakeSolver.made.append(self)
 
     def update(self, updates):
@@ -135,9 +130,11 @@ class FakeSolver:
     def compile(self, initial_values, parameters, duration):
         self.compiled.append((initial_values.shape[1], duration))
 
-    def optimize(self, initial_values, parameters, duration, verbose, force=False):
-        self.optimized.append((initial_values.shape[1], duration, force))
-        return FakeOptimizeResult()
+    def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=True):
+        self.optimized.append((initial_values.shape[1], duration, force, auto_size))
+        if auto_size:
+            return FakeOptimizeResult(SIZED_RUNS, duration * SIZED_FRACTION)
+        return FakeOptimizeResult(initial_values.shape[1], duration)
 
     def solve(self, initial_values, parameters, duration, on_device=False):
         n = initial_values.shape[1]
@@ -172,10 +169,6 @@ class AdapterCase(unittest.TestCase):
         self.built = []
         FakeSolver.made = []
         self.adapter = cubie_bench.CubieAdapter("cubie", KEY, self.root, solver_class=FakeSolver)
-        # Four resident blocks per SM on 56 SMs: a per-kernel batch of 5 waves x 56 x 4 x 64 runs.
-        for name, fake in (("_occupancy", lambda kernel, blocksize, dynamic: 4), ("_multiprocessors", lambda: 56)):
-            self.addCleanup(setattr, cubie_adapter, name, getattr(cubie_adapter, name))
-            setattr(cubie_adapter, name, fake)
 
     def fake_build_system(self, problem, package, precision=None, states=None):
         self.built.append((problem.name, problem["states"], package, precision, states))
@@ -315,12 +308,12 @@ class BuildTests(AdapterCase):
     def test_optimize_records_the_winner_under_the_lines_kernel(self):
         line = trial(n=64, optimize="kernel")
         leg = self.adapter.build(trial(n=8))
-        # Instant probe solves size the optimize at the problem's whole duration.
-        self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 71680 runs over 1")
-        self.assertEqual(leg.solver.optimized, [(71680, 1.0, True)])
-        # The geometry grid holds a full block; the probes solve on the batch, the first from the host.
-        self.assertEqual(leg.solver.compiled, [(1024, 1.0)])
-        self.assertEqual(leg.solver.calls, [(71680, False), (71680, True), (71680, True), (71680, True)])
+        # Cubie sizes the batch and duration itself from the line's own grid; the runner compiles and solves nothing.
+        self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 71680 runs over 0.04")
+        self.assertEqual(leg.solver.optimized, [(64, 1.0, True, True)])
+        self.assertEqual(leg.solver.compiled, [])
+        self.assertEqual(leg.solver.calls, [])
+        self.assertEqual(leg.grid_n, 64)
         tuned = cubie_adapter.load_optimized(line, KEY, root=self.root)
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
@@ -347,9 +340,12 @@ class BuildTests(AdapterCase):
 
     def test_a_per_solve_line_optimizes_on_its_own_n(self):
         leg = self.adapter.build(trial(n=8))
-        self.adapter.optimize(leg, trial(n=8, optimize="solve"))
+        # A per-solve line is timed as given: its own n at the problem's duration.
+        self.assertEqual(self.adapter.optimize(leg, trial(n=8, optimize="solve")),
+                         "state=shared @bs128 x2 on 8 runs over 1")
         self.adapter.optimize(leg, trial(n=32, optimize="solve"))
-        self.assertEqual(leg.solver.optimized, [(8, 1.0, True), (32, 1.0, True)])
+        self.assertEqual(leg.solver.optimized, [(8, 1.0, True, False), (32, 1.0, True, False)])
+        self.assertEqual(leg.solver.calls, [])
         self.assertEqual(self.adapter.optimize(leg, trial(n=32, optimize="solve")), "recorded")
         self.assertIsNone(cubie_adapter.load_optimized(trial(n=128, optimize="solve"), KEY, root=self.root))
         self.assertIsNone(cubie_adapter.load_optimized(trial(n=8, optimize="kernel"), KEY, root=self.root))
