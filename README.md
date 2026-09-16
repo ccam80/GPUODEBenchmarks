@@ -56,23 +56,22 @@ problem, precision, algorithm, controller and gains; larger n or states,
 smaller step or tolerance) on the same transfers. `--resume` runs what the
 store lacks of each trial: a transfers row, the cold build time, a readable
 finals file, an optimize record from the current cubie source;
-`--no-overwrite` also reruns NaN rows and timed-out optimizes. A run
-locks the GPU clocks to the card's row in `runner_scripts/gpu_clocks.conf`
-or `--lock-clocks SM[,MEM]`, needs an elevated shell for that, and refuses
-to start otherwise unless `--no-lock-clocks`;
-`runner_scripts/calibrate/calibrate_clocks.py` writes a card's row. Clocks
-are sampled at 25 Hz into `data/clocks/<key>_<stamp>.csv`, pushed with the
-key; `logs/<key>_<stamp>/` holds one log per package, `run_manifest.txt` and
-`summary.tsv`. Each row records `run`, `driver`, `clock_lock_mhz` (0
-unlocked) and, after its package, `clock_sm_mhz`, `clock_sm_min_mhz` (busy
-samples of its window) and `clock_throttled`; a locked row off the lock by
-more than `--clock-tolerance` or throttled fails the run.
-`python runner_scripts/store.py annotate <run> <clocks.csv>` refills those
-columns from a log. A run deletes the clock logs and log dirs of runs a day
-or older that no row names (`store.py prune-runs` by hand); `sync.py prune`
-deletes them from the box. The `run_*.sh` and `.bat` wrappers forward to
-`bench.py`. Julia runs through `julia +1.13`; set `JULIA` to use another
-launcher.
+`--no-overwrite` also reruns NaN rows and timed-out optimizes. The
+`run_*.sh` and `.bat` wrappers forward to `bench.py`. Julia runs through
+`julia +1.13`; set `JULIA` to use another launcher.
+
+Clocks: a run locks the GPU to the card's row in
+`runner_scripts/gpu_clocks.conf` or `--lock-clocks SM[,MEM]` from an
+elevated shell, or refuses to start unless `--no-lock-clocks`;
+`runner_scripts/calibrate/calibrate_clocks.py` writes the row. A 25 Hz
+sample log lands in `data/clocks/<key>_<stamp>.csv` and each row carries
+`run`, `driver`, `clock_lock_mhz` (0 unlocked), `clock_sm_mhz`,
+`clock_sm_min_mhz` and `clock_throttled` over its own window of that log;
+a locked row throttled or more than `--clock-tolerance` under the lock fails
+the run. `store.py annotate <run> <clocks.csv>` refills the columns from a
+log; `store.py prune-runs` (run before each run) deletes logs and
+`logs/<run>/` dirs a day old that no row names, and `sync.py prune` drops
+them from the box.
 
 | set | packages | what it times |
 |---|---|---|
