@@ -1,4 +1,4 @@
-"""julia_driver.py against a fake julia: one process per build with the floor flag, the hard-exit abandonment and retry, the store-driven abandonment, a crashed build, and the builds run one at a time in file order."""
+"""julia_driver.py against a fake julia: one process per build with the floor flag, a hard exit handed to bench.py through the progress file, a crashed build, and the builds run one at a time in file order."""
 
 import json
 import os
@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "gpu"))
 sys.path.insert(0, ROOT)
 
+import abandon  # noqa: E402
 import bench  # noqa: E402
 import julia_driver  # noqa: E402
 import store  # noqa: E402
@@ -77,16 +78,14 @@ class DriverTests(unittest.TestCase):
         self.trials = plan_julia()
         self.path = os.path.join(self.tmp, "run", "julia_gpu.jsonl")
         trials.write_jsonl(self.path, self.trials)
-        for patch in (mock.patch.object(julia_driver, "DATA_ROOT", self.root),
-                      mock.patch.object(julia_driver, "dataset_key", lambda: KEY),
-                      mock.patch.object(julia_driver, "julia_command", lambda: [sys.executable, self.fake])):
-            patch.start()
-            self.addCleanup(patch.stop)
+        patch = mock.patch.object(julia_driver, "julia_command", lambda: [sys.executable, self.fake])
+        patch.start()
+        self.addCleanup(patch.stop)
 
-    def run_driver(self, actions=None, *argv):
+    def run_driver(self, actions=None, *argv, path=None):
         with open(os.path.join(os.path.dirname(self.path), "plan.json"), "w") as handle:
             json.dump({"root": self.root, "key": KEY, "actions": actions or {}}, handle)
-        status = julia_driver.main(["--trials", self.path] + list(argv))
+        status = julia_driver.main(["--trials", path or self.path] + list(argv))
         calls = []
         for name in sorted(os.listdir(os.path.dirname(self.path))):
             if name.startswith("call.") and name.endswith(".json"):
@@ -100,6 +99,14 @@ class DriverTests(unittest.TestCase):
 
     def rows(self):
         return store.Store(self.root).rows()
+
+    def relaunch(self, actions=None):
+        """What bench.py does after a hard exit: abandon from the progress file and run the driver on the rest."""
+        remaining = abandon.abandon_after_hard_exit(store.Store(self.root), KEY, self.trials,
+                                                    self.path + ".progress", "rev")
+        retry = os.path.join(os.path.dirname(self.path), "julia_gpu.retry1.jsonl")
+        trials.write_jsonl(retry, remaining)
+        return self.run_driver(actions, path=retry)
 
     def test_one_process_per_build_with_the_floor_flag(self):
         status, calls = self.run_driver(None, "--floor")
@@ -122,11 +129,19 @@ class DriverTests(unittest.TestCase):
         self.assertEqual({r["package"] for r in rows}, {"julia_gpu"})
         self.assertEqual({r["key"] for r in rows}, {KEY})
 
-    def test_a_hard_exit_abandons_the_harder_runs_only(self):
+    def test_a_hard_exit_ends_the_driver_with_the_hung_builds_progress_file(self):
         hung = self.solve("tsit5", "fixed", 32)
         status, calls = self.run_driver({hung["trial_id"]: "hang"})
+        self.assertEqual(status, 3)
+        self.assertEqual([c["path"] for c in calls], ["julia_gpu.build001.jsonl", "julia_gpu.build002.jsonl"])
+        with open(self.path + ".progress") as handle:
+            self.assertEqual(json.load(handle)["trial_id"], hung["trial_id"])
+        self.assertEqual([r for r in self.rows() if r["min_ms"] != r["min_ms"]], [])
+        status, calls = self.relaunch()
         self.assertEqual(status, 0)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(sorted(c["path"] for c in calls),
+                         ["julia_gpu.build001.jsonl", "julia_gpu.build002.jsonl",
+                          "julia_gpu.retry1.build001.jsonl", "julia_gpu.retry1.build002.jsonl"])
         abandoned = [r for r in self.rows() if r["min_ms"] != r["min_ms"]]
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
@@ -142,6 +157,8 @@ class DriverTests(unittest.TestCase):
     def test_a_hard_exit_on_the_first_line_abandons_every_run_of_the_build(self):
         first = self.solve("vern7", "default", 8)
         status, calls = self.run_driver({first["trial_id"]: "hang"})
+        self.assertEqual(status, 3)
+        status, calls = self.relaunch()
         self.assertEqual(status, 0)
         abandoned = [r for r in self.rows() if r["min_ms"] != r["min_ms"]]
         self.assertEqual({(r["algorithm"], r["controller"]) for r in abandoned}, {("vern7", "default")})
@@ -149,36 +166,18 @@ class DriverTests(unittest.TestCase):
         self.assertEqual({r["reason"] for r in abandoned}, {"abandoned: hard-exit at " + first["trial_id"]})
 
     def test_a_hard_exit_reruns_the_lines_after_the_hung_one_only(self):
-        # The runner takes its file in order: a line it passed over before the hung one is not run again,
-        # whatever the store holds for it, and a build whose later lines are all abandoned needs no retry.
+        # A line the runner passed over before the hung one is not run again, whatever the store holds for it.
         passed = self.solve("tsit5", "default", 8)
         hung = self.solve("tsit5", "default", 32)
         status, calls = self.run_driver({passed["trial_id"]: "skip", hung["trial_id"]: "hang"})
+        self.assertEqual(status, 3)
+        status, calls = self.relaunch()
         self.assertEqual(status, 0)
-        paths = sorted(c["path"] for c in calls)
-        self.assertEqual(len(paths), 4)
-        self.assertFalse([p for p in paths if ".retry" in p])
+        self.assertEqual(sorted(c["path"] for c in calls), ["julia_gpu.build001.jsonl"] +
+                         ["julia_gpu.retry1.build{0:03d}.jsonl".format(i) for i in range(1, 4)])
         rows = [r for r in self.rows() if r["algorithm"] == "tsit5" and r["controller"] == "default"]
         self.assertEqual(sorted((r["n"], r["min_ms"] == r["min_ms"]) for r in rows),
                          [(32, False), (32, False), (128, False), (128, False)])
-
-    def test_the_stores_timeouts_abandon_the_harder_runs_before_a_build_spawns(self):
-        failed = self.solve("vern7", "fixed", 32)
-        spec = {f: failed[f] for f in store.TRIAL_FIELDS}
-        store.Store(self.root).record(dict(spec, transfers="none", key=KEY, states=3, min_ms=NAN,
-                                           reason="timeout: 130.0s over the 120s cap"))
-        status, calls = self.run_driver()
-        self.assertEqual(status, 0)
-        rows = [r for r in self.rows() if r["algorithm"] == "vern7" and r["controller"] == "fixed"]
-        self.assertEqual(sorted((r["n"], r["transfers"], r["min_ms"] == r["min_ms"]) for r in rows),
-                         [(8, "both", True), (8, "none", True), (32, "both", True), (32, "none", True),
-                          (128, "both", True), (128, "none", False)])
-        self.assertEqual([r["reason"] for r in rows if r["n"] == 128 and r["transfers"] == "none"],
-                         ["abandoned: timeout at " + failed["trial_id"]])
-        vern7 = [c for c in calls if any(t["algorithm"] == "vern7" and t["controller"] == "fixed"
-                                         for t in trials.read_jsonl(c["argv"][c["argv"].index("--trials") + 1]))]
-        self.assertEqual([t["transfers"] for t in trials.read_jsonl(vern7[0]["argv"][vern7[0]["argv"].index("--trials") + 1])],
-                         [["both", "none"], ["both", "none"], ["both"]])
 
     def test_a_crashed_build_fails_the_run_and_the_other_builds_still_run(self):
         crashed = self.solve("vern7", "fixed", 8)
@@ -216,8 +215,8 @@ class SerialTests(unittest.TestCase):
                        for name, rows, build_path in julia_driver.build_files(path, plan_julia())]
 
     def test_the_builds_run_one_at_a_time_in_file_order(self):
-        data = store.Store(os.path.join(self.tmp, "data"))
-        julia_driver.run_builds(self.builds, False, data, KEY, "rev")
+        code = julia_driver.run_builds(self.builds, False, os.path.join(self.tmp, "julia_gpu.jsonl.progress"))
+        self.assertEqual(code, 0)
         self.assertEqual(self.started, [build.path for build in self.builds])
         self.assertTrue(all(not build.failed for build in self.builds))
 

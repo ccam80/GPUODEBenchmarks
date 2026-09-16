@@ -1,4 +1,4 @@
-"""The abandon rule shared by the runners and the drivers: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
+"""The abandon rule shared by the runners and bench.py: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
 
 import json
 
@@ -47,42 +47,6 @@ class History:
 
     def reason(self, trial, transfers):
         return abandon_reason(trial, self.failures.get(transfers, []))
-
-
-def failed_runs(data, key, package):
-    """[(row as a trial, outcome)] of the package's rows under a key whose reason names a timeout or oom."""
-    out = []
-    for row in data.rows(key=key, package=package):
-        outcome = row["reason"].split(":")[0] if row["reason"] else ""
-        if outcome in ("timeout", "oom"):
-            out.append((dict(row, transfers=[row["transfers"]]), outcome, row["transfers"]))
-    return out
-
-
-def abandon_from_store(data, key, trial_list, suite_rev):
-    """Record as abandoned every transfers of the trials the store's timeouts and OOMs of their family give up, and return the trials with what is left to run."""
-    if not trial_list:
-        return []
-    by_transfers = {}
-    for failed, outcome, transfers in failed_runs(data, key, trial_list[0]["package"]):
-        by_transfers.setdefault(transfers, []).append((failed, outcome))
-    kept = []
-    rows = []
-    for trial in trial_list:
-        live = []
-        for transfers in trial["transfers"]:
-            reason = abandon_reason(trial, by_transfers.get(transfers, []))
-            if reason is None:
-                live.append(transfers)
-                continue
-            spec = {field: trial[field] for field in store.TRIAL_FIELDS}
-            rows.append(dict(spec, transfers=transfers, key=key, states=states_of(trial), reason=reason,
-                             suite_rev=suite_rev))
-        if live or not trial["transfers"]:
-            kept.append(dict(trial, transfers=live))
-    if rows:
-        data.record_batch(rows)
-    return kept
 
 
 def remaining(trial_list, current, doomed=()):

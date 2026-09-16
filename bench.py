@@ -289,7 +289,6 @@ class Run:
     def run_package(self, package, trial_list, path):
         """Drive one runner over its trial file, re-invoking after every watchdog hard exit."""
         logfile = package + ".log"
-        rounds = 0
         hard_exits = 0
         while True:
             command = launch.runner_command(package, path, floor=self.args.floor)
@@ -310,12 +309,8 @@ class Run:
             if not remaining:
                 self.record(package, "PARTIAL", "{0} hard exit(s)".format(hard_exits), status)
                 return
-            rounds += 1
-            if rounds > len(trial_list):
-                self.record(package, "FAILED", "hard exits did not converge", status)
-                return
             trial_list = remaining
-            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, rounds))
+            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, hard_exits))
             trials_mod.write_jsonl(path, trial_list)
 
     # -------------------------------------------------------------- lifecycle
