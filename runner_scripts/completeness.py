@@ -10,7 +10,7 @@ MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `stale` (transfers whose row was recorded before the kernel's optimize record, so timed under the settings the record replaced), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent or stale)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `stale` (transfers whose row predates the kernel's optimize record), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent or stale)."""
 
     def __init__(self, trial, wants_finals):
         self.trial = trial
@@ -69,7 +69,7 @@ def optimize_status(record, mode, source):
 
 
 def predates(row, record):
-    """True when a store row was recorded before its kernel's optimize record: the runner records a kernel's optimize before any row of its lines, so an older row was timed under the settings the record replaced (a per-solve record of an earlier suite, a re-optimize after a source change or a timeout). A record without a stamp dates nothing."""
+    """True when a store row predates its kernel's optimize record, so it was timed under settings the record replaced; a record without a stamp dates nothing."""
     stamp = record.get("recorded_utc", "")
     return bool(stamp) and row["recorded_utc"] < store_mod._utc(stamp)
 

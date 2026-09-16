@@ -55,9 +55,8 @@ problem, precision, algorithm, controller and gains; larger n or states,
 smaller step or tolerance) on the same transfers. `--resume` runs what the
 store lacks of each trial: a transfers row, the cold build time, a readable
 finals file, an optimize record from the current cubie source, a row
-recorded after that record (an older row was timed under the settings the
-record replaced); `--no-overwrite` also reruns NaN rows and timed-out
-optimizes. A run
+recorded after that record; `--no-overwrite` also reruns NaN rows and
+timed-out optimizes. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a

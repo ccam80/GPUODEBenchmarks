@@ -228,7 +228,7 @@ class CompletenessTests(unittest.TestCase):
         return "2026-09-{0:02d}T00:00:00Z".format(d)
 
     def optimized(self, trial, runs=71680, source="S", timeout=False, on=1):
-        """A kernel record stamped on day `on`; the rows the tests record after it carry a later day."""
+        """A kernel record stamped on day `on`."""
         with mock.patch.object(cubie_adapter, "_stamp", return_value=self.day(on)):
             if timeout:
                 return cubie_adapter.record_optimize_timeout(trial, KEY, self.root)
@@ -363,8 +363,7 @@ class CompletenessTests(unittest.TestCase):
                          {"optimize:absent": 1})
 
     def test_rows_recorded_before_the_kernels_record_run_again(self):
-        # Rows an earlier suite timed under per-solve records: the n = 8 line re-optimized alone would otherwise
-        # make the n = 32 rows, timed at another block size, complete under the shared record.
+        # Legacy per-solve records with their rows; the n = 8 line alone re-optimizes.
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
                          "-n", "8,32")["cubie"]
         kernel = cubie_adapter.kernel_ident(perf[0], KEY)
@@ -383,7 +382,7 @@ class CompletenessTests(unittest.TestCase):
                 self.record(trial, transfers, recorded_utc=self.day(2))
         # No kernel record: both lines run again.
         self.assertEqual(sorted(self.kept(perf, resume=True)), sorted(t["trial_id"] for t in perf))
-        # The n = 8 line alone re-optimizes and re-times: its rows stand, the n = 32 rows predate the record.
+        # The n = 8 rows stand; the n = 32 rows predate the record.
         self.optimized(perf[0], on=3)
         for transfers in ("both", "none"):
             self.record(perf[0], transfers, recorded_utc=self.day(4))
@@ -401,8 +400,7 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(self.kept(perf, resume=True)[perf[1]["trial_id"]]["transfers"], ["none"])
         self.record(perf[1], "none", recorded_utc=self.day(4))
         self.assertEqual(self.kept(perf, resume=True), {})
-        # A later record (a hung optimize, a re-optimize after a source change) dates every row of the kernel again;
-        # a row recorded in the record's own second stands.
+        # A later record dates every row of the kernel again; a row in the record's own second stands.
         self.optimized(perf[1], on=5, timeout=True)
         self.assertEqual(sorted(self.kept(perf, resume=True)), sorted(t["trial_id"] for t in perf))
         for trial in perf:
