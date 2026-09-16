@@ -42,13 +42,12 @@ python bench.py run  --set perf --floor         # rerun; the lower time per row 
 expanded specs; `-n` names counts of the grids' trajectory lists and exits
 for a count no grid of the named sets lists. A trial is one line per point;
 a point several set files declare runs under one contract whichever sets
-are named: it builds cold, keeps finals, optimizes per solve over per
-kernel and times each transfers mode when any declaration asks; a package
-every declaration lists under `[set.untimed]` runs each line once with no
-warm-up. A cubie
-optimize runs once per compiled kernel (build plus stepping), timing the
-batch and duration cubie's own `optimize` sizes, or once per line on its
-own n at the problem's duration, as the set's `[set.optimize] per` says.
+are named: it builds cold, keeps finals, optimizes and times each
+transfers mode when any declaration asks; a package every declaration
+lists under `[set.untimed]` runs each line once with no warm-up. A cubie
+optimize runs once per compiled kernel (build plus stepping) for the
+packages a set's `[set.optimize]` names, timing the batch and duration
+cubie's own `optimize` sizes.
 Lines run
 easiest first (states, then n, then step and tolerance loose to tight); a
 timeout or out-of-memory run abandons every harder run of its family (same

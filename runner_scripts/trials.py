@@ -15,8 +15,6 @@ BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controlle
 KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
-# A line's optimize policy: once per compiled kernel, or once per line on its own n.
-OPTIMIZE_PER = ("kernel", "solve")
 
 
 def build_key(trial):
@@ -68,23 +66,17 @@ def _budget(spec):
     return float(spec.get("watchdog_s", WATCHDOG_SECONDS))
 
 
-def canonical_optimize(tables):
-    """The optimize policy over every declaration's table: solve over kernel; None without a table."""
-    policies = {t["per"] for t in tables if t is not None}
-    return "solve" if "solve" in policies else "kernel" if policies else None
-
-
 def _entry(spec):
-    return {"spec": spec, "transfers": set(), "finals": False, "cold": False, "tables": [],
+    return {"spec": spec, "transfers": set(), "finals": False, "cold": False, "optimize": False,
             "watchdog_s": 0.0, "timed": False, "sets": set()}
 
 
 def _fold(entry, spec):
-    """Fold one declaration of a point into its entry: transfers union, finals, cold and timed true over false, every optimize table, the larger watchdog budget, the set's name."""
+    """Fold one declaration of a point into its entry: transfers union, finals, cold, optimize and timed true over false, the larger watchdog budget, the set's name."""
     entry["transfers"] |= set(spec["transfers"])
     entry["finals"] = entry["finals"] or bool(spec["finals"])
     entry["cold"] = entry["cold"] or spec["build"] == "cold"
-    entry["tables"].append(spec["optimize"])
+    entry["optimize"] = entry["optimize"] or bool(spec["optimize"])
     entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
     entry["timed"] = entry["timed"] or bool(spec.get("timed", True))
     if spec.get("set"):
@@ -98,7 +90,7 @@ def _record(entry):
     record["transfers"] = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
     record["finals"] = bool(entry["finals"])
     record["cold"] = bool(entry["cold"])
-    record["optimize"] = canonical_optimize(entry["tables"])
+    record["optimize"] = bool(entry["optimize"])
     record["watchdog_s"] = float(entry["watchdog_s"])
     record["timed"] = bool(entry["timed"])
     record["sets"] = sorted(entry["sets"])
@@ -179,7 +171,7 @@ def read_jsonl(path):
                 record["watchdog_s"] = WATCHDOG_SECONDS
             if record.get("sets") is None:
                 record["sets"] = []
-            record.setdefault("optimize", None)
+            record["optimize"] = bool(record.get("optimize"))
             record.setdefault("cold", False)
             record.setdefault("timed", True)
             trials.append(record)
@@ -187,9 +179,8 @@ def read_jsonl(path):
 
 
 def optimizes_of(trials):
-    """The optimize runs of a trial list: one per per-solve line, one per kernel among the per-kernel lines."""
-    kernels = {kernel_key(t) for t in trials if t["optimize"] == "kernel"}
-    return sum(1 for t in trials if t["optimize"] == "solve") + len(kernels)
+    """The optimize runs of a trial list: one per kernel among the lines that optimize."""
+    return len({kernel_key(t) for t in trials if t["optimize"]})
 
 
 def counts(trials):

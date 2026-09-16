@@ -92,7 +92,7 @@ def remaining(trial_list, current, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from every line of its kernel."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -109,10 +109,9 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
 
         def dropped(trial):
             return trial["trial_id"] == current["trial_id"] or (
-                current["optimize"] == "kernel" and trial["optimize"] == "kernel"
-                and trials_mod.kernel_key(trial) == kernel)
+                trial["optimize"] and trials_mod.kernel_key(trial) == kernel)
 
-        return [dict(t, optimize=None) if dropped(t) else t for t in remaining(trial_list, current)]
+        return [dict(t, optimize=False) if dropped(t) else t for t in remaining(trial_list, current)]
     reason = "abandoned: hard-exit at " + current["trial_id"]
     doomed = set()
     rows = []

@@ -56,7 +56,7 @@ def optimize_systems(trial_list):
 
 def optimize_status(trial, key, rows, mode, source):
     """None when the line's optimize.csv record stands, else 'absent', 'timeout' (a lack under no_overwrite alone) or 'source <recorded>' when recorded from another source than `source`."""
-    row = cubie_adapter.find_optimized(rows, cubie_adapter.optimize_ident(trial, key))
+    row = cubie_adapter.find_optimized(rows, cubie_adapter.kernel_ident(trial, key))
     if row is None:
         return "absent"
     if row.get("label") == "timeout":

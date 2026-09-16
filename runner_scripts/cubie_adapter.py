@@ -15,7 +15,7 @@ SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
 PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "states", "precision", "algorithm", "controller",
-                   "gains", "stepping", "per", "n", "duration", "source", "label", "best_ms", "blocksize",
+                   "gains", "stepping", "n", "duration", "source", "label", "best_ms", "blocksize",
                    "resident_blocks", "settings", "recorded_utc")
 # The stepping values that compile into a cubie kernel.
 STEPPING_FIELDS = ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
@@ -181,7 +181,7 @@ def stepping_text(trial):
 
 
 def kernel_ident(trial, key):
-    """The optimize row identity of a trial's kernel: package, key, problem, states, precision, algorithm, controller, gains and stepping."""
+    """The optimize row identity of a trial's kernel: package, key, problem, states, precision, algorithm, controller, gains and stepping; every line of a kernel shares its record."""
     params = json.loads(trial["system_params"]) if trial["system_params"] else {}
     states = params.get("states", as_problem(trial["problem"])["states"])
     return {"package": trial["package"], "key": key, "problem": as_problem(trial["problem"]).name,
@@ -190,23 +190,17 @@ def kernel_ident(trial, key):
             "stepping": stepping_text(trial)}
 
 
-def optimize_ident(trial, key):
-    """kernel_ident plus the line's optimize policy; a per-solve identity carries the line's n."""
-    ident = dict(kernel_ident(trial, key), per=trial["optimize"] or "")
-    if trial["optimize"] == "solve":
-        ident["n"] = str(int(trial["n"]))
-    return ident
-
-
 def _same(row, ident):
     return all(str(row.get(field, "")) == str(value) for field, value in ident.items())
 
 
 def _load(path):
+    """The kernel rows of a store file; rows an earlier suite recorded per solve (a `per` column of solve) are not kernel records and are dropped."""
     if not os.path.isfile(path):
         return []
     with open(path, newline="", encoding="utf-8") as handle:
-        return [row for row in csv.DictReader(handle) if row.get("package")]
+        return [row for row in csv.DictReader(handle)
+                if row.get("package") and row.get("per", "") != "solve"]
 
 
 def _save(path, rows):
@@ -228,7 +222,7 @@ def _encode(settings):
 def _decode(text):
     settings = json.loads(text) if text else {}
     if any(k.startswith("unroll_") for k in settings):
-        from cubie.cuda_simsafe import UnrollChoice
+        from cubie.CUDAFactory import UnrollChoice
         settings = {k: (UnrollChoice[v] if k.startswith("unroll_") else v)
                     for k, v in settings.items()}
     return settings
@@ -303,11 +297,11 @@ def find_optimized(rows, ident):
 
 
 def load_optimized(trial, key, root=None, source=None):
-    """{'settings', 'resident_blocks'} recorded for a line's optimize, or None; with `source`, only a row recorded from that source."""
+    """{'settings', 'resident_blocks'} recorded for a line's kernel, or None; with `source`, only a row recorded from that source."""
     recorded = optimize_rows(trial["package"], key, root)
     if source is not None:
         recorded = [row for row in recorded if row.get("source", "") == source]
-    row = find_optimized(recorded, optimize_ident(trial, key))
+    row = find_optimized(recorded, kernel_ident(trial, key))
     if row is None:
         return None
     resident = row.get("resident_blocks", "")
@@ -326,7 +320,7 @@ def apply_optimized(solver, tuned):
 
 def _replace(trial, key, root, row):
     path = optimize_path(trial["package"], key, root)
-    ident = optimize_ident(trial, key)
+    ident = kernel_ident(trial, key)
     with _Lock(path):
         rows = [r for r in _load(path) if not _same(r, ident)]
         rows.append(row)
@@ -339,9 +333,9 @@ def _stamp():
 
 
 def record_optimized(trial, key, result, root=None, source=""):
-    """Replace the optimize row of a line with the result's best launch, on the runs and duration the result timed."""
+    """Replace the optimize row of a line's kernel with the result's best launch, on the runs and duration the result timed."""
     best = result.best
-    row = dict(optimize_ident(trial, key), n=str(int(result.runs)), duration=_text(result.duration), source=source,
+    row = dict(kernel_ident(trial, key), n=str(int(result.runs)), duration=_text(result.duration), source=source,
                label=best.label, best_ms="{0:.6g}".format(best.best_ms), blocksize=str(best.blocksize),
                resident_blocks="" if best.resident_blocks is None else str(best.resident_blocks),
                settings=_encode(result.applied_settings), recorded_utc=_stamp())
@@ -349,17 +343,17 @@ def record_optimized(trial, key, result, root=None, source=""):
 
 
 def record_optimize_timeout(trial, key, root=None):
-    """Replace the optimize row of a line with one labelled timeout and no settings."""
-    row = dict(optimize_ident(trial, key), n=str(int(trial["n"])), duration="", source="", label="timeout",
+    """Replace the optimize row of a line's kernel with one labelled timeout and no settings."""
+    row = dict(kernel_ident(trial, key), n=str(int(trial["n"])), duration="", source="", label="timeout",
                best_ms="nan", blocksize="", resident_blocks="", settings="", recorded_utc=_stamp())
     return _replace(trial, key, root, row)
 
 
 def optimize_point(solver, trial, initial_values, parameters, key, root=None, force=False,
-                   source="", verbose=True, auto_size=True):
-    """Run Solver.optimize (cubie sizes the batch and duration under `auto_size`, else times the grid as given), apply the winner and record it under `source`; `force` varies settings an earlier optimize applied."""
+                   source="", verbose=True):
+    """Run Solver.optimize with cubie sizing the batch and duration itself (auto_size), apply the winner and record it under `source` for the line's kernel; `force` varies settings an earlier optimize applied."""
     result = solver.optimize(initial_values, parameters, duration=float(trial["duration"]), verbose=verbose,
-                             force=force, auto_size=auto_size)
+                             force=force, auto_size=True)
     if result.best is None:
         raise RuntimeError("optimize timed no launch for {0} {1}".format(
             trial["problem"], trial["algorithm"]))

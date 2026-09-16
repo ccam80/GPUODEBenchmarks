@@ -183,7 +183,7 @@ class PlanTests(unittest.TestCase):
                                    "--mode", "fixed", "--dt", str(2.0 ** -10))
             point = [t for t in by_package["cpp"] if t["system_params"] == '{"states":32}']
             self.assertEqual([(t["cold"], t["finals"], t["transfers"], t["optimize"], t["sets"]) for t in point],
-                             [(True, True, ["both", "none"], None, ["golden_grid", "perf", "states"])], argv)
+                             [(True, True, ["both", "none"], False, ["golden_grid", "perf", "states"])], argv)
 
     def test_plan_cli_writes_the_trial_files_and_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "bench.py"), "plan", "--set", "perf",
@@ -292,7 +292,7 @@ class CompletenessTests(unittest.TestCase):
     def test_an_optimize_record_must_exist_from_the_current_source(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
                          "-n", "8,32")["cubie"]
-        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, "solve"), (32, "solve")])
+        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, True), (32, True)])
         for trial in perf:
             for transfers in ("both", "none"):
                 self.record(trial, transfers)
@@ -306,20 +306,21 @@ class CompletenessTests(unittest.TestCase):
             cubie_adapter.record_optimized(trial, KEY, FakeOptimizeResult(trial["n"]), root=self.root, source="S")
         self.assertEqual(self.kept(perf, resume=True), {})
         self.assertEqual(self.kept(perf, no_overwrite=True), {})
-        # A per-solve record serves its own n alone.
+        # The two lines share a kernel: one record, from either line, serves both.
         cubie_adapter.clear_optimized("cubie", KEY, "tsit5", "lorenz", root=self.root)
-        cubie_adapter.record_optimized(perf[0], KEY, FakeOptimizeResult(8), root=self.root, source="S")
-        self.assertEqual(list(self.kept(perf, resume=True)), [perf[1]["trial_id"]])
-        cubie_adapter.record_optimized(perf[1], KEY, FakeOptimizeResult(32), root=self.root, source="S")
+        cubie_adapter.record_optimized(perf[0], KEY, FakeOptimizeResult(71680), root=self.root, source="S")
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(len(cubie_adapter.optimize_rows("cubie", KEY, self.root)), 1)
         # Recorded from another source: stale, so both lines run again.
         stale = self.kept(perf, resume=True, sources=lambda p, s: {x: "T" for x in s})
         self.assertEqual(sorted(stale), sorted(t["trial_id"] for t in perf))
         audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "T" for x in s})
         self.assertEqual(audits[perf[1]["trial_id"]].reasons(), ["optimize:source S"])
-        # A timed-out optimize stands under --resume and is attempted again under --no-overwrite.
+        # A timed-out optimize stands under --resume and is attempted again, on every line of the kernel,
+        # under --no-overwrite.
         cubie_adapter.record_optimize_timeout(perf[1], KEY, self.root)
         self.assertEqual(self.kept(perf, resume=True), {})
-        self.assertEqual(list(self.kept(perf, no_overwrite=True)), [perf[1]["trial_id"]])
+        self.assertEqual(sorted(self.kept(perf, no_overwrite=True)), sorted(t["trial_id"] for t in perf))
         self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[perf[1]["trial_id"]].reasons(),
                          ["optimize:timeout"])
         # Without a current source (the analyses) a record of any source stands.
@@ -339,7 +340,7 @@ class CompletenessTests(unittest.TestCase):
     def test_each_kernel_has_its_own_optimize_record(self):
         golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cubie"]
-        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, "kernel"), (0.25, "kernel")])
+        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, True), (0.25, True)])
         for trial in golden:
             spec = {f: trial[f] for f in store.TRIAL_FIELDS}
             relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
