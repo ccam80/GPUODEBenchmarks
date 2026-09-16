@@ -338,7 +338,7 @@ class BuildTests(AdapterCase):
         self.assertEqual(lines[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
         leg.close()
 
-    def test_a_kernel_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
+    def test_a_kernel_record_is_applied_and_compiled_whatever_source_recorded_it(self):
         line = trial(n=8, optimize=True)
         leg = self.adapter.build(trial(n=8))
         self.adapter.optimize(leg, line)
@@ -347,17 +347,19 @@ class BuildTests(AdapterCase):
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(leg.solver.compiled[-1], (64, 1.0))
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
-        source = cubie_adapter.source_hash(leg.solver)
         with open(path) as handle:
             text = handle.read()
-        self.assertIn(source, text)
-        # A row from another source is replaced by a fresh optimize.
+        self.assertEqual(text.splitlines()[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
+        self.assertNotIn("source", text.splitlines()[0])
+        # A row an earlier suite recorded with a source hash of its own is applied the same way.
+        lines = text.splitlines()
         with open(path, "w") as handle:
-            handle.write(text.replace(source, "0" * 16))
-        self.adapter.optimize(leg, line)
-        self.assertEqual(len(leg.solver.optimized), 2)
-        with open(path) as handle:
-            self.assertEqual(handle.read().count(source), 1)
+            handle.write(lines[0].replace("recorded_utc", "source,recorded_utc") + "\n")
+            for row in lines[1:]:
+                head, stamp = row.rsplit(",", 1)
+                handle.write(head + "," + "0" * 16 + "," + stamp + "\n")
+        self.assertEqual(self.adapter.optimize(leg, line), "recorded")
+        self.assertEqual(len(leg.solver.optimized), 1)
         leg.close()
 
     def test_a_cold_build_uses_a_fresh_cache_root_and_restores_it(self):

@@ -52,11 +52,15 @@ Lines run
 easiest first (states, then n, then step and tolerance loose to tight); a
 timeout or out-of-memory run abandons every harder run of its family (same
 problem, precision, algorithm, controller and gains; larger n or states,
-smaller step or tolerance) on the same transfers. `--resume` runs what the
-store lacks of each trial: a transfers row, the cold build time, a readable
-finals file, an optimize record from the current cubie source, a row
-recorded after that record; `--no-overwrite` also reruns NaN rows and
-timed-out optimizes. A run
+smaller step or tolerance) on the same transfers. Without a flag every
+selected trial runs and its rows are overwritten. `--resume` runs the
+trials the store lacks rows of and keeps a recorded NaN or error row;
+`--no-overwrite` runs every trial without a finite time; under either a
+trial lacking a requested output (the cold build time, a readable finals
+file) or its kernel's optimize record (timed out, under `--no-overwrite`)
+runs whole, so its timing, build time and finals come from one execution.
+A recorded row is never rerun for its age or the source it was recorded
+from. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
@@ -97,7 +101,7 @@ python analyses/agreement.py --set golden_grid          # errors and package-pai
 Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
 and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, what
 each key's store lacks of the set (rows, cold build times, finals files,
-optimize records, rows older than their kernel's record) is printed per package, written to
+optimize records) is printed per package, written to
 `plots/<key>/incomplete.csv`, and exits the script 1 after its outputs.
 
 ## Using the store

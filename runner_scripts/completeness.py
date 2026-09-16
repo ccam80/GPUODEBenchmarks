@@ -1,42 +1,36 @@
-"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a valid record for the line's optimize, and rows recorded after that record."""
+"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a record for the line's optimize. A recorded row is never dated or checked against a source: an older timing stands whatever was optimized or changed after it."""
 
 import math
 
 import cubie_adapter
-import store as store_mod
 from abandon import run_ids
 
 MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `stale` (transfers whose row predates the kernel's optimize record), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent or stale)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent, or timed out under no_overwrite)."""
 
     def __init__(self, trial, wants_finals):
         self.trial = trial
         self.rows = []
         self.build = []
-        self.stale = []
         self.finals = False
         self.optimize = None
         self.wants_finals = wants_finals
 
     def complete(self):
-        return not (self.rows or self.build or self.stale or self.finals or self.optimize)
+        return not (self.rows or self.build or self.finals or self.optimize)
 
     def transfers(self):
-        """The transfers to run again: every one when the optimize record is invalid, else those without a complete row or with one older than the record, else the last one alone for the finals."""
-        if self.optimize:
+        """The transfers to run again: every one when the optimize record is lacking or a requested output (the build time, the finals) is, so the timing, build time and finals of a trial come from one execution; else those without a complete row."""
+        if self.optimize or self.build or self.finals:
             return list(self.trial["transfers"])
-        wanted = set(self.rows) | set(self.build) | set(self.stale)
-        if not wanted and self.finals:
-            return list(self.trial["transfers"][-1:])
-        return [t for t in self.trial["transfers"] if t in wanted]
+        return [t for t in self.trial["transfers"] if t in set(self.rows)]
 
     def reasons(self):
-        """One text per lack: 'row:both', 'build:none', 'stale:both', 'finals', 'optimize:<why>'."""
-        out = (["row:" + t for t in self.rows] + ["build:" + t for t in self.build]
-               + ["stale:" + t for t in self.stale])
+        """One text per lack: 'row:both', 'build:none', 'finals', 'optimize:<why>'."""
+        out = ["row:" + t for t in self.rows] + ["build:" + t for t in self.build]
         if self.finals:
             out.append("finals")
         if self.optimize:
@@ -48,42 +42,21 @@ def _finite(value):
     return isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def optimize_systems(trial_list):
-    """{package: [(problem, system_params, precision)]} of the cubie lines that optimize, the systems whose source hash validates their records."""
-    systems = {}
-    for trial in trial_list:
-        if trial["optimize"] and trial["package"] in cubie_adapter.PACKAGES:
-            systems.setdefault(trial["package"], set()).add(cubie_adapter.system_key(trial))
-    return {package: sorted(keys) for package, keys in systems.items()}
-
-
-def optimize_status(record, mode, source):
-    """None when a kernel's optimize.csv record stands, else 'absent', 'timeout' (a lack under no_overwrite alone) or 'source <recorded>' when recorded from another source than `source`."""
+def optimize_status(record, mode):
+    """None when a kernel's optimize.csv record stands, else 'absent' or 'timeout' (a lack under no_overwrite alone)."""
     if record is None:
         return "absent"
     if record.get("label") == "timeout":
         return "timeout" if mode == "no_overwrite" else None
-    if source is not None and record.get("source", "") != source:
-        return "source " + (record.get("source", "") or "none")
     return None
 
 
-def predates(row, record):
-    """True when a store row predates its kernel's optimize record, so it was timed under settings the record replaced; a record without a stamp dates nothing."""
-    stamp = record.get("recorded_utc", "")
-    return bool(stamp) and row["recorded_utc"] < store_mod._utc(stamp)
-
-
-def audit(trial_list, key, store, mode=None, sources=None):
-    """{trial_id: Missing} of the lines with transfers under a key; 'no_overwrite' wants a finite time, None and 'resume' any row; `sources(package, systems)` gives the current source hash per cubie system, None accepts any recorded source."""
+def audit(trial_list, key, store, mode=None):
+    """{trial_id: Missing} of the lines with transfers under a key; 'no_overwrite' wants a finite time, None and 'resume' any row."""
     if mode not in MODES:
         raise ValueError("mode is one of None, resume, no_overwrite")
     recorded = {row["run_id"]: row for row in store.rows(key=key)}
-    hashes = {}
     optimize_rows = {}
-    if sources is not None:
-        for package, systems in optimize_systems(trial_list).items():
-            hashes[package] = sources(package, systems)
     out = {}
     for trial in trial_list:
         if not trial["transfers"]:
@@ -104,21 +77,16 @@ def audit(trial_list, key, store, mode=None, sources=None):
             package = trial["package"]
             if package not in optimize_rows:
                 optimize_rows[package] = cubie_adapter.optimize_rows(package, key, store.root)
-            source = hashes.get(package, {}).get(cubie_adapter.system_key(trial))
             record = cubie_adapter.find_optimized(optimize_rows[package], cubie_adapter.kernel_ident(trial, key))
-            missing.optimize = optimize_status(record, mode, source)
-            if missing.optimize is None:
-                missing.stale = [t for t, row in rows.items()
-                                 if row is not None and t not in missing.rows and predates(row, record)]
+            missing.optimize = optimize_status(record, mode)
         out[trial["trial_id"]] = missing
     return out
 
 
 def summary(audits):
-    """{reason: count} over the incomplete trials of an audit, the optimize reasons by their first word."""
+    """{reason: count} over the incomplete trials of an audit."""
     counts = {}
     for missing in audits.values():
         for reason in missing.reasons():
-            word = reason.split(" ")[0]
-            counts[word] = counts.get(word, 0) + 1
+            counts[reason] = counts.get(reason, 0) + 1
     return dict(sorted(counts.items()))
