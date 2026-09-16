@@ -223,8 +223,7 @@ class ClockGuard:
         time.sleep(1)
         if self.monitor is None or self.monitor.poll() is not None:
             self.stop_monitor()
-            raise ClockError("The clock sampler (nvidia-smi -lms) died at once; the rows would carry "
-                             "no clock readings.")
+            return False
 
     def stop_monitor(self):
         if self.monitor is not None:

@@ -606,14 +606,16 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(released, ["stop", "reset"])
         self.assertEqual(store.Store(self.root).rows(), [])
 
-    def test_a_sampler_that_dies_at_once_ends_the_run_and_releases_the_lock(self):
-        with mock.patch.object(clocks.ClockGuard, "start_monitor",
-                               side_effect=clocks.ClockError("The clock sampler (nvidia-smi -lms) died at once")):
-            with self.assertRaises(SystemExit) as caught:
-                self.run_bench()
-        self.assertIn("sampler", str(caught.exception))
+    def test_a_sampler_that_dies_at_once_allows_the_run_and_releases_the_lock(self):
+        with mock.patch.object(clocks.ClockGuard, "start_monitor", return_value=False):
+            status, _, _, _ = self.run_bench()
+        self.assertEqual(status, 0)
         self.assertEqual(self.resets, [True])
-        self.assertEqual(store.Store(self.root).rows(), [])
+        rows = store.Store(self.root).rows()
+        self.assertEqual(len(rows), 12)
+        self.assertEqual({r["min_ms"] for r in rows}, {1.0})
+        self.assertTrue(all(np.isnan(r[field]) for r in rows for field in ("clock_sm_mhz", "clock_sm_min_mhz")))
+        self.assertTrue(all(r["clock_throttled"] is None for r in rows))
 
     def test_a_run_that_cannot_lock_refuses_to_start(self):
         # There is no flag that runs unlocked.

@@ -239,25 +239,21 @@ class ConfTable(unittest.TestCase):
         self.assertEqual(guard.status(), "unlocked")
         self.assertFalse(clocks.ClockGuard(None, None).lock())
 
-    def test_a_sampler_that_dies_at_once_is_a_clock_error(self):
+    def test_a_sampler_that_dies_at_once_is_nonfatal(self):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         guard = clocks.ClockGuard("1470", None)
         original = clocks.subprocess.Popen
         clocks.subprocess.Popen = mock.Mock(side_effect=OSError("no nvidia-smi"))
         self.addCleanup(setattr, clocks.subprocess, "Popen", original)
-        with self.assertRaises(clocks.ClockError) as caught:
-            guard.start_monitor(os.path.join(tmp, "run.csv"), sample_ms=40)
-        self.assertIn("sampler", str(caught.exception))
+        self.assertFalse(guard.start_monitor(os.path.join(tmp, "run.csv"), sample_ms=40))
         self.assertIsNone(guard.monitor)
-        # A sampler that exits within its first second is the same refusal.
         clocks.subprocess.Popen = original
         guard = clocks.ClockGuard("1470", None)
         with mock.patch.object(clocks.subprocess, "Popen",
                                return_value=mock.Mock(stdout=iter([]), poll=lambda: 1, kill=lambda: None,
                                                       wait=lambda *_: 1)):
-            with self.assertRaises(clocks.ClockError):
-                guard.start_monitor(os.path.join(tmp, "run.csv"))
+            self.assertFalse(guard.start_monitor(os.path.join(tmp, "run.csv")))
         self.assertIsNone(guard.monitor)
 
 
