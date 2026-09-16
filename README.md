@@ -58,14 +58,22 @@ trials the store lacks rows of, keeping a recorded NaN or error row;
 `--no-overwrite` runs every trial without a finite time. Under either, a
 trial lacking its cold build time, a readable finals file or its kernel's
 optimize record (timed out, under `--no-overwrite`) runs every transfers
-again. A run
-pins the GPU clocks to the row for this card in
-`runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
-skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a
-new card), samples them at 1 Hz, and writes `logs/<key>_<stamp>/` with one
-log per package, `run_manifest.txt`, `summary.tsv` and `clocks.csv`. The
+again. The
 `run_*.sh` and `.bat` wrappers forward to `bench.py`. Julia runs through
 `julia +1.13`; set `JULIA` to use another launcher.
+
+Clocks: a run locks the GPU to the card's row in
+`runner_scripts/gpu_clocks.conf` or `--lock-clocks SM[,MEM]` from an
+elevated shell, and refuses to start when it cannot;
+`runner_scripts/calibrate/calibrate_clocks.py` writes the row. A 25 Hz
+sample log lands in `data/clocks/<key>_<stamp>.csv`; each row carries
+`run`, `driver`, `clock_lock_mhz`, its timing window (`timed_start_utc`,
+`timed_end_utc`) and that window's `clock_sm_mhz`, `clock_sm_min_mhz` and
+`clock_throttled` (NaN when the log does not cover it). A row throttled or
+more than `--clock-tolerance` under the lock fails the run.
+`store.py annotate <run> <clocks.csv>` refills the columns from a log. After
+the push the box deletes this key's clock logs a day old that no row names
+(`sync/box_prune.py`); the mirror and `logs/<run>/` follow.
 
 | set | packages | what it times |
 |---|---|---|

@@ -10,9 +10,10 @@ import sys
 import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -94,7 +95,9 @@ class HashTests(unittest.TestCase):
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
             "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
             "errored_pct", "build_s", "reason", "finals", "package_version",
-            "suite_rev", "recorded_utc"])
+            "suite_rev", "run", "driver", "clock_lock_mhz", "clock_sm_mhz",
+            "clock_sm_min_mhz", "clock_throttled", "timed_start_utc", "timed_end_utc",
+            "recorded_utc"])
         for absent in ("error", "reference"):
             self.assertNotIn(absent, store.COLUMNS)
 
@@ -598,6 +601,179 @@ class JuliaShimTests(unittest.TestCase):
                               cwd=root, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("results.jl shim", proc.stdout)
+
+
+class RunContextTests(StoreCase):
+    """The run, driver and lock columns come from bench.py's environment; annotate fills the clock columns from a window function; a file written before the columns existed reads beside a new one."""
+
+    ENV = (store.RUN_ENV, store.DRIVER_ENV, store.CLOCK_LOCK_ENV)
+
+    def setUp(self):
+        super().setUp()
+        saved = {name: os.environ.pop(name, None) for name in self.ENV}
+
+        def restore():
+            for name, value in saved.items():
+                os.environ.pop(name, None)
+                if value is not None:
+                    os.environ[name] = value
+        self.addCleanup(restore)
+
+    def test_outside_a_run_the_context_is_empty_and_the_lock_unknown(self):
+        standing = self.store.record(row())
+        self.assertEqual((standing["run"], standing["driver"]), ("", ""))
+        self.assertIsNone(standing["clock_lock_mhz"])
+        self.assertIsNone(standing["clock_throttled"])
+        self.assertTrue(math.isnan(standing["clock_sm_mhz"]))
+        self.assertTrue(math.isnan(standing["clock_sm_min_mhz"]))
+        stored = pq.read_table(self.results_file()).to_pylist()[0]
+        self.assertIsNone(stored["clock_lock_mhz"])
+        self.assertEqual(stored["run"], "")
+
+    def test_the_environment_fills_the_context_and_explicit_fields_win(self):
+        os.environ[store.RUN_ENV] = KEY + "_20260916T030000Z"
+        os.environ[store.DRIVER_ENV] = "610.62"
+        os.environ[store.CLOCK_LOCK_ENV] = "2310"
+        standing = self.store.record(row())
+        self.assertEqual(standing["run"], KEY + "_20260916T030000Z")
+        self.assertEqual(standing["driver"], "610.62")
+        self.assertEqual(standing["clock_lock_mhz"], 2310)
+        os.environ[store.CLOCK_LOCK_ENV] = "0"
+        self.assertEqual(self.store.record(row(n=32))["clock_lock_mhz"], 0)
+        explicit = self.store.record(row(n=64, run="other", driver="1.0", clock_lock_mhz=1470,
+                                         clock_sm_mhz=1470.0, clock_sm_min_mhz=1455.0, clock_throttled=2))
+        self.assertEqual((explicit["run"], explicit["driver"], explicit["clock_lock_mhz"]),
+                         ("other", "1.0", 1470))
+        self.assertEqual((explicit["clock_sm_mhz"], explicit["clock_sm_min_mhz"], explicit["clock_throttled"]),
+                         (1470.0, 1455.0, 2))
+        self.assertEqual({r["run"] for r in self.store.rows(run="other")}, {"other"})
+        with self.assertRaises(ValueError):
+            self.store.record(row(n=128, clock_lock_mhz="2310.5"))
+
+    def test_the_timing_window_is_a_pair_of_utc_stamps_or_nothing(self):
+        untimed = self.store.record(row())
+        self.assertIsNone(untimed["timed_start_utc"])
+        self.assertIsNone(untimed["timed_end_utc"])
+        # The writers send ISO text (Julia, C++) or aware datetimes (Python); both land as UTC.
+        timed = self.store.record(row(n=32, timed_start_utc="2026-09-16T03:00:00.250Z",
+                                      timed_end_utc=datetime(2026, 9, 16, 3, 0, 2, tzinfo=timezone.utc)))
+        self.assertEqual(timed["timed_start_utc"], datetime(2026, 9, 16, 3, 0, 0, 250000, tzinfo=timezone.utc))
+        self.assertEqual((timed["timed_end_utc"] - timed["timed_start_utc"]).total_seconds(), 1.75)
+        stored = {r["n"]: r for r in pq.read_table(self.results_file()).to_pylist()}
+        self.assertIsNone(stored[8]["timed_start_utc"])
+        self.assertEqual(stored[32]["timed_end_utc"].tzinfo.utcoffset(None).total_seconds(), 0)
+        self.assertEqual(self.store.rows(n=32)[0]["timed_start_utc"], timed["timed_start_utc"])
+        with self.assertRaises(ValueError):
+            self.store.record(row(n=64, timed_start_utc="2026-09-16T03:00:02Z", timed_end_utc="2026-09-16T03:00:01Z"))
+
+    def test_annotate_fills_the_rows_of_one_run_from_their_timing_windows(self):
+        run = KEY + "_20260916T030000Z"
+        start = datetime(2026, 9, 16, 3, 9, 50, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 16, 3, 10, 0, tzinfo=timezone.utc)
+        # Recorded well after the batch ended.
+        self.store.record(row(run=run, samples_ms=[500.0, 250.0, 250.0], timed_start_utc=start,
+                              timed_end_utc=start + timedelta(seconds=1.2), recorded_utc=end))
+        self.store.record(row(run=run, n=32, transfers="none", samples_ms=[], timed_start_utc=start,
+                              timed_end_utc=end, recorded_utc=end))
+        self.store.record(row(run=run, n=16, samples_ms=[100.0], recorded_utc=end))
+        self.store.record(row(run="another", n=64, samples_ms=[100.0], timed_start_utc=start, timed_end_utc=end,
+                              recorded_utc=end))
+        self.store.record(row(run=run, n=128, package="jax", samples_ms=[100.0], timed_start_utc=start,
+                              timed_end_utc=end, recorded_utc=end))
+        windows = []
+
+        def stats(start_s, end_s):
+            windows.append((start_s, end_s))
+            if end_s - start_s < 5.0:
+                return {"clock_sm_mhz": 2445.0, "clock_sm_min_mhz": 2430.0, "clock_throttled": 1}
+            return None
+
+        self.assertEqual(self.store.annotate(run, stats, package="cubie", key=KEY), 1)
+        # Only the runner's own stamps are windowed; a row without samples or without a window is left.
+        self.assertEqual(windows, [(start.timestamp(), start.timestamp() + 1.2)])
+        annotated = self.store.rows(run=run, n=8)[0]
+        self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
+                         (2445.0, 2430.0, 1))
+        for n in (16, 32):
+            left = self.store.rows(run=run, n=n)[0]
+            self.assertTrue(math.isnan(left["clock_sm_mhz"]))
+            self.assertIsNone(left["clock_throttled"])
+            self.assertEqual(left["run"], run)
+        self.assertTrue(math.isnan(self.store.rows(run="another")[0]["clock_sm_mhz"]))
+        self.assertTrue(math.isnan(self.store.rows(package="jax")[0]["clock_sm_mhz"]))
+        self.assertEqual(self.store.annotate(run, lambda s, e: {
+            "clock_sm_mhz": 1.0, "clock_sm_min_mhz": 1.0, "clock_throttled": 0}), 2)
+        self.assertTrue(math.isnan(self.store.rows(run=run, n=32)[0]["clock_sm_mhz"]))
+        self.assertTrue(math.isnan(self.store.rows(run=run, n=16)[0]["clock_sm_mhz"]))
+        self.assertEqual(self.store.rows(package="jax")[0]["clock_sm_mhz"], 1.0)
+        self.assertEqual(self.store.rows(run=run, n=8)[0]["clock_sm_mhz"], 1.0)
+
+    def test_annotate_cli_reads_a_clock_log(self):
+        import clocks
+        run = KEY + "_20260916T030000Z"
+        start = datetime(2026, 9, 16, 3, 10, 0, tzinfo=timezone.utc)
+        end = start + timedelta(seconds=0.2)
+        self.store.record(row(run=run, samples_ms=[100.0, 100.0], timed_start_utc=start, timed_end_utc=end,
+                              recorded_utc=end + timedelta(seconds=30)))
+        log = os.path.join(self.tmp, "clocks.csv")
+        with open(log, "w") as handle:
+            handle.write(clocks.HEADER + "\n")
+            for offset, sm, reasons in ((-0.1, 2400, 0), (0.05, 2500, 0), (0.15, 2600, 4), (0.25, 210, 1)):
+                stamp = start + timedelta(seconds=offset)
+                handle.write("{0},{1},10251,60,170,100,0x{2:016x}\n".format(
+                    stamp.strftime(clocks.UTC_STAMP), sm, reasons))
+        proc = subprocess.run([sys.executable, STORE_PY, "--root", self.tmp, "annotate", run, log],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "1")
+        annotated = self.store.rows(run=run)[0]
+        self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
+                         (2500.0, 2400.0, 1))
+
+    def legacy_file(self, algorithm="euler", n=8):
+        """A results file in the schema from before the run and clock columns, holding one row; returns (path, ids)."""
+        names = [c for c in store.COLUMNS if c not in ("run", "driver", "clock_lock_mhz", "clock_sm_mhz",
+                                                        "clock_sm_min_mhz", "clock_throttled",
+                                                        "timed_start_utc", "timed_end_utc")]
+        old = [{name: value for name, value in store.make_row(**row(algorithm=algorithm, n=n)).items()
+                if name in names}]
+        ids = store.ids(old[0])
+        path = self.results_file(algorithm=algorithm)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        pq.write_table(pa.Table.from_pylist(old, schema=pa.schema([store.SCHEMA.field(c) for c in names])), path)
+        return path, ids
+
+    def test_a_store_of_files_from_before_the_columns_alone_reads_them_as_null(self):
+        # No file holds the new columns.
+        path, ids = self.legacy_file()
+        rows = self.store.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["run"])
+        self.assertIsNone(rows[0]["clock_lock_mhz"])
+        self.assertIsNone(rows[0]["timed_start_utc"])
+        self.assertEqual(self.store.status(ids["run_id"]), "nan")
+        self.assertEqual(self.store.rows(run="x"), [])
+        table = self.store.query("SELECT DISTINCT run FROM results WHERE run IS NOT NULL AND run <> ''")
+        self.assertEqual(table.num_rows, 0)
+        self.assertEqual(self.store.query("SELECT * FROM results").column_names, list(store.COLUMNS))
+        self.assertEqual(self.store.annotate("any", lambda s, e: None), 0)
+
+    def test_a_file_from_before_the_columns_reads_beside_a_new_one_and_upgrades_on_rewrite(self):
+        self.store.record(row())
+        old_path, ids = self.legacy_file()
+        rows = self.store.rows()
+        self.assertEqual(len(rows), 2)
+        legacy = [r for r in rows if r["algorithm"] == "euler"][0]
+        self.assertIsNone(legacy["run"])
+        self.assertIsNone(legacy["clock_lock_mhz"])
+        self.assertIsNone(legacy["clock_sm_mhz"])
+        self.assertEqual(self.store.status(ids["run_id"]), "nan")
+        self.store.record(row(algorithm="euler", n=32))
+        upgraded = pq.read_table(old_path)
+        self.assertEqual(upgraded.schema, store.SCHEMA)
+        legacy = [r for r in upgraded.to_pylist() if r["n"] == 8][0]
+        self.assertIsNone(legacy["run"])
+        self.assertTrue(math.isnan(legacy["clock_sm_mhz"]))
 
 
 class SuiteRevTests(unittest.TestCase):

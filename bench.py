@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
+"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per compiled kernel, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
 Without a flag every selected trial runs and its rows are overwritten. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
-Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
+A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal, a sampler that dies at once); there is no unlocked run. It samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler did not cover stays NaN).
+The push has the box delete this key's clock logs a day or older that no row on the box names, and drops them and their logs/<run>/ dirs here.
+Exit 0 when every runner finished; 1 on a runner failure, a locked row that throttled or fell more than --clock-tolerance below the lock, or a failed push.
 """
 
 import argparse
@@ -47,7 +49,8 @@ import trials as trials_mod  # noqa: E402
 from abandon import abandon_after_hard_exit, crashed_builds  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
-from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
+from clocks import (TOL_MHZ, ClockError, ClockGuard, configure as configure_clocks,  # noqa: E402
+                    driver_version, drifted, load_samples, window_stats)
 from problems import problem_names  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
@@ -85,8 +88,7 @@ def parse_args(argv):
     p.add_argument("--cooldown", type=int, default=15)
     p.add_argument("--allow-unknown-gpu", action="store_true")
     p.add_argument("--lock-clocks", default="")
-    p.add_argument("--no-lock-clocks", action="store_true")
-    p.add_argument("--clock-tolerance", type=int, default=None)
+    p.add_argument("--clock-tolerance", type=int, default=TOL_MHZ)
     p.add_argument("--no-sync", action="store_true")
     p.add_argument("-h", "--help", action="store_true")
     args = p.parse_args(argv)
@@ -204,7 +206,7 @@ def print_counts(by_package):
 # ---------------------------------------------------------------------- run
 
 class Run:
-    """One invocation: log dir, clock guard, manifest, summary and the runner loop."""
+    """One invocation: log dir, clock guard, manifest, summary and the runner loop; the run name, driver and lock go into the environment every row is recorded under."""
 
     def __init__(self, args, plan, key=None, data_root=DATA_DIR, logs_root=LOGS_DIR):
         self.args, self.plan = args, plan
@@ -215,24 +217,28 @@ class Run:
         self.data_root = data_root
         self.store = store.Store(data_root)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.log_dir = os.path.join(logs_root, "{0}_{1}".format(self.key, stamp))
+        self.run = "{0}_{1}".format(self.key, stamp)
+        self.log_dir = os.path.join(logs_root, self.run)
         os.makedirs(self.log_dir, exist_ok=True)
+        self.clocks_csv = os.path.join(data_root, "clocks", self.run + ".csv")
         self.summary = os.path.join(self.log_dir, "summary.tsv")
         open(self.summary, "w").close()
         self.clock_failures = 0
+        self.clock_lines = []
         self.failures = 0
         self.partials = 0
-        sm = mem = None
-        if not args.no_lock_clocks:
+        # Every run is locked: no target, no elevation or a driver refusal ends it here.
+        try:
             sm, mem = configure_clocks(self.key, args.lock_clocks)
-        self.clocks = ClockGuard(sm, mem, args.clock_tolerance or 15)
-        self.clock_status = "off"
-        if sm:
-            self.clock_status = ("locked SM={0}{1}".format(sm, " MEM=" + mem if mem else "")
-                                 if self.clocks.lock()
-                                 else "unlocked (not elevated) - target was SM={0}".format(sm))
-        elif not args.no_lock_clocks:
-            self.clock_status = "unlocked (no target configured)"
+            self.clocks = ClockGuard(sm, mem, args.clock_tolerance)
+            self.clocks.lock()
+        except ClockError as exc:
+            raise SystemExit("Clocks      : " + str(exc))
+        self.clock_status = self.clocks.status()
+        self.driver = driver_version()
+        os.environ[store.RUN_ENV] = self.run
+        os.environ[store.DRIVER_ENV] = self.driver
+        os.environ[store.CLOCK_LOCK_ENV] = str(sm)
 
     # ------------------------------------------------------------- plumbing
     def record(self, stage, status, detail, code):
@@ -250,7 +256,6 @@ class Run:
         print("  " + subprocess.list2cmdline(command.argv))
         print("=" * 60, flush=True)
         start = time.monotonic()
-        cstart = self.clocks.stamp()
         env = dict(os.environ, **command.env)
         with open(os.path.join(self.log_dir, logfile), "a", encoding="utf-8") as log:
             proc = subprocess.Popen(command.argv, cwd=ROOT, env=env, stdout=subprocess.PIPE,
@@ -260,16 +265,40 @@ class Run:
                 log.write(line)
             proc.stdout.close()
             status = proc.wait()
-        cend = self.clocks.stamp(end=True)
         elapsed = int(time.monotonic() - start)
         if status in command.ok:
             print("OK {0}  ({1}s)".format(label, elapsed))
         else:
             print("X {0} exited {1}  ({2}s)".format(label, status, elapsed))
         sys.stdout.flush()
-        if not self.clocks.check(cstart, cend, label):
-            self.clock_failures += 1
         return status
+
+    def annotate(self, package):
+        """Fill the clock columns of the rows this run recorded for a package from the log so far; a locked row that throttled or fell below the lock counts as drift."""
+        samples = load_samples(self.clocks_csv)
+        lock = int(self.clocks.sm) if self.clocks.locked else 0
+        seen = []
+
+        def stats(start, end):
+            window = window_stats(samples, start, end)
+            if window is not None:
+                seen.append(window)
+            return window
+
+        count = self.store.annotate(self.run, stats, package=package, key=self.key)
+        drift = sum(1 for window in seen if drifted(window, lock, self.clocks.tol))
+        busy = [w["clock_sm_mhz"] for w in seen if w["clock_sm_mhz"] == w["clock_sm_mhz"]]
+        line = "{0}: {1} rows annotated".format(package, count)
+        if busy:
+            line += ", SM median {0:.0f} MHz, low {1:.0f} MHz".format(
+                sorted(busy)[len(busy) // 2], min(w["clock_sm_min_mhz"] for w in seen
+                                                  if w["clock_sm_min_mhz"] == w["clock_sm_min_mhz"]))
+        if lock:
+            line += ", {0} drifted".format(drift)
+        self.clock_lines.append(line)
+        print("Clocks      : " + line, flush=True)
+        if drift:
+            self.clock_failures += 1
 
     def cooldown(self):
         if self.args.cooldown > 0:
@@ -324,7 +353,8 @@ class Run:
             return
         gpu = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
                              capture_output=True, text=True)
-        lines = ["dataset_key=" + self.key,
+        lines = ["run=" + self.run,
+                 "dataset_key=" + self.key,
                  "started_utc=" + datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                  "sets=" + ",".join(self.plan["sets"]),
                  "argv=" + subprocess.list2cmdline(sys.argv[1:]),
@@ -332,7 +362,9 @@ class Run:
                  "trials=" + ";".join("{0}={1}".format(p, len(t)) for p, t in by_package.items()),
                  "suite_rev=" + store.suite_rev(ROOT),
                  "host={0} {1}".format(platform.node(), sys.platform),
-                 "clocks=" + self.clock_status]
+                 "driver=" + self.driver,
+                 "clocks=" + self.clock_status,
+                 "clocks_csv=" + self.clocks_csv]
         lines += ["gpu=" + line.strip() for line in gpu.stdout.splitlines() if line.strip()]
         with open(path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
@@ -349,21 +381,20 @@ class Run:
                 if len(cols) >= 3:
                     print("{0:<26} {1:<16} {2}".format(cols[0], cols[1], cols[2]))
         print("=" * 60)
-        report = self.clocks.report_text()
-        if report:
-            print(report)
-            print("=" * 60)
+        for line in self.clock_lines:
+            print("Clocks: " + line)
         print("Logs: " + self.log_dir)
-        print("Clocks: {0}  (1 Hz log in {1})".format(self.clock_status, os.path.join(self.log_dir, "clocks.csv")))
+        print("Clocks: {0}  (25 Hz log in {1})".format(self.clock_status, self.clocks_csv))
         if self.partials:
             print("{0} package(s) partial: a watchdog hard exit abandoned part of a build.".format(self.partials))
         if self.clock_failures:
-            print("{0} runner(s) drifted; lower the lock in runner_scripts/gpu_clocks.conf and re-run them.".format(self.clock_failures))
+            print("{0} package(s) have rows that drifted under the lock; lower the lock in "
+                  "runner_scripts/gpu_clocks.conf and re-run them.".format(self.clock_failures))
         if self.failures:
             print("{0} runner(s) failed outright.".format(self.failures))
         return 1 if (self.failures or self.clock_failures) else 0
 
-    def execute(self):
+    def _execute(self):
         by_package = plan_trials(self.plan, self.key, self.data_root,
                                  self.args.resume, self.args.no_overwrite)
         if any(package.startswith("julia") for package in by_package):
@@ -373,19 +404,30 @@ class Run:
         print("Sets        : " + ", ".join(self.plan["sets"]))
         print("Packages    : " + ", ".join(by_package))
         print("Log dir     : " + self.log_dir)
-        print("Clocks      : " + self.clock_status)
+        print("Run         : " + self.run)
+        print("Clocks      : {0}, driver {1}".format(self.clock_status, self.driver or "unknown"))
         print("", flush=True)
         print_counts(by_package)
         self.manifest(by_package)
-        self.clocks.start_monitor(os.path.join(self.log_dir, "clocks.csv"))
+        try:
+            self.clocks.start_monitor(self.clocks_csv)
+        except ClockError as exc:
+            raise SystemExit("Clocks      : " + str(exc))
         try:
             for index, (package, rows) in enumerate(by_package.items()):
                 if index:
                     self.cooldown()
                 self.run_package(package, rows, paths[package])
+                self.annotate(package)
             return self.summarise()
         finally:
             self.manifest(by_package, finished=True)
+
+    def execute(self):
+        """Plan, run and summarise; the clock lock taken in __init__ is released whatever fails, planning included."""
+        try:
+            return self._execute()
+        finally:
             self.clocks.stop_monitor()
             self.clocks.reset()
 
@@ -419,6 +461,10 @@ def pull_store(key, root=DATA_DIR, skip=False):
     if reason:
         raise SystemExit("Store       : {0}; pass --no-sync to run without it".format(reason))
     remote = sync.remote_default()
+    # The push after the runners needs the box-side pruner.
+    reason = sync.box_ready(remote, key=key)
+    if reason:
+        raise SystemExit("Store       : {0}; pass --no-sync to run without the store".format(reason))
     if sync.partition_has_files(root, key):
         print("Store       : unpushed check of key={0} against {1}".format(key, remote), flush=True)
         if sync.run("unpushed", root, key):
@@ -430,12 +476,12 @@ def pull_store(key, root=DATA_DIR, skip=False):
         raise SystemExit("Store       : pull FAILED; pass --no-sync to run without it")
 
 
-def push_store(key, root=DATA_DIR, skip=False):
-    """Copy this key and its clocks files to the store after a run; 0 when done or skipped, 1 on failure."""
+def push_store(key, root=DATA_DIR, skip=False, logs_root=LOGS_DIR):
+    """Copy this key and its clocks files to the store after a run, under the key's lock on the box, and have the box prune the clock logs no row names (their logs/<run>/ dirs go too); 0 when done or skipped, 1 on failure."""
     if skip:
         return 0
     print("Store       : push to " + sync.remote_default(), flush=True)
-    code = sync.run("push", root, key)
+    code = sync.run("push", root, key, logs_dir=logs_root)
     print("Store       : " + ("pushed" if code == 0 else "push FAILED (exit {0})".format(code)))
     return 1 if code else 0
 

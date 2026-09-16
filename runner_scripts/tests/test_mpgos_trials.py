@@ -231,6 +231,11 @@ class CppTrialTests(unittest.TestCase):
         self.assertEqual(made["run_id"], store.run_id(dict(target, transfers="both", key=KEY)))
         self.assertEqual(made["min_ms"], 1.5)
         self.assertEqual(made["package_version"], "abcdef123456+nvcc13.3")
+        # The window parses as the store's UTC stamps.
+        self.assertEqual((made["timed_end_utc"] - made["timed_start_utc"]).total_seconds(), 1.5)
+        self.assertEqual(made["timed_start_utc"].isoformat(), "2026-09-16T03:00:00+00:00")
+        parsed = store.make_row(**dict(row, timed_start_utc=fields["utc_stamp"], timed_end_utc=fields["utc_stamp"]))
+        self.assertLess(abs((parsed["timed_start_utc"] - made["recorded_utc"]).total_seconds()), 600)
         with open(spec_path, encoding="utf-8") as handle:
             finals_spec = json.load(handle)
         self.assertEqual(set(finals_spec), set(store.FINALS_FIELDS))

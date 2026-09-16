@@ -111,7 +111,7 @@ class Runner:
 
     # ------------------------------------------------------------- timing
     def time(self, build, trial, values, transfers):
-        """(outcome, best_ms, samples, result, exc, elapsed_s) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog; an untimed line runs once with no warm-up."""
+        """(outcome, best_ms, samples, result, exc, elapsed_s, window) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog; an untimed line runs once with no warm-up. window is the (start, end) UTC host stamps around the whole batch."""
         def run():
             return self.adapter.solve(build, trial, values, transfers)
 
@@ -119,8 +119,18 @@ class Runner:
             print("WATCHDOG hard exit: {0} never returned".format(label(trial, transfers)),
                   flush=True)
 
-        if not trial.get("timed", True):
-            return self.once(run, breach, trial)
+        started = datetime.now(timezone.utc)
+        try:
+            if not trial.get("timed", True):
+                outcome = self.once(run, breach, trial)
+            else:
+                outcome = self.repeated(run, breach, trial, build, values, transfers)
+        finally:
+            ended = datetime.now(timezone.utc)
+        return outcome + ((started, ended),)
+
+    def repeated(self, run, breach, trial, build, values, transfers):
+        """(outcome, best_ms, samples, result, exc, elapsed_s) of the warm-up and repeat schedule."""
         reset = getattr(self.adapter, "reset", None)
         setup = None if reset is None else (lambda: reset(build, trial, values, transfers))
         try:
@@ -164,7 +174,7 @@ class Runner:
                 self.record(trial, transfers, build.states, reason=reason, build_s=build_s)
                 print("SKIP {0}: {1}".format(label(trial, transfers), reason), flush=True)
                 continue
-            outcome, best, samples, result, exc, elapsed = self.time(build, trial, values, transfers)
+            outcome, best, samples, result, exc, elapsed, window = self.time(build, trial, values, transfers)
             history.add(trial, transfers, outcome)
             if result is not None and not finals_read:
                 try:
@@ -176,7 +186,8 @@ class Runner:
             result = None
             reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed, budget_of(trial))
             self.record(trial, transfers, build.states, min_ms=best, samples_ms=samples,
-                        errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason)
+                        errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason,
+                        timed_start_utc=window[0], timed_end_utc=window[1])
             if outcome == "ok":
                 print("{0}: {1:.3f} ms over {2} attempts, errored {3:.1f}%".format(
                     label(trial, transfers), best, len(samples), pct), flush=True)

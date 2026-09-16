@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the clock a GPU holds under sustained load, for gpu_clocks.conf.
-
-Builds clock_burn.cu, runs it under 1 Hz nvidia-smi sampling, and prints the row
-to paste into runner_scripts/gpu_clocks.conf. Linux and Windows.
-
-    python3 runner_scripts/calibrate/calibrate_clocks.py
-"""
+"""Burn the GPU for 30 minutes under 1 Hz sampling, judge the plateau after the first 15, and write the card's row to gpu_clocks.conf: python3 runner_scripts/calibrate/calibrate_clocks.py"""
 
 import csv
 import glob
@@ -19,15 +13,16 @@ import sys
 import time
 from datetime import datetime
 
-MINUTES = 15          # below ~10 the heatsink may not have saturated
+MINUTES = 30          # burn length
 MATRIX = 4096         # SGEMM size; big enough to saturate the SMs
-WARMUP_S = 300        # discarded before looking at the plateau
+WARMUP_S = 900        # discarded before the plateau
 HEADROOM_PCT = 5      # applied only if the clock varied or throttled
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "runner_scripts"))
 from bench_key import dataset_key                                # noqa: E402
+from clocks import CLOCK_CONF, gpu_slug, write_conf_row          # noqa: E402
 
 # Reason-mask bits: GpuIdle is expected, the THROTTLES bits override a lock.
 BIT_GPU_IDLE = 0x1
@@ -136,9 +131,17 @@ def recommend(res):
                 + f" — {HEADROOM_PCT}% headroom applied")
 
 
+def conf_note(res, why):
+    """The comment line written above the conf row: the date, driver, plateau and rule applied."""
+    driver = (smi("gpu=driver_version") or ["?"])[0]
+    return (f"Measured {datetime.now():%Y-%m-%d}, driver {driver}: SM {res['sm_min']}-{res['sm_max']} "
+            f"MHz, mem {res['mem']} MHz, {res['temp']:.0f}C, {res['power']:.0f}W over "
+            f"{res['n']} plateau samples; {why}")
+
+
 def main():
     key = dataset_key()
-    gpu = key.split("_", 1)[1] if "_" in key else key
+    gpu = gpu_slug(key)
     csv_path = os.path.join(REPO, "data", "clocks", f"calibration_{key}.csv")
 
     print(f"{(smi('gpu=name') or ['?'])[0]} — {MINUTES} min SGEMM n={MATRIX}")
@@ -152,7 +155,8 @@ def main():
     print(f"  throttling: {', '.join(res['throttles']) or 'none'}")
     print(f"  log: {csv_path}\n")
     print(f"  {why}")
-    print(f"\nAdd to runner_scripts/gpu_clocks.conf:\n\n    {gpu} {sm} {res['mem']}\n")
+    row = write_conf_row(gpu, sm, res["mem"], conf_note(res, why), CLOCK_CONF)
+    print(f"\nWritten to {CLOCK_CONF}:\n\n    {row}\n")
 
 
 if __name__ == "__main__":
