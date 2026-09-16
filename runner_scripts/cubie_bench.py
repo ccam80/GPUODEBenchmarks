@@ -196,9 +196,9 @@ class CubieAdapter:
         return Build(self.package, self.key, self.root, trial, cold, self.solver_class)
 
     def compile(self, build, trial, values):
+        # Cubie compiles from the settings alone; the grid is not an input.
         build.apply(trial)
-        initials, parameters = build.grid(values)
-        build.solver.compile(initials, parameters, duration=build.duration)
+        build.solver.compile(duration=build.duration)
 
     def optimize(self, build, trial):
         """Apply and compile the kernel's recorded settings, whatever source recorded them, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; returns what was done."""
@@ -209,7 +209,7 @@ class CubieAdapter:
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile(initials, parameters, duration=build.duration)
+            build.solver.compile(duration=build.duration)
             return "recorded"
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
                                      force=True)
