@@ -1,4 +1,4 @@
-"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition and its own clocks files (calibration_<key>.csv and the <key>_<stamp>.csv log of each run) up, deleting nothing; prune mirrors this key so files gone locally are deleted on the box; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
+"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition and its own clocks files (calibration_<key>.csv and the <key>_<stamp>.csv log of each run) up, deleting nothing; prune mirrors this key and its own clocks files so those gone locally are deleted on the box; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
 
 import argparse
 import os
@@ -81,7 +81,8 @@ def commands(command, root, key, remote, tool, dry_run=False):
         if command == "pull":
             return [["rclone", "copy", remote, _local(root), "--update"] + transient + dry]
         if command == "prune":
-            return [["rclone", "sync", _local(root, key_dir), _join(remote, key_dir)] + transient + dry]
+            return [["rclone", "sync", _local(root, key_dir), _join(remote, key_dir)] + transient + dry,
+                    ["rclone", "sync", _local(root, "clocks"), _join(remote, "clocks")] + includes + dry]
         if command == "check":
             return [["rclone", "check", _local(root, key_dir), _join(remote, key_dir)] + transient]
         if command == "unpushed":
@@ -99,7 +100,9 @@ def commands(command, root, key, remote, tool, dry_run=False):
                     + [remote.rstrip("/") + "/", _local(root) + "/"]]
         if command == "prune":
             return [["rsync", "-a", "--delete"] + transient + dry
-                    + [_local(root, key_dir) + "/", _join(remote, key_dir) + "/"]]
+                    + [_local(root, key_dir) + "/", _join(remote, key_dir) + "/"],
+                    ["rsync", "-a", "--delete"] + includes + ["--exclude", "*"] + dry
+                    + [_local(root, "clocks") + "/", _join(remote, "clocks") + "/"]]
         if command == "check":
             return [["rsync", "-aO", "--delete", "--dry-run", "--itemize-changes"] + transient
                     + [_local(root, key_dir) + "/", _join(remote, key_dir) + "/"]]
@@ -136,7 +139,7 @@ def run(command, root, key, remote=None, tool=None, dry_run=False, out=sys.stdou
     if command == "unpushed" and not _has_files(key_dir):
         out.write("store sync: nothing under {0}\n".format(key_dir))
         return 0
-    if command in ("push", "sync"):
+    if command in ("push", "sync", "prune"):
         os.makedirs(key_dir, exist_ok=True)
         os.makedirs(_local(root, "clocks"), exist_ok=True)
     if command in ("pull", "sync"):

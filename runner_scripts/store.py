@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports) and the clocks its window of that run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports) and the clocks its window of that run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K] | prune-runs [--clocks DIR] [--logs DIR] [--min-age-days D] [--dry-run]."""
 
 import argparse
 import csv
@@ -7,6 +7,8 @@ import hashlib
 import json
 import math
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -68,6 +70,8 @@ RUN_ENV = "GPUODE_RUN"
 DRIVER_ENV = "GPUODE_DRIVER"
 CLOCK_LOCK_ENV = "GPUODE_CLOCK_LOCK_MHZ"
 CLOCK_COLUMNS = ("clock_sm_mhz", "clock_sm_min_mhz", "clock_throttled")
+# A run name: the dataset key and bench.py's UTC stamp.
+RUN_NAME = re.compile(r"^[a-z]+_[A-Za-z0-9-]+_\d{8}T\d{6}Z$")
 
 NAN = float("nan")
 HASH_HEX = 16
@@ -554,6 +558,34 @@ class Store:
                     self._write_results(path, rows)
         return done
 
+    def runs_named(self):
+        """The distinct run names the rows carry."""
+        table = self.query("SELECT DISTINCT run FROM results WHERE run IS NOT NULL AND run <> ''")
+        return set(table.column("run").to_pylist())
+
+    def prune_runs(self, clocks_dir, logs_dir, min_age_s=86400.0, delete=True, now=None):
+        """The clock logs (clocks_dir/<run>.csv) and log dirs (logs_dir/<run>/) of runs at least min_age_s old that no row names, deleted unless delete is False; returns their paths."""
+        now = time.time() if now is None else now
+        named = self.runs_named()
+        found = []
+        for base, is_dir in ((clocks_dir, False), (logs_dir, True)):
+            if not base or not os.path.isdir(base):
+                continue
+            for name in sorted(os.listdir(base)):
+                path = os.path.join(base, name)
+                run = name[:-4] if not is_dir and name.endswith(".csv") else name
+                if os.path.isdir(path) != is_dir or not RUN_NAME.match(run) or run in named:
+                    continue
+                if now - os.stat(path).st_mtime < min_age_s:
+                    continue
+                found.append(path)
+                if delete:
+                    if is_dir:
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        os.remove(path)
+        return found
+
     def clear(self, **eq_filters):
         """Drop every row matching the equality filters; returns the count dropped."""
         unknown = set(eq_filters) - set(COLUMNS)
@@ -635,6 +667,11 @@ def _cli(argv):
     annotate.add_argument("clocks")
     annotate.add_argument("--package", default=None)
     annotate.add_argument("--key", default=None)
+    prune = commands.add_parser("prune-runs")
+    prune.add_argument("--clocks", default=None, help="default <root>/clocks")
+    prune.add_argument("--logs", default=None, help="default <repo>/logs")
+    prune.add_argument("--min-age-days", type=float, default=1.0)
+    prune.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     store = Store(args.root)
 
@@ -671,6 +708,12 @@ def _cli(argv):
         samples = clocks.load_samples(args.clocks)
         print(store.annotate(args.run, lambda start, end: clocks.window_stats(samples, start, end),
                              package=args.package, key=args.key))
+        return 0
+    if args.command == "prune-runs":
+        for path in store.prune_runs(args.clocks or os.path.join(args.root, "clocks"),
+                                     args.logs or os.path.join(REPO_ROOT, "logs"),
+                                     args.min_age_days * 86400.0, delete=not args.dry_run):
+            print(path)
         return 0
     return 1
 

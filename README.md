@@ -61,14 +61,16 @@ locks the GPU clocks to the card's row in `runner_scripts/gpu_clocks.conf`
 or `--lock-clocks SM[,MEM]`, needs an elevated shell for that, and refuses
 to start otherwise unless `--no-lock-clocks`;
 `runner_scripts/calibrate/calibrate_clocks.py` writes a card's row. Clocks
-are sampled at 10 Hz into `data/clocks/<key>_<stamp>.csv`, pushed with the
+are sampled at 25 Hz into `data/clocks/<key>_<stamp>.csv`, pushed with the
 key; `logs/<key>_<stamp>/` holds one log per package, `run_manifest.txt` and
 `summary.tsv`. Each row records `run`, `driver`, `clock_lock_mhz` (0
 unlocked) and, after its package, `clock_sm_mhz`, `clock_sm_min_mhz` (busy
 samples of its window) and `clock_throttled`; a locked row off the lock by
 more than `--clock-tolerance` or throttled fails the run.
 `python runner_scripts/store.py annotate <run> <clocks.csv>` refills those
-columns from a log. The `run_*.sh` and `.bat` wrappers forward to
+columns from a log. A run deletes the clock logs and log dirs of runs a day
+or older that no row names (`store.py prune-runs` by hand); `sync.py prune`
+deletes them from the box. The `run_*.sh` and `.bat` wrappers forward to
 `bench.py`. Julia runs through `julia +1.13`; set `JULIA` to use another
 launcher.
 

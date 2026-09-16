@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -52,7 +53,7 @@ for t in trials:
         json.dump(dict(plan, done=True), open(marker, "w"))
         sys.exit(plan.get("code", 3))
     spec = {{f: t[f] for f in store.TRIAL_FIELDS}}
-    data.record_batch([dict(spec, transfers=x, key=plan["key"], states=3, min_ms=1.0)
+    data.record_batch([dict(spec, transfers=x, key=plan["key"], states=3, min_ms=1.0, samples_ms=[2.0, 1.0])
                        for x in t["transfers"]])
 sys.exit(0)
 '''.format(runner_scripts=os.path.dirname(HERE))
@@ -517,6 +518,35 @@ class HardExitTests(unittest.TestCase):
             self.assertEqual({r["clock_throttled"] is not None for r in rows}, {True})
         else:
             self.assertTrue(run.clock_lines[0].startswith("cpp: 0 rows annotated"))
+
+    def test_a_run_prunes_the_logs_of_runs_no_row_names(self):
+        old = time.time() - 2 * 86400
+        clocks_dir = os.path.join(self.root, "clocks")
+        os.makedirs(clocks_dir)
+        orphan_csv = os.path.join(clocks_dir, KEY + "_20260801T000000Z.csv")
+        orphan_dir = os.path.join(self.logs, KEY + "_20260801T000000Z")
+        recent_csv = os.path.join(clocks_dir, KEY + "_20260915T000000Z.csv")
+        for path in (orphan_csv, recent_csv):
+            open(path, "w").close()
+        os.makedirs(orphan_dir)
+        os.utime(orphan_csv, (old, old))
+        os.utime(orphan_dir, (old, old))
+        status, run, calls, summary = self.run_bench()
+        self.assertEqual(status, 0)
+        self.assertFalse(os.path.exists(orphan_csv))
+        self.assertFalse(os.path.exists(orphan_dir))
+        self.assertTrue(os.path.exists(recent_csv))
+        self.assertTrue(os.path.exists(run.clocks_csv))
+        # A second run a day later would keep this one's log, since its rows name it.
+        rows = store.Store(self.root).rows()
+        self.assertEqual(store.Store(self.root).runs_named(), {run.run})
+        os.utime(run.clocks_csv, (old, old))
+        self.assertEqual(store.Store(self.root).prune_runs(clocks_dir, self.logs), [])
+        # Under --no-sync the mirror may be stale, so nothing is pruned.
+        open(orphan_csv, "w").close()
+        os.utime(orphan_csv, (old, old))
+        status, run, calls, summary = self.run_bench(None, 3, "--no-sync")
+        self.assertTrue(os.path.exists(orphan_csv))
 
     def test_a_run_that_cannot_lock_refuses_to_start(self):
         with self.assertRaises(SystemExit) as caught:

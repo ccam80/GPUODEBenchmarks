@@ -50,9 +50,12 @@ class Commands(unittest.TestCase):
         self.assertEqual(pull[:3], ["rclone", "copy", REMOTE])
         self.assertIn("--update", pull)
         self.assertNotIn("key=" + KEY + "/**", pull)
-        (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rclone")
+        prune, prune_clocks = sync.commands("prune", "d", KEY, REMOTE, "rclone")
         self.assertEqual(prune[:2], ["rclone", "sync"])
         self.assertEqual(prune[3], REMOTE + "/key=" + KEY)
+        self.assertEqual(prune_clocks[:2], ["rclone", "sync"])
+        self.assertEqual(prune_clocks[3], REMOTE + "/clocks")
+        self.assertEqual(prune_clocks[4:], clocks[4:])
         (check,) = sync.commands("check", "d", KEY, REMOTE, "rclone")
         self.assertEqual(check[:2], ["rclone", "check"])
         self.assertNotIn("--one-way", check)
@@ -60,6 +63,7 @@ class Commands(unittest.TestCase):
         self.assertEqual(unpushed[:4], check[:4])
         self.assertIn("--one-way", unpushed)
         self.assertIn("--dry-run", sync.commands("push", "d", KEY, "r:/p", "rclone", dry_run=True)[0])
+        self.assertIn("--dry-run", sync.commands("prune", "d", KEY, "r:/p", "rclone", dry_run=True)[1])
         self.assertEqual(len(sync.commands("sync", "d", KEY, "r:/p", "rclone")), 3)
 
     def test_rsync_argv(self):
@@ -74,9 +78,12 @@ class Commands(unittest.TestCase):
         self.assertEqual(pull[1], "-au")
         self.assertNotIn("key=" + KEY + "/", pull)
         self.assertEqual(pull[-2], REMOTE + "/")
-        (prune,) = sync.commands("prune", "d", KEY, REMOTE, "rsync")
+        prune, prune_clocks = sync.commands("prune", "d", KEY, REMOTE, "rsync")
         self.assertIn("--delete", prune)
         self.assertNotIn("--dry-run", prune)
+        self.assertEqual(prune_clocks[:3], ["rsync", "-a", "--delete"])
+        self.assertEqual(prune_clocks[3:9], clocks[2:8])
+        self.assertEqual(prune_clocks[-1], REMOTE + "/clocks/")
         (check,) = sync.commands("check", "d", KEY, REMOTE, "rsync")
         self.assertIn("--dry-run", check)
         self.assertIn("--itemize-changes", check)
@@ -126,6 +133,8 @@ class RcloneRoundTrip(unittest.TestCase):
         # The box's copy is newer than the local one by a clear margin.
         os.utime(newer, (time.time() + 60, time.time() + 60))
         _touch(self.remote, "clocks/lightload_{0}.csv".format(OTHER))
+        _touch(self.remote, "clocks/{0}_20260901T000000Z.csv".format(KEY), "pruned-by-me")
+        _touch(self.remote, "clocks/{0}_20260901T000000Z.csv".format(OTHER), "not-mine")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -141,6 +150,8 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertEqual(_files(self.remote), [
             "clocks/calibration_{0}.csv".format(KEY),
             "clocks/lightload_{0}.csv".format(OTHER),
+            "clocks/{0}_20260901T000000Z.csv".format(OTHER),
+            "clocks/{0}_20260901T000000Z.csv".format(KEY),
             "clocks/{0}_20260916T000000Z.csv".format(KEY),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
@@ -159,7 +170,9 @@ class RcloneRoundTrip(unittest.TestCase):
             "clocks/calibration_{0}.csv".format(OTHER),
             "clocks/calibration_{0}.csv".format(KEY),
             "clocks/lightload_{0}.csv".format(OTHER),
+            "clocks/{0}_20260901T000000Z.csv".format(OTHER),
             "clocks/{0}_20260916T000000Z.csv".format(OTHER),
+            "clocks/{0}_20260901T000000Z.csv".format(KEY),
             "clocks/{0}_20260916T000000Z.csv".format(KEY),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
@@ -197,6 +210,11 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertNotIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
         self.assertIn("key={0}/package=cubie/finals/abc.parquet".format(KEY), _files(self.remote))
+        # Own clocks files gone locally go from the box; another machine's stay.
+        self.assertNotIn("clocks/{0}_20260901T000000Z.csv".format(KEY), _files(self.remote))
+        self.assertIn("clocks/{0}_20260916T000000Z.csv".format(KEY), _files(self.remote))
+        self.assertIn("clocks/{0}_20260901T000000Z.csv".format(OTHER), _files(self.remote))
+        self.assertIn("clocks/lightload_{0}.csv".format(OTHER), _files(self.remote))
         code, text = self.run_sync("check")
         self.assertEqual(code, 0, text)
 

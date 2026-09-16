@@ -1,6 +1,6 @@
 # The store
 
-One `data/` tree on a store box over Tailscale, `/srv/gpuode/data` by default. A machine keeps an untracked `data/` mirror and writes only its own `key=<os>_<gpu>` partition and its clocks files, `clocks/calibration_<key>.csv` and the 10 Hz `clocks/<key>_<stamp>.csv` log of each run.
+One `data/` tree on a store box over Tailscale, `/srv/gpuode/data` by default. A machine keeps an untracked `data/` mirror and writes only its own `key=<os>_<gpu>` partition and its clocks files, `clocks/calibration_<key>.csv` and the 25 Hz `clocks/<key>_<stamp>.csv` log of each run.
 
 ## Set up the box
 
@@ -27,7 +27,7 @@ A `Host box` entry in `~/.ssh/config` serves rsync when rclone is absent. `GPUOD
 python sync/sync.py pull     # the whole tree into data/, nothing deleted, newer local files kept
 python sync/sync.py push     # this key and its clocks files up, nothing deleted
 python sync/sync.py sync     # push, then pull
-python sync/sync.py prune    # this key mirrored: files gone locally are deleted on the box; refuses an empty partition
+python sync/sync.py prune    # this key and its clocks files mirrored: files gone locally are deleted on the box; refuses an empty partition
 python sync/sync.py check    # the differences under this key, exit 1 when there are any
 python sync/sync.py unpushed # this key's local files missing from or differing on the box, exit 1 when there are any
 ```

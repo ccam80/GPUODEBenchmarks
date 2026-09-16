@@ -702,6 +702,49 @@ class RunContextTests(StoreCase):
         self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
                          (2500.0, 2400.0, 1))
 
+    def test_prune_runs_deletes_old_logs_no_row_names(self):
+        named = KEY + "_20260901T000000Z"
+        self.store.record(row(run=named))
+        self.store.record(row(n=32, run="linux_RTX-2060-SUPER_20260902T000000Z", key="linux_RTX-2060-SUPER"))
+        clocks_dir = os.path.join(self.tmp, "clocks")
+        logs_dir = os.path.join(self.tmp, "logs")
+        os.makedirs(clocks_dir)
+        old = time.time() - 3 * 86400
+        files = {}
+        for name in (named, "linux_RTX-2060-SUPER_20260902T000000Z", KEY + "_20260801T000000Z",
+                     "linux_RTX-2060-SUPER_20260803T000000Z", "calibration_" + KEY):
+            path = os.path.join(clocks_dir, name + ".csv")
+            open(path, "w").close()
+            os.utime(path, (old, old))
+            files[name] = path
+        fresh = os.path.join(clocks_dir, KEY + "_20260916T000000Z.csv")
+        open(fresh, "w").close()
+        dirs = {}
+        for name in (named, KEY + "_20260801T000000Z", "notes", KEY + "_20260916T000000Z"):
+            path = os.path.join(logs_dir, name)
+            os.makedirs(path)
+            with open(os.path.join(path, "run_manifest.txt"), "w") as handle:
+                handle.write("run=" + name + "\n")
+            dirs[name] = path
+        for name in (named, KEY + "_20260801T000000Z", "notes"):
+            os.utime(dirs[name], (old, old))
+        self.assertEqual(self.store.runs_named(), {named, "linux_RTX-2060-SUPER_20260902T000000Z"})
+        listed = self.store.prune_runs(clocks_dir, logs_dir, delete=False)
+        self.assertEqual(listed, [files["linux_RTX-2060-SUPER_20260803T000000Z"], files[KEY + "_20260801T000000Z"],
+                                  dirs[KEY + "_20260801T000000Z"]])
+        self.assertTrue(all(os.path.exists(p) for p in listed))
+        self.assertEqual(self.store.prune_runs(clocks_dir, logs_dir), listed)
+        self.assertFalse(any(os.path.exists(p) for p in listed))
+        kept = [files[named], files["linux_RTX-2060-SUPER_20260902T000000Z"], files["calibration_" + KEY], fresh,
+                dirs[named], dirs["notes"], dirs[KEY + "_20260916T000000Z"]]
+        self.assertTrue(all(os.path.exists(p) for p in kept))
+        self.assertEqual(self.store.prune_runs(clocks_dir, os.path.join(self.tmp, "absent")), [])
+        proc = subprocess.run([sys.executable, STORE_PY, "--root", self.tmp, "prune-runs", "--logs", logs_dir,
+                               "--min-age-days", "0", "--dry-run"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.split(), [fresh, dirs[KEY + "_20260916T000000Z"]])
+        self.assertTrue(os.path.exists(fresh))
+
     def test_a_file_from_before_the_columns_reads_beside_a_new_one_and_upgrades_on_rewrite(self):
         self.store.record(row())
         old_path = self.results_file(algorithm="euler")

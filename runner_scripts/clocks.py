@@ -1,4 +1,4 @@
-"""GPU clock guard: pin the clocks (elevated shell) from the per-GPU table, sample them at 10 Hz into a UTC-stamped CSV, and judge any window of that log for the rows recorded in it."""
+"""GPU clock guard: pin the clocks (elevated shell) from the per-GPU table, sample them at 25 Hz into a UTC-stamped CSV, and judge any window of that log for the rows recorded in it."""
 
 import bisect
 import os
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 CLOCK_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "gpu_clocks.conf")
 TOL_MHZ = 15            # one clock step; anything beyond this is real drift
-SAMPLE_MS = 100         # nvidia-smi -lms period; one process saturates near 20 ms
+SAMPLE_MS = 40          # nvidia-smi -lms period; one process saturates near 20 ms
 FIELDS = ("timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,"
           "utilization.gpu,clocks_event_reasons.active")
 HEADER = "utc,sm_mhz,mem_mhz,temp_c,power_w,util_pct,reasons"
