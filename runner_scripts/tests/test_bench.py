@@ -542,6 +542,32 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual([c["path"] for c in calls], ["cpp.jsonl"])
         self.assertEqual(summary, [["cpp", "FAILED", "1 hard exit(s); crashed before a hard exit: a, b", "3"]])
 
+    def test_consecutive_hard_exits_accumulate_crashed_builds(self):
+        args = bench.parse_args(["run", "--set", "perf", "--no-lock-clocks"])
+        run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
+        planned = self.planned()
+        path = os.path.join(run.log_dir, "cpp.jsonl")
+        trials.write_jsonl(path, planned)
+        calls = []
+
+        def step(label, logfile, command):
+            current = command.argv[command.argv.index("--trials") + 1]
+            calls.append(os.path.basename(current))
+            if len(calls) == 3:
+                return 0
+            with open(current + ".progress", "w") as handle:
+                json.dump({"failed": ["first"] if len(calls) == 1 else ["second", "first"]}, handle)
+            return WATCHDOG_EXIT_CODE
+
+        with mock.patch.object(run, "step", side_effect=step), \
+                mock.patch.object(bench, "abandon_after_hard_exit", side_effect=[planned[1:], planned[2:]]):
+            run.run_package("cpp", planned, path)
+        self.assertEqual(calls, ["cpp.jsonl", "cpp.retry1.jsonl", "cpp.retry2.jsonl"])
+        with open(run.summary) as handle:
+            self.assertEqual(handle.read(),
+                             "cpp\tFAILED\t2 hard exit(s); crashed before a hard exit: first, second\t0\n")
+        self.assertEqual(run.failures, 1)
+
     def test_other_exit_codes_fail_the_package(self):
         hung = self.planned()[0]
         status, run, calls, summary = self.run_bench(hung["trial_id"], 2)
