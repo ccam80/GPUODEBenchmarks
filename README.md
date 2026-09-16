@@ -53,8 +53,9 @@ easiest first (states, then n, then step and tolerance loose to tight); a
 timeout or out-of-memory run abandons every harder run of its family (same
 problem, precision, algorithm, controller and gains; larger n or states,
 smaller step or tolerance) on the same transfers. Without a flag every
-selected trial runs and its rows are overwritten. `--resume` runs the
-trials the store lacks rows of, keeping a recorded NaN or error row;
+selected trial runs, its rows are overwritten and its cubie kernel is
+optimized again (once per run). `--resume` runs the trials the store lacks
+rows of, keeping a recorded NaN or error row and a timed-out optimize;
 `--no-overwrite` runs every trial without a finite time. Under either, a
 trial lacking its cold build time, a readable finals file or its kernel's
 optimize record (timed out, under `--no-overwrite`) runs every transfers

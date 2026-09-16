@@ -370,6 +370,15 @@ class CompletenessTests(unittest.TestCase):
         self.assertNotIn("sources", inspect.signature(completeness.audit).parameters)
         self.assertNotIn("sources", inspect.signature(bench.continue_filter).parameters)
 
+    def test_a_timed_out_optimize_stands_under_resume_and_reruns_under_no_overwrite(self):
+        perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
+                         "-n", "8,32")["cubie"]
+        self.optimized(perf[0], timeout=True)
+        # No rows: both lines run; under --resume they solve without optimizing the timed-out kernel.
+        self.assertEqual({t["optimize"] for t in self.kept(perf, resume=True).values()}, {False})
+        self.assertEqual({t["optimize"] for t in self.kept(perf, no_overwrite=True).values()}, {True})
+        self.assertEqual({t["optimize"] for t in self.kept(perf).values()}, {True})
+
     def test_each_kernel_has_its_own_optimize_record(self):
         golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cubie"]
@@ -559,7 +568,7 @@ class HardExitTests(unittest.TestCase):
         self.addCleanup(launch.RUNNERS.__setitem__, "cpp", saved)
         # A Run exports its context into the environment; the tests leave none behind.
         context = {name: os.environ.pop(name, None)
-                   for name in (store.RUN_ENV, store.DRIVER_ENV, store.CLOCK_LOCK_ENV)}
+                   for name in (store.RUN_ENV, store.DRIVER_ENV, store.CLOCK_LOCK_ENV, store.OVERWRITE_ENV)}
 
         def restore():
             for name, value in context.items():
@@ -625,6 +634,7 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual({r["driver"] for r in rows}, {run.driver})
         self.assertEqual(run.clocks_csv, os.path.join(self.root, "clocks", run.run + ".csv"))
         self.assertNotIn(store.RUN_ENV, {k for k in os.environ if k == "no-such"})
+        self.assertEqual(os.environ[store.OVERWRITE_ENV], "1")
         with open(os.path.join(run.log_dir, "run_manifest.txt")) as handle:
             manifest = handle.read()
         self.assertIn("run=" + run.run + "\n", manifest)
