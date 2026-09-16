@@ -243,7 +243,7 @@ def find_optimized(rows, ident):
 def load_optimized(trial, key, root=None):
     """{'settings', 'resident_blocks'} recorded for a line's kernel, or None."""
     row = find_optimized(optimize_rows(trial["package"], key, root), kernel_ident(trial, key))
-    if row is None:
+    if row is None or row.get("label") == "timeout":
         return None
     resident = row.get("resident_blocks", "")
     return {"settings": _decode(row["settings"]),

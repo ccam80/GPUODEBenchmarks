@@ -256,7 +256,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual((row["label"], row["n"], row["settings"]), ("timeout", "64", ""))
         rows = adapter.optimize_rows("cubie", "k")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(adapter.load_optimized(line(n=8), "k"), {"settings": {}, "resident_blocks": None})
+        self.assertIsNone(adapter.load_optimized(line(n=8), "k"))
 
     def test_clear_narrows_by_algorithm_and_problem(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
