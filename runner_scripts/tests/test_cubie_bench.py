@@ -127,8 +127,8 @@ class FakeSolver:
         params = np.asarray(values, np.float32).reshape(1, n)
         return initials, params
 
-    def compile(self, initial_values, parameters, duration):
-        self.compiled.append((initial_values.shape[1], duration))
+    def compile(self, drivers=None, duration=1.0, settling_time=0.0, t0=0.0, **kwargs):
+        self.compiled.append(duration)
 
     def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False):
         self.optimized.append((initial_values.shape[1], duration, force, auto_size))
@@ -240,10 +240,10 @@ class BuildTests(AdapterCase):
         leg.close()
         self.assertTrue(all(s.closed for s in FakeSolver.made))
 
-    def test_compile_builds_the_grid_at_the_trials_n(self):
+    def test_compile_compiles_at_the_trials_duration(self):
         leg = self.adapter.build(trial(n=8))
         self.adapter.compile(leg, trial(n=8, kind="warm"), self.values(8))
-        self.assertEqual(leg.solver.compiled, [(8, 1.0)])
+        self.assertEqual(leg.solver.compiled, [1.0])
         leg.close()
 
     def test_a_changed_stepping_updates_the_solver_and_drops_the_resident_inputs(self):
@@ -345,7 +345,7 @@ class BuildTests(AdapterCase):
         self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize=True)), "recorded")
         self.assertEqual(len(leg.solver.optimized), 1)
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
-        self.assertEqual(leg.solver.compiled[-1], (64, 1.0))
+        self.assertEqual(leg.solver.compiled[-1], 1.0)
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
         with open(path) as handle:
             text = handle.read()

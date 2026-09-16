@@ -103,7 +103,8 @@ def main():
     # cuda<N>      -> numba-cuda[cuN] + cupy-cudaNx
     # mlir-cuda<N> -> cubie-numba-cuda-mlir[cuN] + cupy-cudaNx
     # Both live side by side; CUBIE_CUDA_BACKEND picks between them at import.
-    spec = f"cubie[cuda{CUDA_MAJOR},mlir-cuda{CUDA_MAJOR},test]"
+    # cubie_bench.py calls Solver.compile(duration=...), which needs 0.13.1.
+    spec = f"cubie[cuda{CUDA_MAJOR},mlir-cuda{CUDA_MAJOR},test]>=0.13.1"
     print(f"Installing {spec} from PyPI...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         "--upgrade", spec]):
