@@ -178,6 +178,8 @@ class ClockGuard:
             print("Could not enable persistence mode.")
         ok, text = _privileged(["-lgc", "{0},{0}".format(self.sm)])
         if not ok:
+            if self.pm_restore == "Disabled":
+                _privileged(["-pm", "0"])
             raise ClockError("Failed to lock the SM clock to {0} MHz: {1}".format(
                 self.sm, text.strip() or "nvidia-smi refused"))
         self.locked = True

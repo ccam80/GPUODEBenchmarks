@@ -239,6 +239,21 @@ class ConfTable(unittest.TestCase):
         self.assertEqual(guard.status(), "unlocked")
         self.assertFalse(clocks.ClockGuard(None, None).lock())
 
+    def test_a_failed_lock_restores_only_previously_disabled_persistence(self):
+        for persistence in ("Disabled", "Enabled"):
+            with self.subTest(persistence=persistence), \
+                    mock.patch.object(clocks, "is_admin", return_value=True), \
+                    mock.patch.object(clocks, "_smi", return_value=(True, persistence)), \
+                    mock.patch.object(clocks, "_privileged", side_effect=[(True, ""), (False, "refused"), (True, "")]) as privileged:
+                guard = clocks.ClockGuard("1470", None)
+                with self.assertRaises(clocks.ClockError):
+                    guard.lock()
+                expected = [mock.call(["-pm", "1"]), mock.call(["-lgc", "1470,1470"])]
+                if persistence == "Disabled":
+                    expected.append(mock.call(["-pm", "0"]))
+                self.assertEqual(privileged.call_args_list, expected)
+                self.assertFalse(guard.locked)
+
     def test_a_sampler_that_dies_at_once_is_nonfatal(self):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
