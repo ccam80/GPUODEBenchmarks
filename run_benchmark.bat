@@ -18,7 +18,7 @@ shift
 shift
 goto parse_loop
 :parse_done
-python bench.py --no-lock-clocks !PASS!
+python bench.py !PASS!
 set "STATUS=!errorlevel!"
 popd
 endlocal & exit /b %STATUS%

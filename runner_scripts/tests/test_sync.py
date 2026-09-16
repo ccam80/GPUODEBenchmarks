@@ -256,6 +256,49 @@ class BoxPrune(unittest.TestCase):
         self.assertEqual(sync.box_ready(self.root), "")
         self.assertIn("no store", sync.box_ready(os.path.join(self.tmp, "no")))
 
+    def remote_box(self):
+        """A Box whose command line runs box_prune.py in a subprocess of this interpreter, standing in for the ssh hop."""
+        box = sync.Box(self.root, "rclone")
+        box.host, box.ssh, box.python, box.script = "fake", [], sys.executable, BOX_PY
+        self.assertFalse(box.local)
+        self.assertEqual(box.command("serve", KEY)[:3], [sys.executable, BOX_PY, "serve"])
+        return box
+
+    def test_the_hold_over_a_subprocess_prunes_on_the_prune_line_and_releases_on_exit(self):
+        out = io.StringIO()
+        with sync.Hold(self.remote_box(), KEY, out=out) as hold:
+            with self.assertRaises(TimeoutError):
+                with box_prune.KeyLock(self.root, KEY, timeout=0.5):
+                    pass
+            self.assertEqual(hold.prune(dry_run=True), [KEY + "_20260801T000000Z.csv", OLD_RUN + ".csv"])
+        self.assertTrue(os.path.exists(self.logs[OLD_RUN]))
+        with sync.Hold(self.remote_box(), KEY, out=out) as hold:
+            self.assertEqual(hold.prune(), [KEY + "_20260801T000000Z.csv", OLD_RUN + ".csv"])
+        self.assertFalse(os.path.exists(self.logs[OLD_RUN]))
+        self.assertIn("serve", out.getvalue())
+        # Leaving the hold without a prune line releases the lock and deletes nothing.
+        with sync.Hold(self.remote_box(), KEY, min_age_days=0, out=out):
+            pass
+        self.assertTrue(os.path.exists(self.fresh))
+        with box_prune.KeyLock(self.root, KEY, timeout=0.5):
+            pass
+        # A box that never says `held` is a failure carrying its stderr.
+        box = self.remote_box()
+        box.script = os.path.join(self.tmp, "no_such_script.py")
+        with self.assertRaises(RuntimeError) as caught:
+            with sync.Hold(box, KEY, out=out):
+                pass
+        self.assertIn("did not take the key's lock", str(caught.exception))
+        self.assertIn("no_such_script.py", str(caught.exception))
+        # A box whose prune fails is reported, with the lock released.
+        _touch(self.root, "key={0}/package=cpp/results/broken.parquet".format(KEY), "not parquet")
+        with self.assertRaises(RuntimeError) as caught:
+            with sync.Hold(self.remote_box(), KEY, out=out) as hold:
+                hold.prune()
+        self.assertIn("prune failed", str(caught.exception))
+        with box_prune.KeyLock(self.root, KEY, timeout=0.5):
+            pass
+
 
 @unittest.skipUnless(shutil.which("rclone"), "rclone is not installed")
 class RcloneRoundTrip(unittest.TestCase):

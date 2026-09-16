@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--no-lock-clocks] [--clock-tolerance MHZ] [--no-sync]
+"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel (a cubie optimize times the batch and duration cubie sizes itself per kernel, or the line's n at its duration per solve), the watchdog budget the largest.
 --resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
-A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal) unless --no-lock-clocks; it samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler never observed stays NaN).
+A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal, a sampler that dies at once); there is no unlocked run. It samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler did not cover stays NaN).
 The push has the box delete this key's clock logs a day or older that no row on the box names, and drops them and their logs/<run>/ dirs here.
 Exit 0 when every runner finished; 1 on a runner failure, a locked row that throttled or fell more than --clock-tolerance below the lock, or a failed push.
 """
@@ -49,8 +49,8 @@ import trials as trials_mod  # noqa: E402
 from abandon import abandon_after_hard_exit  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
-from clocks import (ClockError, ClockGuard, configure as configure_clocks, driver_version,  # noqa: E402
-                    drifted, load_samples, window_stats)
+from clocks import (TOL_MHZ, ClockError, ClockGuard, configure as configure_clocks,  # noqa: E402
+                    driver_version, drifted, load_samples, window_stats)
 from problems import problem_names  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
@@ -88,8 +88,7 @@ def parse_args(argv):
     p.add_argument("--cooldown", type=int, default=15)
     p.add_argument("--allow-unknown-gpu", action="store_true")
     p.add_argument("--lock-clocks", default="")
-    p.add_argument("--no-lock-clocks", action="store_true")
-    p.add_argument("--clock-tolerance", type=int, default=None)
+    p.add_argument("--clock-tolerance", type=int, default=TOL_MHZ)
     p.add_argument("--no-sync", action="store_true")
     p.add_argument("-h", "--help", action="store_true")
     args = p.parse_args(argv)
@@ -238,23 +237,18 @@ class Run:
         self.clock_lines = []
         self.failures = 0
         self.partials = 0
-        sm = mem = None
-        if not args.no_lock_clocks:
-            try:
-                sm, mem = configure_clocks(self.key, args.lock_clocks)
-            except ClockError as exc:
-                raise SystemExit("Clocks      : " + str(exc))
-        self.clocks = ClockGuard(sm, mem, args.clock_tolerance or 15)
-        if sm:
-            try:
-                self.clocks.lock()
-            except ClockError as exc:
-                raise SystemExit("Clocks      : " + str(exc))
+        # Every run is locked: no target, no elevation or a driver refusal ends it here.
+        try:
+            sm, mem = configure_clocks(self.key, args.lock_clocks)
+            self.clocks = ClockGuard(sm, mem, args.clock_tolerance)
+            self.clocks.lock()
+        except ClockError as exc:
+            raise SystemExit("Clocks      : " + str(exc))
         self.clock_status = self.clocks.status()
         self.driver = driver_version()
         os.environ[store.RUN_ENV] = self.run
         os.environ[store.DRIVER_ENV] = self.driver
-        os.environ[store.CLOCK_LOCK_ENV] = str(sm or 0)
+        os.environ[store.CLOCK_LOCK_ENV] = str(sm)
 
     # ------------------------------------------------------------- plumbing
     def record(self, stage, status, detail, code):
@@ -418,7 +412,10 @@ class Run:
         print("", flush=True)
         print_counts(by_package)
         self.manifest(by_package)
-        self.clocks.start_monitor(self.clocks_csv)
+        try:
+            self.clocks.start_monitor(self.clocks_csv)
+        except ClockError as exc:
+            raise SystemExit("Clocks      : " + str(exc))
         try:
             for index, (package, rows) in enumerate(by_package.items()):
                 if index:

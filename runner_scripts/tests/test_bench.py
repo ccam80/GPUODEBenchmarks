@@ -6,7 +6,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 import numpy as np
@@ -17,6 +20,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 
 import bench  # noqa: E402
+import clocks  # noqa: E402
 import completeness  # noqa: E402
 import cubie_adapter  # noqa: E402
 import launch  # noqa: E402
@@ -446,8 +450,38 @@ class LaunchTests(unittest.TestCase):
                 os.environ["JULIA_PROJECT"] = saved
 
 
+class FakeSampler:
+    """Stands in for the nvidia-smi sampler: a thread writes a 25 Hz log of one SM reading and reason mask until stopped."""
+
+    def __init__(self, sm=2310, reasons=0):
+        self.sm, self.reasons = sm, reasons
+        self.stopped = threading.Event()
+        self.thread = None
+
+    def start_monitor(self, guard, csv_path, sample_ms=40):
+        guard.csv = csv_path
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
+        def write():
+            with open(csv_path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(clocks.HEADER + "\n")
+                while not self.stopped.is_set():
+                    stamp = datetime.now(timezone.utc).strftime(clocks.UTC_STAMP)
+                    handle.write("{0},{1},10251,60,170,100,0x{2:016x}\n".format(stamp, self.sm, self.reasons))
+                    handle.flush()
+                    self.stopped.wait(sample_ms / 1000.0)
+        self.thread = threading.Thread(target=write, daemon=True)
+        self.thread.start()
+        time.sleep(0.1)
+
+    def stop_monitor(self, guard):
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join(5)
+
+
 class HardExitTests(unittest.TestCase):
-    """The runner loop against a fake runner: a hard exit abandons the harder runs of the family and the rest re-runs."""
+    """The runner loop against a fake runner under a fake lock and sampler: a hard exit abandons the harder runs of the family and the rest re-runs; every row records the lock and the clocks its window showed; drift fails the run."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="bench_run_")
@@ -470,8 +504,27 @@ class HardExitTests(unittest.TestCase):
                 if value is not None:
                     os.environ[name] = value
         self.addCleanup(restore)
+        # The card's conf row, the lock and the sampler are faked: no nvidia-smi is driven.
+        self.real_configure = bench.configure_clocks
+        self.real_lock = clocks.ClockGuard.lock
+        self.resets = []
+        self.sampler = FakeSampler()
 
-    def run_bench(self, hung=None, code=3, *argv, lock="--no-lock-clocks"):
+        def lock(guard):
+            guard.locked = True
+            return True
+        for target, name, value in (
+                (bench, "configure_clocks", lambda key, explicit="": ("2310", None)),
+                (clocks.ClockGuard, "lock", lock),
+                (clocks.ClockGuard, "reset", lambda guard: self.resets.append(guard.locked)),
+                (clocks.ClockGuard, "start_monitor",
+                 lambda guard, path, sample_ms=40: self.sampler.start_monitor(guard, path, sample_ms)),
+                (clocks.ClockGuard, "stop_monitor", lambda guard: self.sampler.stop_monitor(guard))):
+            patcher = mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_bench(self, hung=None, code=3, *argv, lock=""):
         args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128",
                                  "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
@@ -501,33 +554,48 @@ class HardExitTests(unittest.TestCase):
         rows = store.Store(self.root).rows()
         self.assertEqual(len(rows), 12)
         self.assertEqual({r["min_ms"] for r in rows}, {1.0})
-        # Every row names the run it was recorded in, unlocked, and the run's clock log sits in the mirror.
+        # Every row names the run it was recorded in and the lock, and the run's clock log sits in the mirror.
         self.assertEqual(run.run, os.path.basename(run.log_dir))
         self.assertTrue(run.run.startswith(KEY + "_"))
         self.assertEqual({r["run"] for r in rows}, {run.run})
-        self.assertEqual({r["clock_lock_mhz"] for r in rows}, {0})
+        self.assertEqual({r["clock_lock_mhz"] for r in rows}, {2310})
         self.assertEqual({r["driver"] for r in rows}, {run.driver})
         self.assertEqual(run.clocks_csv, os.path.join(self.root, "clocks", run.run + ".csv"))
         self.assertNotIn(store.RUN_ENV, {k for k in os.environ if k == "no-such"})
         with open(os.path.join(run.log_dir, "run_manifest.txt")) as handle:
             manifest = handle.read()
         self.assertIn("run=" + run.run + "\n", manifest)
-        self.assertIn("clocks=unlocked\n", manifest)
-        self.assertEqual(len(run.clock_lines), 1)
-        self.assertTrue(run.clock_lines[0].startswith("cpp: "))
-        import clocks
+        self.assertIn("clocks=locked SM=2310\n", manifest)
         self.assertTrue(all(r["timed_start_utc"] <= r["timed_end_utc"] <= r["recorded_utc"] for r in rows))
-        if clocks.load_samples(run.clocks_csv)["t"]:
-            # The monitor sampled, so every row's timing window got its clocks (NaN when the GPU was idle).
-            self.assertTrue(run.clock_lines[0].startswith("cpp: 12 rows annotated"), run.clock_lines[0])
-            self.assertEqual({r["clock_throttled"] is not None for r in rows}, {True})
-        else:
-            self.assertTrue(run.clock_lines[0].startswith("cpp: 0 rows annotated"))
+        # The sampler covered every timing window, so each row carries the clocks it showed.
+        self.assertEqual(run.clock_lines, ["cpp: 12 rows annotated, SM median 2310 MHz, low 2310 MHz, 0 drifted"])
+        self.assertEqual({(r["clock_sm_mhz"], r["clock_sm_min_mhz"], r["clock_throttled"]) for r in rows},
+                         {(2310.0, 2310.0, 0)})
+        # The lock was released once, after the run.
+        self.assertEqual(self.resets, [True])
+
+    def test_a_row_below_the_lock_or_throttled_fails_the_run(self):
+        self.sampler.sm = 2200
+        status, run, calls, summary = self.run_bench()
+        self.assertEqual(status, 1)
+        self.assertEqual(summary, [["cpp", "OK", "-", "0"]])
+        self.assertEqual(run.clock_failures, 1)
+        self.assertEqual(run.clock_lines, ["cpp: 12 rows annotated, SM median 2200 MHz, low 2200 MHz, 12 drifted"])
+        rows = store.Store(self.root).rows()
+        self.assertEqual({r["clock_sm_min_mhz"] for r in rows}, {2200.0})
+        # A window within the tolerance passes; a throttle reason in it fails the run.
+        self.sampler = FakeSampler(sm=2300)
+        status, run, _, _ = self.run_bench()
+        self.assertEqual((status, run.clock_failures), (0, 0))
+        self.sampler = FakeSampler(sm=2310, reasons=0x4)
+        status, run, _, _ = self.run_bench()
+        self.assertEqual((status, run.clock_failures), (1, 1))
+        self.assertTrue(run.clock_lines[0].endswith("12 drifted"), run.clock_lines[0])
 
     def test_the_clock_lock_is_released_when_planning_fails(self):
-        args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8", "--no-lock-clocks",
-                                 "--cooldown", "0"])
+        args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8", "--cooldown", "0"])
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
+        self.assertTrue(run.clocks.locked)
         released = []
         run.clocks.reset = lambda: released.append("reset")
         run.clocks.stop_monitor = lambda: released.append("stop")
@@ -538,22 +606,39 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(released, ["stop", "reset"])
         self.assertEqual(store.Store(self.root).rows(), [])
 
+    def test_a_sampler_that_dies_at_once_ends_the_run_and_releases_the_lock(self):
+        with mock.patch.object(clocks.ClockGuard, "start_monitor",
+                               side_effect=clocks.ClockError("The clock sampler (nvidia-smi -lms) died at once")):
+            with self.assertRaises(SystemExit) as caught:
+                self.run_bench()
+        self.assertIn("sampler", str(caught.exception))
+        self.assertEqual(self.resets, [True])
+        self.assertEqual(store.Store(self.root).rows(), [])
+
     def test_a_run_that_cannot_lock_refuses_to_start(self):
-        with self.assertRaises(SystemExit) as caught:
-            self.run_bench(lock="")
+        # There is no flag that runs unlocked.
+        with self.assertRaises(SystemExit):
+            bench.parse_args(["run", "--set", "perf", "--no-lock-clocks"])
+        self.assertNotIn("--no-lock-clocks", bench.__doc__)
+        with mock.patch.object(bench, "configure_clocks", self.real_configure):
+            with self.assertRaises(SystemExit) as caught:
+                self.run_bench()
         self.assertIn("No clock target for 'RTX-4070-SUPER'", str(caught.exception))
+        self.assertNotIn("--no-lock-clocks", str(caught.exception))
         self.assertNotIn(store.RUN_ENV, os.environ)
         self.assertEqual(store.Store(self.root).rows(), [])
-        import clocks
-        original = clocks.is_admin
-        clocks.is_admin = lambda: False
-        self.addCleanup(setattr, clocks, "is_admin", original)
-        supported = clocks.supported
-        clocks.supported = lambda kind, mhz: True
-        self.addCleanup(setattr, clocks, "supported", supported)
-        with self.assertRaises(SystemExit) as caught:
-            self.run_bench(lock="--lock-clocks=2310")
+        self.assertEqual(self.resets, [])
+        # An explicit target from a shell that is not elevated refuses the same way.
+        for patcher in (mock.patch.object(clocks, "is_admin", lambda: False),
+                        mock.patch.object(clocks, "supported", lambda kind, mhz: True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with mock.patch.object(bench, "configure_clocks", self.real_configure):
+            with mock.patch.object(clocks.ClockGuard, "lock", self.real_lock):
+                with self.assertRaises(SystemExit) as caught:
+                    self.run_bench(lock="--lock-clocks=2310")
         self.assertIn("elevated", str(caught.exception))
+        self.assertEqual(self.resets, [])
 
     def test_a_hard_exit_abandons_the_harder_runs_and_reruns_the_rest(self):
         # The cash-karp-54 build runs first; hang it at n = 32.

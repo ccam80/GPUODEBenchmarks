@@ -143,8 +143,8 @@ def configure(dataset_key, explicit="", conf=CLOCK_CONF):
     if not sm:
         raise ClockError(
             "No clock target for '{0}' in {1} and none given. Measure one with "
-            "runner_scripts/calibrate/calibrate_clocks.py (it writes the row), pass "
-            "--lock-clocks SM[,MEM], or run unlocked with --no-lock-clocks.".format(gpu, conf))
+            "runner_scripts/calibrate/calibrate_clocks.py (it writes the row) or pass "
+            "--lock-clocks SM[,MEM]; a run never times unlocked.".format(gpu, conf))
     if not supported("gr", sm):
         raise ClockError("SM clock {0} MHz is not a supported clock on this GPU.".format(sm))
     if mem and not supported("mem", mem):
@@ -170,8 +170,8 @@ class ClockGuard:
         if not is_admin():
             raise ClockError(
                 "Not an elevated shell, so the clocks cannot be locked. Run from an "
-                "Administrator console (or with passwordless sudo nvidia-smi), or run "
-                "unlocked with --no-lock-clocks.")
+                "Administrator console (or with passwordless sudo nvidia-smi); a run "
+                "never times unlocked.")
         self.pm_restore = _smi(["--query-gpu=persistence_mode",
                                 "--format=csv,noheader"])[1].strip()
         if not _privileged(["-pm", "1"])[0]:
@@ -205,7 +205,7 @@ class ClockGuard:
             _privileged(["-pm", "0"])
 
     def start_monitor(self, csv_path, sample_ms=SAMPLE_MS):
-        """Begin sampling into csv_path with UTC stamps; False when the sampler dies at once."""
+        """Begin sampling into csv_path with UTC stamps; ClockError when the sampler dies at once, since no row could then record its clocks."""
         self.csv = csv_path
         os.makedirs(os.path.dirname(os.path.abspath(csv_path)), exist_ok=True)
         try:
@@ -222,11 +222,9 @@ class ClockGuard:
             self.reader.start()
         time.sleep(1)
         if self.monitor is None or self.monitor.poll() is not None:
-            print("Clock monitor died immediately; the rows will carry no clock readings.")
             self.stop_monitor()
-            self.monitor = None
-            return False
-        return True
+            raise ClockError("The clock sampler (nvidia-smi -lms) died at once; the rows would carry "
+                             "no clock readings.")
 
     def stop_monitor(self):
         if self.monitor is not None:
@@ -318,20 +316,22 @@ def load_samples(csv_path):
 
 
 def window_stats(samples, start, end, max_gap_s=COVERAGE_GAP_S):
-    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side when that sample lies within max_gap_s of the edge; the SM statistics are over busy samples alone (NaN with none); None when no sample lies in the window and it is not bracketed within max_gap_s on both sides, so an interval the sampler never observed stays unannotated."""
+    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side when that sample lies within max_gap_s of the edge; the SM statistics are over busy samples alone (NaN with none); None when the selected samples do not cover the window, that is when either edge is more than max_gap_s from its nearest selected sample or two consecutive selected samples are more than max_gap_s apart, so an interval the sampler never observed, stopped observing or skipped stays unannotated."""
     times = samples["t"]
     if not times:
         return None
     first = bisect.bisect_left(times, start)       # the first sample at or after start
     last = bisect.bisect_right(times, end) - 1     # the last sample at or before end
-    before = first - 1 if first > 0 and start - times[first - 1] <= max_gap_s else None
-    after = last + 1 if last + 1 < len(times) and times[last + 1] - end <= max_gap_s else None
-    if last < first and (before is None or after is None):
+    if first > 0 and start - times[first - 1] <= max_gap_s:
+        first -= 1
+    if last + 1 < len(times) and times[last + 1] - end <= max_gap_s:
+        last += 1
+    if last < first:
         return None
-    if before is not None:
-        first = before
-    if after is not None:
-        last = after
+    # Coverage: from start through every selected sample to end, no step wider than the gap.
+    edges = [start] + times[first:last + 1] + [end]
+    if any(later - earlier > max_gap_s for earlier, later in zip(edges, edges[1:])):
+        return None
     busy = [samples["sm"][i] for i in range(first, last + 1)
             if not samples["reasons"][i] & IDLE_BIT]
     throttled = sum(1 for i in range(first, last + 1) if samples["reasons"][i] & BAD_BITS)

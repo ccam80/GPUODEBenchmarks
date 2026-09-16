@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -94,21 +95,45 @@ class Windows(unittest.TestCase):
         self.assertIsNone(clocks.window_stats(samples, self.at(3600.0), self.at(3601.0)))
         self.assertIsNone(clocks.window_stats(samples, self.at(5.0), self.at(6.0)))
         self.assertIsNone(clocks.window_stats(samples, self.at(-6.0), self.at(-5.0)))
-        # A window just past the last sample, within the coverage gap, still counts its neighbour.
+        # A window ending within the coverage gap of the last sample is covered, on or past that sample.
         stats = clocks.window_stats(samples, self.at(0.1), self.at(0.5))
         self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
-        self.assertIsNone(clocks.window_stats(samples, self.at(0.11), self.at(0.5)))
+        stats = clocks.window_stats(samples, self.at(0.11), self.at(0.5))
+        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2500.0, 2500.0))
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.11), self.at(1.2)))
         # No sample inside: a neighbour within the gap is needed on each side.
         samples = self.log([(0.0, 2400, 0), (10.0, 2500, 0)])
         self.assertIsNone(clocks.window_stats(samples, self.at(4.0), self.at(5.0)))
-        self.assertIsNone(clocks.window_stats(samples, self.at(0.5), self.at(0.6)))
-        self.assertEqual(clocks.window_stats(samples, self.at(0.0), self.at(10.0))["clock_sm_mhz"], 2450.0)
-        stats = clocks.window_stats(samples, self.at(0.5), self.at(9.5))
-        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
-        self.assertIsNone(clocks.window_stats(samples, self.at(1.5), self.at(9.5)))
-        # With a sample inside, a neighbour beyond the gap is left out and one within it counted.
-        self.assertEqual(clocks.window_stats(samples, self.at(-0.5), self.at(5.0))["clock_sm_mhz"], 2400.0)
-        self.assertEqual(clocks.window_stats(samples, self.at(-0.5), self.at(9.5))["clock_sm_mhz"], 2450.0)
+        self.assertEqual(clocks.window_stats(samples, self.at(0.5), self.at(0.6))["clock_sm_mhz"], 2400.0)
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.5), self.at(1.1)))
+
+    def test_a_sampler_that_stops_during_the_batch_leaves_it_unannotated(self):
+        # Two samples at the start, then the sampler died: the batch's end is 600 s past the last one.
+        samples = self.log([(0.0, 2400, 0), (0.04, 2400, 0)])
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.0), self.at(600.0)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.0), self.at(1.05)))
+        stats = clocks.window_stats(samples, self.at(0.0), self.at(1.0))
+        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"], stats["clock_throttled"]),
+                         (2400.0, 2400.0, 0))
+        # A sampler that started late leaves the batch's start uncovered the same way.
+        samples = self.log([(599.96, 2400, 0), (600.0, 2400, 0)])
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.0), self.at(600.0)))
+
+    def test_a_gap_in_the_log_wider_than_the_tolerance_leaves_the_batch_unannotated(self):
+        # Samples bracket the batch within the gap on both sides, with nothing observed between them.
+        samples = self.log([(0.0, 2400, 0), (600.0, 2400, 0)])
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.5), self.at(599.5)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.0), self.at(600.0)))
+        # A hole in an otherwise steady log leaves a batch spanning it unannotated; one beside it is covered.
+        steady = [(t / 25.0, 2400, 0) for t in range(0, 50)] + [(t / 25.0, 2400, 0) for t in range(100, 150)]
+        samples = self.log(steady)
+        self.assertIsNone(clocks.window_stats(samples, self.at(1.5), self.at(4.5)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(1.0), self.at(5.0)))
+        self.assertEqual(clocks.window_stats(samples, self.at(0.5), self.at(1.5))["clock_sm_mhz"], 2400.0)
+        self.assertEqual(clocks.window_stats(samples, self.at(4.5), self.at(5.5))["clock_sm_mhz"], 2400.0)
+        # A hole no wider than the tolerance is covered.
+        samples = self.log([(0.0, 2400, 0), (1.0, 2500, 0), (2.0, 2600, 0)])
+        self.assertEqual(clocks.window_stats(samples, self.at(0.0), self.at(2.0))["clock_sm_mhz"], 2500.0)
 
     def test_idle_samples_alone_give_nan_clocks_and_an_empty_log_gives_none(self):
         samples = self.log([(0.0, 210, 1), (0.1, 210, 1)])
@@ -185,7 +210,9 @@ class ConfTable(unittest.TestCase):
         with self.assertRaises(clocks.ClockError) as caught:
             clocks.configure("windows_RTX-4070-SUPER", conf=self.conf)
         self.assertIn("RTX-4070-SUPER", str(caught.exception))
-        self.assertIn("--no-lock-clocks", str(caught.exception))
+        self.assertIn("--lock-clocks SM[,MEM]", str(caught.exception))
+        # There is no unlocked run to point at.
+        self.assertNotIn("--no-lock-clocks", str(caught.exception))
         with self.assertRaises(clocks.ClockError):
             clocks.configure("windows_RTX-4070-SUPER", conf=os.path.join(self.tmp, "none"))
 
@@ -211,6 +238,27 @@ class ConfTable(unittest.TestCase):
         self.assertFalse(guard.locked)
         self.assertEqual(guard.status(), "unlocked")
         self.assertFalse(clocks.ClockGuard(None, None).lock())
+
+    def test_a_sampler_that_dies_at_once_is_a_clock_error(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        guard = clocks.ClockGuard("1470", None)
+        original = clocks.subprocess.Popen
+        clocks.subprocess.Popen = mock.Mock(side_effect=OSError("no nvidia-smi"))
+        self.addCleanup(setattr, clocks.subprocess, "Popen", original)
+        with self.assertRaises(clocks.ClockError) as caught:
+            guard.start_monitor(os.path.join(tmp, "run.csv"), sample_ms=40)
+        self.assertIn("sampler", str(caught.exception))
+        self.assertIsNone(guard.monitor)
+        # A sampler that exits within its first second is the same refusal.
+        clocks.subprocess.Popen = original
+        guard = clocks.ClockGuard("1470", None)
+        with mock.patch.object(clocks.subprocess, "Popen",
+                               return_value=mock.Mock(stdout=iter([]), poll=lambda: 1, kill=lambda: None,
+                                                      wait=lambda *_: 1)):
+            with self.assertRaises(clocks.ClockError):
+                guard.start_monitor(os.path.join(tmp, "run.csv"))
+        self.assertIsNone(guard.monitor)
 
 
 class CalibratorTable(unittest.TestCase):

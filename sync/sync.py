@@ -168,7 +168,7 @@ class Hold:
         self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
         if self.proc.stdout.readline().strip() != "held":
-            self.proc.stdin.close()
+            # communicate closes stdin itself; closing it first makes communicate raise.
             _, err = self.proc.communicate()
             raise RuntimeError("the box did not take the key's lock: " + err.strip())
         return self
@@ -178,9 +178,7 @@ class Hold:
         if self.box.local:
             days = float(self.flags[1]) if self.flags else box_prune.MIN_AGE_S / 86400.0
             return box_prune.prune(self.box.root, self.key, days * 86400.0, dry_run=dry_run)
-        self.proc.stdin.write("prune" + (" --dry-run" if dry_run else "") + "\n")
-        self.proc.stdin.close()
-        out, err = self.proc.communicate()
+        out, err = self.proc.communicate("prune" + (" --dry-run" if dry_run else "") + "\n")
         names = [line.strip() for line in out.splitlines() if line.strip()]
         if self.proc.returncode != 0 or not names or names[-1] != "released":
             raise RuntimeError("the box's prune failed: " + (out + err).strip())

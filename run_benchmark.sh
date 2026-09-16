@@ -8,4 +8,4 @@ while [ $# -gt 0 ]; do
         *) PASS+=("$1"); shift;;
     esac
 done
-exec python3 ./bench.py --no-lock-clocks "${PASS[@]}"
+exec python3 ./bench.py "${PASS[@]}"
