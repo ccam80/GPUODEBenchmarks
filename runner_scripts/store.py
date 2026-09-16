@@ -528,7 +528,7 @@ class Store:
             con.close()
 
     def annotate(self, run, stats, package=None, key=None):
-        """Fill the clock columns of every row recorded in `run`: stats(start, end) gives {clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the row's window, recorded_utc back by the sum of its samples, or None to leave the row; package and key narrow the files touched. Returns the rows annotated."""
+        """Fill the clock columns of every timed row recorded in `run`: stats(start, end) gives {clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the row's window, recorded_utc back by the sum of its samples, or None to leave the row; a row without samples is left; package and key narrow the files touched. Returns the rows annotated."""
         done = 0
         for path in self.results_files():
             if package and os.sep + "package=" + package + os.sep not in path.replace("/", os.sep):
@@ -539,10 +539,10 @@ class Store:
                 rows = self._read_results(path)
                 changed = False
                 for row in rows:
-                    if row.get("run") != run:
+                    if row.get("run") != run or not row["samples_ms"]:
                         continue
                     end = _utc(row["recorded_utc"]).timestamp()
-                    start = end - sum(row["samples_ms"] or []) / 1000.0
+                    start = end - sum(row["samples_ms"]) / 1000.0
                     window = stats(start, end)
                     if window is None:
                         continue

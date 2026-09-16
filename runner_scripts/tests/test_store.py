@@ -665,18 +665,20 @@ class RunContextTests(StoreCase):
             return None
 
         self.assertEqual(self.store.annotate(run, stats, package="cubie", key=KEY), 1)
-        self.assertEqual(sorted(e - s for s, e in windows), [0.0, 1.0])
-        self.assertEqual(sorted(e for _, e in windows), [end.timestamp()] * 2)
+        # The row without samples is never windowed; it keeps its run all the same.
+        self.assertEqual(windows, [(end.timestamp() - 1.0, end.timestamp())])
         annotated = self.store.rows(run=run, n=8)[0]
         self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
                          (2445.0, 2430.0, 1))
-        untouched = self.store.rows(run=run, n=32)[0]
-        self.assertTrue(math.isnan(untouched["clock_sm_mhz"]))
-        self.assertIsNone(untouched["clock_throttled"])
+        untimed = self.store.rows(run=run, n=32)[0]
+        self.assertTrue(math.isnan(untimed["clock_sm_mhz"]))
+        self.assertIsNone(untimed["clock_throttled"])
+        self.assertEqual(untimed["run"], run)
         self.assertTrue(math.isnan(self.store.rows(run="another")[0]["clock_sm_mhz"]))
         self.assertTrue(math.isnan(self.store.rows(package="jax")[0]["clock_sm_mhz"]))
         self.assertEqual(self.store.annotate(run, lambda s, e: {
-            "clock_sm_mhz": 1.0, "clock_sm_min_mhz": 1.0, "clock_throttled": 0}), 3)
+            "clock_sm_mhz": 1.0, "clock_sm_min_mhz": 1.0, "clock_throttled": 0}), 2)
+        self.assertTrue(math.isnan(self.store.rows(run=run, n=32)[0]["clock_sm_mhz"]))
         self.assertEqual(self.store.rows(package="jax")[0]["clock_sm_mhz"], 1.0)
         self.assertEqual(self.store.rows(run=run, n=8)[0]["clock_sm_mhz"], 1.0)
 
