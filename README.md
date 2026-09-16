@@ -45,9 +45,10 @@ a point several set files declare runs under one contract whichever sets
 are named: it builds cold, keeps finals, optimizes and times each
 transfers mode when any declaration asks; a package every declaration
 lists under `[set.untimed]` runs each line once with no warm-up. A cubie
-optimize runs once per compiled kernel (build plus stepping) for the
-packages a set's `[set.optimize]` names, timing the batch and duration
-cubie's own `optimize` sizes.
+optimize runs once per build and stepping (once per build across dt for
+an explicit fixed-step algorithm) for the packages a set's
+`[set.optimize]` names, timing the batch and duration cubie's own
+`optimize` sizes.
 Lines run
 easiest first (states, then n, then step and tolerance loose to tight); a
 timeout or out-of-memory run abandons every harder run of its family (same

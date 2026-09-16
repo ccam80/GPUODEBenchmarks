@@ -1,9 +1,11 @@
 """Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog, timed), written in difficulty order one JSON object per line."""
 
+import functools
 import json
 import math
 import os
 
+from algorithms import algorithm_facts
 from protocol import WATCHDOG_SECONDS
 from store import TRIAL_FIELDS, trial_id
 
@@ -11,7 +13,7 @@ TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimiz
 TRANSFERS_ORDER = ("both", "none")
 # The fields one package build serves; a line whose values differ from the last needs a new build.
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
-# The fields one compiled kernel serves: the build plus every stepping value.
+# The fields one optimize serves: the build plus every stepping value, dt aside on an explicit fixed-step line.
 KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
@@ -22,10 +24,21 @@ def build_key(trial):
     return tuple(trial[f] for f in BUILD_FIELDS)
 
 
+@functools.lru_cache(maxsize=None)
+def _family(algorithm):
+    return algorithm_facts(algorithm)["family"]
+
+
+def shares_dt_optimize(trial):
+    """True for an explicit fixed-step line: one optimize serves every dt of its build."""
+    return trial["controller"] == "fixed" and _family(trial["algorithm"]) == "erk"
+
+
 def kernel_key(trial):
-    """The kernel a trial runs on, as a tuple of KERNEL_FIELDS with NaN as None."""
-    return tuple(None if isinstance(trial[f], float) and math.isnan(trial[f]) else trial[f]
-                 for f in KERNEL_FIELDS)
+    """The optimize a trial shares, as a tuple of KERNEL_FIELDS with NaN as None; dt is None where shares_dt_optimize."""
+    shared = shares_dt_optimize(trial)
+    return tuple(None if (shared and f == "dt") or (isinstance(trial[f], float) and math.isnan(trial[f]))
+                 else trial[f] for f in KERNEL_FIELDS)
 
 
 def family_key(trial):

@@ -380,7 +380,7 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual({t["optimize"] for t in self.kept(perf).values()}, {True})
 
     def test_each_kernel_has_its_own_optimize_record(self):
-        golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
+        golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "backwards_euler",
                            "--dt", "0.5,0.25")["cubie"]
         self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, True), (0.25, True)])
         for trial in golden:
@@ -392,6 +392,17 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(list(self.kept(golden, resume=True)), [golden[1]["trial_id"]])
         self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume")),
                          {"optimize:absent": 1})
+
+    def test_an_explicit_fixed_step_build_shares_one_optimize_record_across_dt(self):
+        golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
+                           "--dt", "0.5,0.25")["cubie"]
+        for trial in golden:
+            spec = {f: trial[f] for f in store.TRIAL_FIELDS}
+            relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
+            self.record(trial, "none", finals=relative, recorded_utc=self.day(2))
+        self.optimized(golden[0])
+        self.assertEqual(self.kept(golden, resume=True), {})
+        self.assertEqual(trials.optimizes_of(golden), 1)
 
     def test_a_recorded_row_stands_whatever_was_optimized_or_changed_after_it(self):
         # Legacy per-solve records with their rows: the per-solve rows are dropped, the timings stay.

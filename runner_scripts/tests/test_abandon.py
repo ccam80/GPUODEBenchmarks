@@ -104,7 +104,7 @@ class AbandonTests(unittest.TestCase):
         self.assertEqual(len(recorded), 1)
         self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["stepping"].split(";")[0],
                           recorded[0]["settings"]),
-                         ("timeout", "8", "dt=0.0009765625", ""))
+                         ("timeout", "8", "dt=", ""))
         self.assertNotIn("per", recorded[0])
         # Only the later lines of the hung kernel lose their optimize; euler and dt = 0.5 precede it in the file.
         trial_list = trials.build_trials([spec(8, True), spec(32, True), spec(8, True, dt=0.5),
