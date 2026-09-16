@@ -10,9 +10,10 @@ import sys
 import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -94,7 +95,8 @@ class HashTests(unittest.TestCase):
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
             "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
             "errored_pct", "build_s", "reason", "finals", "package_version",
-            "suite_rev", "recorded_utc"])
+            "suite_rev", "run", "driver", "clock_lock_mhz", "clock_sm_mhz",
+            "clock_sm_min_mhz", "clock_throttled", "recorded_utc"])
         for absent in ("error", "reference"):
             self.assertNotIn(absent, store.COLUMNS)
 
@@ -598,6 +600,131 @@ class JuliaShimTests(unittest.TestCase):
                               cwd=root, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("results.jl shim", proc.stdout)
+
+
+class RunContextTests(StoreCase):
+    """The run, driver and lock columns come from bench.py's environment; annotate fills the clock columns from a window function; a file written before the columns existed reads beside a new one."""
+
+    ENV = (store.RUN_ENV, store.DRIVER_ENV, store.CLOCK_LOCK_ENV)
+
+    def setUp(self):
+        super().setUp()
+        saved = {name: os.environ.pop(name, None) for name in self.ENV}
+
+        def restore():
+            for name, value in saved.items():
+                os.environ.pop(name, None)
+                if value is not None:
+                    os.environ[name] = value
+        self.addCleanup(restore)
+
+    def test_outside_a_run_the_context_is_empty_and_the_lock_unknown(self):
+        standing = self.store.record(row())
+        self.assertEqual((standing["run"], standing["driver"]), ("", ""))
+        self.assertIsNone(standing["clock_lock_mhz"])
+        self.assertIsNone(standing["clock_throttled"])
+        self.assertTrue(math.isnan(standing["clock_sm_mhz"]))
+        self.assertTrue(math.isnan(standing["clock_sm_min_mhz"]))
+        stored = pq.read_table(self.results_file()).to_pylist()[0]
+        self.assertIsNone(stored["clock_lock_mhz"])
+        self.assertEqual(stored["run"], "")
+
+    def test_the_environment_fills_the_context_and_explicit_fields_win(self):
+        os.environ[store.RUN_ENV] = KEY + "_20260916T030000Z"
+        os.environ[store.DRIVER_ENV] = "610.62"
+        os.environ[store.CLOCK_LOCK_ENV] = "2310"
+        standing = self.store.record(row())
+        self.assertEqual(standing["run"], KEY + "_20260916T030000Z")
+        self.assertEqual(standing["driver"], "610.62")
+        self.assertEqual(standing["clock_lock_mhz"], 2310)
+        os.environ[store.CLOCK_LOCK_ENV] = "0"
+        self.assertEqual(self.store.record(row(n=32))["clock_lock_mhz"], 0)
+        explicit = self.store.record(row(n=64, run="other", driver="1.0", clock_lock_mhz=1470,
+                                         clock_sm_mhz=1470.0, clock_sm_min_mhz=1455.0, clock_throttled=2))
+        self.assertEqual((explicit["run"], explicit["driver"], explicit["clock_lock_mhz"]),
+                         ("other", "1.0", 1470))
+        self.assertEqual((explicit["clock_sm_mhz"], explicit["clock_sm_min_mhz"], explicit["clock_throttled"]),
+                         (1470.0, 1455.0, 2))
+        self.assertEqual({r["run"] for r in self.store.rows(run="other")}, {"other"})
+        with self.assertRaises(ValueError):
+            self.store.record(row(n=128, clock_lock_mhz="2310.5"))
+
+    def test_annotate_fills_the_rows_of_one_run_from_their_windows(self):
+        run = KEY + "_20260916T030000Z"
+        end = datetime(2026, 9, 16, 3, 10, 0, tzinfo=timezone.utc)
+        self.store.record(row(run=run, samples_ms=[500.0, 250.0, 250.0], recorded_utc=end))
+        self.store.record(row(run=run, n=32, transfers="none", samples_ms=[], recorded_utc=end))
+        self.store.record(row(run="another", n=64, samples_ms=[100.0], recorded_utc=end))
+        self.store.record(row(run=run, n=128, package="jax", samples_ms=[100.0], recorded_utc=end))
+        windows = []
+
+        def stats(start, end_s):
+            windows.append((start, end_s))
+            if end_s - start > 0.5:
+                return {"clock_sm_mhz": 2445.0, "clock_sm_min_mhz": 2430.0, "clock_throttled": 1}
+            return None
+
+        self.assertEqual(self.store.annotate(run, stats, package="cubie", key=KEY), 1)
+        self.assertEqual(sorted(e - s for s, e in windows), [0.0, 1.0])
+        self.assertEqual(sorted(e for _, e in windows), [end.timestamp()] * 2)
+        annotated = self.store.rows(run=run, n=8)[0]
+        self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
+                         (2445.0, 2430.0, 1))
+        untouched = self.store.rows(run=run, n=32)[0]
+        self.assertTrue(math.isnan(untouched["clock_sm_mhz"]))
+        self.assertIsNone(untouched["clock_throttled"])
+        self.assertTrue(math.isnan(self.store.rows(run="another")[0]["clock_sm_mhz"]))
+        self.assertTrue(math.isnan(self.store.rows(package="jax")[0]["clock_sm_mhz"]))
+        self.assertEqual(self.store.annotate(run, lambda s, e: {
+            "clock_sm_mhz": 1.0, "clock_sm_min_mhz": 1.0, "clock_throttled": 0}), 3)
+        self.assertEqual(self.store.rows(package="jax")[0]["clock_sm_mhz"], 1.0)
+        self.assertEqual(self.store.rows(run=run, n=8)[0]["clock_sm_mhz"], 1.0)
+
+    def test_annotate_cli_reads_a_clock_log(self):
+        import clocks
+        run = KEY + "_20260916T030000Z"
+        end = datetime(2026, 9, 16, 3, 10, 0, tzinfo=timezone.utc)
+        self.store.record(row(run=run, samples_ms=[100.0, 100.0], recorded_utc=end))
+        log = os.path.join(self.tmp, "clocks.csv")
+        with open(log, "w") as handle:
+            handle.write(clocks.HEADER + "\n")
+            for offset, sm, reasons in ((-0.3, 2400, 0), (-0.15, 2500, 0), (-0.05, 2600, 4), (0.05, 210, 1)):
+                stamp = end + timedelta(seconds=offset)
+                handle.write("{0},{1},10251,60,170,100,0x{2:016x}\n".format(
+                    stamp.strftime(clocks.UTC_STAMP), sm, reasons))
+        proc = subprocess.run([sys.executable, STORE_PY, "--root", self.tmp, "annotate", run, log],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "1")
+        annotated = self.store.rows(run=run)[0]
+        self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
+                         (2500.0, 2400.0, 1))
+
+    def test_a_file_from_before_the_columns_reads_beside_a_new_one_and_upgrades_on_rewrite(self):
+        self.store.record(row())
+        old_path = self.results_file(algorithm="euler")
+        table = pq.read_table(self.results_file())
+        names = [n for n in store.COLUMNS if n not in ("run", "driver", "clock_lock_mhz", "clock_sm_mhz",
+                                                        "clock_sm_min_mhz", "clock_throttled")]
+        old = table.select(names).to_pylist()
+        old[0]["algorithm"] = "euler"
+        ids = store.ids(old[0])
+        old[0].update(ids)
+        pq.write_table(pa.Table.from_pylist(old, schema=pa.schema([table.schema.field(n) for n in names])),
+                       old_path)
+        rows = self.store.rows()
+        self.assertEqual(len(rows), 2)
+        legacy = [r for r in rows if r["algorithm"] == "euler"][0]
+        self.assertIsNone(legacy["run"])
+        self.assertIsNone(legacy["clock_lock_mhz"])
+        self.assertIsNone(legacy["clock_sm_mhz"])
+        self.assertEqual(self.store.status(ids["run_id"]), "nan")
+        self.store.record(row(algorithm="euler", n=32))
+        upgraded = pq.read_table(old_path)
+        self.assertEqual(upgraded.schema, store.SCHEMA)
+        legacy = [r for r in upgraded.to_pylist() if r["n"] == 8][0]
+        self.assertIsNone(legacy["run"])
+        self.assertTrue(math.isnan(legacy["clock_sm_mhz"]))
 
 
 class SuiteRevTests(unittest.TestCase):

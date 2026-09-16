@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id. CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json>."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports) and the clocks its window of that run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
 
 import argparse
 import csv
@@ -55,11 +55,19 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
     ("samples_ms", pa.list_(pa.float64())), ("errored_pct", pa.float64()),
     ("build_s", pa.float64()), ("reason", pa.string()), ("finals", pa.string()),
     ("package_version", pa.string()), ("suite_rev", pa.string()),
+    ("run", pa.string()), ("driver", pa.string()), ("clock_lock_mhz", pa.int64()),
+    ("clock_sm_mhz", pa.float64()), ("clock_sm_min_mhz", pa.float64()),
+    ("clock_throttled", pa.int64()),
     ("recorded_utc", pa.timestamp("us", tz="UTC")),
 ])
 COLUMNS = tuple(SCHEMA.names)
-FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s")
+FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s", "clock_sm_mhz", "clock_sm_min_mhz")
 TEXT_VALUE_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
+# The run context every writer inherits from bench.py; a row outside a run has "" and null.
+RUN_ENV = "GPUODE_RUN"
+DRIVER_ENV = "GPUODE_DRIVER"
+CLOCK_LOCK_ENV = "GPUODE_CLOCK_LOCK_MHZ"
+CLOCK_COLUMNS = ("clock_sm_mhz", "clock_sm_min_mhz", "clock_throttled")
 
 NAN = float("nan")
 HASH_HEX = 16
@@ -217,6 +225,14 @@ def make_row(**fields):
     row["samples_ms"] = [float(s) for s in samples]
     for field in TEXT_VALUE_COLUMNS:
         row[field] = _text(fields.get(field))
+    row["run"] = _text(fields.get("run")) or os.environ.get(RUN_ENV, "")
+    row["driver"] = _text(fields.get("driver")) or os.environ.get(DRIVER_ENV, "")
+    lock = fields.get("clock_lock_mhz")
+    if lock is None:
+        lock = os.environ.get(CLOCK_LOCK_ENV) or None
+    row["clock_lock_mhz"] = None if lock is None else _int("clock_lock_mhz", lock)
+    throttled = fields.get("clock_throttled")
+    row["clock_throttled"] = None if throttled is None else _int("clock_throttled", throttled)
     row["recorded_utc"] = _utc(fields.get("recorded_utc"))
     return {name: row[name] for name in COLUMNS}
 
@@ -351,9 +367,15 @@ class Store:
 
     @staticmethod
     def _read_results(path):
+        """The rows of a results file; a file written before a column existed reads it as null (NaN for a float)."""
         if not os.path.isfile(path):
             return []
-        return pq.read_table(path).to_pylist()
+        rows = pq.read_table(path).to_pylist()
+        for row in rows:
+            for name in COLUMNS:
+                if name not in row:
+                    row[name] = NAN if name in FLOAT_VALUE_COLUMNS else None
+        return rows
 
     @staticmethod
     def _write_results(path, rows):
@@ -465,9 +487,10 @@ class Store:
             pattern = os.path.join(os.path.abspath(self.root), "key=*",
                                    "package=*", "results", "*.parquet")
             pattern = pattern.replace("\\", "/").replace("'", "''")
+            # union_by_name: a file written before a column existed reads it as NULL.
             con.execute(
                 "CREATE VIEW results AS SELECT * FROM read_parquet('{0}', "
-                "hive_partitioning = true, "
+                "hive_partitioning = true, union_by_name = true, "
                 "hive_types = {{'key': VARCHAR, 'package': VARCHAR}})".format(pattern))
         else:
             con.register("empty_results", SCHEMA.empty_table())
@@ -503,6 +526,33 @@ class Store:
             return con.execute(sql, params).to_arrow_table().to_pylist()
         finally:
             con.close()
+
+    def annotate(self, run, stats, package=None, key=None):
+        """Fill the clock columns of every row recorded in `run`: stats(start, end) gives {clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the row's window, recorded_utc back by the sum of its samples, or None to leave the row; package and key narrow the files touched. Returns the rows annotated."""
+        done = 0
+        for path in self.results_files():
+            if package and os.sep + "package=" + package + os.sep not in path.replace("/", os.sep):
+                continue
+            if key and os.sep + "key=" + key + os.sep not in path.replace("/", os.sep):
+                continue
+            with _Lock(path):
+                rows = self._read_results(path)
+                changed = False
+                for row in rows:
+                    if row.get("run") != run:
+                        continue
+                    end = _utc(row["recorded_utc"]).timestamp()
+                    start = end - sum(row["samples_ms"] or []) / 1000.0
+                    window = stats(start, end)
+                    if window is None:
+                        continue
+                    for name in CLOCK_COLUMNS:
+                        row[name] = window[name]
+                    changed = True
+                    done += 1
+                if changed:
+                    self._write_results(path, rows)
+        return done
 
     def clear(self, **eq_filters):
         """Drop every row matching the equality filters; returns the count dropped."""
@@ -580,6 +630,11 @@ def _cli(argv):
     clear.add_argument("filters")
     hash_ = commands.add_parser("hash")
     hash_.add_argument("spec")
+    annotate = commands.add_parser("annotate")
+    annotate.add_argument("run")
+    annotate.add_argument("clocks")
+    annotate.add_argument("--package", default=None)
+    annotate.add_argument("--key", default=None)
     args = parser.parse_args(argv)
     store = Store(args.root)
 
@@ -610,6 +665,12 @@ def _cli(argv):
         return 0
     if args.command == "hash":
         print(json.dumps(ids(_read_json(args.spec))))
+        return 0
+    if args.command == "annotate":
+        import clocks
+        samples = clocks.load_samples(args.clocks)
+        print(store.annotate(args.run, lambda start, end: clocks.window_stats(samples, start, end),
+                             package=args.package, key=args.key))
         return 0
     return 1
 

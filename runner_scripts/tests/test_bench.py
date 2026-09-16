@@ -455,10 +455,20 @@ class HardExitTests(unittest.TestCase):
         saved = launch.RUNNERS["cpp"]
         launch.RUNNERS["cpp"] = lambda: [sys.executable, self.runner]
         self.addCleanup(launch.RUNNERS.__setitem__, "cpp", saved)
+        # A Run exports its context into the environment; the tests leave none behind.
+        context = {name: os.environ.pop(name, None)
+                   for name in (store.RUN_ENV, store.DRIVER_ENV, store.CLOCK_LOCK_ENV)}
 
-    def run_bench(self, hung=None, code=3, *argv):
+        def restore():
+            for name, value in context.items():
+                os.environ.pop(name, None)
+                if value is not None:
+                    os.environ[name] = value
+        self.addCleanup(restore)
+
+    def run_bench(self, hung=None, code=3, *argv, lock="--no-lock-clocks"):
         args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128",
-                                 "--no-lock-clocks", "--cooldown", "0"] + list(argv))
+                                 "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
             json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY}, handle)
@@ -486,6 +496,44 @@ class HardExitTests(unittest.TestCase):
         rows = store.Store(self.root).rows()
         self.assertEqual(len(rows), 12)
         self.assertEqual({r["min_ms"] for r in rows}, {1.0})
+        # Every row names the run it was recorded in, unlocked, and the run's clock log sits in the mirror.
+        self.assertEqual(run.run, os.path.basename(run.log_dir))
+        self.assertTrue(run.run.startswith(KEY + "_"))
+        self.assertEqual({r["run"] for r in rows}, {run.run})
+        self.assertEqual({r["clock_lock_mhz"] for r in rows}, {0})
+        self.assertEqual({r["driver"] for r in rows}, {run.driver})
+        self.assertEqual(run.clocks_csv, os.path.join(self.root, "clocks", run.run + ".csv"))
+        self.assertNotIn(store.RUN_ENV, {k for k in os.environ if k == "no-such"})
+        with open(os.path.join(run.log_dir, "run_manifest.txt")) as handle:
+            manifest = handle.read()
+        self.assertIn("run=" + run.run + "\n", manifest)
+        self.assertIn("clocks=unlocked\n", manifest)
+        self.assertEqual(len(run.clock_lines), 1)
+        self.assertTrue(run.clock_lines[0].startswith("cpp: "))
+        import clocks
+        if clocks.load_samples(run.clocks_csv)["t"]:
+            # The monitor sampled, so every row got its window's clocks (NaN when the GPU was idle).
+            self.assertTrue(run.clock_lines[0].startswith("cpp: 12 rows annotated"))
+            self.assertEqual({r["clock_throttled"] is not None for r in rows}, {True})
+        else:
+            self.assertTrue(run.clock_lines[0].startswith("cpp: 0 rows annotated"))
+
+    def test_a_run_that_cannot_lock_refuses_to_start(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_bench(lock="")
+        self.assertIn("No clock target for 'RTX-4070-SUPER'", str(caught.exception))
+        self.assertNotIn(store.RUN_ENV, os.environ)
+        self.assertEqual(store.Store(self.root).rows(), [])
+        import clocks
+        original = clocks.is_admin
+        clocks.is_admin = lambda: False
+        self.addCleanup(setattr, clocks, "is_admin", original)
+        supported = clocks.supported
+        clocks.supported = lambda kind, mhz: True
+        self.addCleanup(setattr, clocks, "supported", supported)
+        with self.assertRaises(SystemExit) as caught:
+            self.run_bench(lock="--lock-clocks=2310")
+        self.assertIn("elevated", str(caught.exception))
 
     def test_a_hard_exit_abandons_the_harder_runs_and_reruns_the_rest(self):
         # The cash-karp-54 build runs first; hang it at n = 32.

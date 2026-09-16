@@ -1,4 +1,4 @@
-"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition and its own clocks files up, deleting nothing; prune mirrors this key so files gone locally are deleted on the box; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
+"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition and its own clocks files (calibration_<key>.csv and the <key>_<stamp>.csv log of each run) up, deleting nothing; prune mirrors this key so files gone locally are deleted on the box; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
 
 import argparse
 import os
@@ -69,14 +69,15 @@ def commands(command, root, key, remote, tool, dry_run=False):
         return commands("push", root, key, remote, tool, dry_run) + \
             commands("pull", root, key, remote, tool, dry_run)
     key_dir = "key=" + key
-    own_clocks = "*_" + key + ".csv"
+    # This machine's clocks files: calibration_<key>.csv and the <key>_<stamp>.csv log of each run.
+    own_clocks = ["*_" + key + ".csv", key + "_*.csv"]
     dry = ["--dry-run"] if dry_run else []
     if tool == "rclone":
         transient = [flag for pattern in TRANSIENT for flag in ("--exclude", pattern)]
+        includes = [flag for pattern in own_clocks for flag in ("--include", pattern)]
         if command == "push":
             return [["rclone", "copy", _local(root, key_dir), _join(remote, key_dir)] + transient + dry,
-                    ["rclone", "copy", _local(root, "clocks"), _join(remote, "clocks"),
-                     "--include", own_clocks] + dry]
+                    ["rclone", "copy", _local(root, "clocks"), _join(remote, "clocks")] + includes + dry]
         if command == "pull":
             return [["rclone", "copy", remote, _local(root), "--update"] + transient + dry]
         if command == "prune":
@@ -87,10 +88,11 @@ def commands(command, root, key, remote, tool, dry_run=False):
             return [["rclone", "check", _local(root, key_dir), _join(remote, key_dir), "--one-way"] + transient]
     if tool == "rsync":
         transient = [flag for pattern in TRANSIENT[:2] for flag in ("--exclude", pattern)]
+        includes = [flag for pattern in own_clocks for flag in ("--include", pattern)]
         if command == "push":
             return [["rsync", "-a"] + transient + dry
                     + [_local(root, key_dir) + "/", _join(remote, key_dir) + "/"],
-                    ["rsync", "-a", "--include", own_clocks, "--exclude", "*"] + dry
+                    ["rsync", "-a"] + includes + ["--exclude", "*"] + dry
                     + [_local(root, "clocks") + "/", _join(remote, "clocks") + "/"]]
         if command == "pull":
             return [["rsync", "-au"] + transient + dry

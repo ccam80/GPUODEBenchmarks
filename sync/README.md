@@ -1,6 +1,6 @@
 # The store
 
-One `data/` tree on a store box over Tailscale, `/srv/gpuode/data` by default. A machine keeps an untracked `data/` mirror and writes only its own `key=<os>_<gpu>` partition and `clocks/*_<key>.csv` files.
+One `data/` tree on a store box over Tailscale, `/srv/gpuode/data` by default. A machine keeps an untracked `data/` mirror and writes only its own `key=<os>_<gpu>` partition and its clocks files, `clocks/calibration_<key>.csv` and the 10 Hz `clocks/<key>_<stamp>.csv` log of each run.
 
 ## Set up the box
 

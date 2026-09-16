@@ -45,7 +45,7 @@ class Commands(unittest.TestCase):
         self.assertIn("*.partial", push)
         self.assertIn("*.lock/**", push)
         self.assertEqual(clocks[:2], ["rclone", "copy"])
-        self.assertEqual(clocks[-2:], ["--include", "*_" + KEY + ".csv"])
+        self.assertEqual(clocks[-4:], ["--include", "*_" + KEY + ".csv", "--include", KEY + "_*.csv"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rclone")
         self.assertEqual(pull[:3], ["rclone", "copy", REMOTE])
         self.assertIn("--update", pull)
@@ -68,7 +68,8 @@ class Commands(unittest.TestCase):
         self.assertNotIn("--delete", push)
         self.assertTrue(push[-2].endswith("key=" + KEY + "/"))
         self.assertEqual(push[-1], REMOTE + "/key=" + KEY + "/")
-        self.assertEqual(clocks[2:6], ["--include", "*_" + KEY + ".csv", "--exclude", "*"])
+        self.assertEqual(clocks[2:8], ["--include", "*_" + KEY + ".csv", "--include", KEY + "_*.csv",
+                                       "--exclude", "*"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rsync")
         self.assertEqual(pull[1], "-au")
         self.assertNotIn("key=" + KEY + "/", pull)
@@ -116,7 +117,9 @@ class RcloneRoundTrip(unittest.TestCase):
                                  "lorenz__rk4.parquet.lock"))
         _touch(self.local, "key={0}/package=jax/results/stale.parquet".format(OTHER), "old")
         _touch(self.local, "clocks/calibration_{0}.csv".format(KEY))
+        _touch(self.local, "clocks/{0}_20260916T000000Z.csv".format(KEY))
         _touch(self.local, "clocks/calibration_{0}.csv".format(OTHER), "mine-not-to-push")
+        _touch(self.local, "clocks/{0}_20260916T000000Z.csv".format(OTHER), "mine-not-to-push")
         _touch(self.remote, "key={0}/package=cubie/results/gone.parquet".format(KEY))
         _touch(self.remote, "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER))
         newer = _touch(self.remote, "key={0}/package=jax/results/stale.parquet".format(OTHER), "new")
@@ -138,6 +141,7 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertEqual(_files(self.remote), [
             "clocks/calibration_{0}.csv".format(KEY),
             "clocks/lightload_{0}.csv".format(OTHER),
+            "clocks/{0}_20260916T000000Z.csv".format(KEY),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
             "key={0}/package=cubie/finals/abc.parquet".format(KEY),
@@ -155,6 +159,8 @@ class RcloneRoundTrip(unittest.TestCase):
             "clocks/calibration_{0}.csv".format(OTHER),
             "clocks/calibration_{0}.csv".format(KEY),
             "clocks/lightload_{0}.csv".format(OTHER),
+            "clocks/{0}_20260916T000000Z.csv".format(OTHER),
+            "clocks/{0}_20260916T000000Z.csv".format(KEY),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
             "key={0}/package=cubie/results/gone.parquet".format(KEY),
