@@ -34,8 +34,8 @@ if "-e" in argv:
     sys.exit(0)
 path = argv[argv.index("--trials") + 1]
 plan = json.load(open(os.path.join(os.path.dirname(path), "plan.json")))
-with open(os.path.join(os.path.dirname(path), "call.%d.json" % os.getpid()), "w") as h:
-    json.dump({{"path": os.path.basename(path), "argv": argv}}, h)
+with open(os.path.join(os.path.dirname(path), "calls.jsonl"), "a") as h:
+    h.write(json.dumps({{"path": os.path.basename(path), "argv": argv}}) + "\\n")
 data = store.Store(plan["root"])
 for line in open(path):
     if not line.strip():
@@ -87,10 +87,10 @@ class DriverTests(unittest.TestCase):
             json.dump({"root": self.root, "key": KEY, "actions": actions or {}}, handle)
         status = julia_driver.main(["--trials", path or self.path] + list(argv))
         calls = []
-        for name in sorted(os.listdir(os.path.dirname(self.path))):
-            if name.startswith("call.") and name.endswith(".json"):
-                with open(os.path.join(os.path.dirname(self.path), name)) as handle:
-                    calls.append(json.load(handle))
+        log = os.path.join(os.path.dirname(self.path), "calls.jsonl")
+        if os.path.isfile(log):
+            with open(log) as handle:
+                calls = [json.loads(line) for line in handle if line.strip()]
         return status, calls
 
     def solve(self, algorithm, controller, n):
