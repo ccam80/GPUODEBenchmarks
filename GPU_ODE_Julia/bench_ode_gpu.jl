@@ -347,7 +347,7 @@ function run_trials(trials, cli, version, rev, key, progress_path)
             cold && (build_s = elapsed)
             cold && println("$(trial_label(trial)): built cold in $(elapsed)s")
         end
-        trial["optimize"] === nothing ||
+        get(trial, "optimize", false) == true &&
             println("$(trial_label(trial)): optimize does not apply to the DiffEqGPU kernel path; skipped")
         isempty(trial["transfers"]) && continue
         write_progress(progress_path, trial, "solve")

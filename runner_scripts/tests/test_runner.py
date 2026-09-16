@@ -303,27 +303,26 @@ class BuildTests(RunnerCase):
 
     def test_an_optimize_failure_leaves_the_solves_running(self):
         adapter = FakeAdapter({("optimize", 8): "error"})
-        status, rows, _ = self.run_specs([spec(8, optimize={"per": "kernel"}), spec(32, optimize={"per": "kernel"})],
-                                         adapter)
-        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, "kernel")])
+        status, rows, _ = self.run_specs([spec(8, optimize=True), spec(32, optimize=True)], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, True)])
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
 
-    def test_every_line_with_a_policy_optimizes_before_its_solves(self):
+    def test_every_line_that_optimizes_does_so_before_its_solves(self):
         adapter = FakeAdapter()
-        self.run_specs([spec(8, optimize={"per": "kernel"}, build="cold")], adapter)
-        self.assertEqual(adapter.calls[:3], [("build", 8, True), ("compile", 8, None), ("optimize", 8, "kernel")])
+        self.run_specs([spec(8, optimize=True, build="cold")], adapter)
+        self.assertEqual(adapter.calls[:3], [("build", 8, True), ("compile", 8, None), ("optimize", 8, True)])
+        # Every line asks its adapter, which applies the kernel's record after the first.
         adapter = FakeAdapter()
-        self.run_specs([spec(8, optimize={"per": "solve"}), spec(32, optimize={"per": "solve"})], adapter)
+        self.run_specs([spec(8, optimize=True), spec(32, optimize=True)], adapter)
         self.assertEqual([c for c in adapter.calls if c[0] != "solve" and c[0] != "reset"],
-                         [("build", 8, False), ("optimize", 8, "solve"), ("optimize", 32, "solve")])
+                         [("build", 8, False), ("optimize", 8, True), ("optimize", 32, True)])
         # A line without transfers warms the build alone.
         adapter = FakeAdapter()
         self.run_specs([spec(8, transfers=())], adapter)
         self.assertEqual(adapter.calls, [("build", 8, False), ("compile", 8, None)])
 
     def test_only_the_optimize_runs_under_the_watchdog(self):
-        table = {"per": "kernel"}
         budgets = []
 
         def recording(run, on_breach, budget_s=None):
@@ -334,8 +333,8 @@ class BuildTests(RunnerCase):
         runner.run_watchdogged = recording
         self.addCleanup(setattr, runner, "run_watchdogged", saved)
         adapter = FakeAdapter()
-        status, rows, path = self.run_specs([spec(8, optimize=table)], adapter)
-        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, "kernel")])
+        status, rows, path = self.run_specs([spec(8, optimize=True)], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, True)])
         self.assertEqual(budgets, [runner.OPTIMIZE_SECONDS])
         self.assertGreater(runner.OPTIMIZE_SECONDS, runner.WATCHDOG_SECONDS)
         with open(path + ".progress") as handle:

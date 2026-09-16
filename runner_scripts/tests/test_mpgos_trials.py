@@ -39,7 +39,7 @@ def spec(**overrides):
                   grid_dtype="float32", algorithm="classical-rk4", controller="fixed",
                   dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN, rtol=NAN, gains="{}",
                   newton_atol=NAN, newton_rtol=NAN, package="cpp", transfers=["both", "none"],
-                  finals=False, axis="n", build="warm", optimize=None)
+                  finals=False, axis="n", build="warm", optimize=False)
     fields.update(overrides)
     return fields
 

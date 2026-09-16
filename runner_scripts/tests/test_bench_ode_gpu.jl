@@ -36,7 +36,7 @@ function trial(; overrides...)
         "algorithm" => "tsit5", "controller" => "fixed", "dt" => 2.0^-10, "dt_min" => NaN,
         "dt_max" => NaN, "atol" => NaN, "rtol" => NaN, "gains" => "{}", "newton_atol" => NaN,
         "newton_rtol" => NaN, "package" => "julia_gpu", "trial_id" => "0123456789abcdef",
-        "finals" => false, "transfers" => ["both", "none"], "cold" => false, "optimize" => nothing,
+        "finals" => false, "transfers" => ["both", "none"], "cold" => false, "optimize" => false,
         "watchdog_s" => 120.0, "timed" => true, "sets" => ["perf"])
     for (name, value) in overrides
         record[String(name)] = value
@@ -72,7 +72,7 @@ end
         @test back[2]["dt"] == 0.5 && isnan(back[2]["atol"])
         @test back[3]["n"] == 32 && isnan(back[3]["dt_min"])
         @test back[1]["watchdog_s"] == 120.0
-        @test back[1]["optimize"] === nothing
+        @test back[1]["optimize"] === false
     end
 
     @testset "the progress file names the trial and its stage" begin

@@ -1,4 +1,4 @@
-"""The abandon rule shared by the runners and the drivers: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
+"""The abandon rule shared by the runners and bench.py: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
 
 import json
 
@@ -49,40 +49,14 @@ class History:
         return abandon_reason(trial, self.failures.get(transfers, []))
 
 
-def failed_runs(data, key, package):
-    """[(row as a trial, outcome)] of the package's rows under a key whose reason names a timeout or oom."""
-    out = []
-    for row in data.rows(key=key, package=package):
-        outcome = row["reason"].split(":")[0] if row["reason"] else ""
-        if outcome in ("timeout", "oom"):
-            out.append((dict(row, transfers=[row["transfers"]]), outcome, row["transfers"]))
-    return out
-
-
-def abandon_from_store(data, key, trial_list, suite_rev):
-    """Record as abandoned every transfers of the trials the store's timeouts and OOMs of their family give up, and return the trials with what is left to run."""
-    if not trial_list:
+def crashed_builds(progress_path):
+    """The builds a hard exit's progress file lists under `failed`; [] when it lists none or cannot be read."""
+    try:
+        with open(progress_path, encoding="utf-8") as handle:
+            failed = json.load(handle).get("failed", [])
+    except (OSError, ValueError, AttributeError):
         return []
-    by_transfers = {}
-    for failed, outcome, transfers in failed_runs(data, key, trial_list[0]["package"]):
-        by_transfers.setdefault(transfers, []).append((failed, outcome))
-    kept = []
-    rows = []
-    for trial in trial_list:
-        live = []
-        for transfers in trial["transfers"]:
-            reason = abandon_reason(trial, by_transfers.get(transfers, []))
-            if reason is None:
-                live.append(transfers)
-                continue
-            spec = {field: trial[field] for field in store.TRIAL_FIELDS}
-            rows.append(dict(spec, transfers=transfers, key=key, states=states_of(trial), reason=reason,
-                             suite_rev=suite_rev))
-        if live or not trial["transfers"]:
-            kept.append(dict(trial, transfers=live))
-    if rows:
-        data.record_batch(rows)
-    return kept
+    return [str(name) for name in failed] if isinstance(failed, list) else []
 
 
 def remaining(trial_list, current, doomed=()):
@@ -92,7 +66,7 @@ def remaining(trial_list, current, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from the line and, per kernel, from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from every line of its kernel."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -109,10 +83,9 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
 
         def dropped(trial):
             return trial["trial_id"] == current["trial_id"] or (
-                current["optimize"] == "kernel" and trial["optimize"] == "kernel"
-                and trials_mod.kernel_key(trial) == kernel)
+                trial["optimize"] and trials_mod.kernel_key(trial) == kernel)
 
-        return [dict(t, optimize=None) if dropped(t) else t for t in remaining(trial_list, current)]
+        return [dict(t, optimize=False) if dropped(t) else t for t in remaining(trial_list, current)]
     reason = "abandoned: hard-exit at " + current["trial_id"]
     doomed = set()
     rows = []

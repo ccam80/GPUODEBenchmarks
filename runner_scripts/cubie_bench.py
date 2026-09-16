@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the line's recorded settings or runs Solver.optimize and records the winner; a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
 
 import gc
 import importlib.metadata
@@ -201,19 +201,18 @@ class CubieAdapter:
         build.solver.compile(initials, parameters, duration=build.duration)
 
     def optimize(self, build, trial):
-        """Apply and compile the line's recorded settings from the same source, else Solver.optimize on the line's grid (cubie-sized per kernel, as given per solve) and record the winner; returns what was done."""
+        """Apply and compile the kernel's recorded settings, whatever source recorded them, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
-        source = adapter.source_hash(build.solver)
-        tuned = adapter.load_optimized(trial, self.key, root=self.root, source=source)
+        tuned = adapter.load_optimized(trial, self.key, root=self.root)
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
             build.solver.compile(initials, parameters, duration=build.duration)
             return "recorded"
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
-                                     force=True, source=source, auto_size=trial["optimize"] == "kernel")
+                                     force=True)
         return "{0} on {1} runs over {2}".format(row["label"], row["n"], row["duration"])
 
     def solve(self, build, trial, values, transfers):

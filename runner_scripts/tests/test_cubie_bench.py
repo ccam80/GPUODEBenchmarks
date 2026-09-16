@@ -21,7 +21,7 @@ NAN = float("nan")
 NAMES = ("x", "y", "z")
 
 
-def trial(n=8, transfers=("both", "none"), finals=False, cold=False, optimize=None, **overrides):
+def trial(n=8, transfers=("both", "none"), finals=False, cold=False, optimize=False, **overrides):
     """A trial record: lorenz, fixed tsit5 at dt 2^-10, cubie."""
     fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32",
                   parameter="rho", grid_scale="linear", grid_min=0.0, grid_max=21.0, n=n,
@@ -130,11 +130,11 @@ class FakeSolver:
     def compile(self, initial_values, parameters, duration):
         self.compiled.append((initial_values.shape[1], duration))
 
-    def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=True):
+    def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False):
         self.optimized.append((initial_values.shape[1], duration, force, auto_size))
-        if auto_size:
-            return FakeOptimizeResult(SIZED_RUNS, duration * SIZED_FRACTION)
-        return FakeOptimizeResult(initial_values.shape[1], duration)
+        if not auto_size:
+            raise AssertionError("optimize without auto_size")
+        return FakeOptimizeResult(SIZED_RUNS, duration * SIZED_FRACTION)
 
     def solve(self, initial_values, parameters, duration, on_device=False):
         n = initial_values.shape[1]
@@ -306,7 +306,7 @@ class BuildTests(AdapterCase):
         leg.close()
 
     def test_optimize_records_the_winner_under_the_lines_kernel(self):
-        line = trial(n=64, optimize="kernel")
+        line = trial(n=64, optimize=True)
         leg = self.adapter.build(trial(n=8))
         # Cubie sizes the batch and duration from the line's own grid; the runner compiles and solves nothing.
         self.assertEqual(self.adapter.optimize(leg, line), "state=shared @bs128 x2 on 71680 runs over 0.04")
@@ -317,15 +317,15 @@ class BuildTests(AdapterCase):
         tuned = cubie_adapter.load_optimized(line, KEY, root=self.root)
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
-        self.assertIsNone(cubie_adapter.load_optimized(trial(dt=2.0 ** -13, optimize="kernel"), KEY, root=self.root))
+        self.assertIsNone(cubie_adapter.load_optimized(trial(dt=2.0 ** -13, optimize=True), KEY, root=self.root))
         leg.close()
-        tol_line = trial(n=8, optimize="kernel", **adaptive(atol=1e-4, rtol=1e-4))
+        tol_line = trial(n=8, optimize=True, **adaptive(atol=1e-4, rtol=1e-4))
         leg = self.adapter.build(trial(**adaptive(atol=1e-4, rtol=1e-4)))
         self.adapter.optimize(leg, tol_line)
         self.assertIsNotNone(cubie_adapter.load_optimized(tol_line, KEY, root=self.root))
         self.assertIsNone(cubie_adapter.load_optimized(dict(tol_line, atol=1e-5, rtol=1e-5), KEY, root=self.root))
         # The controller and gains keep one algorithm's builds apart in the record.
-        pi_line = trial(n=8, optimize="kernel",
+        pi_line = trial(n=8, optimize=True,
                         **adaptive(atol=1e-4, rtol=1e-4, controller="pi", gains='{"integral_gain":0.3}'))
         self.adapter.optimize(leg, pi_line)
         self.assertIsNotNone(cubie_adapter.load_optimized(tol_line, KEY, root=self.root))
@@ -338,39 +338,28 @@ class BuildTests(AdapterCase):
         self.assertEqual(lines[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
         leg.close()
 
-    def test_a_per_solve_line_optimizes_on_its_own_n(self):
-        leg = self.adapter.build(trial(n=8))
-        # A per-solve line is timed as given: its own n at the problem's duration.
-        self.assertEqual(self.adapter.optimize(leg, trial(n=8, optimize="solve")),
-                         "state=shared @bs128 x2 on 8 runs over 1")
-        self.adapter.optimize(leg, trial(n=32, optimize="solve"))
-        self.assertEqual(leg.solver.optimized, [(8, 1.0, True, False), (32, 1.0, True, False)])
-        self.assertEqual(leg.solver.calls, [])
-        self.assertEqual(self.adapter.optimize(leg, trial(n=32, optimize="solve")), "recorded")
-        self.assertIsNone(cubie_adapter.load_optimized(trial(n=128, optimize="solve"), KEY, root=self.root))
-        self.assertIsNone(cubie_adapter.load_optimized(trial(n=8, optimize="kernel"), KEY, root=self.root))
-        leg.close()
-
-    def test_a_kernel_recorded_from_the_same_source_is_applied_and_compiled_not_optimized(self):
-        line = trial(n=8, optimize="kernel")
+    def test_a_kernel_record_is_applied_and_compiled_whatever_source_recorded_it(self):
+        line = trial(n=8, optimize=True)
         leg = self.adapter.build(trial(n=8))
         self.adapter.optimize(leg, line)
-        self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize="kernel")), "recorded")
+        self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize=True)), "recorded")
         self.assertEqual(len(leg.solver.optimized), 1)
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(leg.solver.compiled[-1], (64, 1.0))
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
-        source = cubie_adapter.source_hash(leg.solver)
         with open(path) as handle:
             text = handle.read()
-        self.assertIn(source, text)
-        # A row from another source is replaced by a fresh optimize.
+        self.assertEqual(text.splitlines()[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
+        self.assertNotIn("source", text.splitlines()[0])
+        # A row an earlier suite recorded with a source hash of its own is applied the same way.
+        lines = text.splitlines()
         with open(path, "w") as handle:
-            handle.write(text.replace(source, "0" * 16))
-        self.adapter.optimize(leg, line)
-        self.assertEqual(len(leg.solver.optimized), 2)
-        with open(path) as handle:
-            self.assertEqual(handle.read().count(source), 1)
+            handle.write(lines[0].replace("recorded_utc", "source,recorded_utc") + "\n")
+            for row in lines[1:]:
+                head, stamp = row.rsplit(",", 1)
+                handle.write(head + "," + "0" * 16 + "," + stamp + "\n")
+        self.assertEqual(self.adapter.optimize(leg, line), "recorded")
+        self.assertEqual(len(leg.solver.optimized), 1)
         leg.close()
 
     def test_a_cold_build_uses_a_fresh_cache_root_and_restores_it(self):

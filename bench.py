@@ -3,8 +3,8 @@
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
-A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel (a cubie optimize times the batch and duration cubie sizes itself per kernel, or the line's n at its duration per solve), the watchdog budget the largest.
---resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
+A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per compiled kernel, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
+Without a flag every selected trial runs and its rows are overwritten. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
 A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal, a sampler that dies at once); there is no unlocked run. It samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler did not cover stays NaN).
 The push has the box delete this key's clock logs a day or older that no row on the box names, and drops them and their logs/<run>/ dirs here.
@@ -46,7 +46,7 @@ import sets  # noqa: E402
 import store  # noqa: E402
 import sync  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit  # noqa: E402
+from abandon import abandon_after_hard_exit, crashed_builds  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from clocks import (TOL_MHZ, ClockError, ClockGuard, configure as configure_clocks,  # noqa: E402
@@ -147,21 +147,12 @@ def resolve(args):
 
 # ------------------------------------------------------------------ planning
 
-def source_hashes(package, systems):
-    """The current source hash of each cubie system, from the package's own interpreter; SystemExit when it cannot say."""
-    try:
-        return cubie_adapter.source_hashes(package, systems)
-    except (RuntimeError, OSError, ValueError) as exc:
-        raise SystemExit("cannot validate {0}'s optimize records without its source hashes: {1}".format(
-            package, exc))
-
-
-def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
-    """Trials still to run: each keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a line without transfers never runs again."""
+def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
+    """Trials still to run: without a flag every trial; else each keeps the transfers completeness.audit finds lacking (every one when the optimize record, the build time or the finals are lacking, so a trial's outputs come from one execution); a line without transfers never runs again. A recorded row is never rerun for its age or source."""
     if not (resume or no_overwrite):
         return list(trial_list)
     mode = "no_overwrite" if no_overwrite else "resume"
-    audits = completeness.audit(trial_list, key, store.Store(root), mode, sources)
+    audits = completeness.audit(trial_list, key, store.Store(root), mode)
     kept = []
     for trial in trial_list:
         missing = audits.get(trial["trial_id"])
@@ -186,10 +177,9 @@ def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
     return trials_mod.build_trials(specs, sets.declarations(key, root, **narrowing))
 
 
-def plan_trials(plan, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+def plan_trials(plan, key, root, resume=False, no_overwrite=False):
     """{package: trials} for the flags, in run order."""
-    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite,
-                                 sources)
+    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite)
     groups = trials_mod.by_package(all_trials)
     return {package: groups[package] for package in launch.ordered(list(groups))}
 
@@ -316,36 +306,43 @@ class Run:
 
     # ------------------------------------------------------------- packages
     def run_package(self, package, trial_list, path):
-        """Drive one runner over its trial file, re-invoking after every watchdog hard exit."""
+        """Drive one runner over its trial file, re-invoking after every watchdog hard exit; a build that crashed before a hard exit fails the package once the relaunches end."""
         logfile = package + ".log"
-        rounds = 0
         hard_exits = 0
+        crashed = []
         while True:
             command = launch.runner_command(package, path, floor=self.args.floor)
             status = self.step("{0} ({1} trials)".format(package, len(trial_list)), logfile, command)
             if status == 0:
-                self.record(package, "PARTIAL" if hard_exits else "OK",
-                            "{0} hard exit(s)".format(hard_exits) if hard_exits else "-", status)
+                self.finish(package, status, hard_exits, crashed)
                 return
             if status != WATCHDOG_EXIT_CODE:
                 self.record(package, "FAILED", "runner exit {0}".format(status), status)
                 return
             hard_exits += 1
+            crashed += [name for name in crashed_builds(path + ".progress") if name not in crashed]
             remaining = abandon_after_hard_exit(self.store, self.key, trial_list, path + ".progress",
                                                 store.suite_rev(ROOT))
             if remaining is None:
                 self.record(package, "FAILED", "hard exit without a progress file", status)
                 return
             if not remaining:
-                self.record(package, "PARTIAL", "{0} hard exit(s)".format(hard_exits), status)
-                return
-            rounds += 1
-            if rounds > len(trial_list):
-                self.record(package, "FAILED", "hard exits did not converge", status)
+                self.finish(package, status, hard_exits, crashed)
                 return
             trial_list = remaining
-            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, rounds))
+            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, hard_exits))
             trials_mod.write_jsonl(path, trial_list)
+
+    def finish(self, package, status, hard_exits, crashed):
+        """Record a package whose relaunches ended: FAILED when a build crashed before a hard exit, PARTIAL after a hard exit, else OK."""
+        detail = "{0} hard exit(s)".format(hard_exits) if hard_exits else "-"
+        if crashed:
+            self.record(package, "FAILED", "{0}; crashed before a hard exit: {1}".format(detail, ", ".join(crashed)),
+                        status)
+        elif hard_exits:
+            self.record(package, "PARTIAL", detail, status)
+        else:
+            self.record(package, "OK", detail, status)
 
     # -------------------------------------------------------------- lifecycle
     def manifest(self, by_package, finished=False):

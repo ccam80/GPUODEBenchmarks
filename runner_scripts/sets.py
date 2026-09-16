@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the optimize policy and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize policy; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize flag; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -19,7 +19,7 @@ CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
             "optimize", "watchdog", "untimed")
-OPTIMIZE_KEYS = ("packages", "per")
+OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
@@ -118,8 +118,6 @@ def load_set(name, sets_dir=SETS_DIR):
         _check_keys(optimize, OPTIMIZE_KEYS, where)
         optimize.setdefault("packages", "all")
         optimize["packages"] = _name_list(optimize["packages"], PACKAGES, where + " packages")
-        if optimize.get("per") not in ("kernel", "solve"):
-            raise SetError(where + ": per must be kernel or solve")
     head["optimize"] = optimize
     untimed = head.get("untimed")
     if untimed is not None:
@@ -376,10 +374,8 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
 # --------------------------------------------------------------- expansion
 
 def _optimize_for(table, package):
-    """{per} of the set's optimize table when it names the package, else None."""
-    if table is None or (table["packages"] != "all" and package not in table["packages"]):
-        return None
-    return {"per": table["per"]}
+    """True when the set's optimize table names the package."""
+    return table is not None and (table["packages"] == "all" or package in table["packages"])
 
 
 def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,

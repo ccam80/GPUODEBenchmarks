@@ -243,8 +243,8 @@ class Runner:
             try:
                 done = watchdogged(lambda: self.adapter.optimize(build, trial),
                                    "optimize " + label(trial), OPTIMIZE_SECONDS)
-                print("optimized {0} per {1}: {2} in {3:.1f}s".format(
-                    label(trial), trial["optimize"], done, timeit.default_timer() - started), flush=True)
+                print("optimized {0}: {1} in {2:.1f}s".format(
+                    label(trial), done, timeit.default_timer() - started), flush=True)
             except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
                 print("OPTIMIZE {0} failed: {1}".format(
                     label(trial), failure_reason(classify(exc), exc)), flush=True)
