@@ -191,7 +191,7 @@ class Hold:
             self.lock.__exit__(None, None, None)
             self.lock = None
         if self.proc is not None and self.proc.poll() is None:
-            # EOF on its stdin makes serve release without pruning; a box that hangs on it is cut off.
+            # EOF makes serve release without pruning.
             try:
                 self.proc.stdin.close()
             except OSError:

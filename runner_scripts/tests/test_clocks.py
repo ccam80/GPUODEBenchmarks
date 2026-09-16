@@ -89,7 +89,7 @@ class Windows(unittest.TestCase):
         self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
 
     def test_a_window_the_sampler_never_observed_is_not_annotated(self):
-        # The sampler stopped at 0.1 s; a batch an hour later must not borrow its last reading.
+        # The sampler stopped at 0.1 s.
         samples = self.log([(0.0, 2400, 0), (0.1, 2500, 0)])
         self.assertIsNone(clocks.window_stats(samples, self.at(3600.0), self.at(3601.0)))
         self.assertIsNone(clocks.window_stats(samples, self.at(5.0), self.at(6.0)))
@@ -98,8 +98,7 @@ class Windows(unittest.TestCase):
         stats = clocks.window_stats(samples, self.at(0.1), self.at(0.5))
         self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
         self.assertIsNone(clocks.window_stats(samples, self.at(0.11), self.at(0.5)))
-        # A hole in the log wider than the gap leaves a window inside it unobserved, even one near a sample:
-        # without a sample in the window it needs a neighbour within the gap on each side.
+        # No sample inside: a neighbour within the gap is needed on each side.
         samples = self.log([(0.0, 2400, 0), (10.0, 2500, 0)])
         self.assertIsNone(clocks.window_stats(samples, self.at(4.0), self.at(5.0)))
         self.assertIsNone(clocks.window_stats(samples, self.at(0.5), self.at(0.6)))

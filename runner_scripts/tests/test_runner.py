@@ -145,7 +145,7 @@ class OutcomeTests(RunnerCase):
             self.assertTrue(row["suite_rev"])
             self.assertEqual(row["states"], 3)
             self.assertTrue(math.isnan(row["build_s"]))
-            # The host stamps bracket the whole batch (every sample) and precede the row's finals and record.
+            # The stamps bracket every sample and precede the record.
             window_s = (row["timed_end_utc"] - row["timed_start_utc"]).total_seconds()
             self.assertGreaterEqual(window_s, sum(row["samples_ms"]) / 1000.0)
             self.assertLessEqual(row["timed_end_utc"], row["recorded_utc"])
@@ -188,7 +188,7 @@ class OutcomeTests(RunnerCase):
         self.assertTrue(math.isnan(after["min_ms"]))
         self.assertEqual(after["reason"], "abandoned: timeout at " + hit["trial_id"])
         self.assertEqual(after["samples_ms"], [])
-        # A row never timed carries no window; the timed-out one still brackets its single attempt.
+        # An abandoned row has no window; a timed-out one brackets its attempt.
         self.assertIsNone(after["timed_start_utc"])
         self.assertGreaterEqual((hit["timed_end_utc"] - hit["timed_start_utc"]).total_seconds(), CAP_S)
         self.assertTrue(math.isfinite(rows[(128, "both")]["min_ms"]))

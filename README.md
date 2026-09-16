@@ -71,9 +71,8 @@ that window of the log, `clock_sm_mhz`, `clock_sm_min_mhz` and
 `clock_throttled` (NaN when the sampler never observed the window); a locked
 row throttled or more than `--clock-tolerance` under the lock fails the run.
 `store.py annotate <run> <clocks.csv>` refills the columns from a log. After
-the push the box deletes this key's clock logs a day old that no row on the
-box names (`sync/box_prune.py`, under the key's lock the push holds), and
-the mirror and `logs/<run>/` follow.
+the push the box deletes this key's clock logs a day old that no row names
+(`sync/box_prune.py`); the mirror and `logs/<run>/` follow.
 
 | set | packages | what it times |
 |---|---|---|

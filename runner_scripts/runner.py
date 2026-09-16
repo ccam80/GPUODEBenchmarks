@@ -111,7 +111,7 @@ class Runner:
 
     # ------------------------------------------------------------- timing
     def time(self, build, trial, values, transfers):
-        """(outcome, best_ms, samples, result, exc, elapsed_s, window) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog; an untimed line runs once with no warm-up. window is the (start, end) pair of UTC host stamps bracketing the whole timing batch, taken outside every duration measurement."""
+        """(outcome, best_ms, samples, result, exc, elapsed_s, window) of one (trial, transfers): the untimed warm-up then the repeat schedule, a never-returning run hard-exiting through the watchdog; an untimed line runs once with no warm-up. window is the (start, end) UTC host stamps around the whole batch."""
         def run():
             return self.adapter.solve(build, trial, values, transfers)
 

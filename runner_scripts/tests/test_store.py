@@ -670,7 +670,7 @@ class RunContextTests(StoreCase):
         run = KEY + "_20260916T030000Z"
         start = datetime(2026, 9, 16, 3, 9, 50, tzinfo=timezone.utc)
         end = datetime(2026, 9, 16, 3, 10, 0, tzinfo=timezone.utc)
-        # The row is recorded well after its batch ended: finals were read and written in between.
+        # Recorded well after the batch ended.
         self.store.record(row(run=run, samples_ms=[500.0, 250.0, 250.0], timed_start_utc=start,
                               timed_end_utc=start + timedelta(seconds=1.2), recorded_utc=end))
         self.store.record(row(run=run, n=32, transfers="none", samples_ms=[], timed_start_utc=start,
@@ -689,8 +689,7 @@ class RunContextTests(StoreCase):
             return None
 
         self.assertEqual(self.store.annotate(run, stats, package="cubie", key=KEY), 1)
-        # The window is the runner's own pair of stamps, whatever the samples sum to or when the row was recorded;
-        # a row without samples, or without its window (a writer from before the columns), is never windowed.
+        # Only the runner's own stamps are windowed; a row without samples or without a window is left.
         self.assertEqual(windows, [(start.timestamp(), start.timestamp() + 1.2)])
         annotated = self.store.rows(run=run, n=8)[0]
         self.assertEqual((annotated["clock_sm_mhz"], annotated["clock_sm_min_mhz"], annotated["clock_throttled"]),
@@ -745,7 +744,7 @@ class RunContextTests(StoreCase):
         return path, ids
 
     def test_a_store_of_files_from_before_the_columns_alone_reads_them_as_null(self):
-        # No file holds the new columns, so union_by_name alone would leave them unknown to the view.
+        # No file holds the new columns.
         path, ids = self.legacy_file()
         rows = self.store.rows()
         self.assertEqual(len(rows), 1)

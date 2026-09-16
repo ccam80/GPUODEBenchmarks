@@ -500,7 +500,7 @@ class Store:
             pattern = os.path.join(os.path.abspath(self.root), "key=*",
                                    "package=*", "results", "*.parquet")
             pattern = pattern.replace("\\", "/").replace("'", "''")
-            # union_by_name fills a column some files lack; a column every file lacks is added here.
+            # A column every file lacks is added as a typed NULL.
             source = ("read_parquet('{0}', hive_partitioning = true, union_by_name = true, "
                       "hive_types = {{'key': VARCHAR, 'package': VARCHAR}})".format(pattern))
             present = {column[0] for column in

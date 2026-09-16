@@ -531,7 +531,7 @@ class HardExitTests(unittest.TestCase):
         released = []
         run.clocks.reset = lambda: released.append("reset")
         run.clocks.stop_monitor = lambda: released.append("stop")
-        # A failure before the runner loop, planning included, still reaches the guard's reset.
+        # A failure while planning still reaches the guard's reset.
         with mock.patch.object(bench, "plan_trials", side_effect=RuntimeError("no store")):
             with self.assertRaises(RuntimeError):
                 run.execute()
@@ -622,7 +622,7 @@ class PullStore(unittest.TestCase):
             bench.pull_store(KEY, self.root)
 
     def test_a_box_that_cannot_prune_refuses_before_anything_is_pulled(self):
-        # The push after the runners needs the box-side script, so a run does not start without it.
+        # The push needs the box-side script.
         with self.assertRaises(SystemExit) as raised:
             self.pull(box="the box cannot run box_prune.py")
         self.assertIn("box_prune.py", str(raised.exception))

@@ -565,7 +565,7 @@ int main(int argc, char* argv[])
 	for (size_t li = 0; li < o.transfers.size(); li++)
 	{
 		const std::string& transfers = o.transfers[li];
-		// Host stamps around the whole timing batch, before the finals read and the store call.
+		// Host stamps around the whole timing batch.
 		std::string started = UtcStamp();
 		TimingResult timing = TimeTransfers(Scan, Values, Duration, transfers == "both", o.untimed);
 		std::string ended = UtcStamp();

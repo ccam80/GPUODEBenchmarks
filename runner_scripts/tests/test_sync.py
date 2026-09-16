@@ -311,12 +311,12 @@ class RcloneRoundTrip(unittest.TestCase):
         ])
         self.assertFalse(os.path.exists(os.path.join(
             self.remote, "key=" + KEY, "package=cubie", "results", "lorenz__rk4.parquet.lock")))
-        # The box decided from its own rows: the orphan went there, and the mirror and logs/ followed.
+        # The box pruned by its own rows; the mirror and logs/ followed.
         self.assertIn("pruned 1 clock log(s)", text)
         self.assertFalse(os.path.exists(os.path.join(self.local, "clocks", OLD_RUN + ".csv")))
         self.assertFalse(os.path.exists(os.path.join(self.logs_dir, OLD_RUN)))
         self.assertTrue(os.path.exists(os.path.join(self.logs_dir, NEW_RUN)))
-        # The lock file stays for the next holder; the pull's excludes keep it off every mirror.
+        # The lock file stays for the next holder.
         self.assertTrue(os.path.isfile(os.path.join(self.remote, ".sync_" + KEY + ".lock")))
         with box_prune.KeyLock(self.remote, KEY, timeout=0.5):
             pass
@@ -446,7 +446,7 @@ class RcloneRoundTrip(unittest.TestCase):
         code, text = self.run_sync("push")
         self.assertEqual(code, 0, text)
         self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
-        # The box's rows name no run, so its old log of this key is an orphan whatever the empty mirror holds.
+        # The box's rows name no run, so its old log is an orphan whatever the mirror holds.
         self.assertNotIn("clocks/{0}.csv".format(OLD_RUN), _files(self.remote))
         self.assertIn("clocks/{0}_20260901T000000Z.csv".format(OTHER), _files(self.remote))
 

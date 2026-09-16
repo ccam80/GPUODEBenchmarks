@@ -467,7 +467,7 @@ def pull_store(key, root=DATA_DIR, skip=False):
     if reason:
         raise SystemExit("Store       : {0}; pass --no-sync to run without it".format(reason))
     remote = sync.remote_default()
-    # The push after the runners needs the box to take the key's lock and prune, so refuse now rather than then.
+    # The push after the runners needs the box-side pruner.
     reason = sync.box_ready(remote, key=key)
     if reason:
         raise SystemExit("Store       : {0}; pass --no-sync to run without the store".format(reason))

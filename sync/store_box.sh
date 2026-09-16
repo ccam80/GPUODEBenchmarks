@@ -37,7 +37,7 @@ mkdir -p /srv/gpuode/data
 chown -R "$user:$user" /srv/gpuode
 chmod 755 /srv/gpuode /srv/gpuode/data
 
-# The box-side pruner: sync.py ships box_prune.py here on every push and runs it with this venv.
+# The venv that runs box_prune.py after every push.
 [ -x /srv/gpuode/venv/bin/python3 ] || sudo -u "$user" python3 -m venv /srv/gpuode/venv
 sudo -u "$user" /srv/gpuode/venv/bin/pip install --quiet --upgrade pip pyarrow
 install -m 644 -o "$user" -g "$user" "$here/box_prune.py" /srv/gpuode/box_prune.py
