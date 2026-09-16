@@ -44,7 +44,7 @@ import sets  # noqa: E402
 import store  # noqa: E402
 import sync  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit  # noqa: E402
+from abandon import abandon_after_hard_exit, crashed_builds  # noqa: E402
 from algorithms import algorithm_names  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
 from clocks import ClockGuard, configure as configure_clocks  # noqa: E402
@@ -287,36 +287,43 @@ class Run:
 
     # ------------------------------------------------------------- packages
     def run_package(self, package, trial_list, path):
-        """Drive one runner over its trial file, re-invoking after every watchdog hard exit."""
+        """Drive one runner over its trial file, re-invoking after every watchdog hard exit; a build that crashed before a hard exit fails the package once the relaunches end."""
         logfile = package + ".log"
-        rounds = 0
         hard_exits = 0
+        crashed = []
         while True:
             command = launch.runner_command(package, path, floor=self.args.floor)
             status = self.step("{0} ({1} trials)".format(package, len(trial_list)), logfile, command)
             if status == 0:
-                self.record(package, "PARTIAL" if hard_exits else "OK",
-                            "{0} hard exit(s)".format(hard_exits) if hard_exits else "-", status)
+                self.finish(package, status, hard_exits, crashed)
                 return
             if status != WATCHDOG_EXIT_CODE:
                 self.record(package, "FAILED", "runner exit {0}".format(status), status)
                 return
             hard_exits += 1
+            crashed += [name for name in crashed_builds(path + ".progress") if name not in crashed]
             remaining = abandon_after_hard_exit(self.store, self.key, trial_list, path + ".progress",
                                                 store.suite_rev(ROOT))
             if remaining is None:
                 self.record(package, "FAILED", "hard exit without a progress file", status)
                 return
             if not remaining:
-                self.record(package, "PARTIAL", "{0} hard exit(s)".format(hard_exits), status)
-                return
-            rounds += 1
-            if rounds > len(trial_list):
-                self.record(package, "FAILED", "hard exits did not converge", status)
+                self.finish(package, status, hard_exits, crashed)
                 return
             trial_list = remaining
-            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, rounds))
+            path = os.path.join(os.path.dirname(path), "{0}.retry{1}.jsonl".format(package, hard_exits))
             trials_mod.write_jsonl(path, trial_list)
+
+    def finish(self, package, status, hard_exits, crashed):
+        """Record a package whose relaunches ended: FAILED when a build crashed before a hard exit, PARTIAL after a hard exit, else OK."""
+        detail = "{0} hard exit(s)".format(hard_exits) if hard_exits else "-"
+        if crashed:
+            self.record(package, "FAILED", "{0}; crashed before a hard exit: {1}".format(detail, ", ".join(crashed)),
+                        status)
+        elif hard_exits:
+            self.record(package, "PARTIAL", detail, status)
+        else:
+            self.record(package, "OK", detail, status)
 
     # -------------------------------------------------------------- lifecycle
     def manifest(self, by_package, finished=False):

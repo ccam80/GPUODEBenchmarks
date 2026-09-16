@@ -28,7 +28,7 @@ from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 NAN = float("nan")
 
-# A runner that records every solve trial it reaches and exits 3 (once) while a chosen trial is in progress.
+# A runner that records every solve trial it reaches, exits 3 (once) while a chosen trial is in progress and lists plan.json's crashed builds in its progress file.
 FAKE_RUNNER = '''
 import json, os, sys
 sys.path.insert(0, r"{runner_scripts}")
@@ -45,7 +45,8 @@ with open(log, "a") as h:
 data = store.Store(plan["root"])
 for t in trials:
     with open(path + ".progress", "w") as h:
-        json.dump({{"trial_id": t["trial_id"], "stage": "solve", "started_utc": "2026-09-09T00:00:00Z"}}, h)
+        json.dump({{"trial_id": t["trial_id"], "stage": "solve", "started_utc": "2026-09-09T00:00:00Z",
+                   "failed": plan.get("failed", [])}}, h)
     if not t["transfers"]:
         continue
     if t["trial_id"] == plan.get("trial_id") and not plan.get("done"):
@@ -456,12 +457,12 @@ class HardExitTests(unittest.TestCase):
         launch.RUNNERS["cpp"] = lambda: [sys.executable, self.runner]
         self.addCleanup(launch.RUNNERS.__setitem__, "cpp", saved)
 
-    def run_bench(self, hung=None, code=3, *argv):
+    def run_bench(self, hung=None, code=3, *argv, failed=()):
         args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128",
                                  "--no-lock-clocks", "--cooldown", "0"] + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
-            json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY}, handle)
+            json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY, "failed": list(failed)}, handle)
         status = run.execute()
         with open(os.path.join(run.log_dir, "calls.jsonl")) as handle:
             calls = [json.loads(line) for line in handle]
@@ -521,6 +522,51 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual({r["reason"] for r in rows if r["algorithm"] == "classical-rk4"},
                          {"abandoned: hard-exit at " + hung["trial_id"]})
         self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "3"]])
+
+    def test_a_build_crashed_before_a_hard_exit_fails_the_package_after_the_relaunch(self):
+        # The relaunch still runs the rest; the crashed build fails the package.
+        hung = self.line("cash-karp-54", 32)
+        status, run, calls, summary = self.run_bench(hung["trial_id"], 3, failed=["lorenz/{}/float32/euler/fixed/{}"])
+        self.assertEqual(status, 1)
+        self.assertEqual([c["path"] for c in calls], ["cpp.jsonl", "cpp.retry1.jsonl"])
+        self.assertEqual(summary, [["cpp", "FAILED",
+                                    "1 hard exit(s); crashed before a hard exit: lorenz/{}/float32/euler/fixed/{}", "0"]])
+        finite = [r for r in store.Store(self.root).rows() if r["min_ms"] == 1.0]
+        self.assertEqual(sorted((r["algorithm"], r["n"]) for r in finite if r["transfers"] == "both"),
+                         [("cash-karp-54", 8), ("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
+        # A hard exit on the last build ends the package the same way, with the watchdog code.
+        shutil.rmtree(self.root, ignore_errors=True)
+        hung = self.line("classical-rk4", 8)
+        status, run, calls, summary = self.run_bench(hung["trial_id"], 3, failed=["a", "b"])
+        self.assertEqual(status, 1)
+        self.assertEqual([c["path"] for c in calls], ["cpp.jsonl"])
+        self.assertEqual(summary, [["cpp", "FAILED", "1 hard exit(s); crashed before a hard exit: a, b", "3"]])
+
+    def test_consecutive_hard_exits_accumulate_crashed_builds(self):
+        args = bench.parse_args(["run", "--set", "perf", "--no-lock-clocks"])
+        run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
+        planned = self.planned()
+        path = os.path.join(run.log_dir, "cpp.jsonl")
+        trials.write_jsonl(path, planned)
+        calls = []
+
+        def step(label, logfile, command):
+            current = command.argv[command.argv.index("--trials") + 1]
+            calls.append(os.path.basename(current))
+            if len(calls) == 3:
+                return 0
+            with open(current + ".progress", "w") as handle:
+                json.dump({"failed": ["first"] if len(calls) == 1 else ["second", "first"]}, handle)
+            return WATCHDOG_EXIT_CODE
+
+        with mock.patch.object(run, "step", side_effect=step), \
+                mock.patch.object(bench, "abandon_after_hard_exit", side_effect=[planned[1:], planned[2:]]):
+            run.run_package("cpp", planned, path)
+        self.assertEqual(calls, ["cpp.jsonl", "cpp.retry1.jsonl", "cpp.retry2.jsonl"])
+        with open(run.summary) as handle:
+            self.assertEqual(handle.read(),
+                             "cpp\tFAILED\t2 hard exit(s); crashed before a hard exit: first, second\t0\n")
+        self.assertEqual(run.failures, 1)
 
     def test_other_exit_codes_fail_the_package(self):
         hung = self.planned()[0]

@@ -1,6 +1,7 @@
-"""julia_driver.py --trials <path> [--floor]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), one process at a time, hard exits abandoned from the progress file and re-run, trials the store's timeouts and OOMs make hopeless abandoned before their process spawns; exit 1 when a process crashed."""
+"""julia_driver.py --trials <path> [--floor]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), one process at a time; a watchdog hard exit ends the driver with the same code and the hung build's progress file beside the trial file, naming the builds that crashed before it, for bench.py to abandon and relaunch; exit 1 when a process crashed."""
 
 import argparse
+import json
 import os
 import shlex
 import subprocess
@@ -10,16 +11,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO_ROOT, "runner_scripts"))
 
-import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
-from abandon import abandon_after_hard_exit, abandon_from_store  # noqa: E402
-from bench_key import dataset_key  # noqa: E402
 from launch import check_julia_project, julia_project  # noqa: E402
 from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
 BENCH = "GPU_ODE_Julia/bench_ode_gpu.jl"
-# Result store root; tests point it at a scratch directory.
-DATA_ROOT = os.path.join(REPO_ROOT, "data")
 
 
 def julia_command():
@@ -52,13 +48,10 @@ def prepare():
 
 
 class Build:
-    """One build's queue of trial files: the split file, then a retry file after each hard exit that leaves trials without a row."""
+    """One build's trial file and the outcome of its process."""
 
     def __init__(self, name, trial_list, path):
         self.name, self.trials, self.path = name, trial_list, path
-        self.stem = os.path.splitext(path)[0]
-        self.retries = 0
-        self.hard_exits = 0
         self.failed = False
 
     def command(self, floor):
@@ -68,47 +61,34 @@ class Build:
             argv.append("--floor")
         return argv
 
-    def after_exit(self, code, data, key, suite_rev):
-        """True when the build has more to run: a hard exit whose abandonment leaves trials without a row is re-queued with a retry file."""
-        if code == 0:
-            return False
-        if code != WATCHDOG_EXIT_CODE:
-            print("{0}: julia exited {1}".format(self.name, code))
-            self.failed = True
-            return False
-        self.hard_exits += 1
-        remaining = abandon_after_hard_exit(data, key, self.trials, self.path + ".progress", suite_rev)
-        if remaining is None:
-            print("{0}: hard exit without a progress file".format(self.name))
-            self.failed = True
-            return False
-        if not remaining or self.retries >= len(self.trials):
-            return False
-        self.retries += 1
-        self.trials = remaining
-        self.path = "{0}.retry{1}.jsonl".format(self.stem, self.retries)
-        trials_mod.write_jsonl(self.path, remaining)
-        return True
+
+def hand_over(build_progress, progress_path, failed):
+    """Write the hung build's progress to progress_path with `failed`, the builds that crashed before the hard exit."""
+    progress = {}
+    try:
+        with open(build_progress, encoding="utf-8") as handle:
+            progress = json.load(handle)
+    except (OSError, ValueError):
+        pass
+    progress["failed"] = list(failed)
+    with open(progress_path, "w", encoding="utf-8") as handle:
+        json.dump(progress, handle)
 
 
-def run_builds(builds, floor, data, key, suite_rev):
-    """Run the builds' processes one after another, each spawned with the trials the store's failures leave; returns the builds."""
-    pending = list(builds)
-    while pending:
-        build = pending.pop(0)
-        if build.retries == 0:
-            build.trials = abandon_from_store(data, key, build.trials, suite_rev)
-            if not any(t["transfers"] for t in build.trials):
-                print("{0}: every trial abandoned".format(build.name), flush=True)
-                continue
-            trials_mod.write_jsonl(build.path, build.trials)
+def run_builds(builds, floor, progress_path):
+    """Run the builds' processes one after another; WATCHDOG_EXIT_CODE at the first hard exit, its progress handed over to progress_path, else 0. A crash marks its build failed and the next build runs."""
+    for build in builds:
         print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
               flush=True)
         code = subprocess.call(build.command(floor), cwd=REPO_ROOT)
         print("{0}: exit {1}".format(build.name, code), flush=True)
-        if build.after_exit(code, data, key, suite_rev):
-            pending.insert(0, build)
-    return builds
+        if code == WATCHDOG_EXIT_CODE:
+            hand_over(build.path + ".progress", progress_path, [b.name for b in builds if b.failed])
+            return code
+        if code != 0:
+            print("{0}: julia exited {1}".format(build.name, code))
+            build.failed = True
+    return 0
 
 
 def main(argv=None):
@@ -122,14 +102,17 @@ def main(argv=None):
     if status:
         print("julia_gpu: the Julia project could not be instantiated (exit {0})".format(status))
         return 1
-    key = dataset_key()
-    data = store.Store(DATA_ROOT)
-    suite_rev = store.suite_rev(REPO_ROOT)
     builds = [Build(name, rows, path) for name, rows, path in build_files(args.trials, trial_list)]
-    run_builds(builds, args.floor, data, key, suite_rev)
+    code = run_builds(builds, args.floor, args.trials + ".progress")
+    if code:
+        crashed = [build.name for build in builds if build.failed]
+        print("julia_gpu: hard exit; bench.py abandons and relaunches from the progress file{0}".format(
+            ", carrying {0} crashed build(s)".format(len(crashed)) if crashed else ""))
+        for name in crashed:
+            print("  failed: " + name)
+        return code
     failed = [build.name for build in builds if build.failed]
-    hard_exits = sum(build.hard_exits for build in builds)
-    print("julia_gpu: {0} builds, {1} hard exit(s), {2} failed".format(len(builds), hard_exits, len(failed)))
+    print("julia_gpu: {0} builds, {1} failed".format(len(builds), len(failed)))
     for name in failed:
         print("  failed: " + name)
     return 1 if failed else 0
