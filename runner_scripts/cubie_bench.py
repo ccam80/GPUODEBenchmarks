@@ -196,7 +196,7 @@ class CubieAdapter:
         return Build(self.package, self.key, self.root, trial, cold, self.solver_class)
 
     def compile(self, build, trial, values):
-        # Cubie compiles from the settings alone; the grid is not an input.
+        # Compile from the solver settings; no grid needed.
         build.apply(trial)
         build.solver.compile(duration=build.duration)
 
