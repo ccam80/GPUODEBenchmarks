@@ -69,9 +69,8 @@ sample log lands in `data/clocks/<key>_<stamp>.csv` and each row carries
 `clock_sm_min_mhz` and `clock_throttled` over its own window of that log;
 a locked row throttled or more than `--clock-tolerance` under the lock fails
 the run. `store.py annotate <run> <clocks.csv>` refills the columns from a
-log; `store.py prune-runs` (run before each run) deletes logs and
-`logs/<run>/` dirs a day old that no row names, and the push mirrors the
-machine's clocks files so they leave the box.
+log. Each run first deletes clock logs and `logs/<run>/` dirs a day old
+that no row names (`store.py prune-runs`); the push mirrors them off the box.
 
 | set | packages | what it times |
 |---|---|---|
