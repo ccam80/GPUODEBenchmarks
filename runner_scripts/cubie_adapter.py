@@ -1,4 +1,4 @@
-"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows. A kernel's record serves every line of the kernel whatever source it was recorded from; nothing here compares sources or dates."""
+"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows. A kernel's record serves every line of the kernel, and names the run that recorded it; nothing here compares sources or dates."""
 
 import csv
 import json
@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timezone
 
 from problems import as_problem
-from store import _Lock
+from store import RUN_ENV, _Lock
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
 SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
@@ -15,7 +15,7 @@ PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "states", "precision", "algorithm", "controller",
                    "gains", "stepping", "n", "duration", "label", "best_ms", "blocksize",
-                   "resident_blocks", "settings", "recorded_utc")
+                   "resident_blocks", "settings", "run", "recorded_utc")
 # The stepping values that compile into a cubie kernel.
 STEPPING_FIELDS = ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
 
@@ -240,10 +240,10 @@ def find_optimized(rows, ident):
     return matched[-1] if matched else None
 
 
-def load_optimized(trial, key, root=None):
-    """{'settings', 'resident_blocks'} recorded for a line's kernel, or None."""
+def load_optimized(trial, key, root=None, run=None):
+    """{'settings', 'resident_blocks'} recorded for a line's kernel, or None; with `run`, a record another run wrote is None."""
     row = find_optimized(optimize_rows(trial["package"], key, root), kernel_ident(trial, key))
-    if row is None or row.get("label") == "timeout":
+    if row is None or row.get("label") == "timeout" or (run is not None and row.get("run", "") != run):
         return None
     resident = row.get("resident_blocks", "")
     return {"settings": _decode(row["settings"]),
@@ -279,14 +279,15 @@ def record_optimized(trial, key, result, root=None):
     row = dict(kernel_ident(trial, key), n=str(int(result.runs)), duration=_text(result.duration),
                label=best.label, best_ms="{0:.6g}".format(best.best_ms), blocksize=str(best.blocksize),
                resident_blocks="" if best.resident_blocks is None else str(best.resident_blocks),
-               settings=_encode(result.applied_settings), recorded_utc=_stamp())
+               settings=_encode(result.applied_settings), run=os.environ.get(RUN_ENV, ""), recorded_utc=_stamp())
     return _replace(trial, key, root, row)
 
 
 def record_optimize_timeout(trial, key, root=None):
     """Replace the optimize row of a line's kernel with one labelled timeout and no settings."""
     row = dict(kernel_ident(trial, key), n=str(int(trial["n"])), duration="", label="timeout",
-               best_ms="nan", blocksize="", resident_blocks="", settings="", recorded_utc=_stamp())
+               best_ms="nan", blocksize="", resident_blocks="", settings="", run=os.environ.get(RUN_ENV, ""),
+               recorded_utc=_stamp())
     return _replace(trial, key, root, row)
 
 

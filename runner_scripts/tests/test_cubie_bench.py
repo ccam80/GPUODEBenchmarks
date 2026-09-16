@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -336,6 +337,22 @@ class BuildTests(AdapterCase):
             lines = handle.read().splitlines()
         self.assertEqual(len(lines) - 1, 3)
         self.assertEqual(lines[0], ",".join(cubie_adapter.OPTIMIZE_FIELDS))
+        leg.close()
+
+    def test_an_overwriting_run_optimizes_again_a_kernel_another_run_recorded(self):
+        leg = self.adapter.build(trial(n=8))
+        with mock.patch.dict(os.environ, {store.RUN_ENV: "old", store.OVERWRITE_ENV: "1"}):
+            self.adapter.optimize(leg, trial(n=8, optimize=True))
+        with mock.patch.dict(os.environ, {store.RUN_ENV: "new", store.OVERWRITE_ENV: "1"}):
+            self.assertNotEqual(self.adapter.optimize(leg, trial(n=32, optimize=True)), "recorded")
+            # The run's own record serves the kernel's later lines.
+            self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize=True)), "recorded")
+        self.assertEqual(len(leg.solver.optimized), 2)
+        self.assertEqual([r["run"] for r in cubie_adapter.optimize_rows("cubie", KEY, self.root)], ["new"])
+        # --resume and --no-overwrite apply a record whatever run wrote it.
+        with mock.patch.dict(os.environ, {store.RUN_ENV: "later", store.OVERWRITE_ENV: ""}):
+            self.assertEqual(self.adapter.optimize(leg, trial(n=128, optimize=True)), "recorded")
+        self.assertEqual(len(leg.solver.optimized), 2)
         leg.close()
 
     def test_a_kernel_record_is_applied_and_compiled_whatever_source_recorded_it(self):

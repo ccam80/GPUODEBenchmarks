@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cubie_adapter as adapter  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import runner  # noqa: E402
+import store  # noqa: E402
 from cubie_systems import final_states, output_types, variable_order  # noqa: E402
 from problems import as_problem  # noqa: E402
 
@@ -201,11 +202,12 @@ class CubieAdapter:
         build.solver.compile(duration=build.duration)
 
     def optimize(self, build, trial):
-        """Apply and compile the kernel's recorded settings, whatever source recorded them, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; returns what was done."""
+        """Apply and compile the kernel's recorded settings, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; an overwriting run applies only the records it wrote; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
-        tuned = adapter.load_optimized(trial, self.key, root=self.root)
+        run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
+        tuned = adapter.load_optimized(trial, self.key, root=self.root, run=run)
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)

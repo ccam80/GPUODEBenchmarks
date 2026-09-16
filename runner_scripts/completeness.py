@@ -9,7 +9,7 @@ MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent, or timed out under no_overwrite)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent, or timed out under no_overwrite), `optimize_timed_out` (a timed-out record that stands under resume)."""
 
     def __init__(self, trial, wants_finals):
         self.trial = trial
@@ -17,6 +17,7 @@ class Missing:
         self.build = []
         self.finals = False
         self.optimize = None
+        self.optimize_timed_out = False
         self.wants_finals = wants_finals
 
     def complete(self):
@@ -79,6 +80,8 @@ def audit(trial_list, key, store, mode=None):
                 optimize_rows[package] = cubie_adapter.optimize_rows(package, key, store.root)
             record = cubie_adapter.find_optimized(optimize_rows[package], cubie_adapter.kernel_ident(trial, key))
             missing.optimize = optimize_status(record, mode)
+            missing.optimize_timed_out = record is not None and record.get("label") == "timeout" \
+                and missing.optimize is None
         out[trial["trial_id"]] = missing
     return out
 
