@@ -1,4 +1,4 @@
-# Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances, pins and the optimize policy are spelled out in the set files under sets/; a cubie optimize sizes its own batch and duration.
+# Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances, pins and the packages that optimize are spelled out in the set files under sets/; a cubie optimize runs once per kernel and sizes its own batch and duration.
 
 # Rows are [first-run seconds below, floor, ceiling]; a run stops past its floor once median/min - 1 is within spread.
 [repeats]

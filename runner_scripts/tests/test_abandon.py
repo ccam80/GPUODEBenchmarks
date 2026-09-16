@@ -91,29 +91,35 @@ class AbandonTests(unittest.TestCase):
         self.assertEqual([(t["n"], t["dt"], t["algorithm"]) for t in remaining], [(128, 0.5, "tsit5")])
 
     def test_an_optimize_hard_exit_records_a_timeout_row_and_drops_the_optimize(self):
-        trial_list = trials.build_trials([spec(8, {"per": "solve"}), spec(32, {"per": "solve"})])
+        trial_list = trials.build_trials([spec(8, True), spec(32, True)])
         self.progress_for(trial_list[0], "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual(self.data.rows(), [])
-        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, None), (32, "solve")])
+        # The n = 32 line runs on the hung kernel, so its optimize goes with it.
+        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, False), (32, False)])
         import csv
         with open(os.path.join(self.data.root, "key=" + KEY, "package=cubie", "optimize.csv"),
                   newline="", encoding="utf-8") as handle:
             recorded = list(csv.DictReader(handle))
         self.assertEqual(len(recorded), 1)
-        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["per"],
-                          recorded[0]["stepping"].split(";")[0], recorded[0]["settings"]),
-                         ("timeout", "8", "solve", "dt=0.0009765625", ""))
-        # A per-kernel optimize that hangs is dropped from every later line of its kernel; the euler and
-        # dt = 0.5 lines before it in the file have run.
-        table = {"per": "kernel"}
-        trial_list = trials.build_trials([spec(8, table), spec(32, table), spec(8, table, dt=0.5),
-                                          spec(8, table, algorithm="euler")])
+        self.assertEqual((recorded[0]["label"], recorded[0]["n"], recorded[0]["stepping"].split(";")[0],
+                          recorded[0]["settings"]),
+                         ("timeout", "8", "dt=0.0009765625", ""))
+        self.assertNotIn("per", recorded[0])
+        # Only the later lines of the hung kernel lose their optimize; euler and dt = 0.5 precede it in the file.
+        trial_list = trials.build_trials([spec(8, True), spec(32, True), spec(8, True, dt=0.5),
+                                          spec(8, True, algorithm="euler")])
         hung = [t for t in trial_list if t["algorithm"] == "tsit5" and t["dt"] == 2.0 ** -10 and t["n"] == 8][0]
         self.progress_for(hung, "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual([(t["n"], t["dt"], t["algorithm"], t["optimize"]) for t in remaining],
-                         [(8, 2.0 ** -10, "tsit5", None), (32, 2.0 ** -10, "tsit5", None)])
+                         [(8, 2.0 ** -10, "tsit5", False), (32, 2.0 ** -10, "tsit5", False)])
+        # A hang in a line of another kernel leaves this kernel's lines optimizing.
+        other = [t for t in trial_list if t["algorithm"] == "euler"][0]
+        self.progress_for(other, "optimize")
+        remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
+        self.assertEqual([(t["algorithm"], t["optimize"]) for t in remaining],
+                         [("euler", False), ("tsit5", True), ("tsit5", True), ("tsit5", True)])
 
     def test_a_progress_file_naming_no_trial_returns_none(self):
         trial_list = trials.build_trials([spec(8)])

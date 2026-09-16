@@ -1,5 +1,6 @@
 """bench.py: flag resolution, the plan output, the -n check over heterogeneous grids, the completeness-aware continuation filters, the runner registry, and the watchdog hard-exit loop against a fake runner."""
 
+import inspect
 import json
 import os
 import shutil
@@ -130,10 +131,16 @@ class PlanTests(unittest.TestCase):
         data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0, finals="finals/p.parquet"))
         resumed = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, resume=True)}
         self.assertEqual(set(resumed), {partial["trial_id"], absent["trial_id"]})
-        # A partial trial runs its missing transfers alone and keeps asking finals once a row carries them.
+        # An unreadable finals file reruns the whole trial; readable finals rerun the missing transfers alone.
+        self.assertEqual((resumed[partial["trial_id"]]["transfers"], resumed[partial["trial_id"]]["finals"]),
+                         (["both", "none"], True))
+        self.assertEqual(resumed[absent["trial_id"]]["transfers"], ["both", "none"])
+        spec = {f: partial[f] for f in store.TRIAL_FIELDS}
+        readable = data.record_finals(dict(spec, key=KEY), np.zeros((8, 3)), np.full(8, 1.0))
+        data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0, finals=readable))
+        resumed = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, resume=True)}
         self.assertEqual((resumed[partial["trial_id"]]["transfers"], resumed[partial["trial_id"]]["finals"]),
                          (["none"], True))
-        self.assertEqual(resumed[absent["trial_id"]]["transfers"], ["both", "none"])
         fresh = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, no_overwrite=True)}
         self.assertEqual(set(fresh), {nan_row["trial_id"], partial["trial_id"], absent["trial_id"]})
         self.assertEqual(fresh[nan_row["trial_id"]]["transfers"], ["both", "none"])
@@ -145,10 +152,10 @@ class PlanTests(unittest.TestCase):
                 data.record(dict(spec, transfers=transfers, key=KEY, states=3, min_ms=1.0))
         mixed = bench.continue_filter(both["pytorch"] + both["cpp"], KEY, self.root, resume=True)
         self.assertEqual([t["package"] for t in mixed], ["pytorch"])
-        # A trial that asks finals over rows without them runs its last transfers again.
+        # A trial that asks finals over rows without them runs whole, so its finals and timings share an execution.
         wants = dict(recorded, finals=True)
         again = bench.continue_filter([wants], KEY, self.root, resume=True)
-        self.assertEqual([(t["transfers"], t["finals"]) for t in again], [(["none"], True)])
+        self.assertEqual([(t["transfers"], t["finals"]) for t in again], [(["both", "none"], True)])
         spec = {f: recorded[f] for f in store.TRIAL_FIELDS}
         relative = data.record_finals(dict(spec, key=KEY), np.zeros((8, 3)), np.full(8, 1.0))
         for transfers in ("both", "none"):
@@ -184,7 +191,7 @@ class PlanTests(unittest.TestCase):
                                    "--mode", "fixed", "--dt", str(2.0 ** -10))
             point = [t for t in by_package["cpp"] if t["system_params"] == '{"states":32}']
             self.assertEqual([(t["cold"], t["finals"], t["transfers"], t["optimize"], t["sets"]) for t in point],
-                             [(True, True, ["both", "none"], None, ["golden_grid", "perf", "states"])], argv)
+                             [(True, True, ["both", "none"], False, ["golden_grid", "perf", "states"])], argv)
 
     def test_plan_cli_writes_the_trial_files_and_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "bench.py"), "plan", "--set", "perf",
@@ -221,8 +228,31 @@ class CompletenessTests(unittest.TestCase):
         return self.data.record(row)
 
     def kept(self, trial_list, **kw):
-        kw.setdefault("sources", lambda package, systems: {s: "S" for s in systems})
         return {t["trial_id"]: t for t in bench.continue_filter(trial_list, KEY, self.root, **kw)}
+
+    @staticmethod
+    def day(d):
+        return "2026-09-{0:02d}T00:00:00Z".format(d)
+
+    def optimized(self, trial, runs=71680, timeout=False, on=1):
+        """A kernel record stamped on day `on`."""
+        with mock.patch.object(cubie_adapter, "_stamp", return_value=self.day(on)):
+            if timeout:
+                return cubie_adapter.record_optimize_timeout(trial, KEY, self.root)
+            return cubie_adapter.record_optimized(trial, KEY, FakeOptimizeResult(runs), root=self.root)
+
+    def legacy_records(self, trial, rows):
+        """An optimize.csv in the per-solve layout with its source column: (per, n, settings, source) rows for the trial's kernel."""
+        kernel = cubie_adapter.kernel_ident(trial, KEY)
+        text = ("package,key,problem,states,precision,algorithm,controller,gains,stepping,per,n,duration,source,"
+                "label,best_ms,blocksize,resident_blocks,settings,recorded_utc\n")
+        for per, n, settings, source in rows:
+            text += ",".join([kernel["package"], kernel["key"], kernel["problem"], kernel["states"],
+                              kernel["precision"], kernel["algorithm"], kernel["controller"], '"{}"',
+                              kernel["stepping"], per, n, "1", source, "bs", "1.0", "64", "", '"' + settings + '"',
+                              "2026-09-01T00:00:00Z"]) + "\n"
+        with open(cubie_adapter.optimize_path("cubie", KEY, self.root), "w", newline="", encoding="utf-8") as handle:
+            handle.write(text)
 
     def test_a_cold_line_needs_a_finite_build_time_on_every_row(self):
         states = self.plan("--set", "states", "-p", "cpp", "-g", "classical-rk4")["cpp"]
@@ -234,7 +264,8 @@ class CompletenessTests(unittest.TestCase):
             self.record(states[2], transfers, build_s=12.5)
         kept = self.kept(states, resume=True)
         self.assertEqual(kept[states[0]["trial_id"]]["transfers"], ["both", "none"])
-        self.assertEqual(kept[states[1]["trial_id"]]["transfers"], ["none"])
+        # A build time lacking on one row reruns the whole trial: its timing and build time come from one execution.
+        self.assertEqual(kept[states[1]["trial_id"]]["transfers"], ["both", "none"])
         self.assertNotIn(states[2]["trial_id"], kept)
         audits = completeness.audit(states, KEY, self.data, "resume")
         self.assertEqual(audits[states[0]["trial_id"]].reasons(), ["build:both", "build:none"])
@@ -270,7 +301,7 @@ class CompletenessTests(unittest.TestCase):
         with open(path, "wb") as handle:
             handle.write(b"not parquet")
         self.assertIn(golden[0]["trial_id"], self.kept(golden, resume=True))
-        # A canonical finals requirement over rows recorded without finals reruns the last transfers.
+        # Finals wanted over rows recorded without them: the whole trial runs again.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "131072",
                          "--mode", "fixed")["cpp"]
         point = perf[0]
@@ -278,7 +309,9 @@ class CompletenessTests(unittest.TestCase):
         for transfers in ("both", "none"):
             self.record(point, transfers)
         kept = self.kept(perf, resume=True)
-        self.assertEqual((kept[point["trial_id"]]["transfers"], kept[point["trial_id"]]["finals"]), (["none"], True))
+        self.assertEqual((kept[point["trial_id"]]["transfers"], kept[point["trial_id"]]["finals"]),
+                         (["both", "none"], True))
+        self.assertEqual(completeness.audit(perf, KEY, self.data, "resume")[point["trial_id"]].reasons(), ["finals"])
         # Rows all NaN carry no finals: complete under --resume, the row alone under --no-overwrite.
         timed_out = self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
                               "--dt", "0.125")["cpp"]
@@ -290,67 +323,96 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(completeness.audit(timed_out, KEY, self.data, "no_overwrite")[timed_out[0]["trial_id"]].reasons(),
                          ["row:none"])
 
-    def test_an_optimize_record_must_exist_from_the_current_source(self):
+    def test_an_optimize_record_must_exist_for_the_kernel(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
                          "-n", "8,32")["cubie"]
-        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, "solve"), (32, "solve")])
+        self.assertEqual([(t["n"], t["optimize"]) for t in perf], [(8, True), (32, True)])
         for trial in perf:
             for transfers in ("both", "none"):
-                self.record(trial, transfers)
+                self.record(trial, transfers, recorded_utc=self.day(2))
         # Complete rows, no record: every transfers of both lines runs again.
         kept = self.kept(perf, resume=True)
         self.assertEqual(sorted(kept), sorted(t["trial_id"] for t in perf))
         self.assertEqual({tuple(t["transfers"]) for t in kept.values()}, {("both", "none")})
-        audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "S" for x in s})
+        audits = completeness.audit(perf, KEY, self.data, "resume")
         self.assertEqual(audits[perf[0]["trial_id"]].reasons(), ["optimize:absent"])
         for trial in perf:
-            cubie_adapter.record_optimized(trial, KEY, FakeOptimizeResult(trial["n"]), root=self.root, source="S")
+            self.optimized(trial, runs=trial["n"])
         self.assertEqual(self.kept(perf, resume=True), {})
         self.assertEqual(self.kept(perf, no_overwrite=True), {})
-        # A per-solve record serves its own n alone.
+        # The two lines share a kernel: one record, from either line, serves both.
         cubie_adapter.clear_optimized("cubie", KEY, "tsit5", "lorenz", root=self.root)
-        cubie_adapter.record_optimized(perf[0], KEY, FakeOptimizeResult(8), root=self.root, source="S")
-        self.assertEqual(list(self.kept(perf, resume=True)), [perf[1]["trial_id"]])
-        cubie_adapter.record_optimized(perf[1], KEY, FakeOptimizeResult(32), root=self.root, source="S")
-        # Recorded from another source: stale, so both lines run again.
-        stale = self.kept(perf, resume=True, sources=lambda p, s: {x: "T" for x in s})
-        self.assertEqual(sorted(stale), sorted(t["trial_id"] for t in perf))
-        audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "T" for x in s})
-        self.assertEqual(audits[perf[1]["trial_id"]].reasons(), ["optimize:source S"])
-        # A timed-out optimize stands under --resume and is attempted again under --no-overwrite.
-        cubie_adapter.record_optimize_timeout(perf[1], KEY, self.root)
+        self.optimized(perf[0])
         self.assertEqual(self.kept(perf, resume=True), {})
-        self.assertEqual(list(self.kept(perf, no_overwrite=True)), [perf[1]["trial_id"]])
+        self.assertEqual(len(cubie_adapter.optimize_rows("cubie", KEY, self.root)), 1)
+        # A timed-out optimize stands under --resume; --no-overwrite reruns every line of its kernel.
+        self.optimized(perf[1], timeout=True)
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(sorted(self.kept(perf, no_overwrite=True)), sorted(t["trial_id"] for t in perf))
         self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[perf[1]["trial_id"]].reasons(),
                          ["optimize:timeout"])
-        # Without a current source (the analyses) a record of any source stands.
-        for trial in perf:
-            cubie_adapter.record_optimized(trial, KEY, FakeOptimizeResult(trial["n"]), root=self.root, source="old")
-        self.assertTrue(all(m.complete() for m in completeness.audit(perf, KEY, self.data).values()))
-        # The source hashes are asked once per cubie package for the systems of its optimizing lines.
-        asked = []
-        bench.continue_filter(perf, KEY, self.root, resume=True,
-                              sources=lambda p, s: asked.append((p, list(s))) or {x: "old" for x in s})
-        self.assertEqual(asked, [("cubie", [("lorenz", "{}", "float32")])])
-        with mock.patch.object(cubie_adapter, "source_hashes", side_effect=RuntimeError("no cubie")):
-            with self.assertRaises(SystemExit) as caught:
-                bench.continue_filter(perf, KEY, self.root, resume=True)
-        self.assertIn("no cubie", str(caught.exception))
+        # A record carrying a source column from an earlier suite stands, whatever hash it names.
+        self.legacy_records(perf[0], [("kernel", "71680", '{""blocksize"": 256}', "0" * 16)])
+        for mode in (None, "resume", "no_overwrite"):
+            self.assertTrue(all(m.complete() for m in completeness.audit(perf, KEY, self.data, mode).values()), mode)
+        # Nothing about the source is asked or checked on the way.
+        self.assertFalse(hasattr(bench, "source_hashes"))
+        self.assertFalse(hasattr(cubie_adapter, "source_hashes"))
+        self.assertNotIn("sources", inspect.signature(completeness.audit).parameters)
+        self.assertNotIn("sources", inspect.signature(bench.continue_filter).parameters)
 
     def test_each_kernel_has_its_own_optimize_record(self):
         golden = self.plan("--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "classical-rk4",
                            "--dt", "0.5,0.25")["cubie"]
-        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, "kernel"), (0.25, "kernel")])
+        self.assertEqual([(t["dt"], t["optimize"]) for t in golden], [(0.5, True), (0.25, True)])
         for trial in golden:
             spec = {f: trial[f] for f in store.TRIAL_FIELDS}
             relative = self.data.record_finals(dict(spec, key=KEY), np.zeros((131072, 3)), np.full(131072, 1.0))
-            self.record(trial, "none", finals=relative)
-        cubie_adapter.record_optimized(golden[0], KEY, FakeOptimizeResult(71680), root=self.root, source="S")
+            self.record(trial, "none", finals=relative, recorded_utc=self.day(2))
+        self.optimized(golden[0])
         # The 0.5 kernel stands with its record at any batch; the 0.25 kernel runs again.
         self.assertEqual(list(self.kept(golden, resume=True)), [golden[1]["trial_id"]])
-        self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume",
-                                                                 lambda p, s: {x: "S" for x in s})),
+        self.assertEqual(completeness.summary(completeness.audit(golden, KEY, self.data, "resume")),
                          {"optimize:absent": 1})
+
+    def test_a_recorded_row_stands_whatever_was_optimized_or_changed_after_it(self):
+        # Legacy per-solve records with their rows: the per-solve rows are dropped, the timings stay.
+        perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
+                         "-n", "8,32")["cubie"]
+        self.legacy_records(perf[0], [("solve", "8", '{""blocksize"": 256}', "S"),
+                                      ("solve", "32", '{""blocksize"": 32}', "S")])
+        for trial in perf:
+            for transfers in ("both", "none"):
+                self.record(trial, transfers, recorded_utc=self.day(2))
+        # No kernel record: both lines run again, for the record alone.
+        self.assertEqual(sorted(self.kept(perf, resume=True)), sorted(t["trial_id"] for t in perf))
+        self.assertEqual({tuple(m.reasons()) for m in completeness.audit(perf, KEY, self.data, "resume").values()},
+                         {("optimize:absent",)})
+        # A kernel record later than every row: the rows stand under every mode, no row is dated.
+        self.optimized(perf[0], on=3)
+        for mode in (None, "resume", "no_overwrite"):
+            audits = completeness.audit(perf, KEY, self.data, mode)
+            self.assertTrue(all(m.complete() for m in audits.values()), mode)
+            self.assertEqual({r for m in audits.values() for r in m.reasons() if r.startswith("stale")}, set())
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(self.kept(perf, no_overwrite=True), {})
+        # A re-optimize after the rows changes nothing about them either.
+        self.optimized(perf[1], on=6)
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(self.kept(perf, no_overwrite=True), {})
+        # A NaN row recorded before the record is kept under --resume and rerun alone under --no-overwrite.
+        self.record(perf[0], "both", min_ms=NAN, reason="abandoned: hard-exit at x", recorded_utc=self.day(1))
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(self.kept(perf, no_overwrite=True)[perf[0]["trial_id"]]["transfers"], ["both"])
+        self.assertEqual(completeness.audit(perf, KEY, self.data, "no_overwrite")[perf[0]["trial_id"]].reasons(),
+                         ["row:both"])
+        # A timed-out record after the rows: they stand under --resume; --no-overwrite reruns the kernel's lines.
+        self.optimized(perf[1], on=7, timeout=True)
+        self.assertEqual(self.kept(perf, resume=True), {})
+        self.assertEqual(sorted(self.kept(perf, no_overwrite=True)), sorted(t["trial_id"] for t in perf))
+        for gone in ("predates", "optimize_systems"):
+            self.assertFalse(hasattr(completeness, gone), gone)
+        self.assertFalse(hasattr(completeness.Missing(perf[0], False), "stale"))
 
 
 class FakeOptimizeResult:

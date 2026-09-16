@@ -3,8 +3,8 @@
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
-A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel (a cubie optimize times the batch and duration cubie sizes itself per kernel, or the line's n at its duration per solve), the watchdog budget the largest.
---resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
+A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per compiled kernel, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
+Without a flag every selected trial runs and its rows are overwritten. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
 Exit 0 when every runner finished; 1 on a runner failure, clock drift or a failed push.
 """
@@ -145,21 +145,12 @@ def resolve(args):
 
 # ------------------------------------------------------------------ planning
 
-def source_hashes(package, systems):
-    """The current source hash of each cubie system, from the package's own interpreter; SystemExit when it cannot say."""
-    try:
-        return cubie_adapter.source_hashes(package, systems)
-    except (RuntimeError, OSError, ValueError) as exc:
-        raise SystemExit("cannot validate {0}'s optimize records without its source hashes: {1}".format(
-            package, exc))
-
-
-def continue_filter(trial_list, key, root, resume=False, no_overwrite=False, sources=source_hashes):
-    """Trials still to run: each keeps the transfers completeness.audit finds lacking (every one behind a stale optimize record, the last one alone for missing finals); a line without transfers never runs again."""
+def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
+    """Trials still to run: without a flag every trial; else each keeps the transfers completeness.audit finds lacking (every one when the optimize record, the build time or the finals are lacking, so a trial's outputs come from one execution); a line without transfers never runs again. A recorded row is never rerun for its age or source."""
     if not (resume or no_overwrite):
         return list(trial_list)
     mode = "no_overwrite" if no_overwrite else "resume"
-    audits = completeness.audit(trial_list, key, store.Store(root), mode, sources)
+    audits = completeness.audit(trial_list, key, store.Store(root), mode)
     kept = []
     for trial in trial_list:
         missing = audits.get(trial["trial_id"])
@@ -184,10 +175,9 @@ def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
     return trials_mod.build_trials(specs, sets.declarations(key, root, **narrowing))
 
 
-def plan_trials(plan, key, root, resume=False, no_overwrite=False, sources=source_hashes):
+def plan_trials(plan, key, root, resume=False, no_overwrite=False):
     """{package: trials} for the flags, in run order."""
-    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite,
-                                 sources)
+    all_trials = continue_filter(canonical_trials(plan, key, root), key, root, resume, no_overwrite)
     groups = trials_mod.by_package(all_trials)
     return {package: groups[package] for package in launch.ordered(list(groups))}
 
