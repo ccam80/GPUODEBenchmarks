@@ -62,14 +62,13 @@ finals file, an optimize record from the current cubie source;
 
 Clocks: a run locks the GPU to the card's row in
 `runner_scripts/gpu_clocks.conf` or `--lock-clocks SM[,MEM]` from an
-elevated shell, and refuses to start when it cannot; there is no unlocked
-run. `runner_scripts/calibrate/calibrate_clocks.py` writes the row. A 25 Hz
-sample log lands in `data/clocks/<key>_<stamp>.csv` and each row carries
-`run`, `driver`, `clock_lock_mhz`, the host stamps its runner took around
-the timing batch (`timed_start_utc`, `timed_end_utc`) and, over that window
-of the log, `clock_sm_mhz`, `clock_sm_min_mhz` and `clock_throttled` (NaN
-when the samples do not cover the window); a row throttled or more than
-`--clock-tolerance` under the lock fails the run.
+elevated shell, and refuses to start when it cannot;
+`runner_scripts/calibrate/calibrate_clocks.py` writes the row. A 25 Hz
+sample log lands in `data/clocks/<key>_<stamp>.csv`; each row carries
+`run`, `driver`, `clock_lock_mhz`, its timing window (`timed_start_utc`,
+`timed_end_utc`) and that window's `clock_sm_mhz`, `clock_sm_min_mhz` and
+`clock_throttled` (NaN when the log does not cover it). A row throttled or
+more than `--clock-tolerance` under the lock fails the run.
 `store.py annotate <run> <clocks.csv>` refills the columns from a log. After
 the push the box deletes this key's clock logs a day old that no row names
 (`sync/box_prune.py`); the mirror and `logs/<run>/` follow.

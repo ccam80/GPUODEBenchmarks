@@ -24,10 +24,9 @@ failed. Each script can be run on its own and reuses an existing venv.
   C++ workload (`run_ode_cpp.ps1` enters it through `vswhere`).
 - Julia through `juliaup`: `setup_julia.py` pins this directory to the 1.13
   channel and every launcher runs `julia +1.13` (override with `JULIA`).
-- Locking GPU clocks needs an elevated shell (passwordless `sudo nvidia-smi`
-  on Linux, an Administrator console on Windows) and the card's row in
-  `runner_scripts/gpu_clocks.conf` (`calibrate_clocks.py` writes it);
-  a run refuses to start without both.
+- A run needs an elevated shell (passwordless `sudo nvidia-smi` on Linux,
+  an Administrator console on Windows) and the card's row in
+  `runner_scripts/gpu_clocks.conf` (`calibrate_clocks.py` writes it).
 - `rclone` with the `box:` remote and a box set up by `sync/store_box.sh`
   (its venv runs the box-side prune after every push; `sync/README.md`), or
   `--no-sync` on every run and analysis.
