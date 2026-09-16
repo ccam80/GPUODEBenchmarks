@@ -25,11 +25,9 @@ failed. Each script can be run on its own and reuses an existing venv.
 - Julia through `juliaup`: `setup_julia.py` pins this directory to the 1.13
   channel and every launcher runs `julia +1.13` (override with `JULIA`).
 - Locking GPU clocks needs an elevated shell (passwordless `sudo nvidia-smi`
-  on Linux, an Administrator console on Windows) and a row for the card in
-  `runner_scripts/gpu_clocks.conf`, which
-  `runner_scripts/calibrate/calibrate_clocks.py` writes after a 30-minute
-  burn; without either a run refuses to start unless told to run unlocked
-  with `--no-lock-clocks`.
+  on Linux, an Administrator console on Windows) and the card's row in
+  `runner_scripts/gpu_clocks.conf` (`calibrate_clocks.py` writes it);
+  without both a run needs `--no-lock-clocks`.
 - `rclone` with the `box:` remote (`sync/README.md`), or `--no-sync` on every run and analysis.
 
 On a fresh Linux machine:

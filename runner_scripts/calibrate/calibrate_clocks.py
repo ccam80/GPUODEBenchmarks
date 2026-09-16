@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the clock a GPU holds under sustained load and write its row to gpu_clocks.conf.
-
-Builds clock_burn.cu, runs it for 30 minutes under 1 Hz nvidia-smi sampling,
-judges the plateau after the first 15 minutes (a cooled machine's heatsink
-takes that long to saturate), and writes the GPU's row into
-runner_scripts/gpu_clocks.conf, replacing an earlier one. Linux and Windows.
-
-    python3 runner_scripts/calibrate/calibrate_clocks.py
-"""
+"""Burn the GPU for 30 minutes under 1 Hz sampling, judge the plateau after the first 15, and write the card's row to gpu_clocks.conf: python3 runner_scripts/calibrate/calibrate_clocks.py"""
 
 import csv
 import glob
@@ -21,9 +13,9 @@ import sys
 import time
 from datetime import datetime
 
-MINUTES = 30          # long enough for a cooled machine's heatsink to saturate
+MINUTES = 30          # burn length
 MATRIX = 4096         # SGEMM size; big enough to saturate the SMs
-WARMUP_S = 900        # discarded before looking at the plateau
+WARMUP_S = 900        # discarded before the plateau
 HEADROOM_PCT = 5      # applied only if the clock varied or throttled
 
 HERE = os.path.dirname(os.path.abspath(__file__))
