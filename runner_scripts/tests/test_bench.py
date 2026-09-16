@@ -28,8 +28,7 @@ from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 NAN = float("nan")
 
-# A runner that records every solve trial it reaches and exits 3 (once) while a chosen trial is in progress; its
-# progress file names the builds plan.json says crashed before the hard exit, as the julia driver's does.
+# A runner that records every solve trial it reaches, exits 3 (once) while a chosen trial is in progress and lists plan.json's crashed builds in its progress file.
 FAKE_RUNNER = '''
 import json, os, sys
 sys.path.insert(0, r"{runner_scripts}")
@@ -525,8 +524,7 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "3"]])
 
     def test_a_build_crashed_before_a_hard_exit_fails_the_package_after_the_relaunch(self):
-        # The driver's progress file names a build that crashed before the hang: the relaunch still runs the rest,
-        # then the package is FAILED rather than PARTIAL, and the run exits 1.
+        # The relaunch still runs the rest; the crashed build fails the package.
         hung = self.line("cash-karp-54", 32)
         status, run, calls, summary = self.run_bench(hung["trial_id"], 3, failed=["lorenz/{}/float32/euler/fixed/{}"])
         self.assertEqual(status, 1)

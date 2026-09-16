@@ -180,8 +180,7 @@ class DriverTests(unittest.TestCase):
                          [(32, False), (32, False), (128, False), (128, False)])
 
     def test_a_crash_before_a_hard_exit_is_handed_over_with_the_progress_file(self):
-        # Build 1 (tsit5 default) crashes, build 2 (tsit5 fixed) hangs: the driver exits with the watchdog code and
-        # the progress file names the crashed build, for bench.py to fail the package once the relaunch ends.
+        # Build 1 crashes, build 2 hangs: the progress file names build 1.
         crashed = self.solve("tsit5", "default", 8)
         hung = self.solve("tsit5", "fixed", 32)
         status, calls = self.run_driver({crashed["trial_id"]: "crash", hung["trial_id"]: "hang"})
@@ -192,7 +191,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(progress["trial_id"], hung["trial_id"])
         self.assertEqual(progress["failed"], ["lorenz/{}/float32/tsit5/default/{}"])
         self.assertEqual(abandon.crashed_builds(self.path + ".progress"), ["lorenz/{}/float32/tsit5/default/{}"])
-        # The relaunch runs what the abandonment leaves and exits 0; the crashed build's lines stay unrun.
+        # The relaunch exits 0; the crashed build's lines stay unrun.
         status, calls = self.relaunch()
         self.assertEqual(status, 0)
         self.assertEqual(sorted(c["path"] for c in calls),

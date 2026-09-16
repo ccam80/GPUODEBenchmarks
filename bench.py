@@ -287,7 +287,7 @@ class Run:
 
     # ------------------------------------------------------------- packages
     def run_package(self, package, trial_list, path):
-        """Drive one runner over its trial file, re-invoking after every watchdog hard exit; a build the progress file names as crashed before a hard exit fails the package once the relaunches end."""
+        """Drive one runner over its trial file, re-invoking after every watchdog hard exit; a build that crashed before a hard exit fails the package once the relaunches end."""
         logfile = package + ".log"
         hard_exits = 0
         crashed = []

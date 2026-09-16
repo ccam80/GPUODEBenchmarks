@@ -63,7 +63,7 @@ class Build:
 
 
 def hand_over(build_progress, progress_path, failed):
-    """Write the hung build's progress beside the trial file with `failed`, the names of the builds that crashed before the hard exit, for bench.py to carry across its relaunches."""
+    """Write the hung build's progress to progress_path with `failed`, the builds that crashed before the hard exit."""
     progress = {}
     try:
         with open(build_progress, encoding="utf-8") as handle:
@@ -76,7 +76,7 @@ def hand_over(build_progress, progress_path, failed):
 
 
 def run_builds(builds, floor, progress_path):
-    """Run the builds' processes one after another; returns WATCHDOG_EXIT_CODE at the first hard exit, with the hung build's progress file and the names of the builds that crashed before it written to progress_path, else 0. A crash marks its build failed and the next build runs."""
+    """Run the builds' processes one after another; WATCHDOG_EXIT_CODE at the first hard exit, its progress handed over to progress_path, else 0. A crash marks its build failed and the next build runs."""
     for build in builds:
         print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
               flush=True)

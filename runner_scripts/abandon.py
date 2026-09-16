@@ -50,7 +50,7 @@ class History:
 
 
 def crashed_builds(progress_path):
-    """The builds a hard exit's progress file names as crashed before it (the julia driver's `failed`), [] when it names none or cannot be read."""
+    """The builds a hard exit's progress file lists under `failed`; [] when it lists none or cannot be read."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             failed = json.load(handle).get("failed", [])
