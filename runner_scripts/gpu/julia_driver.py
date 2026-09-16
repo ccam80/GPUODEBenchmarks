@@ -1,9 +1,9 @@
-"""julia_driver.py --trials <path> [--floor]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), one process at a time; a watchdog hard exit ends the driver with the same code and the hung build's progress file beside the trial file, for bench.py to abandon and relaunch; exit 1 when a process crashed."""
+"""julia_driver.py --trials <path> [--floor]: one bench_ode_gpu.jl process per build (consecutive lines of one system, algorithm, controller and precision), one process at a time; a watchdog hard exit ends the driver with the same code and the hung build's progress file beside the trial file, naming the builds that crashed before it, for bench.py to abandon and relaunch; exit 1 when a process crashed."""
 
 import argparse
+import json
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 
@@ -62,16 +62,28 @@ class Build:
         return argv
 
 
+def hand_over(build_progress, progress_path, failed):
+    """Write the hung build's progress beside the trial file with `failed`, the names of the builds that crashed before the hard exit, for bench.py to carry across its relaunches."""
+    progress = {}
+    try:
+        with open(build_progress, encoding="utf-8") as handle:
+            progress = json.load(handle)
+    except (OSError, ValueError):
+        pass
+    progress["failed"] = list(failed)
+    with open(progress_path, "w", encoding="utf-8") as handle:
+        json.dump(progress, handle)
+
+
 def run_builds(builds, floor, progress_path):
-    """Run the builds' processes one after another; returns WATCHDOG_EXIT_CODE at the first hard exit, with the hung build's progress file copied to progress_path, else 0. A crash marks its build failed and the next build runs."""
+    """Run the builds' processes one after another; returns WATCHDOG_EXIT_CODE at the first hard exit, with the hung build's progress file and the names of the builds that crashed before it written to progress_path, else 0. A crash marks its build failed and the next build runs."""
     for build in builds:
         print("spawning {0} ({1} trials, {2})".format(build.name, len(build.trials), os.path.basename(build.path)),
               flush=True)
         code = subprocess.call(build.command(floor), cwd=REPO_ROOT)
         print("{0}: exit {1}".format(build.name, code), flush=True)
         if code == WATCHDOG_EXIT_CODE:
-            if os.path.isfile(build.path + ".progress"):
-                shutil.copyfile(build.path + ".progress", progress_path)
+            hand_over(build.path + ".progress", progress_path, [b.name for b in builds if b.failed])
             return code
         if code != 0:
             print("{0}: julia exited {1}".format(build.name, code))
@@ -93,7 +105,11 @@ def main(argv=None):
     builds = [Build(name, rows, path) for name, rows, path in build_files(args.trials, trial_list)]
     code = run_builds(builds, args.floor, args.trials + ".progress")
     if code:
-        print("julia_gpu: hard exit; bench.py abandons and relaunches from the progress file")
+        crashed = [build.name for build in builds if build.failed]
+        print("julia_gpu: hard exit; bench.py abandons and relaunches from the progress file{0}".format(
+            ", carrying {0} crashed build(s)".format(len(crashed)) if crashed else ""))
+        for name in crashed:
+            print("  failed: " + name)
         return code
     failed = [build.name for build in builds if build.failed]
     print("julia_gpu: {0} builds, {1} failed".format(len(builds), len(failed)))

@@ -123,6 +123,20 @@ class AbandonTests(unittest.TestCase):
         os.remove(self.progress)
         self.assertIsNone(abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev"))
 
+    def test_the_progress_file_names_the_builds_that_crashed_before_the_hard_exit(self):
+        trial_list = trials.build_trials([spec(8), spec(32)])
+        self.progress_for(trial_list[1])
+        self.assertEqual(abandon.crashed_builds(self.progress), [])
+        with open(self.progress, "w", encoding="utf-8") as handle:
+            json.dump({"trial_id": trial_list[1]["trial_id"], "stage": "solve", "started_utc": "x",
+                       "failed": ["lorenz/{}/float32/vern7/fixed/{}"]}, handle)
+        self.assertEqual(abandon.crashed_builds(self.progress), ["lorenz/{}/float32/vern7/fixed/{}"])
+        # The abandonment reads the same file.
+        self.assertEqual([t["n"] for t in abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress,
+                                                                            "rev")], [])
+        os.remove(self.progress)
+        self.assertEqual(abandon.crashed_builds(self.progress), [])
+
 
 if __name__ == "__main__":
     unittest.main()

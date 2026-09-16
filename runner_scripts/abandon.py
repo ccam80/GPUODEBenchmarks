@@ -49,6 +49,16 @@ class History:
         return abandon_reason(trial, self.failures.get(transfers, []))
 
 
+def crashed_builds(progress_path):
+    """The builds a hard exit's progress file names as crashed before it (the julia driver's `failed`), [] when it names none or cannot be read."""
+    try:
+        with open(progress_path, encoding="utf-8") as handle:
+            failed = json.load(handle).get("failed", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(name) for name in failed] if isinstance(failed, list) else []
+
+
 def remaining(trial_list, current, doomed=()):
     """The trials from `current` on in file order, outside `doomed`, that list transfers: a runner takes its file in order, so every line before the hung one has run, whatever rows the store held before the run."""
     index = next(i for i, t in enumerate(trial_list) if t["trial_id"] == current["trial_id"])
