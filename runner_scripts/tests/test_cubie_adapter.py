@@ -174,7 +174,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertNotIn("per", rows[0])
         self.assertEqual(adapter.optimize_rows("cubie_mlir", "k"), [])
 
-    def test_rows_an_earlier_suite_recorded_per_solve_are_dropped(self):
+    def test_rows_with_a_per_column_of_solve_are_dropped(self):
         path = adapter.optimize_path("cubie", "k")
         kernel = adapter.kernel_ident(line(), "k")
         legacy = ("package,key,problem,states,precision,algorithm,controller,gains,stepping,per,n,duration,source,"

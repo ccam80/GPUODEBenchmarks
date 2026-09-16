@@ -106,8 +106,7 @@ class AbandonTests(unittest.TestCase):
                           recorded[0]["settings"]),
                          ("timeout", "8", "dt=0.0009765625", ""))
         self.assertNotIn("per", recorded[0])
-        # A hung optimize is dropped from every later line of its kernel alone; the euler and dt = 0.5 lines
-        # before it in the file have run.
+        # Only the later lines of the hung kernel lose their optimize; euler and dt = 0.5 precede it in the file.
         trial_list = trials.build_trials([spec(8, True), spec(32, True), spec(8, True, dt=0.5),
                                           spec(8, True, algorithm="euler")])
         hung = [t for t in trial_list if t["algorithm"] == "tsit5" and t["dt"] == 2.0 ** -10 and t["n"] == 8][0]

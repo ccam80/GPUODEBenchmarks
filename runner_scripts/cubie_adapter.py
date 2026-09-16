@@ -195,7 +195,7 @@ def _same(row, ident):
 
 
 def _load(path):
-    """The kernel rows of a store file; rows an earlier suite recorded per solve (a `per` column of solve) are not kernel records and are dropped."""
+    """The kernel rows of a store file; a row whose `per` column reads solve is skipped."""
     if not os.path.isfile(path):
         return []
     with open(path, newline="", encoding="utf-8") as handle:

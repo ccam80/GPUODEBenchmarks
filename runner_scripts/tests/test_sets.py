@@ -149,7 +149,7 @@ class ShippedSetTests(unittest.TestCase):
                                      if (s["controller"] == "fixed") == (kind == "fixed")}), sorted(names))
         built = self.trials["perf"]
         self.assertEqual(dict(solve_counts(built)), expected)
-        # One optimize per kernel: perf gives each build one stepping, so kernels and builds count alike.
+        # One optimize per kernel; perf gives each build one stepping.
         self.assertEqual(line_counts(built, "cubie"), (1632, 136, 0, 136))
         self.assertEqual(line_counts(built, "jax"), (360, 0, 0, 30))
         self.assertEqual(line_counts(built, "julia_gpu"), (960, 0, 0, 80))
@@ -712,7 +712,7 @@ class SchemaTests(unittest.TestCase):
         self.write(text.replace('[set.optimize]\npackages = ["jax"]', '[set.optimize]\npackages = ["cubie"]'))
         built = trials.build_trials(sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"]))
         self.assertEqual({t["optimize"] for t in built}, {False})
-        # The policy is one per kernel; a per key, or any other, is refused.
+        # Any key but packages is refused.
         for bad in ('per = "kernel"', 'per = "solve"', 'n = 64', 'shape = 1'):
             self.write(text + bad + "\n")
             with self.assertRaises(sets.SetError, msg=bad):

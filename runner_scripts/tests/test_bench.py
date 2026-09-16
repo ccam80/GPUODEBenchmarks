@@ -316,8 +316,7 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(sorted(stale), sorted(t["trial_id"] for t in perf))
         audits = completeness.audit(perf, KEY, self.data, "resume", lambda p, s: {x: "T" for x in s})
         self.assertEqual(audits[perf[1]["trial_id"]].reasons(), ["optimize:source S"])
-        # A timed-out optimize stands under --resume and is attempted again, on every line of the kernel,
-        # under --no-overwrite.
+        # A timed-out optimize stands under --resume; --no-overwrite reruns every line of its kernel.
         cubie_adapter.record_optimize_timeout(perf[1], KEY, self.root)
         self.assertEqual(self.kept(perf, resume=True), {})
         self.assertEqual(sorted(self.kept(perf, no_overwrite=True)), sorted(t["trial_id"] for t in perf))
