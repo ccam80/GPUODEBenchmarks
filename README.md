@@ -54,13 +54,11 @@ timeout or out-of-memory run abandons every harder run of its family (same
 problem, precision, algorithm, controller and gains; larger n or states,
 smaller step or tolerance) on the same transfers. Without a flag every
 selected trial runs and its rows are overwritten. `--resume` runs the
-trials the store lacks rows of and keeps a recorded NaN or error row;
-`--no-overwrite` runs every trial without a finite time; under either a
-trial lacking a requested output (the cold build time, a readable finals
-file) or its kernel's optimize record (timed out, under `--no-overwrite`)
-runs whole, so its timing, build time and finals come from one execution.
-A recorded row is never rerun for its age or the source it was recorded
-from. A run
+trials the store lacks rows of, keeping a recorded NaN or error row;
+`--no-overwrite` runs every trial without a finite time. Under either, a
+trial lacking its cold build time, a readable finals file or its kernel's
+optimize record (timed out, under `--no-overwrite`) runs every transfers
+again. A run
 pins the GPU clocks to the row for this card in
 `runner_scripts/gpu_clocks.conf` when the shell is elevated (`--no-lock-clocks`
 skips it; `runner_scripts/calibrate/calibrate_clocks.py` prints the row for a

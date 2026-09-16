@@ -130,8 +130,7 @@ class PlanTests(unittest.TestCase):
         data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=2.0, finals="finals/p.parquet"))
         resumed = {t["trial_id"]: t for t in bench.continue_filter(cpp, KEY, self.root, resume=True)}
         self.assertEqual(set(resumed), {partial["trial_id"], absent["trial_id"]})
-        # A partial trial whose row names an unreadable finals file runs whole, still asking finals; one whose
-        # finals are in place runs its missing transfers alone.
+        # An unreadable finals file reruns the whole trial; readable finals rerun the missing transfers alone.
         self.assertEqual((resumed[partial["trial_id"]]["transfers"], resumed[partial["trial_id"]]["finals"]),
                          (["both", "none"], True))
         self.assertEqual(resumed[absent["trial_id"]]["transfers"], ["both", "none"])
@@ -301,8 +300,7 @@ class CompletenessTests(unittest.TestCase):
         with open(path, "wb") as handle:
             handle.write(b"not parquet")
         self.assertIn(golden[0]["trial_id"], self.kept(golden, resume=True))
-        # A canonical finals requirement over rows recorded without finals reruns the whole trial, so the
-        # finals and every timing row come from one execution.
+        # Finals wanted over rows recorded without them: the whole trial runs again.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "131072",
                          "--mode", "fixed")["cpp"]
         point = perf[0]
