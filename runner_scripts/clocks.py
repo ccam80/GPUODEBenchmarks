@@ -13,6 +13,7 @@ CLOCK_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "gpu_clocks.conf")
 TOL_MHZ = 15            # one clock step; anything beyond this is real drift
 SAMPLE_MS = 40          # nvidia-smi -lms period; one process saturates near 20 ms
+COVERAGE_GAP_S = 1.0    # a window counts as observed only when a sample lies within this of each edge
 FIELDS = ("timestamp,clocks.sm,clocks.mem,temperature.gpu,power.draw,"
           "utilization.gpu,clocks_event_reasons.active")
 HEADER = "utc,sm_mhz,mem_mhz,temp_c,power_w,util_pct,reasons"
@@ -316,15 +317,21 @@ def load_samples(csv_path):
             "reasons": [reasons[i] for i in order]}
 
 
-def window_stats(samples, start, end):
-    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side; the SM statistics are over busy samples alone (NaN with none); None when the log holds no sample."""
+def window_stats(samples, start, end, max_gap_s=COVERAGE_GAP_S):
+    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side when that sample lies within max_gap_s of the edge; the SM statistics are over busy samples alone (NaN with none); None when no sample lies in the window and it is not bracketed within max_gap_s on both sides, so an interval the sampler never observed stays unannotated."""
     times = samples["t"]
     if not times:
         return None
-    first = max(bisect.bisect_right(times, start) - 1, 0)
-    last = min(bisect.bisect_left(times, end), len(times) - 1)
-    if last < first:
-        last = first
+    first = bisect.bisect_left(times, start)       # the first sample at or after start
+    last = bisect.bisect_right(times, end) - 1     # the last sample at or before end
+    before = first - 1 if first > 0 and start - times[first - 1] <= max_gap_s else None
+    after = last + 1 if last + 1 < len(times) and times[last + 1] - end <= max_gap_s else None
+    if last < first and (before is None or after is None):
+        return None
+    if before is not None:
+        first = before
+    if after is not None:
+        last = after
     busy = [samples["sm"][i] for i in range(first, last + 1)
             if not samples["reasons"][i] & IDLE_BIT]
     throttled = sum(1 for i in range(first, last + 1) if samples["reasons"][i] & BAD_BITS)

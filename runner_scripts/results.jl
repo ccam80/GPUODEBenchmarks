@@ -60,13 +60,18 @@ function store_spec(fields, names = STORE_SPEC_FIELDS)
     return Dict{String, Any}(f => fields[f] for f in names)
 end
 
-"One complete store row: the spec fields of a trial or spec Dict with the value columns; store.py hashes run_id, trial_id and group_id."
+"A UTC DateTime as the store's ISO text."
+store_stamp(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS.sss") * "Z"
+
+"One complete store row: the spec fields of a trial or spec Dict with the value columns; timed_start_utc and timed_end_utc are the host DateTimes bracketing the timing batch (nothing on a row never timed); store.py hashes run_id, trial_id and group_id."
 function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_pct = NaN,
         build_s = NaN, reason = "", finals = "", package_version = "", suite_rev = "",
-        recorded_utc = nothing)
+        timed_start_utc = nothing, timed_end_utc = nothing, recorded_utc = nothing)
     row = store_spec(spec)
     stamp = recorded_utc === nothing ? Dates.now(Dates.UTC) : recorded_utc
     row["states"] = Int(states)
+    row["timed_start_utc"] = timed_start_utc === nothing ? nothing : store_stamp(timed_start_utc)
+    row["timed_end_utc"] = timed_end_utc === nothing ? nothing : store_stamp(timed_end_utc)
     row["min_ms"] = Float64(min_ms)
     row["samples_ms"] = Float64[samples_ms...]
     row["errored_pct"] = Float64(errored_pct)
@@ -75,7 +80,7 @@ function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_p
     row["finals"] = String(finals)
     row["package_version"] = String(package_version)
     row["suite_rev"] = String(suite_rev)
-    row["recorded_utc"] = Dates.format(stamp, "yyyy-mm-ddTHH:MM:SS.sss") * "Z"
+    row["recorded_utc"] = store_stamp(stamp)
     return row
 end
 

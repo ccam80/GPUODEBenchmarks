@@ -87,6 +87,11 @@ int main(int argc, char** argv)
 		v.finals = "";
 		v.package_version = "abcdef123456+nvcc13.3";
 		v.suite_rev = "rev";
+		v.timed_start_utc = "2026-09-16T03:00:00.000Z";
+		v.timed_end_utc = "2026-09-16T03:00:01.500Z";
+		std::string stamp = UtcStamp();
+		Check(stamp.size() == 24 && stamp[10] == 'T' && stamp[23] == 'Z' && stamp[19] == '.', "utc stamp shape " + stamp);
+		std::printf("utc_stamp=%s\n", stamp.c_str());
 		std::ofstream row(argv[4], std::ios::binary);
 		row << RowText(t, "both", argv[3], v) << "\n";
 		std::ofstream spec(argv[5], std::ios::binary);

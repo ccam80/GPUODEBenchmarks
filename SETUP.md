@@ -28,7 +28,9 @@ failed. Each script can be run on its own and reuses an existing venv.
   on Linux, an Administrator console on Windows) and the card's row in
   `runner_scripts/gpu_clocks.conf` (`calibrate_clocks.py` writes it);
   without both a run needs `--no-lock-clocks`.
-- `rclone` with the `box:` remote (`sync/README.md`), or `--no-sync` on every run and analysis.
+- `rclone` with the `box:` remote and a box set up by `sync/store_box.sh`
+  (its venv runs the box-side prune after every push; `sync/README.md`), or
+  `--no-sync` on every run and analysis.
 
 On a fresh Linux machine:
 

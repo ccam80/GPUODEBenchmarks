@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -31,7 +30,8 @@ NAN = float("nan")
 
 # A runner that records every solve trial it reaches and exits 3 (once) while a chosen trial is in progress.
 FAKE_RUNNER = '''
-import json, os, sys
+import json, os, sys, time
+from datetime import datetime, timezone
 sys.path.insert(0, r"{runner_scripts}")
 import store
 argv = sys.argv[1:]
@@ -53,7 +53,11 @@ for t in trials:
         json.dump(dict(plan, done=True), open(marker, "w"))
         sys.exit(plan.get("code", 3))
     spec = {{f: t[f] for f in store.TRIAL_FIELDS}}
-    data.record_batch([dict(spec, transfers=x, key=plan["key"], states=3, min_ms=1.0, samples_ms=[2.0, 1.0])
+    started = datetime.now(timezone.utc)
+    time.sleep(0.003)
+    ended = datetime.now(timezone.utc)
+    data.record_batch([dict(spec, transfers=x, key=plan["key"], states=3, min_ms=1.0, samples_ms=[2.0, 1.0],
+                            timed_start_utc=started, timed_end_utc=ended)
                        for x in t["transfers"]])
 sys.exit(0)
 '''.format(runner_scripts=os.path.dirname(HERE))
@@ -512,46 +516,27 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(len(run.clock_lines), 1)
         self.assertTrue(run.clock_lines[0].startswith("cpp: "))
         import clocks
+        self.assertTrue(all(r["timed_start_utc"] <= r["timed_end_utc"] <= r["recorded_utc"] for r in rows))
         if clocks.load_samples(run.clocks_csv)["t"]:
-            # The monitor sampled, so every row got its window's clocks (NaN when the GPU was idle).
-            self.assertTrue(run.clock_lines[0].startswith("cpp: 12 rows annotated"))
+            # The monitor sampled, so every row's timing window got its clocks (NaN when the GPU was idle).
+            self.assertTrue(run.clock_lines[0].startswith("cpp: 12 rows annotated"), run.clock_lines[0])
             self.assertEqual({r["clock_throttled"] is not None for r in rows}, {True})
         else:
             self.assertTrue(run.clock_lines[0].startswith("cpp: 0 rows annotated"))
 
-    def test_a_run_prunes_the_logs_of_runs_no_row_names(self):
-        old = time.time() - 2 * 86400
-        clocks_dir = os.path.join(self.root, "clocks")
-        os.makedirs(clocks_dir)
-        orphan_csv = os.path.join(clocks_dir, KEY + "_20260801T000000Z.csv")
-        orphan_dir = os.path.join(self.logs, KEY + "_20260801T000000Z")
-        recent_csv = os.path.join(clocks_dir, KEY + "_20260915T000000Z.csv")
-        for path in (orphan_csv, recent_csv):
-            open(path, "w").close()
-        os.makedirs(orphan_dir)
-        os.utime(orphan_csv, (old, old))
-        os.utime(orphan_dir, (old, old))
-        # A pulled mirror holds this key's partition; here one row stands in for it.
-        seed = self.planned()[0]
-        store.Store(self.root).record(dict({f: seed[f] for f in store.TRIAL_FIELDS}, transfers="both", key=KEY,
-                                           states=3, min_ms=5.0))
-        status, run, calls, summary = self.run_bench()
-        self.assertEqual(status, 0)
-        self.assertFalse(os.path.exists(orphan_csv))
-        self.assertFalse(os.path.exists(orphan_dir))
-        self.assertTrue(os.path.exists(recent_csv))
-        self.assertTrue(os.path.exists(run.clocks_csv))
-        # A second run a day later would keep this one's log, since its rows name it.
-        rows = store.Store(self.root).rows()
-        self.assertEqual(store.Store(self.root).runs_named(), {run.run})
-        os.utime(run.clocks_csv, (old, old))
-        self.assertEqual(store.Store(self.root).prune_runs(clocks_dir, self.logs), [])
-        # Without this key's partition nothing is pruned.
-        open(orphan_csv, "w").close()
-        os.utime(orphan_csv, (old, old))
-        shutil.rmtree(os.path.join(self.root, "key=" + KEY))
-        status, run, calls, summary = self.run_bench()
-        self.assertTrue(os.path.exists(orphan_csv))
+    def test_the_clock_lock_is_released_when_planning_fails(self):
+        args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8", "--no-lock-clocks",
+                                 "--cooldown", "0"])
+        run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
+        released = []
+        run.clocks.reset = lambda: released.append("reset")
+        run.clocks.stop_monitor = lambda: released.append("stop")
+        # A failure before the runner loop, planning included, still reaches the guard's reset.
+        with mock.patch.object(bench, "plan_trials", side_effect=RuntimeError("no store")):
+            with self.assertRaises(RuntimeError):
+                run.execute()
+        self.assertEqual(released, ["stop", "reset"])
+        self.assertEqual(store.Store(self.root).rows(), [])
 
     def test_a_run_that_cannot_lock_refuses_to_start(self):
         with self.assertRaises(SystemExit) as caught:
@@ -629,12 +614,20 @@ class PullStore(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def pull(self, check_code=0):
+    def pull(self, check_code=0, box=""):
         def fake_run(command, root, key, *args, **kwargs):
             self.calls.append(command)
             return check_code if command == "unpushed" else 0
-        with mock.patch.object(bench.sync, "unavailable", return_value=""),                 mock.patch.object(bench.sync, "run", side_effect=fake_run):
+        with mock.patch.object(bench.sync, "unavailable", return_value=""),                 mock.patch.object(bench.sync, "box_ready", return_value=box),                 mock.patch.object(bench.sync, "run", side_effect=fake_run):
             bench.pull_store(KEY, self.root)
+
+    def test_a_box_that_cannot_prune_refuses_before_anything_is_pulled(self):
+        # The push after the runners needs the box-side script, so a run does not start without it.
+        with self.assertRaises(SystemExit) as raised:
+            self.pull(box="the box cannot run box_prune.py")
+        self.assertIn("box_prune.py", str(raised.exception))
+        self.assertIn("--no-sync", str(raised.exception))
+        self.assertEqual(self.calls, [])
 
     def test_empty_partition_pulls_without_a_check(self):
         os.makedirs(os.path.join(self.root, "key=" + KEY, "package=cubie"))

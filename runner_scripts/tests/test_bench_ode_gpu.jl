@@ -17,7 +17,7 @@ function load_helpers()
         Base.showerror(io::IO, ::OutOfGPUMemoryError) = print(io, "Out of GPU memory")
     end
     module Dates
-        using Dates: now, UTC, format
+        using Dates: now, UTC, format, DateTime
     end
     watchdogged_min_ms(f, on_breach, repeats; cap_s = 120.0) = (1.5, [2.0, 1.5], f())
     run_watchdogged(f, on_breach; budget_s = 270.0) = f()
@@ -122,8 +122,12 @@ end
         @test length(reason) <= length("error: ArgumentError: ") + 200
         ok = timed(() -> (1, 2), "leg", 120.0)
         @test ok.kind == "ok" && ok.result == (1, 2) && ok.min_ms == 1.5 && ok.samples == [2.0, 1.5]
+        # The batch's host stamps bracket the timing call, whatever the outcome.
+        @test ok.started isa Dates.DateTime && ok.ended isa Dates.DateTime && ok.started <= ok.ended
         bad = timed(() -> error("boom"), "leg", 120.0)
         @test bad.kind == "error" && bad.reason == "error: ErrorException: boom" && isnan(bad.min_ms)
+        @test bad.started <= bad.ended
+        @test failed("abandoned", "abandoned: x").started === nothing
     end
 
     @testset "states come from the construction parameters" begin

@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports) and the clocks its window of that run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K] | prune-runs [--clocks DIR] [--logs DIR] [--min-age-days D] [--dry-run]."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports), the host stamps bracketing its timing batch (timed_start_utc, timed_end_utc, written by the runner) and the clocks that window of the run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
 
 import argparse
 import csv
@@ -7,8 +7,6 @@ import hashlib
 import json
 import math
 import os
-import re
-import shutil
 import subprocess
 import sys
 import time
@@ -60,6 +58,8 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
     ("run", pa.string()), ("driver", pa.string()), ("clock_lock_mhz", pa.int64()),
     ("clock_sm_mhz", pa.float64()), ("clock_sm_min_mhz", pa.float64()),
     ("clock_throttled", pa.int64()),
+    ("timed_start_utc", pa.timestamp("us", tz="UTC")),
+    ("timed_end_utc", pa.timestamp("us", tz="UTC")),
     ("recorded_utc", pa.timestamp("us", tz="UTC")),
 ])
 COLUMNS = tuple(SCHEMA.names)
@@ -70,8 +70,11 @@ RUN_ENV = "GPUODE_RUN"
 DRIVER_ENV = "GPUODE_DRIVER"
 CLOCK_LOCK_ENV = "GPUODE_CLOCK_LOCK_MHZ"
 CLOCK_COLUMNS = ("clock_sm_mhz", "clock_sm_min_mhz", "clock_throttled")
-# A run name: the dataset key and bench.py's UTC stamp.
-RUN_NAME = re.compile(r"^[a-z]+_[A-Za-z0-9-]+_\d{8}T\d{6}Z$")
+# The host stamps a runner takes around one transfers' timing batch; null on a row it never timed.
+WINDOW_COLUMNS = ("timed_start_utc", "timed_end_utc")
+# DuckDB's spelling of each Arrow type, for the NULL a file written before a column existed reads as.
+_DUCK_TYPES = {"string": "VARCHAR", "double": "DOUBLE", "int64": "BIGINT", "int32": "INTEGER",
+               "list<item: double>": "DOUBLE[]", "timestamp[us, tz=UTC]": "TIMESTAMPTZ"}
 
 NAN = float("nan")
 HASH_HEX = 16
@@ -237,6 +240,12 @@ def make_row(**fields):
     row["clock_lock_mhz"] = None if lock is None else _int("clock_lock_mhz", lock)
     throttled = fields.get("clock_throttled")
     row["clock_throttled"] = None if throttled is None else _int("clock_throttled", throttled)
+    for name in WINDOW_COLUMNS:
+        given = fields.get(name)
+        row[name] = None if given is None or given == "" else _utc(given)
+    if row["timed_start_utc"] is not None and row["timed_end_utc"] is not None \
+            and row["timed_end_utc"] < row["timed_start_utc"]:
+        raise ValueError("timed_end_utc precedes timed_start_utc")
     row["recorded_utc"] = _utc(fields.get("recorded_utc"))
     return {name: row[name] for name in COLUMNS}
 
@@ -483,7 +492,7 @@ class Store:
         return sorted(glob.glob(pattern))
 
     def _connect(self):
-        """A DuckDB connection with a `results` view over every results file, in UTC."""
+        """A DuckDB connection with a `results` view of every SCHEMA column over every results file, in UTC; a column no file holds yet reads as a typed NULL."""
         import duckdb
         con = duckdb.connect()
         con.execute("SET TimeZone = 'UTC'")
@@ -491,11 +500,16 @@ class Store:
             pattern = os.path.join(os.path.abspath(self.root), "key=*",
                                    "package=*", "results", "*.parquet")
             pattern = pattern.replace("\\", "/").replace("'", "''")
-            # union_by_name: a file written before a column existed reads it as NULL.
-            con.execute(
-                "CREATE VIEW results AS SELECT * FROM read_parquet('{0}', "
-                "hive_partitioning = true, union_by_name = true, "
-                "hive_types = {{'key': VARCHAR, 'package': VARCHAR}})".format(pattern))
+            # union_by_name fills a column some files lack; a column every file lacks is added here.
+            source = ("read_parquet('{0}', hive_partitioning = true, union_by_name = true, "
+                      "hive_types = {{'key': VARCHAR, 'package': VARCHAR}})".format(pattern))
+            present = {column[0] for column in
+                       con.execute("SELECT * FROM {0} LIMIT 0".format(source)).description}
+            selected = ", ".join(
+                '"{0}"'.format(name) if name in present
+                else 'NULL::{1} AS "{0}"'.format(name, _DUCK_TYPES[str(SCHEMA.field(name).type)])
+                for name in COLUMNS)
+            con.execute("CREATE VIEW results AS SELECT {0} FROM {1}".format(selected, source))
         else:
             con.register("empty_results", SCHEMA.empty_table())
             con.execute("CREATE VIEW results AS SELECT * FROM empty_results")
@@ -532,7 +546,7 @@ class Store:
             con.close()
 
     def annotate(self, run, stats, package=None, key=None):
-        """Fill the clock columns of every timed row recorded in `run`: stats(start, end) gives {clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the row's window, recorded_utc back by the sum of its samples, or None to leave the row; a row without samples is left; package and key narrow the files touched. Returns the rows annotated."""
+        """Fill the clock columns of every timed row recorded in `run`: stats(start, end) gives {clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the row's timing window (timed_start_utc to timed_end_utc, epoch seconds) or None to leave the row; a row without samples or without its window is left; package and key narrow the files touched. Returns the rows annotated."""
         done = 0
         for path in self.results_files():
             if package and os.sep + "package=" + package + os.sep not in path.replace("/", os.sep):
@@ -545,9 +559,10 @@ class Store:
                 for row in rows:
                     if row.get("run") != run or not row["samples_ms"]:
                         continue
-                    end = _utc(row["recorded_utc"]).timestamp()
-                    start = end - sum(row["samples_ms"]) / 1000.0
-                    window = stats(start, end)
+                    if row["timed_start_utc"] is None or row["timed_end_utc"] is None:
+                        continue
+                    window = stats(_utc(row["timed_start_utc"]).timestamp(),
+                                   _utc(row["timed_end_utc"]).timestamp())
                     if window is None:
                         continue
                     for name in CLOCK_COLUMNS:
@@ -557,34 +572,6 @@ class Store:
                 if changed:
                     self._write_results(path, rows)
         return done
-
-    def runs_named(self):
-        """The distinct run names the rows carry."""
-        table = self.query("SELECT DISTINCT run FROM results WHERE run IS NOT NULL AND run <> ''")
-        return set(table.column("run").to_pylist())
-
-    def prune_runs(self, clocks_dir, logs_dir, min_age_s=86400.0, delete=True, now=None):
-        """The clock logs (clocks_dir/<run>.csv) and log dirs (logs_dir/<run>/) of runs at least min_age_s old that no row names, deleted unless delete is False; returns their paths."""
-        now = time.time() if now is None else now
-        named = self.runs_named()
-        found = []
-        for base, is_dir in ((clocks_dir, False), (logs_dir, True)):
-            if not base or not os.path.isdir(base):
-                continue
-            for name in sorted(os.listdir(base)):
-                path = os.path.join(base, name)
-                run = name[:-4] if not is_dir and name.endswith(".csv") else name
-                if os.path.isdir(path) != is_dir or not RUN_NAME.match(run) or run in named:
-                    continue
-                if now - os.stat(path).st_mtime < min_age_s:
-                    continue
-                found.append(path)
-                if delete:
-                    if is_dir:
-                        shutil.rmtree(path, ignore_errors=True)
-                    else:
-                        os.remove(path)
-        return found
 
     def clear(self, **eq_filters):
         """Drop every row matching the equality filters; returns the count dropped."""
@@ -667,11 +654,6 @@ def _cli(argv):
     annotate.add_argument("clocks")
     annotate.add_argument("--package", default=None)
     annotate.add_argument("--key", default=None)
-    prune = commands.add_parser("prune-runs")
-    prune.add_argument("--clocks", default=None, help="default <root>/clocks")
-    prune.add_argument("--logs", default=None, help="default <repo>/logs")
-    prune.add_argument("--min-age-days", type=float, default=1.0)
-    prune.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     store = Store(args.root)
 
@@ -708,12 +690,6 @@ def _cli(argv):
         samples = clocks.load_samples(args.clocks)
         print(store.annotate(args.run, lambda start, end: clocks.window_stats(samples, start, end),
                              package=args.package, key=args.key))
-        return 0
-    if args.command == "prune-runs":
-        for path in store.prune_runs(args.clocks or os.path.join(args.root, "clocks"),
-                                     args.logs or os.path.join(REPO_ROOT, "logs"),
-                                     args.min_age_days * 86400.0, delete=not args.dry_run):
-            print(path)
         return 0
     return 1
 

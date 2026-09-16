@@ -2,10 +2,12 @@
 #pragma once
 
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -384,9 +386,11 @@ struct RowValues
 	std::string finals;
 	std::string package_version;
 	std::string suite_rev;
+	std::string timed_start_utc;   // host stamps bracketing the timing batch; empty on a row never timed
+	std::string timed_end_utc;
 };
 
-// One store row as JSON.
+// One store row as JSON; the timing window goes in only when it was taken.
 inline std::string RowText(const Trial& trial, const std::string& transfers, const std::string& key,
                            const RowValues& values)
 {
@@ -403,5 +407,28 @@ inline std::string RowText(const Trial& trial, const std::string& transfers, con
 	out += ",\"finals\":" + JsonString(values.finals);
 	out += ",\"package_version\":" + JsonString(values.package_version);
 	out += ",\"suite_rev\":" + JsonString(values.suite_rev);
+	if (!values.timed_start_utc.empty())
+		out += ",\"timed_start_utc\":" + JsonString(values.timed_start_utc);
+	if (!values.timed_end_utc.empty())
+		out += ",\"timed_end_utc\":" + JsonString(values.timed_end_utc);
 	return out + "}";
+}
+
+// The current UTC time as the store's ISO text, yyyy-mm-ddTHH:MM:SS.mmmZ.
+inline std::string UtcStamp()
+{
+	using namespace std::chrono;
+	system_clock::time_point now = system_clock::now();
+	std::time_t seconds = system_clock::to_time_t(now);
+	int millis = (int)(duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000);
+	std::tm parts;
+#ifdef _WIN32
+	gmtime_s(&parts, &seconds);
+#else
+	gmtime_r(&seconds, &parts);
+#endif
+	char buf[40];
+	snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", parts.tm_year + 1900, parts.tm_mon + 1,
+	         parts.tm_mday, parts.tm_hour, parts.tm_min, parts.tm_sec, millis);
+	return buf;
 }

@@ -89,6 +89,22 @@ end
         @test_throws ProcessFailedException store_record(merge(rows[1], Dict("error" => 1e-4)); root = root)
     end
 
+    @testset "the timing window lands as UTC stamps and is absent on a row never timed" begin
+        started = Dates.DateTime(2026, 9, 16, 3, 0, 0, 250)
+        ended = Dates.DateTime(2026, 9, 16, 3, 0, 2)
+        timed = store_row(both; states = 3, min_ms = 12.5, samples_ms = [20.0, 12.5],
+            timed_start_utc = started, timed_end_utc = ended)
+        @test timed["timed_start_utc"] == "2026-09-16T03:00:00.250Z"
+        @test timed["timed_end_utc"] == "2026-09-16T03:00:02.000Z"
+        @test store_row(both; states = 3)["timed_start_utc"] === nothing
+        store_record(timed; root = root)
+        back = query_rows("SELECT timed_start_utc, timed_end_utc FROM results WHERE transfers = 'both'", root)
+        @test back[1]["timed_start_utc"] == "2026-09-16T03:00:00.250000Z"
+        @test back[1]["timed_end_utc"] == "2026-09-16T03:00:02.000000Z"
+        back = query_rows("SELECT timed_start_utc FROM results WHERE transfers = 'none'", root)
+        @test back[1]["timed_start_utc"] in ("", "\"\"")   # the CSV writer quotes an empty cell
+    end
+
     @testset "floor keeps the lower finite time and NaN never wins" begin
         store_record(store_row(both; states = 3, min_ms = 20.0); root = root, floor = true)
         store_record(store_row(both; states = 3); root = root, floor = true)

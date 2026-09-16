@@ -88,12 +88,28 @@ class Windows(unittest.TestCase):
         stats = clocks.window_stats(samples, self.at(0.05), self.at(0.06))
         self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
 
-    def test_a_window_past_either_end_clamps_to_the_log(self):
+    def test_a_window_the_sampler_never_observed_is_not_annotated(self):
+        # The sampler stopped at 0.1 s; a batch an hour later must not borrow its last reading.
         samples = self.log([(0.0, 2400, 0), (0.1, 2500, 0)])
-        stats = clocks.window_stats(samples, self.at(5.0), self.at(6.0))
-        self.assertEqual(stats["clock_sm_mhz"], 2500.0)
-        stats = clocks.window_stats(samples, self.at(-6.0), self.at(-5.0))
-        self.assertEqual(stats["clock_sm_mhz"], 2400.0)
+        self.assertIsNone(clocks.window_stats(samples, self.at(3600.0), self.at(3601.0)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(5.0), self.at(6.0)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(-6.0), self.at(-5.0)))
+        # A window just past the last sample, within the coverage gap, still counts its neighbour.
+        stats = clocks.window_stats(samples, self.at(0.1), self.at(0.5))
+        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.11), self.at(0.5)))
+        # A hole in the log wider than the gap leaves a window inside it unobserved, even one near a sample:
+        # without a sample in the window it needs a neighbour within the gap on each side.
+        samples = self.log([(0.0, 2400, 0), (10.0, 2500, 0)])
+        self.assertIsNone(clocks.window_stats(samples, self.at(4.0), self.at(5.0)))
+        self.assertIsNone(clocks.window_stats(samples, self.at(0.5), self.at(0.6)))
+        self.assertEqual(clocks.window_stats(samples, self.at(0.0), self.at(10.0))["clock_sm_mhz"], 2450.0)
+        stats = clocks.window_stats(samples, self.at(0.5), self.at(9.5))
+        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"]), (2450.0, 2400.0))
+        self.assertIsNone(clocks.window_stats(samples, self.at(1.5), self.at(9.5)))
+        # With a sample inside, a neighbour beyond the gap is left out and one within it counted.
+        self.assertEqual(clocks.window_stats(samples, self.at(-0.5), self.at(5.0))["clock_sm_mhz"], 2400.0)
+        self.assertEqual(clocks.window_stats(samples, self.at(-0.5), self.at(9.5))["clock_sm_mhz"], 2450.0)
 
     def test_idle_samples_alone_give_nan_clocks_and_an_empty_log_gives_none(self):
         samples = self.log([(0.0, 210, 1), (0.1, 210, 1)])

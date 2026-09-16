@@ -565,11 +565,16 @@ int main(int argc, char* argv[])
 	for (size_t li = 0; li < o.transfers.size(); li++)
 	{
 		const std::string& transfers = o.transfers[li];
+		// Host stamps around the whole timing batch, before the finals read and the store call.
+		std::string started = UtcStamp();
 		TimingResult timing = TimeTransfers(Scan, Values, Duration, transfers == "both", o.untimed);
+		std::string ended = UtcStamp();
 		RowValues v = BaseValues(o);
 		v.min_ms = timing.min_ms;
 		v.samples_ms = timing.samples;
 		v.reason = timing.reason;
+		v.timed_start_utc = started;
+		v.timed_end_utc = ended;
 		std::vector<std::string> rows;
 		if (timing.outcome == Ok)
 		{

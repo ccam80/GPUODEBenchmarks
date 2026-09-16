@@ -6,8 +6,8 @@ plan writes trials/<key>/<package>.jsonl and prints counts; run writes them unde
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, the optimize policy solve over kernel (a cubie optimize times the batch and duration cubie sizes itself per kernel, or the line's n at its duration per solve), the watchdog budget the largest.
 --resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
-A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal) unless --no-lock-clocks; it samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment), and after each package the timed rows it recorded get the clocks their window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled).
-Before the runners a run whose mirror holds this key deletes the clock logs under data/clocks/ and the log dirs under logs/ of runs a day or older that no row names; the push mirrors this machine's clocks files, so they leave the box too.
+A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal) unless --no-lock-clocks; it samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler never observed stays NaN).
+The push has the box delete this key's clock logs a day or older that no row on the box names, and drops them and their logs/<run>/ dirs here.
 Exit 0 when every runner finished; 1 on a runner failure, a locked row that throttled or fell more than --clock-tolerance below the lock, or a failed push.
 """
 
@@ -403,7 +403,7 @@ class Run:
             print("{0} runner(s) failed outright.".format(self.failures))
         return 1 if (self.failures or self.clock_failures) else 0
 
-    def execute(self):
+    def _execute(self):
         by_package = plan_trials(self.plan, self.key, self.data_root,
                                  self.args.resume, self.args.no_overwrite)
         if any(package.startswith("julia") for package in by_package):
@@ -418,10 +418,6 @@ class Run:
         print("", flush=True)
         print_counts(by_package)
         self.manifest(by_package)
-        if sync.partition_has_files(self.data_root, self.key):
-            pruned = self.store.prune_runs(os.path.dirname(self.clocks_csv), os.path.dirname(self.log_dir))
-            if pruned:
-                print("Pruned      : {0} clock log(s) and log dir(s) of runs no row names".format(len(pruned)))
         self.clocks.start_monitor(self.clocks_csv)
         try:
             for index, (package, rows) in enumerate(by_package.items()):
@@ -432,6 +428,12 @@ class Run:
             return self.summarise()
         finally:
             self.manifest(by_package, finished=True)
+
+    def execute(self):
+        """Plan, run and summarise; the clock lock taken in __init__ is released whatever fails, planning included."""
+        try:
+            return self._execute()
+        finally:
             self.clocks.stop_monitor()
             self.clocks.reset()
 
@@ -465,6 +467,10 @@ def pull_store(key, root=DATA_DIR, skip=False):
     if reason:
         raise SystemExit("Store       : {0}; pass --no-sync to run without it".format(reason))
     remote = sync.remote_default()
+    # The push after the runners needs the box to take the key's lock and prune, so refuse now rather than then.
+    reason = sync.box_ready(remote, key=key)
+    if reason:
+        raise SystemExit("Store       : {0}; pass --no-sync to run without the store".format(reason))
     if sync.partition_has_files(root, key):
         print("Store       : unpushed check of key={0} against {1}".format(key, remote), flush=True)
         if sync.run("unpushed", root, key):
@@ -476,12 +482,12 @@ def pull_store(key, root=DATA_DIR, skip=False):
         raise SystemExit("Store       : pull FAILED; pass --no-sync to run without it")
 
 
-def push_store(key, root=DATA_DIR, skip=False):
-    """Copy this key and its clocks files to the store after a run; 0 when done or skipped, 1 on failure."""
+def push_store(key, root=DATA_DIR, skip=False, logs_root=LOGS_DIR):
+    """Copy this key and its clocks files to the store after a run, under the key's lock on the box, and have the box prune the clock logs no row names (their logs/<run>/ dirs go too); 0 when done or skipped, 1 on failure."""
     if skip:
         return 0
     print("Store       : push to " + sync.remote_default(), flush=True)
-    code = sync.run("push", root, key)
+    code = sync.run("push", root, key, logs_dir=logs_root)
     print("Store       : " + ("pushed" if code == 0 else "push FAILED (exit {0})".format(code)))
     return 1 if code else 0
 

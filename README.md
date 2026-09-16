@@ -65,12 +65,15 @@ Clocks: a run locks the GPU to the card's row in
 elevated shell, or refuses to start unless `--no-lock-clocks`;
 `runner_scripts/calibrate/calibrate_clocks.py` writes the row. A 25 Hz
 sample log lands in `data/clocks/<key>_<stamp>.csv` and each row carries
-`run`, `driver`, `clock_lock_mhz` (0 unlocked), `clock_sm_mhz`,
-`clock_sm_min_mhz` and `clock_throttled` over its own window of that log;
-a locked row throttled or more than `--clock-tolerance` under the lock fails
-the run. `store.py annotate <run> <clocks.csv>` refills the columns from a
-log. Each run first deletes clock logs and `logs/<run>/` dirs a day old
-that no row names (`store.py prune-runs`); the push mirrors them off the box.
+`run`, `driver`, `clock_lock_mhz` (0 unlocked), the host stamps its runner
+took around the timing batch (`timed_start_utc`, `timed_end_utc`) and, over
+that window of the log, `clock_sm_mhz`, `clock_sm_min_mhz` and
+`clock_throttled` (NaN when the sampler never observed the window); a locked
+row throttled or more than `--clock-tolerance` under the lock fails the run.
+`store.py annotate <run> <clocks.csv>` refills the columns from a log. After
+the push the box deletes this key's clock logs a day old that no row on the
+box names (`sync/box_prune.py`, under the key's lock the push holds), and
+the mirror and `logs/<run>/` follow.
 
 | set | packages | what it times |
 |---|---|---|

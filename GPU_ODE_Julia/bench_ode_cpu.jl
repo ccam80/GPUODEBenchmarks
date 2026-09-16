@@ -240,8 +240,14 @@ is_oom(err) = root_error(err) isa OutOfMemoryError
 error_reason(err) = (e = root_error(err);
     "error: $(typeof(e).name.name): " * first(sprint(showerror, e), 200))
 
-"(min_ms, samples, result, outcome, reason) of timing f under the watchdog with the trial's cap: ok, timeout (the cap passed but the run returned), oom or error; an untimed line runs once with no warm-up."
+"(min_ms, samples, result, outcome, reason, started, ended) of timing f under the watchdog with the trial's cap: ok, timeout (the cap passed but the run returned), oom or error; an untimed line runs once with no warm-up; started and ended are the UTC host stamps bracketing the whole batch, taken outside every duration measurement."
 function time_trial(f, label, cap_s, is_timed = true)
+    started = Dates.now(Dates.UTC)
+    ms, samples, result, outcome, reason = time_batch(f, label, cap_s, is_timed)
+    return ms, samples, result, outcome, reason, started, Dates.now(Dates.UTC)
+end
+
+function time_batch(f, label, cap_s, is_timed)
     on_breach = () -> println("WATCHDOG $(label): run never returned")
     try
         if !is_timed
@@ -265,10 +271,11 @@ end
 
 "One store row of a trial under a transfers value; the run key and version stamps come from ctx."
 function trial_row(ctx, trial, transfers; states, min_ms = NaN, samples_ms = Float64[],
-        errored_pct = NaN, build_s = NaN, reason = "", finals = "")
+        errored_pct = NaN, build_s = NaN, reason = "", finals = "", timed_start_utc = nothing,
+        timed_end_utc = nothing)
     spec = merge(trial, Dict{String, Any}("transfers" => transfers, "key" => ctx.key))
     return store_row(spec; states, min_ms, samples_ms, errored_pct, build_s, reason, finals,
-        package_version = ctx.version, suite_rev = ctx.suite_rev)
+        package_version = ctx.version, suite_rev = ctx.suite_rev, timed_start_utc, timed_end_utc)
 end
 
 function write_progress(ctx, trial, stage = "solve")
@@ -397,7 +404,7 @@ function run_build(ctx, lines, failures)
                 push!(rows, trial_row(ctx, trial, transfers; states, reason))
                 continue
             end
-            ms, samples, result, outcome, why = time_trial(
+            ms, samples, result, outcome, why, started, ended = time_trial(
                 () -> ensemble_solve(system, prob, alg, points, kwargs), "$(label) $(transfers)",
                 trial["watchdog_s"], get(trial, "timed", true))
             pct = NaN
@@ -410,7 +417,8 @@ function run_build(ctx, lines, failures)
                 end
             end
             push!(rows, trial_row(ctx, trial, transfers; states, min_ms = ms, samples_ms = samples,
-                errored_pct = pct, build_s = line_build_s, reason = why, finals = finals_path))
+                errored_pct = pct, build_s = line_build_s, reason = why, finals = finals_path,
+                timed_start_utc = started, timed_end_utc = ended))
             println(@sprintf("  %s %s: %s ms, errored=%s%%%s", label, transfers,
                 isnan(ms) ? "nan" : @sprintf("%.3f", ms), isnan(pct) ? "nan" : @sprintf("%.1f", pct),
                 isempty(why) ? "" : "  [" * why * "]"))

@@ -182,9 +182,11 @@ struct Outcome
     samples::Vector{Float64}
     reason::String
     result::Any           # the last solve's (ts, us), or nothing
+    started::Any          # UTC DateTime host stamps bracketing the timing batch, or nothing
+    ended::Any
 end
 
-failed(kind, reason) = Outcome(kind, NaN, Float64[], reason, nothing)
+failed(kind, reason) = Outcome(kind, NaN, Float64[], reason, nothing, nothing, nothing)
 
 "oom or error, with the reason text: '<kind>: <Type>: <message[:200]>'."
 function classify(err)
@@ -196,26 +198,29 @@ function classify(err)
     return kind, "$(kind): $(nameof(typeof(err))): $(message)"
 end
 
-"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error; an untimed line runs once with no warm-up."
+"One untimed warm-up and the repeats schedule of protocol.toml over f, under the watchdog with the trial's cap; a run past the cap is a timeout, an exception an oom or error; an untimed line runs once with no warm-up. The outcome carries the host stamps taken before and after the whole batch, outside every duration measurement."
 function timed(f, label, cap_s, is_timed = true)
     on_breach = () -> begin
         println("WATCHDOG $(label): run never returned")
         flush(stdout)
     end
-    try
+    started = Dates.now(Dates.UTC)
+    kind, ms, samples, reason, result = try
         if !is_timed
             elapsed = @elapsed result = run_watchdogged(f, on_breach; budget_s = cap_s + 30.0)
-            ms = elapsed * 1000.0
-            elapsed > cap_s || return Outcome("ok", ms, [ms], "", result)
-            return Outcome("timeout", NaN, [ms], "timeout: run exceeded $(cap_s)s", result)
+            once = elapsed * 1000.0
+            elapsed > cap_s ? ("timeout", NaN, [once], "timeout: run exceeded $(cap_s)s", result) :
+                ("ok", once, [once], "", result)
+        else
+            ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
+            isnan(ms) ? ("timeout", NaN, samples, "timeout: run exceeded $(cap_s)s", result) :
+                ("ok", ms, samples, "", result)
         end
-        ms, samples, result = watchdogged_min_ms(f, on_breach, REPEAT_CAP; cap_s)
-        isnan(ms) && return Outcome("timeout", NaN, samples,
-            "timeout: run exceeded $(cap_s)s", result)
-        return Outcome("ok", ms, samples, "", result)
     catch err
-        return failed(classify(err)...)
+        kind, reason = classify(err)
+        (kind, NaN, Float64[], reason, nothing)
     end
+    return Outcome(kind, ms, samples, reason, result, started, Dates.now(Dates.UTC))
 end
 
 "One solve at n = 8 under the watchdog's hard exit; the kernel compile lands here."
@@ -297,7 +302,9 @@ function run_solve(trial, parts, failure, failures, build_s, cli, version, rev, 
                 states = states, min_ms = outcomes[transfers].min_ms,
                 samples_ms = outcomes[transfers].samples, errored_pct = pct,
                 build_s = build_s, reason = outcomes[transfers].reason, finals = finals,
-                package_version = version, suite_rev = rev)
+                package_version = version, suite_rev = rev,
+                timed_start_utc = outcomes[transfers].started,
+                timed_end_utc = outcomes[transfers].ended)
             for transfers in trial["transfers"]]
     store_record(rows; floor = cli.floor)
     # Ensembles are per-trial; only the compiled kernels carry over.
