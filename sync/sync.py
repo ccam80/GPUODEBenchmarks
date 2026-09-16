@@ -1,4 +1,4 @@
-"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition and its own clocks files (calibration_<key>.csv and the <key>_<stamp>.csv log of each run) up, deleting nothing; prune mirrors this key and its own clocks files so those gone locally are deleted on the box; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
+"""The remote store, a data/ tree on the store box: pull copies the whole tree into the local mirror, leaving a local file that is newer than the box's alone; push copies this machine's key partition up, deleting nothing, and mirrors its own clocks files (calibration_<key>.csv and the <key>_<stamp>.csv log of each run) so one gone locally is deleted on the box, skipping the clocks when the partition holds no file; prune mirrors this key and its clocks files; check lists the differences under this key; unpushed lists this key's local files missing from or differing on the box, ignoring files only the box has. rclone drives the `box:` remote, rsync the `box` ssh host when rclone is absent; the same <host>:<path> string names both. CLI: sync.py [--root DIR] [--remote HOST:PATH] [--key KEY] [--tool rclone|rsync] [--dry-run] pull | push | sync | prune | check | unpushed."""
 
 import argparse
 import os
@@ -63,10 +63,10 @@ def unavailable(remote=None, tool=None):
     return ""
 
 
-def commands(command, root, key, remote, tool, dry_run=False):
-    """The argv list of a command for the tool; sync is a push then a pull."""
+def commands(command, root, key, remote, tool, dry_run=False, mirror_clocks=True):
+    """The argv list of a command for the tool; sync is a push then a pull; a push copies the clocks files instead of mirroring them when mirror_clocks is False."""
     if command == "sync":
-        return commands("push", root, key, remote, tool, dry_run) + \
+        return commands("push", root, key, remote, tool, dry_run, mirror_clocks) + \
             commands("pull", root, key, remote, tool, dry_run)
     key_dir = "key=" + key
     # This machine's clocks files: calibration_<key>.csv and the <key>_<stamp>.csv log of each run.
@@ -77,7 +77,8 @@ def commands(command, root, key, remote, tool, dry_run=False):
         includes = [flag for pattern in own_clocks for flag in ("--include", pattern)]
         if command == "push":
             return [["rclone", "copy", _local(root, key_dir), _join(remote, key_dir)] + transient + dry,
-                    ["rclone", "copy", _local(root, "clocks"), _join(remote, "clocks")] + includes + dry]
+                    ["rclone", "sync" if mirror_clocks else "copy", _local(root, "clocks"),
+                     _join(remote, "clocks")] + includes + dry]
         if command == "pull":
             return [["rclone", "copy", remote, _local(root), "--update"] + transient + dry]
         if command == "prune":
@@ -93,7 +94,7 @@ def commands(command, root, key, remote, tool, dry_run=False):
         if command == "push":
             return [["rsync", "-a"] + transient + dry
                     + [_local(root, key_dir) + "/", _join(remote, key_dir) + "/"],
-                    ["rsync", "-a"] + includes + ["--exclude", "*"] + dry
+                    ["rsync", "-a"] + (["--delete"] if mirror_clocks else []) + includes + ["--exclude", "*"] + dry
                     + [_local(root, "clocks") + "/", _join(remote, "clocks") + "/"]]
         if command == "pull":
             return [["rsync", "-au"] + transient + dry
@@ -144,7 +145,10 @@ def run(command, root, key, remote=None, tool=None, dry_run=False, out=sys.stdou
         os.makedirs(_local(root, "clocks"), exist_ok=True)
     if command in ("pull", "sync"):
         os.makedirs(_local(root), exist_ok=True)
-    for argv in commands(command, root, key, remote, tool, dry_run):
+    mirror_clocks = _has_files(key_dir)
+    if command in ("push", "sync") and not mirror_clocks:
+        out.write("store sync: nothing under {0}; clocks files not mirrored\n".format(key_dir))
+    for argv in commands(command, root, key, remote, tool, dry_run, mirror_clocks):
         out.write("store sync: " + subprocess.list2cmdline(argv) + "\n")
         out.flush()
         done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

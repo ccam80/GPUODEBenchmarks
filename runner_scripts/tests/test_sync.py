@@ -44,7 +44,8 @@ class Commands(unittest.TestCase):
         self.assertEqual(push[3], REMOTE + "/key=" + KEY)
         self.assertIn("*.partial", push)
         self.assertIn("*.lock/**", push)
-        self.assertEqual(clocks[:2], ["rclone", "copy"])
+        self.assertEqual(clocks[:2], ["rclone", "sync"])
+        self.assertEqual(clocks[3], REMOTE + "/clocks")
         self.assertEqual(clocks[-4:], ["--include", "*_" + KEY + ".csv", "--include", KEY + "_*.csv"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rclone")
         self.assertEqual(pull[:3], ["rclone", "copy", REMOTE])
@@ -72,8 +73,8 @@ class Commands(unittest.TestCase):
         self.assertNotIn("--delete", push)
         self.assertTrue(push[-2].endswith("key=" + KEY + "/"))
         self.assertEqual(push[-1], REMOTE + "/key=" + KEY + "/")
-        self.assertEqual(clocks[2:8], ["--include", "*_" + KEY + ".csv", "--include", KEY + "_*.csv",
-                                       "--exclude", "*"])
+        self.assertEqual(clocks[1:9], ["-a", "--delete", "--include", "*_" + KEY + ".csv", "--include",
+                                       KEY + "_*.csv", "--exclude", "*"])
         (pull,) = sync.commands("pull", "d", KEY, REMOTE, "rsync")
         self.assertEqual(pull[1], "-au")
         self.assertNotIn("key=" + KEY + "/", pull)
@@ -81,9 +82,7 @@ class Commands(unittest.TestCase):
         prune, prune_clocks = sync.commands("prune", "d", KEY, REMOTE, "rsync")
         self.assertIn("--delete", prune)
         self.assertNotIn("--dry-run", prune)
-        self.assertEqual(prune_clocks[:3], ["rsync", "-a", "--delete"])
-        self.assertEqual(prune_clocks[3:9], clocks[2:8])
-        self.assertEqual(prune_clocks[-1], REMOTE + "/clocks/")
+        self.assertEqual(prune_clocks, clocks)
         (check,) = sync.commands("check", "d", KEY, REMOTE, "rsync")
         self.assertIn("--dry-run", check)
         self.assertIn("--itemize-changes", check)
@@ -144,14 +143,13 @@ class RcloneRoundTrip(unittest.TestCase):
         code = sync.run(command, self.local, KEY, self.remote, tool="rclone", out=out, **kw)
         return code, out.getvalue()
 
-    def test_push_keeps_remote_files(self):
+    def test_push_keeps_remote_files_and_mirrors_own_clocks(self):
         code, text = self.run_sync("push")
         self.assertEqual(code, 0, text)
         self.assertEqual(_files(self.remote), [
             "clocks/calibration_{0}.csv".format(KEY),
             "clocks/lightload_{0}.csv".format(OTHER),
             "clocks/{0}_20260901T000000Z.csv".format(OTHER),
-            "clocks/{0}_20260901T000000Z.csv".format(KEY),
             "clocks/{0}_20260916T000000Z.csv".format(KEY),
             "key={0}/package=jax/results/lorenz__tsit5.parquet".format(OTHER),
             "key={0}/package=jax/results/stale.parquet".format(OTHER),
@@ -252,11 +250,13 @@ class RcloneRoundTrip(unittest.TestCase):
         self.assertIn("no files under", text)
         self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
 
-    def test_push_from_an_empty_mirror(self):
+    def test_push_from_an_empty_mirror_leaves_the_box_clocks(self):
         shutil.rmtree(self.local)
         code, text = self.run_sync("push")
         self.assertEqual(code, 0, text)
+        self.assertIn("clocks files not mirrored", text)
         self.assertIn("key={0}/package=cubie/results/gone.parquet".format(KEY), _files(self.remote))
+        self.assertIn("clocks/{0}_20260901T000000Z.csv".format(KEY), _files(self.remote))
 
     def test_sync_and_cli(self):
         code, text = self.run_sync("sync")

@@ -531,6 +531,10 @@ class HardExitTests(unittest.TestCase):
         os.makedirs(orphan_dir)
         os.utime(orphan_csv, (old, old))
         os.utime(orphan_dir, (old, old))
+        # A pulled mirror holds this key's partition; here one row stands in for it.
+        seed = self.planned()[0]
+        store.Store(self.root).record(dict({f: seed[f] for f in store.TRIAL_FIELDS}, transfers="both", key=KEY,
+                                           states=3, min_ms=5.0))
         status, run, calls, summary = self.run_bench()
         self.assertEqual(status, 0)
         self.assertFalse(os.path.exists(orphan_csv))
@@ -542,10 +546,11 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(store.Store(self.root).runs_named(), {run.run})
         os.utime(run.clocks_csv, (old, old))
         self.assertEqual(store.Store(self.root).prune_runs(clocks_dir, self.logs), [])
-        # Under --no-sync the mirror may be stale, so nothing is pruned.
+        # Without this key's partition nothing is pruned.
         open(orphan_csv, "w").close()
         os.utime(orphan_csv, (old, old))
-        status, run, calls, summary = self.run_bench(None, 3, "--no-sync")
+        shutil.rmtree(os.path.join(self.root, "key=" + KEY))
+        status, run, calls, summary = self.run_bench()
         self.assertTrue(os.path.exists(orphan_csv))
 
     def test_a_run_that_cannot_lock_refuses_to_start(self):

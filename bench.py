@@ -7,7 +7,7 @@ A trial is one line per point; a point declared by several set files runs under 
 --resume runs what the store lacks of each trial: a transfers row, a cold build time, a readable finals file, a valid optimize record; --no-overwrite also reruns NaN rows and timed-out optimizes; --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
 A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal) unless --no-lock-clocks; it samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment), and after each package the timed rows it recorded get the clocks their window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled).
-Before the runners a run deletes the clock logs under data/clocks/ and the log dirs under logs/ of runs a day or older that no row in the mirror names; sync.py prune deletes them from the box.
+Before the runners a run whose mirror holds this key deletes the clock logs under data/clocks/ and the log dirs under logs/ of runs a day or older that no row names; the push mirrors this machine's clocks files, so they leave the box too.
 Exit 0 when every runner finished; 1 on a runner failure, a locked row that throttled or fell more than --clock-tolerance below the lock, or a failed push.
 """
 
@@ -418,8 +418,7 @@ class Run:
         print("", flush=True)
         print_counts(by_package)
         self.manifest(by_package)
-        if not self.args.no_sync:
-            # Only a pulled mirror knows every row; a stale one would orphan live runs.
+        if sync.partition_has_files(self.data_root, self.key):
             pruned = self.store.prune_runs(os.path.dirname(self.clocks_csv), os.path.dirname(self.log_dir))
             if pruned:
                 print("Pruned      : {0} clock log(s) and log dir(s) of runs no row names".format(len(pruned)))

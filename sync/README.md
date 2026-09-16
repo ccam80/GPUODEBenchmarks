@@ -25,7 +25,7 @@ A `Host box` entry in `~/.ssh/config` serves rsync when rclone is absent. `GPUOD
 
 ```
 python sync/sync.py pull     # the whole tree into data/, nothing deleted, newer local files kept
-python sync/sync.py push     # this key and its clocks files up, nothing deleted
+python sync/sync.py push     # this key up, nothing deleted; this machine's clocks files mirrored (skipped when the partition is empty)
 python sync/sync.py sync     # push, then pull
 python sync/sync.py prune    # this key and its clocks files mirrored: files gone locally are deleted on the box; refuses an empty partition
 python sync/sync.py check    # the differences under this key, exit 1 when there are any
