@@ -1,4 +1,4 @@
-"""bench.py: flag resolution, the plan output, the -n check over heterogeneous grids, the completeness-aware continuation filters, the runner registry, and the watchdog hard-exit loop against a fake runner."""
+"""bench.py: flag resolution, the plan output, the -n check over heterogeneous grids, the completeness-aware continuation filters, the runner registry, the cubie precompile step and the watchdog hard-exit loop against a fake runner."""
 
 import inspect
 import json
@@ -33,7 +33,7 @@ from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 NAN = float("nan")
 
-# A runner that records every solve trial it reaches, exits 3 (once) while a chosen trial is in progress and lists plan.json's crashed builds in its progress file.
+# A runner that records every solve trial it reaches, exits 3 (once) while a chosen trial is in progress and lists plan.json's crashed builds in its progress file; under --precompile it logs the call and exits plan.json's precompile_code.
 FAKE_RUNNER = '''
 import json, os, sys, time
 from datetime import datetime, timezone
@@ -48,6 +48,8 @@ log = os.path.join(os.path.dirname(path), "calls.jsonl")
 with open(log, "a") as h:
     h.write(json.dumps({{"path": os.path.basename(path), "argv": argv,
                          "ids": [t["trial_id"] for t in trials]}}) + "\\n")
+if "--precompile" in argv:
+    sys.exit(plan.get("precompile_code", 0))
 data = store.Store(plan["root"])
 for t in trials:
     with open(path + ".progress", "w") as h:
@@ -207,7 +209,7 @@ class PlanTests(unittest.TestCase):
                               "-p", "cpp", "-s", "lorenz", "-n", "8", "--allow-unknown-gpu"],
                              capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertIn("cpp: 2 trials, 0 optimize, 0 cold, 2 builds", out.stdout)
+        self.assertIn("cpp: 2 trials, 0 optimize, 0 cold, 2 builds, 2 kernels", out.stdout)
         self.assertIn("lorenz/{}/float32/classical-rk4/fixed/{}  1", out.stdout)
         self.assertIn("2 trials", out.stdout)
         written = [line for line in out.stdout.splitlines() if line.endswith("cpp.jsonl")]
@@ -465,6 +467,14 @@ class LaunchTests(unittest.TestCase):
             command = launch.runner_command(package, "trials/k/x.jsonl")
             self.assertEqual(command.argv[-2:], ["--trials", "trials/k/x.jsonl"], package)
             self.assertEqual(command.ok, (0,))
+        for package in launch.CUBIE_PACKAGES:
+            precompile = launch.precompile_command(package, "trials/k/x.jsonl")
+            self.assertEqual(precompile.argv[:2], launch.runner_command(package, "x.jsonl").argv[:2])
+            self.assertEqual(precompile.argv[2:], ["--trials", "trials/k/x.jsonl", "--precompile", "--jobs", "4",
+                                                   "--per-worker", "8"])
+            self.assertEqual(precompile.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
+            self.assertEqual(precompile.label, package + " precompile")
+        self.assertEqual(launch.PRECOMPILE_JOBS, 4)
         floored = launch.runner_command("cubie", "x.jsonl", floor=True)
         self.assertEqual(floored.argv[-3:], ["--trials", "x.jsonl", "--floor"])
         self.assertEqual(floored.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
@@ -607,12 +617,13 @@ class HardExitTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp"):
+    def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp", precompile_code=0):
         args = bench.parse_args(["run", "--set", "perf", "-p", package, "-s", "lorenz", "-n", "8,32,128",
                                  "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
-            json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY, "failed": list(failed)}, handle)
+            json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY, "failed": list(failed),
+                       "precompile_code": precompile_code}, handle)
         status = run.execute()
         with open(os.path.join(run.log_dir, "calls.jsonl")) as handle:
             calls = [json.loads(line) for line in handle]
@@ -750,42 +761,75 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual([(t["algorithm"], t["n"]) for t in retry],
                          [("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
 
-    def test_a_package_with_restart_optimizes_runs_a_fresh_runner_per_part_of_whole_families(self):
+    def test_a_cubie_package_precompiles_its_kernels_then_runs_a_fresh_runner_per_part_of_whole_families(self):
         two = ("-g", "cash-karp-54,classical-rk4")
         cubie_lines = self.planned("cubie", *two)
         families = {trials.family_key(t) for t in cubie_lines}
-        # Each family's n sweep shares one kernel, so a budget of one optimize gives one part per family.
+        # Each family's n sweep shares one kernel, so a budget of one kernel gives one part per family.
         parts = trials.family_parts(cubie_lines, 1)
         self.assertEqual(len(parts), len(families))
+        self.assertEqual(trials.kernels_of(cubie_lines), len(families))
         self.assertEqual([t for part in parts for t in part], cubie_lines)
         self.assertEqual(trials.family_parts(cubie_lines, len(families)), [cubie_lines])
         self.assertEqual(trials.family_parts(cubie_lines), [cubie_lines])
-        # A package whose lines never optimize runs as one part whatever the budget.
-        self.assertEqual(trials.family_parts(self.planned(), 1), [self.planned()])
+        # A family of several kernels stays whole: the part closes at the boundary past the budget.
+        tols = bench.plan_trials(bench.resolve(bench.parse_args(
+            ["run", "--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "cash-karp-54",
+             "--controller", "default"])), KEY, self.root)["cubie"]
+        self.assertEqual(len({trials.family_key(t) for t in tols}), 1)
+        self.assertGreater(trials.kernels_of(tols), 1)
+        self.assertEqual(trials.family_parts(tols, 1), [tols])
+        # Only the cubie packages restart.
+        self.assertEqual(sorted(launch.RESTART_KERNELS), ["cubie", "cubie_mlir"])
+        self.assertEqual(set(launch.RESTART_KERNELS.values()), {8})
+        self.assertIsNone(launch.RESTART_KERNELS.get("cpp"))
         saved = launch.RUNNERS["cubie"]
         launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
         self.addCleanup(launch.RUNNERS.__setitem__, "cubie", saved)
-        with mock.patch.dict(launch.RESTART_OPTIMIZES, {"cubie": 1}):
+        with mock.patch.dict(launch.RESTART_KERNELS, {"cubie": 1}):
             status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie")
         self.assertEqual(status, 0)
-        self.assertEqual([c["path"] for c in calls],
+        # The precompile pass takes the whole file first, with the worker geometry.
+        self.assertEqual(calls[0]["path"], "cubie.jsonl")
+        self.assertEqual(calls[0]["argv"][-5:], ["--precompile", "--jobs", "4", "--per-worker", "1"])
+        self.assertEqual([c["path"] for c in calls[1:]],
                          ["cubie.part{0}.jsonl".format(n + 1) for n in range(len(parts))])
+        self.assertTrue(all("--precompile" not in c["argv"] for c in calls[1:]))
         self.assertEqual([t["trial_id"] for part in parts for t in part],
-                         [i for c in calls for i in c["ids"]])
+                         [i for c in calls[1:] for i in c["ids"]])
         self.assertEqual(summary, [["cubie", "OK", "-", "0"]])
         self.assertEqual(len(store.Store(self.root).rows()), 2 * len(cubie_lines))
+        self.assertEqual(calls[0]["ids"], [t["trial_id"] for t in cubie_lines])
         # A hard exit retries within its part, and the later parts still run.
         shutil.rmtree(self.root, ignore_errors=True)
         hung = [t for t in cubie_lines if t["algorithm"] == "cash-karp-54" and t["n"] == 32][0]
-        with mock.patch.dict(launch.RESTART_OPTIMIZES, {"cubie": 1}):
+        with mock.patch.dict(launch.RESTART_KERNELS, {"cubie": 1}):
             status, run, calls, summary = self.run_bench(hung["trial_id"], 3, *two, package="cubie")
-        self.assertEqual([c["path"] for c in calls],
+        self.assertEqual([c["path"] for c in calls[1:]],
                          ["cubie.part{0}.jsonl".format(n + 1) for n in range(len(parts))])
         self.assertEqual(summary, [["cubie", "PARTIAL", "1 hard exit(s)", "0"]])
         abandoned = [r for r in store.Store(self.root).rows() if r["min_ms"] != r["min_ms"]]
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
         self.assertEqual({r["algorithm"] for r in abandoned}, {"cash-karp-54"})
+
+    def test_a_failed_precompile_pass_fails_the_package_and_runs_no_runner(self):
+        saved = launch.RUNNERS["cubie"]
+        launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
+        self.addCleanup(launch.RUNNERS.__setitem__, "cubie", saved)
+        status, run, calls, summary = self.run_bench(None, 3, package="cubie", precompile_code=1)
+        self.assertEqual(status, 1)
+        self.assertEqual([c["path"] for c in calls], ["cubie.jsonl"])
+        self.assertIn("--precompile", calls[0]["argv"])
+        self.assertEqual(summary, [["cubie", "FAILED", "precompile exit 1", "1"]])
+        self.assertEqual(store.Store(self.root).rows(), [])
+        # A package without a precompile pass runs its runner at once.
+        self.assertIsNone(launch.precompile_command("cpp", "x.jsonl"))
+        status, run, calls, summary = self.run_bench(precompile_code=1)
+        self.assertEqual(status, 0)
+        self.assertEqual(summary, [["cpp", "OK", "-", "0"]])
+        self.assertEqual(calls[-1]["path"], "cpp.jsonl")
+        self.assertTrue(all("--precompile" not in c["argv"] for c in calls if c["path"] == "cpp.jsonl"))
 
     def test_a_hard_exit_on_the_last_build_ends_the_package_without_a_retry(self):
         hung = self.line("classical-rk4", 8)

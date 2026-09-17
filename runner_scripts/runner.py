@@ -1,4 +1,4 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first; `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first. A cold line that optimizes runs its optimize on a warm build first, so its timed cold build compiles the optimized kernel once in a fresh cache. `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
@@ -203,10 +203,10 @@ class Runner:
             self.build_key = None
             gc.collect()
 
-    def ensure_build(self, trial):
-        """(build, build_s): the build the trial runs on, kept from the last line when it serves it; a cold line rebuilds in a fresh cache and its build and compile wall time is build_s."""
+    def ensure_build(self, trial, cold=None):
+        """(build, build_s): the build the trial runs on, kept from the last line when it serves it; a cold line (or `cold`) rebuilds in a fresh cache and its build and compile wall time is build_s."""
         key = trials_mod.build_key(trial)
-        cold = bool(trial["cold"])
+        cold = bool(trial["cold"]) if cold is None else bool(cold)
         if self.build is not None and key == self.build_key and not cold:
             return self.build, NAN
         self.close_build()
@@ -220,34 +220,53 @@ class Runner:
             return self.build, build_s
         return self.build, NAN
 
+    def run_optimize(self, build, trial, progress_path):
+        """The line's optimize on a build; past OPTIMIZE_SECONDS the watchdog hard-exits and the driver drops the optimize from this line and re-runs it."""
+        write_progress(progress_path, trial, "optimize")
+        started = timeit.default_timer()
+        try:
+            done = watchdogged(lambda: self.adapter.optimize(build, trial),
+                               "optimize " + label(trial), OPTIMIZE_SECONDS)
+            print("optimized {0}: {1} in {2:.1f}s".format(
+                label(trial), done, timeit.default_timer() - started), flush=True)
+        except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
+            print("OPTIMIZE {0} failed: {1}".format(
+                label(trial), failure_reason(classify(exc), exc)), flush=True)
+
+    def make_build(self, trial, failed_builds, cold=None):
+        """(build, build_s) of ensure_build, or None once a failed build is recorded on the trial's rows."""
+        try:
+            return self.ensure_build(trial, cold)
+        except Exception as exc:  # noqa: BLE001 - the trial's rows carry the reason
+            failed_builds[trials_mod.build_key(trial)] = failure_reason(classify(exc), exc)
+            self.close_build()
+            self.record_failed(trial, failed_builds[trials_mod.build_key(trial)])
+            return None
+
     def run_trial(self, trial, history, progress_path, failed_builds):
         if trial["controller"] not in self.adapter.controllers:
             self.record_failed(trial, "error: unknown controller " + trial["controller"])
             return
-        key = trials_mod.build_key(trial)
-        if key in failed_builds:
-            self.record_failed(trial, failed_builds[key])
+        if trials_mod.build_key(trial) in failed_builds:
+            self.record_failed(trial, failed_builds[trials_mod.build_key(trial)])
             return
-        write_progress(progress_path, trial, "build")
-        try:
-            build, build_s = self.ensure_build(trial)
-        except Exception as exc:  # noqa: BLE001 - the trial's rows carry the reason
-            failed_builds[key] = failure_reason(classify(exc), exc)
+        optimized = False
+        if trial["cold"] and trial["optimize"]:
+            # Optimize on a warm build; the cold build then compiles the optimized kernel once.
+            write_progress(progress_path, trial, "build")
+            made = self.make_build(trial, failed_builds, cold=False)
+            if made is None:
+                return
+            self.run_optimize(made[0], trial, progress_path)
             self.close_build()
-            self.record_failed(trial, failed_builds[key])
+            optimized = True
+        write_progress(progress_path, trial, "build")
+        made = self.make_build(trial, failed_builds)
+        if made is None:
             return
-        if trial["optimize"]:
-            # Past OPTIMIZE_SECONDS the watchdog hard-exits; the driver drops the optimize from this line and re-runs it.
-            write_progress(progress_path, trial, "optimize")
-            started = timeit.default_timer()
-            try:
-                done = watchdogged(lambda: self.adapter.optimize(build, trial),
-                                   "optimize " + label(trial), OPTIMIZE_SECONDS)
-                print("optimized {0}: {1} in {2:.1f}s".format(
-                    label(trial), done, timeit.default_timer() - started), flush=True)
-            except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
-                print("OPTIMIZE {0} failed: {1}".format(
-                    label(trial), failure_reason(classify(exc), exc)), flush=True)
+        build, build_s = made
+        if trial["optimize"] and not optimized:
+            self.run_optimize(build, trial, progress_path)
         elif not trial["cold"] and not trial["transfers"]:
             self.adapter.compile(build, trial, grid_mod.grid(trial))
         if trial["transfers"]:

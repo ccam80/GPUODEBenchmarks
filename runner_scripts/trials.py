@@ -46,20 +46,31 @@ def family_key(trial):
     return tuple(trial[f] for f in FAMILY_FIELDS)
 
 
-def family_parts(trial_list, optimizes=None):
-    """File-order parts of whole families, each closed at the first family boundary at or past `optimizes` optimize runs; one part when `optimizes` is None or the lines run none."""
-    if not optimizes:
+def family_parts(trial_list, kernels=None):
+    """File-order parts of whole families, each closed at the first family boundary at or past `kernels` distinct kernels; one part when `kernels` is None."""
+    if not kernels:
         return [list(trial_list)]
     parts, current, counted = [], [], 0
     for trial in trial_list:
-        if counted >= optimizes and family_key(trial) != family_key(current[-1]):
+        if counted >= kernels and family_key(trial) != family_key(current[-1]):
             parts.append(current)
             current, counted = [], 0
         current.append(trial)
-        counted = optimizes_of(current)
+        counted = kernels_of(current)
     if current:
         parts.append(current)
     return parts
+
+
+def kernel_lines(trial_list):
+    """The first line of every kernel in file order, one per kernel_key."""
+    seen, out = set(), []
+    for trial in trial_list:
+        key = kernel_key(trial)
+        if key not in seen:
+            seen.add(key)
+            out.append(trial)
+    return out
 
 
 def states_of(spec):
@@ -210,6 +221,11 @@ def read_jsonl(path):
 def optimizes_of(trials):
     """The optimize runs of a trial list: one per kernel among the lines that optimize."""
     return len({kernel_key(t) for t in trials if t["optimize"]})
+
+
+def kernels_of(trials):
+    """The distinct kernels of a trial list, by kernel_key."""
+    return len({kernel_key(t) for t in trials})
 
 
 def counts(trials):

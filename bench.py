@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
-plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner, a fresh cubie runner every 25 optimizes at a family boundary (<package>.part<N>.jsonl).
+plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: a cubie package precompiles its kernels and optimize candidates into the package cache first (four workers of eight kernels), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per build and stepping, once per build across dt for an explicit fixed-step algorithm, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
 Without a flag every selected trial runs, its rows are overwritten and its cubie kernel is optimized again. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row and a timed-out optimize; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
@@ -197,8 +197,8 @@ def print_counts(by_package):
     for package, rows in by_package.items():
         solves, optimizes, colds, builds = trials_mod.counts(rows)
         total += solves
-        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds".format(
-            package, solves, optimizes, colds, builds))
+        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds, {5} kernels".format(
+            package, solves, optimizes, colds, builds, trials_mod.kernels_of(rows)))
         for key, lines in trials_mod.builds_of(rows):
             print("  {0}  {1}".format("/".join(str(k) for k in key), len(lines)))
     print("{0} trials".format(total))
@@ -307,9 +307,23 @@ class Run:
             time.sleep(self.args.cooldown)
 
     # ------------------------------------------------------------- packages
+    def precompile(self, package, trial_list, path):
+        """A cubie package's precompile pass over its whole trial file; False once a failed pass is recorded, so the package's runners do not run."""
+        command = launch.precompile_command(package, path)
+        if command is None:
+            return True
+        status = self.step("{0} precompile ({1} kernels)".format(package, trials_mod.kernels_of(trial_list)),
+                           package + ".log", command)
+        if status != 0:
+            self.record(package, "FAILED", "precompile exit {0}".format(status), status)
+            return False
+        return True
+
     def run_package(self, package, trial_list, path):
-        """Drive a package's runners over its trial file, a fresh runner per part of launch.RESTART_OPTIMIZES optimizes of whole families; a build that crashed before a hard exit fails the package once every part ends."""
-        parts = trials_mod.family_parts(trial_list, launch.RESTART_OPTIMIZES.get(package))
+        """Precompile a cubie package's kernels, then drive the package's runners over its trial file, a fresh runner per part of launch.RESTART_KERNELS kernels of whole families; a build that crashed before a hard exit fails the package once every part ends."""
+        if not self.precompile(package, trial_list, path):
+            return
+        parts = trials_mod.family_parts(trial_list, launch.RESTART_KERNELS.get(package))
         hard_exits, crashed, status = 0, [], 0
         for number, part in enumerate(parts, start=1):
             label = package if len(parts) == 1 else "{0} part {1}/{2}".format(package, number, len(parts))
