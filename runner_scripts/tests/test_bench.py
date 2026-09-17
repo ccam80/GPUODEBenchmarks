@@ -738,6 +738,29 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual([(t["algorithm"], t["n"]) for t in retry],
                          [("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
 
+    def test_a_package_with_restart_lines_runs_a_fresh_runner_per_part_of_whole_families(self):
+        planned = self.planned()
+        self.assertEqual([len(p) for p in trials.family_parts(planned, 2)], [3, 3])
+        self.assertEqual(trials.family_parts(planned, 1), trials.family_parts(planned, 3))
+        self.assertEqual(trials.family_parts(planned), [planned])
+        with mock.patch.dict(launch.RESTART_LINES, {"cpp": 2}):
+            status, run, calls, summary = self.run_bench()
+        self.assertEqual(status, 0)
+        self.assertEqual([c["path"] for c in calls], ["cpp.part1.jsonl", "cpp.part2.jsonl"])
+        self.assertEqual([len(c["ids"]) for c in calls], [3, 3])
+        self.assertEqual(summary, [["cpp", "OK", "-", "0"]])
+        self.assertEqual(len(store.Store(self.root).rows()), 12)
+        # A hard exit retries within its part, and the next part still runs.
+        shutil.rmtree(self.root, ignore_errors=True)
+        hung = self.line("cash-karp-54", 32)
+        with mock.patch.dict(launch.RESTART_LINES, {"cpp": 2}):
+            status, run, calls, summary = self.run_bench(hung["trial_id"])
+        self.assertEqual([c["path"] for c in calls], ["cpp.part1.jsonl", "cpp.part2.jsonl"])
+        self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "0"]])
+        abandoned = [r for r in store.Store(self.root).rows() if r["min_ms"] != r["min_ms"]]
+        self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
+                         [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
+
     def test_a_hard_exit_on_the_last_build_ends_the_package_without_a_retry(self):
         hung = self.line("classical-rk4", 8)
         status, run, calls, summary = self.run_bench(hung["trial_id"])

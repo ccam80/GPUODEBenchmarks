@@ -33,6 +33,21 @@ def family_key(trial):
     return tuple(trial[f] for f in FAMILY_FIELDS)
 
 
+def family_parts(trial_list, lines=None):
+    """File-order parts of whole families, each closed at the first family boundary at or past `lines` lines; one part when `lines` is None."""
+    if not lines:
+        return [list(trial_list)]
+    parts, current = [], []
+    for trial in trial_list:
+        if len(current) >= lines and family_key(trial) != family_key(current[-1]):
+            parts.append(current)
+            current = []
+        current.append(trial)
+    if current:
+        parts.append(current)
+    return parts
+
+
 def states_of(spec):
     """The states of system_params, 0 when it names none."""
     params = json.loads(spec["system_params"]) if spec["system_params"] else {}
