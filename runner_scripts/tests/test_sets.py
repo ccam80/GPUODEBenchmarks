@@ -278,7 +278,10 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
         built = self.trials["golden_grid"]
         lines, optimized, cold, builds = line_counts(built, "cubie")
-        self.assertEqual((lines, optimized, cold), (expected["cubie"], expected["cubie"], 0))
+        # An explicit fixed-step build optimizes once across its dt.
+        shared = [t for t in built if t["package"] == "cubie" and trials.shares_dt_optimize(t)]
+        self.assertEqual((lines, optimized, cold),
+                         (expected["cubie"], expected["cubie"] - len(shared) + len({trials.build_key(t) for t in shared}), 0))
         # One build per (problem, algorithm, controller, gains); a matched entry resolving to pi shares the pi build.
         self.assertGreaterEqual(builds, 8 * (23 + 17 + 14))
         self.assertEqual(line_counts(built, "julia_cpu"), (3192, 0, 0, 8 * (21 + 18)))
@@ -287,7 +290,10 @@ class ShippedSetTests(unittest.TestCase):
     def test_golden_grid_optimizes_every_cubie_kernel_once(self):
         built = [t for t in self.trials["golden_grid"] if t["package"] == "cubie" and t["problem"] == "lorenz"]
         self.assertEqual({t["optimize"] for t in built}, {True})
-        self.assertEqual(len({trials.kernel_key(t) for t in built}), len(built))
+        shared = [t for t in built if trials.shares_dt_optimize(t)]
+        self.assertTrue(shared)
+        self.assertEqual(len({trials.kernel_key(t) for t in built}),
+                         len(built) - len(shared) + len({trials.build_key(t) for t in shared}))
         states = [t for t in self.trials["states"] if t["package"] == "cubie"]
         self.assertEqual({t["optimize"] for t in states}, {True})
         self.assertEqual(trials.optimizes_of(states), len(states))
@@ -574,9 +580,10 @@ class MergeAndNarrowTests(unittest.TestCase):
                          [(8, True, True, ["a", "b", "c"])])
         self.assertEqual({t["optimize"] for t in trials.build_trials([b, c])}, {False})
         # Optimize counts: one per kernel among the lines that optimize.
-        kernel_lines = trials.build_trials([a, dict(a, n=32), dict(a, dt=0.5)])
-        self.assertEqual(trials.optimizes_of(kernel_lines), 2)
-        self.assertEqual(trials.counts(kernel_lines)[1], 2)
+        kernel_lines = trials.build_trials([a, dict(a, n=32), dict(a, dt=0.5), dict(a, algorithm="backwards_euler"),
+                                            dict(a, algorithm="backwards_euler", dt=0.5)])
+        self.assertEqual(trials.optimizes_of(kernel_lines), 3)
+        self.assertEqual(trials.counts(kernel_lines)[1], 3)
         self.assertEqual(trials.optimizes_of(trials.build_trials([b, dict(b, n=32), dict(b, dt=0.5)])), 0)
         # File order: states, then n ascending, dt descending, tolerance descending, per build.
         lines = [dict(a, n=32), dict(a, dt=0.5), dict(a, n=8), dict(a, system_params='{"states":4}', problem="lorenz96"),

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from problems import as_problem
 from store import RUN_ENV, _Lock
+from trials import shares_dt_optimize
 
 BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
 SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
@@ -175,8 +176,10 @@ def _text(value):
 
 
 def stepping_text(trial):
-    """The stepping values of a trial as one text: dt, dt_min, dt_max, atol, rtol, newton_atol, newton_rtol."""
-    return ";".join("{0}={1}".format(field, _text(trial[field])) for field in STEPPING_FIELDS)
+    """The stepping values of a trial as one text: dt, dt_min, dt_max, atol, rtol, newton_atol, newton_rtol; dt is blank where shares_dt_optimize."""
+    shared = shares_dt_optimize(trial)
+    return ";".join("{0}={1}".format(field, "" if shared and field == "dt" else _text(trial[field]))
+                    for field in STEPPING_FIELDS)
 
 
 def kernel_ident(trial, key):

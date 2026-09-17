@@ -149,8 +149,13 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual(ident, {"package": "cubie", "key": "k", "problem": "lorenz", "states": "3",
                                  "precision": "float32", "algorithm": "tsit5", "controller": "fixed",
                                  "gains": "{}",
-                                 "stepping": "dt=0.0009765625;dt_min=;dt_max=;atol=;rtol=;newton_atol=;newton_rtol="})
+                                 "stepping": "dt=;dt_min=;dt_max=;atol=;rtol=;newton_atol=;newton_rtol="})
         self.assertEqual(adapter.kernel_ident(line(n=64), "k"), ident)
+        # An explicit fixed-step line shares its optimize across dt; an implicit one keeps dt.
+        self.assertEqual(adapter.kernel_ident(line(dt=0.5), "k"), ident)
+        implicit = adapter.kernel_ident(line(algorithm="backwards_euler"), "k")
+        self.assertTrue(implicit["stepping"].startswith("dt=0.0009765625;"))
+        self.assertNotEqual(adapter.kernel_ident(line(algorithm="backwards_euler", dt=0.5), "k"), implicit)
         self.assertNotIn("per", adapter.OPTIMIZE_FIELDS)
         resized = adapter.kernel_ident(line(problem="lorenz96", system_params='{"states":8}'), "k")
         self.assertEqual((resized["problem"], resized["states"]), ("lorenz96", "8"))
@@ -190,7 +195,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual([r["n"] for r in adapter.optimize_rows("cubie", "k")], ["71680"])
         self.assertEqual(adapter.load_optimized(line(n=8), "k")["settings"], {"blocksize": 256})
         # The next record rewrites the file in the kernel-only layout.
-        adapter.record_optimized(line(dt=0.5), "k", FakeResult(FakeLaunch(128, 2), {"blocksize": 128}, runs=512))
+        adapter.record_optimized(line(algorithm="euler"), "k", FakeResult(FakeLaunch(128, 2), {"blocksize": 128}, runs=512))
         with open(path, newline="", encoding="utf-8") as handle:
             text = handle.read()
         self.assertEqual(text.splitlines()[0], ",".join(adapter.OPTIMIZE_FIELDS))
@@ -230,7 +235,7 @@ class OptimizeStoreTests(unittest.TestCase):
         rows = adapter.optimize_rows("cubie", "k")
         self.assertNotIn("source", rows[0])
         self.assertNotIn("source", adapter.OPTIMIZE_FIELDS)
-        self.assertIsNone(adapter.find_optimized(rows, adapter.kernel_ident(line(dt=0.5), "k")))
+        self.assertIsNone(adapter.find_optimized(rows, adapter.kernel_ident(line(algorithm="euler"), "k")))
         # A row an earlier suite recorded with a source column is served as it is.
         kernel = adapter.kernel_ident(line(), "k")
         legacy = ("package,key,problem,states,precision,algorithm,controller,gains,stepping,n,duration,source,"

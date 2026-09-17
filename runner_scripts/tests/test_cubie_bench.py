@@ -318,7 +318,9 @@ class BuildTests(AdapterCase):
         tuned = cubie_adapter.load_optimized(line, KEY, root=self.root)
         self.assertEqual(tuned["settings"], {"blocksize": 128, "state_location": "shared"})
         self.assertEqual(tuned["resident_blocks"], 2)
-        self.assertIsNone(cubie_adapter.load_optimized(trial(dt=2.0 ** -13, optimize=True), KEY, root=self.root))
+        # An explicit fixed-step build shares its optimize across dt.
+        self.assertIsNotNone(cubie_adapter.load_optimized(trial(dt=2.0 ** -13, optimize=True), KEY, root=self.root))
+        self.assertIsNone(cubie_adapter.load_optimized(trial(algorithm="euler", optimize=True), KEY, root=self.root))
         leg.close()
         tol_line = trial(n=8, optimize=True, **adaptive(atol=1e-4, rtol=1e-4))
         leg = self.adapter.build(trial(**adaptive(atol=1e-4, rtol=1e-4)))
