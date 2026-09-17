@@ -88,7 +88,7 @@ Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
 refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
 trial's watchdog is recorded NaN with a reason and every harder run of its
 family is abandoned; a runner that never returns hard-exits and the driver re-invokes
-it with the trials still missing. The driver starts a fresh cubie runner every 25
+it with the trials still missing. The driver starts a fresh cubie runner every 12
 optimizes, at the next family boundary (`<package>.part<N>.jsonl`).
 
 ## Data and analyses

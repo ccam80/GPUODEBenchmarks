@@ -19,7 +19,7 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "cubie_mlir": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 # Optimizes per runner process; a cubie runner keeps every kernel an optimize compiled until it exits.
-RESTART_OPTIMIZES = {"cubie": 25, "cubie_mlir": 25}
+RESTART_OPTIMIZES = {"cubie": 12, "cubie_mlir": 12}
 
 
 class Command:
