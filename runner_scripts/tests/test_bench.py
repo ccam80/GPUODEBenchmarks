@@ -607,8 +607,8 @@ class HardExitTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def run_bench(self, hung=None, code=3, *argv, lock="", failed=()):
-        args = bench.parse_args(["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128",
+    def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp"):
+        args = bench.parse_args(["run", "--set", "perf", "-p", package, "-s", "lorenz", "-n", "8,32,128",
                                  "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
@@ -620,9 +620,10 @@ class HardExitTests(unittest.TestCase):
             summary = [line.rstrip("\n").split("\t") for line in handle]
         return status, run, calls, summary
 
-    def planned(self):
+    def planned(self, package="cpp", *argv):
         return bench.plan_trials(bench.resolve(bench.parse_args(
-            ["run", "--set", "perf", "-p", "cpp", "-s", "lorenz", "-n", "8,32,128"])), KEY, self.root)["cpp"]
+            ["run", "--set", "perf", "-p", package, "-s", "lorenz", "-n", "8,32,128"] + list(argv))),
+            KEY, self.root)[package]
 
     def line(self, algorithm, n):
         return [t for t in self.planned() if t["algorithm"] == algorithm and t["n"] == n][0]
@@ -749,28 +750,42 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual([(t["algorithm"], t["n"]) for t in retry],
                          [("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
 
-    def test_a_package_with_restart_lines_runs_a_fresh_runner_per_part_of_whole_families(self):
-        planned = self.planned()
-        self.assertEqual([len(p) for p in trials.family_parts(planned, 2)], [3, 3])
-        self.assertEqual(trials.family_parts(planned, 1), trials.family_parts(planned, 3))
-        self.assertEqual(trials.family_parts(planned), [planned])
-        with mock.patch.dict(launch.RESTART_LINES, {"cpp": 2}):
-            status, run, calls, summary = self.run_bench()
+    def test_a_package_with_restart_optimizes_runs_a_fresh_runner_per_part_of_whole_families(self):
+        two = ("-g", "cash-karp-54,classical-rk4")
+        cubie_lines = self.planned("cubie", *two)
+        families = {trials.family_key(t) for t in cubie_lines}
+        # Each family's n sweep shares one kernel, so a budget of one optimize gives one part per family.
+        parts = trials.family_parts(cubie_lines, 1)
+        self.assertEqual(len(parts), len(families))
+        self.assertEqual([t for part in parts for t in part], cubie_lines)
+        self.assertEqual(trials.family_parts(cubie_lines, len(families)), [cubie_lines])
+        self.assertEqual(trials.family_parts(cubie_lines), [cubie_lines])
+        # A package whose lines never optimize runs as one part whatever the budget.
+        self.assertEqual(trials.family_parts(self.planned(), 1), [self.planned()])
+        saved = launch.RUNNERS["cubie"]
+        launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
+        self.addCleanup(launch.RUNNERS.__setitem__, "cubie", saved)
+        with mock.patch.dict(launch.RESTART_OPTIMIZES, {"cubie": 1}):
+            status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie")
         self.assertEqual(status, 0)
-        self.assertEqual([c["path"] for c in calls], ["cpp.part1.jsonl", "cpp.part2.jsonl"])
-        self.assertEqual([len(c["ids"]) for c in calls], [3, 3])
-        self.assertEqual(summary, [["cpp", "OK", "-", "0"]])
-        self.assertEqual(len(store.Store(self.root).rows()), 12)
-        # A hard exit retries within its part, and the next part still runs.
+        self.assertEqual([c["path"] for c in calls],
+                         ["cubie.part{0}.jsonl".format(n + 1) for n in range(len(parts))])
+        self.assertEqual([t["trial_id"] for part in parts for t in part],
+                         [i for c in calls for i in c["ids"]])
+        self.assertEqual(summary, [["cubie", "OK", "-", "0"]])
+        self.assertEqual(len(store.Store(self.root).rows()), 2 * len(cubie_lines))
+        # A hard exit retries within its part, and the later parts still run.
         shutil.rmtree(self.root, ignore_errors=True)
-        hung = self.line("cash-karp-54", 32)
-        with mock.patch.dict(launch.RESTART_LINES, {"cpp": 2}):
-            status, run, calls, summary = self.run_bench(hung["trial_id"])
-        self.assertEqual([c["path"] for c in calls], ["cpp.part1.jsonl", "cpp.part2.jsonl"])
-        self.assertEqual(summary, [["cpp", "PARTIAL", "1 hard exit(s)", "0"]])
+        hung = [t for t in cubie_lines if t["algorithm"] == "cash-karp-54" and t["n"] == 32][0]
+        with mock.patch.dict(launch.RESTART_OPTIMIZES, {"cubie": 1}):
+            status, run, calls, summary = self.run_bench(hung["trial_id"], 3, *two, package="cubie")
+        self.assertEqual([c["path"] for c in calls],
+                         ["cubie.part{0}.jsonl".format(n + 1) for n in range(len(parts))])
+        self.assertEqual(summary, [["cubie", "PARTIAL", "1 hard exit(s)", "0"]])
         abandoned = [r for r in store.Store(self.root).rows() if r["min_ms"] != r["min_ms"]]
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
+        self.assertEqual({r["algorithm"] for r in abandoned}, {"cash-karp-54"})
 
     def test_a_hard_exit_on_the_last_build_ends_the_package_without_a_retry(self):
         hung = self.line("classical-rk4", 8)
