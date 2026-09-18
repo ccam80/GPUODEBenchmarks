@@ -158,6 +158,14 @@ class DriverTests(unittest.TestCase):
     def test_main_runs_the_driver_over_the_files_kernels_one_line_each(self):
         trials.write_jsonl(self.path, trials.build_trials([spec(8), spec(32), spec(8, dt=2.0 ** -12),
                                                            spec(8, algorithm="euler")]))
+        # A kernel optimizes when any of its lines does.
+        lines = {}
+        for trial in trials.read_jsonl(self.path):
+            line = lines.setdefault(trials.kernel_key(trial), dict(trial))
+            line["optimize"] = line["optimize"] or trial["optimize"]
+        self.assertEqual([t["optimize"] for t in lines.values()], [True, True])
+        mixed = trials.build_trials([spec(8, optimize=False), spec(32, optimize=True)])
+        self.assertEqual([t["optimize"] for t in mixed], [False, True])
         with open(os.path.join(self.tmp, "plan.json"), "w") as handle:
             json.dump({"count": 2}, handle)
         made = []

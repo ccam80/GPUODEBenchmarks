@@ -1,4 +1,4 @@
-"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K]` compiles every kernel of a trial file, with its optimize candidates, into the package cache before the runners run it. The kernels (one line per kernel_key, file order) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk; a worker that exits on a kernel hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build."""
+"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk; a worker that exits on a kernel hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build."""
 
 import argparse
 import json
@@ -34,7 +34,7 @@ def progress_path(trials_path, start):
 
 
 class Worker:
-    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled with its optimize candidates under the optimize watchdog; the progress file carries the kernel under way and the tallies."""
+    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; the progress file carries the kernel under way and the tallies."""
 
     def __init__(self, package, key, root, lines, span, path, solver_class=None):
         self.package, self.key, self.root = package, key, root
@@ -50,7 +50,7 @@ class Worker:
         import cubie_bench
         build = cubie_bench.Build(self.package, self.key, self.root, trial, cold=False, solver_class=self.solver_class)
         try:
-            build.solver.compile(duration=build.duration, optimize_candidates=True, max_parallel=1)
+            build.solver.compile(duration=build.duration, optimize_candidates=bool(trial["optimize"]), max_parallel=1)
         finally:
             build.close()
 
@@ -136,7 +136,8 @@ def main(argv, package, key=None, root=runner.DATA_ROOT, solver_class=None, work
     args = parse_args(argv)
     first = {}
     for trial in trials_mod.read_jsonl(args.trials):
-        first.setdefault(trials_mod.kernel_key(trial), trial)
+        line = first.setdefault(trials_mod.kernel_key(trial), dict(trial))
+        line["optimize"] = line["optimize"] or trial["optimize"]
     lines = list(first.values())
     if args.worker is not None:
         return Worker(package, key or dataset_key(), root, lines, args.worker,
