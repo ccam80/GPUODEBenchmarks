@@ -471,7 +471,7 @@ class LaunchTests(unittest.TestCase):
             precompile = launch.precompile_command(package, "trials/k/x.jsonl")
             self.assertEqual(precompile.argv[:2], launch.runner_command(package, "x.jsonl").argv[:2])
             self.assertEqual(precompile.argv[2:], ["--trials", "trials/k/x.jsonl", "--precompile", "--jobs", "4",
-                                                   "--per-worker", "8"])
+                                                   "--per-worker", "8", "--memory-gb", "6"])
             self.assertEqual(precompile.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
             self.assertEqual(precompile.label, package + " precompile")
         floored = launch.runner_command("cubie", "x.jsonl", floor=True)
@@ -789,7 +789,7 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(status, 0)
         # The precompile pass takes the whole file first, with the worker geometry.
         self.assertEqual(calls[0]["path"], "cubie.jsonl")
-        self.assertEqual(calls[0]["argv"][-5:], ["--precompile", "--jobs", "4", "--per-worker", "1"])
+        self.assertEqual(calls[0]["argv"][-7:], ["--precompile", "--jobs", "4", "--per-worker", "1", "--memory-gb", "6"])
         self.assertEqual([c["path"] for c in calls[1:]],
                          ["cubie.part{0}.jsonl".format(n + 1) for n in range(len(parts))])
         self.assertTrue(all("--precompile" not in c["argv"] for c in calls[1:]))

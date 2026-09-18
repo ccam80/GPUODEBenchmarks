@@ -1,4 +1,4 @@
-"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk; a worker that exits on a kernel hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build."""
+"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K] [--memory-gb G]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk or once its private memory passes `--memory-gb` after a kernel; a worker that exits early hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build."""
 
 import argparse
 import json
@@ -23,10 +23,41 @@ def parse_args(argv):
     parser.add_argument("--precompile", action="store_true")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--per-worker", type=int, default=8)
+    parser.add_argument("--memory-gb", type=float, default=6.0)
     parser.add_argument("--worker", default="")
     args = parser.parse_args(argv)
     args.worker = tuple(int(tok) for tok in args.worker.split(":")) if args.worker else None
     return args
+
+
+def private_bytes():
+    """This process's private memory, swapped pages included; the peak resident size where no reader exists."""
+    if sys.platform.startswith("linux"):
+        fields = {}
+        with open("/proc/self/status", encoding="ascii") as handle:
+            for line in handle:
+                name, _, value = line.partition(":")
+                fields[name] = value.split()
+        return sum(int(fields[name][0]) for name in ("RssAnon", "VmSwap") if name in fields) * 1024
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class Counters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+                (name, ctypes.c_size_t) for name in (
+                    "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+                    "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage",
+                    "PrivateUsage")]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+        counters = Counters(cb=ctypes.sizeof(Counters))
+        kernel32.K32GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb)
+        return counters.PrivateUsage
+    import resource
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 def progress_path(trials_path, start):
@@ -34,12 +65,13 @@ def progress_path(trials_path, start):
 
 
 class Worker:
-    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; the progress file carries the kernel under way and the tallies."""
+    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
 
-    def __init__(self, package, key, root, lines, span, path, solver_class=None):
+    def __init__(self, package, key, root, lines, span, path, solver_class=None, memory_bytes=None):
         self.package, self.key, self.root = package, key, root
         self.lines, self.span, self.path = lines, span, path
         self.solver_class = solver_class
+        self.memory_bytes = memory_bytes
         self.progress = {"under_way": None, "compiled": [], "failed": []}
 
     def write_progress(self):
@@ -75,12 +107,19 @@ class Worker:
                 print("precompiled {0} in {1:.1f}s".format(runner.label(trial), timeit.default_timer() - started),
                       flush=True)
             self.progress["under_way"] = None
+            used = private_bytes()
+            if self.memory_bytes and used > self.memory_bytes and index + 1 < self.span[1]:
+                self.progress["next"] = index + 1
+                self.write_progress()
+                print("precompile worker at {0:.1f} GB: kernels {1}:{2} go to a new worker".format(
+                    used / 2 ** 30, index + 1, self.span[1]), flush=True)
+                return 0
             self.write_progress()
         return 0
 
 
 class Driver:
-    """The parent: chunks of `per_worker` kernels to at most `jobs` workers at once; a worker that exits on a kernel loses it and the rest of its chunk goes to a new worker."""
+    """The parent: chunks of `per_worker` kernels to at most `jobs` workers at once; a worker that exits on a kernel loses it, and the rest of its chunk goes to a new worker, as does the rest of a chunk a worker left over its memory budget."""
 
     def __init__(self, path, lines, jobs, per_worker, worker_argv):
         self.path, self.lines = path, lines
@@ -96,7 +135,7 @@ class Driver:
         self.launched += 1
 
     def settle(self, proc, code):
-        """Tally a finished worker's chunk; the kernel it exited on is lost and the rest requeued."""
+        """Tally a finished worker's chunk; the kernel it exited on is lost and the rest requeued, as is the rest of a chunk it left early."""
         start, end = self.running.pop(proc)
         try:
             with open(progress_path(self.path, start), encoding="utf-8") as handle:
@@ -107,6 +146,8 @@ class Driver:
         self.failed += [tuple(entry) for entry in progress.get("failed", [])]
         under_way = progress.get("under_way")
         if under_way is None:
+            if progress.get("next") is not None:
+                self.queue.insert(0, (progress["next"], end))
             return
         self.lost.append(under_way)
         print("PRECOMPILE LOST {0}: the worker exited {1}".format(runner.label(self.lines[under_way]), code),
@@ -141,11 +182,12 @@ def main(argv, package, key=None, root=runner.DATA_ROOT, solver_class=None, work
     lines = list(first.values())
     if args.worker is not None:
         return Worker(package, key or dataset_key(), root, lines, args.worker,
-                      progress_path(args.trials, args.worker[0]), solver_class=solver_class).run()
+                      progress_path(args.trials, args.worker[0]), solver_class=solver_class,
+                      memory_bytes=int(args.memory_gb * 2 ** 30)).run()
     if worker_argv is None:
         def worker_argv(start, end):
             return [sys.executable, sys.argv[0], "--trials", args.trials, "--precompile",
-                    "--worker", "{0}:{1}".format(start, end)]
+                    "--memory-gb", str(args.memory_gb), "--worker", "{0}:{1}".format(start, end)]
     return Driver(args.trials, lines, args.jobs, args.per_worker, worker_argv).run()
 
 
