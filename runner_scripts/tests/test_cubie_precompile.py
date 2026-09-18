@@ -1,4 +1,4 @@
-"""cubie_precompile.py: the kernel listing and the driver loop against a fake worker script: chunks of per-worker kernels to at most --jobs workers at once, a worker's exit on a kernel requeuing the rest of its chunk, failed kernels tallied."""
+"""cubie_precompile.py: the kernel listing and the driver loop against a fake worker script: chunks of per-worker kernels to at most --jobs workers at once, a worker's exit on a kernel or over its memory budget requeuing the rest of its chunk, failed kernels tallied."""
 
 import json
 import os
@@ -17,7 +17,7 @@ from protocol import WATCHDOG_EXIT_CODE  # noqa: E402
 
 NAN = float("nan")
 
-# A worker that sleeps through its span, writing the progress file as the real one does; plan.json chooses a kernel to hang, crash or fail at, or a span that dies before its first kernel.
+# A worker that sleeps through its span, writing the progress file as the real one does; plan.json chooses a kernel to hang, crash, fail or pass its memory budget at, or a span that dies before its first kernel.
 FAKE_WORKER = '''
 import json, os, sys, time
 sys.path.insert(0, r"{runner_scripts}")
@@ -48,6 +48,10 @@ for index in range(start, min(end, plan["count"])):
     else:
         progress["compiled"].append(index)
     progress["under_way"] = None
+    if plan.get("full_at") == index and index + 1 < end:
+        progress["next"] = index + 1
+        write()
+        break
     write()
 call["ended"] = time.time()
 json.dump(call, open(calls, "w"))
@@ -69,7 +73,7 @@ def spec(n=8, **overrides):
 class FlagTests(unittest.TestCase):
     def test_flags(self):
         args = cubie_precompile.parse_args(["--trials", "x.jsonl", "--precompile"])
-        self.assertEqual((args.jobs, args.per_worker, args.worker), (4, 8, None))
+        self.assertEqual((args.jobs, args.per_worker, args.memory_gb, args.worker), (4, 8, 6.0, None))
         args = cubie_precompile.parse_args(["--trials", "x.jsonl", "--precompile", "--jobs", "2", "--per-worker", "3",
                                             "--worker", "3:6"])
         self.assertEqual((args.jobs, args.per_worker, args.worker), (2, 3, (3, 6)))
@@ -139,6 +143,24 @@ class DriverTests(unittest.TestCase):
         status, driver, calls = self.drive(jobs=1, per_worker=5, crash_at=9)
         self.assertEqual(driver.lost, [9])
         self.assertEqual(driver.launched, 2)
+
+    def test_a_worker_over_its_memory_budget_hands_the_rest_of_its_chunk_to_a_new_worker(self):
+        status, driver, calls = self.drive(jobs=1, per_worker=4, full_at=5)
+        self.assertEqual(status, 0)
+        self.assertEqual((driver.lost, driver.failed), ([], []))
+        self.assertEqual(sorted(driver.compiled), list(range(10)))
+        self.assertEqual([tuple(c["span"]) for c in calls], [(0, 4), (4, 8), (6, 8), (8, 10)])
+        # A budget passed on the chunk's last kernel requeues nothing.
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        os.makedirs(self.tmp)
+        with open(self.worker, "w", encoding="utf-8") as handle:
+            handle.write(FAKE_WORKER)
+        status, driver, calls = self.drive(jobs=1, per_worker=5, full_at=4)
+        self.assertEqual(sorted(driver.compiled), list(range(10)))
+        self.assertEqual(driver.launched, 2)
+
+    def test_private_bytes_reads_this_process(self):
+        self.assertGreater(cubie_precompile.private_bytes(), 1 << 20)
 
     def test_failed_kernels_are_tallied_and_a_chunk_whose_worker_dies_at_once_is_left_to_the_runner(self):
         status, driver, calls = self.drive(jobs=2, per_worker=3, fail_at=[2, 4])

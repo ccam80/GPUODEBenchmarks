@@ -311,6 +311,18 @@ class PrecompileWorkerTests(AdapterCase):
         with open(path) as handle:
             self.assertEqual(json.load(handle)["failed"], [[0, "error: RuntimeError: ptxas failed"]])
 
+    def test_a_worker_past_its_memory_budget_stops_after_the_kernel_and_names_the_next(self):
+        lines = self.lines()
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
+        with mock.patch.object(cubie_precompile, "private_bytes", side_effect=[1 << 30, 8 << 30]):
+            worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 5), path, solver_class=FakeSolver,
+                                             memory_bytes=6 << 30)
+            self.assertEqual(worker.run(), 0)
+        self.assertEqual(len(FakeSolver.made), 2)
+        with open(path) as handle:
+            progress = json.load(handle)
+        self.assertEqual((progress["compiled"], progress["under_way"], progress["next"]), ([0, 1], None, 2))
+
     def test_each_kernel_compiles_under_the_optimize_watchdog(self):
         budgets = []
 
