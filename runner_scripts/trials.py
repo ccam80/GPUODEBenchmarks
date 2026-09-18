@@ -13,7 +13,7 @@ TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimiz
 TRANSFERS_ORDER = ("both", "none")
 # The fields one package build serves; a line whose values differ from the last needs a new build.
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
-# The fields one optimize serves: the build plus every stepping value, dt aside on an explicit fixed-step line.
+# The fields of one compiled kernel: the build plus every stepping value.
 KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
@@ -35,10 +35,17 @@ def shares_dt_optimize(trial):
 
 
 def kernel_key(trial):
-    """The optimize a trial shares, as a tuple of KERNEL_FIELDS with NaN as None; dt is None where shares_dt_optimize."""
-    shared = shares_dt_optimize(trial)
-    return tuple(None if (shared and f == "dt") or (isinstance(trial[f], float) and math.isnan(trial[f]))
-                 else trial[f] for f in KERNEL_FIELDS)
+    """The compiled kernel a trial runs, as a tuple of KERNEL_FIELDS with NaN as None."""
+    return tuple(None if isinstance(trial[f], float) and math.isnan(trial[f]) else trial[f] for f in KERNEL_FIELDS)
+
+
+def optimize_key(trial):
+    """The optimize a trial shares: its kernel_key, with dt None where shares_dt_optimize."""
+    key = kernel_key(trial)
+    if not shares_dt_optimize(trial):
+        return key
+    dt = KERNEL_FIELDS.index("dt")
+    return key[:dt] + (None,) + key[dt + 1:]
 
 
 def family_key(trial):
@@ -208,8 +215,8 @@ def read_jsonl(path):
 
 
 def optimizes_of(trials):
-    """The optimize runs of a trial list: one per kernel among the lines that optimize."""
-    return len({kernel_key(t) for t in trials if t["optimize"]})
+    """The optimize runs of a trial list: one per optimize_key among the lines that optimize."""
+    return len({optimize_key(t) for t in trials if t["optimize"]})
 
 
 def counts(trials):

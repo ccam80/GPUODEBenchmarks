@@ -163,11 +163,11 @@ class DriverTests(unittest.TestCase):
         for trial in trials.read_jsonl(self.path):
             line = lines.setdefault(trials.kernel_key(trial), dict(trial))
             line["optimize"] = line["optimize"] or trial["optimize"]
-        self.assertEqual([t["optimize"] for t in lines.values()], [True, True])
+        self.assertEqual([t["optimize"] for t in lines.values()], [True, True, True])
         mixed = trials.build_trials([spec(8, optimize=False), spec(32, optimize=True)])
         self.assertEqual([t["optimize"] for t in mixed], [False, True])
         with open(os.path.join(self.tmp, "plan.json"), "w") as handle:
-            json.dump({"count": 2}, handle)
+            json.dump({"count": 3}, handle)
         made = []
 
         def argv(start, end):
@@ -177,10 +177,10 @@ class DriverTests(unittest.TestCase):
         status = cubie_precompile.main(["--trials", self.path, "--precompile", "--jobs", "4", "--per-worker", "1"],
                                        "cubie", worker_argv=argv)
         self.assertEqual(status, 0)
-        self.assertEqual(made, [(0, 1), (1, 2)])
+        self.assertEqual(made, [(0, 1), (1, 2), (2, 3)])
         trials.write_jsonl(self.path, [])
         self.assertEqual(cubie_precompile.main(["--trials", self.path, "--precompile"], "cubie", worker_argv=argv), 0)
-        self.assertEqual(len(made), 2)
+        self.assertEqual(len(made), 3)
         default = cubie_precompile.Driver(self.path, self.lines, 4, 8, None)
         self.assertEqual(default.queue, [(0, 8), (8, 10)])
 

@@ -292,7 +292,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({t["optimize"] for t in built}, {True})
         shared = [t for t in built if trials.shares_dt_optimize(t)]
         self.assertTrue(shared)
-        self.assertEqual(len({trials.kernel_key(t) for t in built}),
+        self.assertEqual(len({trials.optimize_key(t) for t in built}),
                          len(built) - len(shared) + len({trials.build_key(t) for t in shared}))
         states = [t for t in self.trials["states"] if t["package"] == "cubie"]
         self.assertEqual({t["optimize"] for t in states}, {True})

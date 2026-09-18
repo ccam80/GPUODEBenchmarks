@@ -79,11 +79,11 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
     if progress.get("stage") == "optimize":
         if current["package"] in cubie_adapter.PACKAGES:
             cubie_adapter.record_optimize_timeout(current, key, data.root)
-        kernel = trials_mod.kernel_key(current)
+        kernel = trials_mod.optimize_key(current)
 
         def dropped(trial):
             return trial["trial_id"] == current["trial_id"] or (
-                trial["optimize"] and trials_mod.kernel_key(trial) == kernel)
+                trial["optimize"] and trials_mod.optimize_key(trial) == kernel)
 
         return [dict(t, optimize=False) if dropped(t) else t for t in remaining(trial_list, current)]
     reason = "abandoned: hard-exit at " + current["trial_id"]

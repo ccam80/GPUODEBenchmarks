@@ -257,15 +257,16 @@ class PrecompileWorkerTests(AdapterCase):
 
     def test_every_kernel_is_built_warm_and_compiled_with_candidates_where_it_optimizes(self):
         lines = self.lines()
-        # tsit5 fixed shares its kernel across dt and n: euler, tsit5 default, tsit5 fixed, lorenz96 tsit5 fixed.
-        self.assertEqual(len(lines), 4)
+        # One kernel per dt, shared across n: euler, tsit5 default, tsit5 fixed at two dt, lorenz96 tsit5 fixed.
+        self.assertEqual(len(lines), 5)
         path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
-        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 4), path, solver_class=FakeSolver)
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 5), path, solver_class=FakeSolver)
         self.assertEqual(worker.run(), 0)
-        self.assertEqual(len(FakeSolver.made), 4)
+        self.assertEqual(len(FakeSolver.made), 5)
         # euler and lorenz96 optimize; the tsit5 kernels compile the default kernel alone.
         self.assertEqual([s.compiled for s in FakeSolver.made],
                          [[{"optimize_candidates": True, "max_parallel": 1}],
+                          [{"optimize_candidates": False, "max_parallel": 1}],
                           [{"optimize_candidates": False, "max_parallel": 1}],
                           [{"optimize_candidates": False, "max_parallel": 1}],
                           [{"optimize_candidates": True, "max_parallel": 1}]])
@@ -279,13 +280,13 @@ class PrecompileWorkerTests(AdapterCase):
         self.assertIn(("lorenz96", 8, "cubie", np.float32, 8), self.built)
         with open(path) as handle:
             progress = json.load(handle)
-        self.assertEqual(progress["compiled"], [0, 1, 2, 3])
+        self.assertEqual(progress["compiled"], [0, 1, 2, 3, 4])
         self.assertEqual(progress["failed"], [])
         self.assertIsNone(progress["under_way"])
 
     def test_a_span_takes_its_slice_and_a_failed_compile_is_tallied(self):
         lines = self.lines()
-        path = os.path.join(self.tmp, "cubie.jsonl.precompile2.progress")
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile3.progress")
 
         def fragile(problem, package, precision=None, states=None):
             if problem.name == "lorenz96":
@@ -293,13 +294,13 @@ class PrecompileWorkerTests(AdapterCase):
             return FakeSystem(), {name: 0.0 for name in NAMES}
 
         cubie_adapter.build_system = fragile
-        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (2, 4), path, solver_class=FakeSolver)
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (3, 5), path, solver_class=FakeSolver)
         self.assertEqual(worker.run(), 0)
         self.assertEqual(len(FakeSolver.made), 1)
         with open(path) as handle:
             progress = json.load(handle)
-        self.assertEqual(progress["compiled"], [2])
-        self.assertEqual(progress["failed"], [[3, "error: RuntimeError: codegen failed"]])
+        self.assertEqual(progress["compiled"], [3])
+        self.assertEqual(progress["failed"], [[4, "error: RuntimeError: codegen failed"]])
         self.assertIsNone(progress["under_way"])
         # A compile that raises after the build closes the solver and is tallied the same way.
         FakeSolver.made = []
