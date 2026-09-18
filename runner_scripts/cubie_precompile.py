@@ -50,7 +50,7 @@ class Worker:
         import cubie_bench
         build = cubie_bench.Build(self.package, self.key, self.root, trial, cold=False, solver_class=self.solver_class)
         try:
-            build.solver.compile(duration=build.duration, optimize_candidates=bool(trial["optimize"]), max_parallel=1)
+            build.solver.compile(optimize_candidates=bool(trial["optimize"]), max_parallel=1)
         finally:
             build.close()
 

@@ -140,9 +140,8 @@ class FakeSolver:
         params = np.asarray(values, np.float32).reshape(1, n)
         return initials, params
 
-    def compile(self, drivers=None, duration=1.0, settling_time=0.0, t0=0.0, **kwargs):
-        self.compiled.append(duration)
-        self.compile_kwargs.append(dict(kwargs))
+    def compile(self, **kwargs):
+        self.compiled.append(dict(kwargs))
         if getattr(self.system, "broken", False):
             raise RuntimeError("ptxas failed")
 
@@ -265,13 +264,12 @@ class PrecompileWorkerTests(AdapterCase):
         self.assertEqual(worker.run(), 0)
         self.assertEqual(len(FakeSolver.made), 4)
         # euler and lorenz96 optimize; the tsit5 kernels compile the default kernel alone.
-        self.assertEqual([s.compile_kwargs for s in FakeSolver.made],
+        self.assertEqual([s.compiled for s in FakeSolver.made],
                          [[{"optimize_candidates": True, "max_parallel": 1}],
                           [{"optimize_candidates": False, "max_parallel": 1}],
                           [{"optimize_candidates": False, "max_parallel": 1}],
                           [{"optimize_candidates": True, "max_parallel": 1}]])
         for solver in FakeSolver.made:
-            self.assertEqual(solver.compiled, [1.0])
             self.assertEqual(solver.optimized, [])
             self.assertEqual(solver.calls, [])
             self.assertTrue(solver.closed)
@@ -340,11 +338,10 @@ class BuildTests(AdapterCase):
         leg.close()
         self.assertTrue(all(s.closed for s in FakeSolver.made))
 
-    def test_compile_compiles_at_the_trials_duration_under_the_kernels_record(self):
+    def test_compile_compiles_under_the_kernels_record(self):
         leg = self.adapter.build(trial(n=8))
         self.adapter.compile(leg, trial(n=8, kind="warm"), self.values(8))
-        self.assertEqual(leg.solver.compiled, [1.0])
-        self.assertEqual(leg.solver.compile_kwargs, [{}])
+        self.assertEqual(leg.solver.compiled, [{}])
         self.assertEqual(leg.solver.updates, [])
         # A recorded optimize is applied before the compile, so a cold build times the optimized kernel.
         self.adapter.optimize(leg, trial(n=64, optimize=True))
@@ -352,7 +349,7 @@ class BuildTests(AdapterCase):
         leg = self.adapter.build(trial(n=8, cold=True), cold=True)
         self.adapter.compile(leg, trial(n=8), self.values(8))
         self.assertEqual(leg.solver.updates, [{"blocksize": 128, "state_location": "shared"}])
-        self.assertEqual(leg.solver.compiled, [1.0])
+        self.assertEqual(leg.solver.compiled, [{}])
         leg.close()
         # An overwriting run applies only its own records.
         with mock.patch.dict(os.environ, {store.RUN_ENV: "other", store.OVERWRITE_ENV: "1"}):
@@ -478,7 +475,7 @@ class BuildTests(AdapterCase):
         self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize=True)), "recorded")
         self.assertEqual(len(leg.solver.optimized), 1)
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
-        self.assertEqual(leg.solver.compiled[-1], 1.0)
+        self.assertEqual(leg.solver.compiled[-1], {})
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
         with open(path) as handle:
             text = handle.read()
