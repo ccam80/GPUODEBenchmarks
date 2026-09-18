@@ -89,9 +89,9 @@ refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
 trial's watchdog is recorded NaN with a reason and every harder run of its
 family is abandoned; a runner that never returns hard-exits and the driver re-invokes
 it with the trials still missing. A cubie package first precompiles the
-kernels of its trial file, with their optimize candidates, into the package
-cache (`bench_cubie.py --trials <file> --precompile`, four workers of eight
-kernels each), then runs a fresh runner every 8 kernels at the next family
+kernels of its trial file into the package cache, with the optimize
+candidates of the kernels whose lines optimize (`bench_cubie.py --trials
+<file> --precompile`, four workers of eight kernels each), then runs a fresh runner every 8 kernels at the next family
 boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
 
