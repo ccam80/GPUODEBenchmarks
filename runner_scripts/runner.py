@@ -233,39 +233,30 @@ class Runner:
             print("OPTIMIZE {0} failed: {1}".format(
                 label(trial), failure_reason(classify(exc), exc)), flush=True)
 
-    def make_build(self, trial, failed_builds, cold=None):
-        """(build, build_s) of ensure_build, or None once a failed build is recorded on the trial's rows."""
-        try:
-            return self.ensure_build(trial, cold)
-        except Exception as exc:  # noqa: BLE001 - the trial's rows carry the reason
-            failed_builds[trials_mod.build_key(trial)] = failure_reason(classify(exc), exc)
-            self.close_build()
-            self.record_failed(trial, failed_builds[trials_mod.build_key(trial)])
-            return None
-
     def run_trial(self, trial, history, progress_path, failed_builds):
         if trial["controller"] not in self.adapter.controllers:
             self.record_failed(trial, "error: unknown controller " + trial["controller"])
             return
-        if trials_mod.build_key(trial) in failed_builds:
-            self.record_failed(trial, failed_builds[trials_mod.build_key(trial)])
+        key = trials_mod.build_key(trial)
+        if key in failed_builds:
+            self.record_failed(trial, failed_builds[key])
             return
-        optimized = False
-        if trial["cold"] and trial["optimize"]:
-            # Optimize on a warm build; the cold build then compiles the optimized kernel once.
-            write_progress(progress_path, trial, "build")
-            made = self.make_build(trial, failed_builds, cold=False)
-            if made is None:
-                return
-            self.run_optimize(made[0], trial, progress_path)
-            self.close_build()
-            optimized = True
+        warm_optimize = trial["cold"] and trial["optimize"]
         write_progress(progress_path, trial, "build")
-        made = self.make_build(trial, failed_builds)
-        if made is None:
+        try:
+            if warm_optimize:
+                # Optimize on a warm build; the cold build then compiles the optimized kernel once.
+                build, _ = self.ensure_build(trial, cold=False)
+                self.run_optimize(build, trial, progress_path)
+                self.close_build()
+                write_progress(progress_path, trial, "build")
+            build, build_s = self.ensure_build(trial)
+        except Exception as exc:  # noqa: BLE001 - the trial's rows carry the reason
+            failed_builds[key] = failure_reason(classify(exc), exc)
+            self.close_build()
+            self.record_failed(trial, failed_builds[key])
             return
-        build, build_s = made
-        if trial["optimize"] and not optimized:
+        if trial["optimize"] and not warm_optimize:
             self.run_optimize(build, trial, progress_path)
         elif not trial["cold"] and not trial["transfers"]:
             self.adapter.compile(build, trial, grid_mod.grid(trial))

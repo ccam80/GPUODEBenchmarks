@@ -209,7 +209,7 @@ class PlanTests(unittest.TestCase):
                               "-p", "cpp", "-s", "lorenz", "-n", "8", "--allow-unknown-gpu"],
                              capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertIn("cpp: 2 trials, 0 optimize, 0 cold, 2 builds, 2 kernels", out.stdout)
+        self.assertIn("cpp: 2 trials, 0 optimize, 0 cold, 2 builds", out.stdout)
         self.assertIn("lorenz/{}/float32/classical-rk4/fixed/{}  1", out.stdout)
         self.assertIn("2 trials", out.stdout)
         written = [line for line in out.stdout.splitlines() if line.endswith("cpp.jsonl")]
@@ -474,7 +474,6 @@ class LaunchTests(unittest.TestCase):
                                                    "--per-worker", "8"])
             self.assertEqual(precompile.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
             self.assertEqual(precompile.label, package + " precompile")
-        self.assertEqual(launch.PRECOMPILE_JOBS, 4)
         floored = launch.runner_command("cubie", "x.jsonl", floor=True)
         self.assertEqual(floored.argv[-3:], ["--trials", "x.jsonl", "--floor"])
         self.assertEqual(floored.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
@@ -768,7 +767,6 @@ class HardExitTests(unittest.TestCase):
         # Each family's n sweep shares one kernel, so a budget of one kernel gives one part per family.
         parts = trials.family_parts(cubie_lines, 1)
         self.assertEqual(len(parts), len(families))
-        self.assertEqual(trials.kernels_of(cubie_lines), len(families))
         self.assertEqual([t for part in parts for t in part], cubie_lines)
         self.assertEqual(trials.family_parts(cubie_lines, len(families)), [cubie_lines])
         self.assertEqual(trials.family_parts(cubie_lines), [cubie_lines])
@@ -777,7 +775,7 @@ class HardExitTests(unittest.TestCase):
             ["run", "--set", "golden_grid", "-p", "cubie", "-s", "lorenz", "-g", "cash-karp-54",
              "--controller", "default"])), KEY, self.root)["cubie"]
         self.assertEqual(len({trials.family_key(t) for t in tols}), 1)
-        self.assertGreater(trials.kernels_of(tols), 1)
+        self.assertGreater(len({trials.kernel_key(t) for t in tols}), 1)
         self.assertEqual(trials.family_parts(tols, 1), [tols])
         # Only the cubie packages restart.
         self.assertEqual(sorted(launch.RESTART_KERNELS), ["cubie", "cubie_mlir"])
@@ -813,18 +811,17 @@ class HardExitTests(unittest.TestCase):
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
         self.assertEqual({r["algorithm"] for r in abandoned}, {"cash-karp-54"})
 
-    def test_a_failed_precompile_pass_fails_the_package_and_runs_no_runner(self):
+    def test_a_failed_precompile_pass_still_runs_the_runners(self):
         saved = launch.RUNNERS["cubie"]
         launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
         self.addCleanup(launch.RUNNERS.__setitem__, "cubie", saved)
         status, run, calls, summary = self.run_bench(None, 3, package="cubie", precompile_code=1)
-        self.assertEqual(status, 1)
-        self.assertEqual([c["path"] for c in calls], ["cubie.jsonl"])
+        self.assertEqual(status, 0)
+        self.assertEqual(calls[0]["path"], "cubie.jsonl")
         self.assertIn("--precompile", calls[0]["argv"])
-        self.assertEqual(summary, [["cubie", "FAILED", "precompile exit 1", "1"]])
-        self.assertEqual(store.Store(self.root).rows(), [])
+        self.assertTrue(all("--precompile" not in c["argv"] and c["path"].startswith("cubie.part") for c in calls[1:]))
+        self.assertEqual(summary, [["cubie", "OK", "-", "0"]])
         # A package without a precompile pass runs its runner at once.
-        self.assertIsNone(launch.precompile_command("cpp", "x.jsonl"))
         status, run, calls, summary = self.run_bench(precompile_code=1)
         self.assertEqual(status, 0)
         self.assertEqual(summary, [["cpp", "OK", "-", "0"]])

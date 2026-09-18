@@ -20,8 +20,6 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 # Kernels a cubie process, runner or precompile worker, compiles before it exits.
 RESTART_KERNELS = {"cubie": 8, "cubie_mlir": 8}
-# Precompile workers a cubie package runs at once.
-PRECOMPILE_JOBS = 4
 
 
 class Command:
@@ -151,10 +149,7 @@ def runner_command(package, trials_path, floor=False):
 
 
 def precompile_command(package, trials_path):
-    """The Command that compiles a cubie trial file's kernels into the package cache ahead of its runners; None for a package without a precompile pass."""
-    if package not in CUBIE_PACKAGES:
-        return None
-    argv = list(RUNNERS[package]()) + ["--trials", trials_path, "--precompile",
-                                       "--jobs", str(PRECOMPILE_JOBS),
+    """The Command that compiles a cubie trial file's kernels into the package cache ahead of its runners."""
+    argv = list(RUNNERS[package]()) + ["--trials", trials_path, "--precompile", "--jobs", "4",
                                        "--per-worker", str(RESTART_KERNELS[package])]
     return Command(package + " precompile", argv, ENV.get(package, {}))

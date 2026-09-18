@@ -197,7 +197,7 @@ class CubieAdapter:
         return Build(self.package, self.key, self.root, trial, cold, self.solver_class)
 
     def recorded(self, trial):
-        """The kernel's optimize record, or None; an overwriting run sees only the records it wrote."""
+        """The kernel's optimize record, or None; a run without --resume or --no-overwrite ignores records other runs wrote, so it optimizes every kernel once."""
         run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
         return adapter.load_optimized(trial, self.key, root=self.root, run=run)
 

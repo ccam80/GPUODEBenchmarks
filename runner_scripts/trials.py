@@ -56,21 +56,10 @@ def family_parts(trial_list, kernels=None):
             parts.append(current)
             current, counted = [], 0
         current.append(trial)
-        counted = kernels_of(current)
+        counted = len({kernel_key(t) for t in current})
     if current:
         parts.append(current)
     return parts
-
-
-def kernel_lines(trial_list):
-    """The first line of every kernel in file order, one per kernel_key."""
-    seen, out = set(), []
-    for trial in trial_list:
-        key = kernel_key(trial)
-        if key not in seen:
-            seen.add(key)
-            out.append(trial)
-    return out
 
 
 def states_of(spec):
@@ -221,11 +210,6 @@ def read_jsonl(path):
 def optimizes_of(trials):
     """The optimize runs of a trial list: one per kernel among the lines that optimize."""
     return len({kernel_key(t) for t in trials if t["optimize"]})
-
-
-def kernels_of(trials):
-    """The distinct kernels of a trial list, by kernel_key."""
-    return len({kernel_key(t) for t in trials})
 
 
 def counts(trials):

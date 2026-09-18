@@ -197,8 +197,8 @@ def print_counts(by_package):
     for package, rows in by_package.items():
         solves, optimizes, colds, builds = trials_mod.counts(rows)
         total += solves
-        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds, {5} kernels".format(
-            package, solves, optimizes, colds, builds, trials_mod.kernels_of(rows)))
+        print("{0}: {1} trials, {2} optimize, {3} cold, {4} builds".format(
+            package, solves, optimizes, colds, builds))
         for key, lines in trials_mod.builds_of(rows):
             print("  {0}  {1}".format("/".join(str(k) for k in key), len(lines)))
     print("{0} trials".format(total))
@@ -307,22 +307,10 @@ class Run:
             time.sleep(self.args.cooldown)
 
     # ------------------------------------------------------------- packages
-    def precompile(self, package, trial_list, path):
-        """A cubie package's precompile pass over its whole trial file; False once a failed pass is recorded, so the package's runners do not run."""
-        command = launch.precompile_command(package, path)
-        if command is None:
-            return True
-        status = self.step("{0} precompile ({1} kernels)".format(package, trials_mod.kernels_of(trial_list)),
-                           package + ".log", command)
-        if status != 0:
-            self.record(package, "FAILED", "precompile exit {0}".format(status), status)
-            return False
-        return True
-
     def run_package(self, package, trial_list, path):
         """Precompile a cubie package's kernels, then drive the package's runners over its trial file, a fresh runner per part of launch.RESTART_KERNELS kernels of whole families; a build that crashed before a hard exit fails the package once every part ends."""
-        if not self.precompile(package, trial_list, path):
-            return
+        if package in launch.CUBIE_PACKAGES:
+            self.step(package + " precompile", package + ".log", launch.precompile_command(package, path))
         parts = trials_mod.family_parts(trial_list, launch.RESTART_KERNELS.get(package))
         hard_exits, crashed, status = 0, [], 0
         for number, part in enumerate(parts, start=1):

@@ -246,18 +246,21 @@ class PrecompileWorkerTests(AdapterCase):
     """cubie_precompile.Worker over kernel lines: one warm build per kernel, compiled with its optimize candidates in this process, closed, and the progress file tallying the outcomes."""
 
     def lines(self):
-        return trials_mod.kernel_lines(trials_mod.build_trials([
-            dict(spec(n=8), set="t"), dict(spec(n=32), set="t"), dict(spec(n=8, dt=2.0 ** -12), set="t"),
-            dict(spec(n=8, algorithm="euler"), set="t"),
-            dict(spec(n=8, **adaptive()), set="t"),
-            dict(spec(n=8, problem="lorenz96", system_params='{"states":8}', parameter="F", grid_max=16.0), set="t")]))
+        first = {}
+        for trial in trials_mod.build_trials([
+                dict(spec(n=8), set="t"), dict(spec(n=32), set="t"), dict(spec(n=8, dt=2.0 ** -12), set="t"),
+                dict(spec(n=8, algorithm="euler"), set="t"),
+                dict(spec(n=8, **adaptive()), set="t"),
+                dict(spec(n=8, problem="lorenz96", system_params='{"states":8}', parameter="F", grid_max=16.0), set="t")]):
+            first.setdefault(trials_mod.kernel_key(trial), trial)
+        return list(first.values())
 
     def test_every_kernel_is_built_warm_and_compiled_with_its_candidates_once(self):
         lines = self.lines()
         # tsit5 fixed shares its kernel across dt and n: euler, tsit5 default, tsit5 fixed, lorenz96 tsit5 fixed.
         self.assertEqual(len(lines), 4)
         path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
-        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 5), path, solver_class=FakeSolver)
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 4), path, solver_class=FakeSolver)
         self.assertEqual(worker.run(), 0)
         self.assertEqual(len(FakeSolver.made), 4)
         for solver in FakeSolver.made:
@@ -286,7 +289,7 @@ class PrecompileWorkerTests(AdapterCase):
             return FakeSystem(), {name: 0.0 for name in NAMES}
 
         cubie_adapter.build_system = fragile
-        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (2, 9), path, solver_class=FakeSolver)
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (2, 4), path, solver_class=FakeSolver)
         self.assertEqual(worker.run(), 0)
         self.assertEqual(len(FakeSolver.made), 1)
         with open(path) as handle:
