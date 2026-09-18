@@ -1,4 +1,4 @@
-"""runner.py against a fake adapter: every outcome, the abandon rule, finals kept and not kept, unknown controllers, build and optimize failures, cold builds, builds kept across lines, the progress file and the CLI."""
+"""runner.py against a fake adapter: every outcome, the abandon rule, finals kept and not kept, unknown controllers, build and optimize failures, cold builds (optimized on a warm build first), builds kept across lines, the progress file and the CLI."""
 
 import json
 import math
@@ -72,6 +72,7 @@ class FakeAdapter:
             time.sleep(0.01)
         build = FakeBuild(trial)
         self.builds.append(build)
+        self.open = [b for b in self.builds if not b.closed]
         return build
 
     def compile(self, leg, trial, values):
@@ -308,10 +309,32 @@ class BuildTests(RunnerCase):
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
 
+    def test_a_cold_line_that_optimizes_does_so_on_a_warm_build_before_its_timed_build(self):
+        adapter = FakeAdapter()
+        status, rows, path = self.run_specs([spec(8, optimize=True, build="cold")], adapter)
+        # The warm build optimizes and closes; the cold build compiles once, timed, with no second optimize.
+        self.assertEqual([c for c in adapter.calls if c[0] not in ("solve", "reset")],
+                         [("build", 8, False), ("optimize", 8, True), ("build", 8, True), ("compile", 8, None)])
+        self.assertEqual(len(adapter.builds), 2)
+        self.assertTrue(adapter.builds[0].closed)
+        # Only the cold build was open when it was made.
+        self.assertEqual(adapter.open, [adapter.builds[1]])
+        self.assertGreater(rows[(8, "both")]["build_s"], 0.0)
+        self.assertEqual({r["reason"] for r in rows.values()}, {""})
+        # A warm build that fails records the line once and never builds cold.
+        adapter = FakeAdapter(fail_build=True)
+        status, rows, path = self.run_specs([spec(8, optimize=True, build="cold")], adapter)
+        self.assertEqual(adapter.calls, [("build", 8, False)])
+        self.assertEqual({r["reason"] for r in rows.values()}, {"error: RuntimeError: no such system"})
+        # A cold line without an optimize builds cold at once.
+        adapter = FakeAdapter()
+        self.run_specs([spec(8, build="cold")], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, True), ("compile", 8, None)])
+
     def test_every_line_that_optimizes_does_so_before_its_solves(self):
         adapter = FakeAdapter()
-        self.run_specs([spec(8, optimize=True, build="cold")], adapter)
-        self.assertEqual(adapter.calls[:3], [("build", 8, True), ("compile", 8, None), ("optimize", 8, True)])
+        self.run_specs([spec(8, optimize=True)], adapter)
+        self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, True)])
         # Every line asks its adapter, which applies the kernel's record after the first.
         adapter = FakeAdapter()
         self.run_specs([spec(8, optimize=True), spec(32, optimize=True)], adapter)

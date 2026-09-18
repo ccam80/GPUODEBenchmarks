@@ -18,8 +18,8 @@ VENV = {"cubie": "GPU_ODE_CUBIE/venv", "cubie_mlir": "GPU_ODE_CUBIE_MLIR/venv",
 ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "cubie_mlir": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
-# Optimizes per runner process; a cubie runner keeps every kernel an optimize compiled until it exits.
-RESTART_OPTIMIZES = {"cubie": 25, "cubie_mlir": 25}
+# Kernels a cubie process, runner or precompile worker, compiles before it exits.
+RESTART_KERNELS = {"cubie": 8, "cubie_mlir": 8}
 
 
 class Command:
@@ -146,3 +146,10 @@ def runner_command(package, trials_path, floor=False):
     if floor:
         argv.append("--floor")
     return Command(package, argv, ENV.get(package, {}))
+
+
+def precompile_command(package, trials_path):
+    """The Command that compiles a cubie trial file's kernels into the package cache ahead of its runners."""
+    argv = list(RUNNERS[package]()) + ["--trials", trials_path, "--precompile", "--jobs", "4",
+                                       "--per-worker", str(RESTART_KERNELS[package])]
+    return Command(package + " precompile", argv, ENV.get(package, {}))

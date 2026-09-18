@@ -1,5 +1,6 @@
-"""The cubie adapter: Solver keywords from a trial, gains applied after construction, a build's stepping updates and resident inputs, finals with status codes, the optimize rows, cold cache roots, and the version string."""
+"""The cubie adapter: Solver keywords from a trial, gains applied after construction, a build's stepping updates and resident inputs, finals with status codes, the optimize rows, a compile under the kernel's record, cold cache roots, the precompile worker, and the version string."""
 
+import json
 import math
 import os
 import shutil
@@ -15,7 +16,9 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import cubie_bench  # noqa: E402
 import cubie_adapter  # noqa: E402
+import cubie_precompile  # noqa: E402
 import store  # noqa: E402
+import trials as trials_mod  # noqa: E402
 
 KEY = "windows_RTX-4070-SUPER"
 NAN = float("nan")
@@ -42,15 +45,23 @@ def adaptive(**overrides):
     return fields
 
 
+def spec(n=8, **overrides):
+    """A run spec for trials.build_trials: the trial fields plus the expansion's own."""
+    fields = trial(n=n, **overrides)
+    fields.update(build="warm", optimize=False, transfers=["both", "none"], finals=False, watchdog_s=120.0)
+    return fields
+
+
 class FakeIndices:
     def __init__(self, names):
         self.index_map = list(names)
 
 
 class FakeSystem:
-    """Three named states and no observables."""
+    """Three named states and no observables; `broken` makes every compile of it raise."""
 
-    def __init__(self):
+    def __init__(self, broken=False):
+        self.broken = broken
         self.indices = type("I", (), {})()
         self.indices.states = FakeIndices(NAMES)
         self.sizes = type("S", (), {"observables": 0})()
@@ -112,6 +123,7 @@ class FakeSolver:
         self.updates = []
         self.calls = []
         self.compiled = []
+        self.compile_kwargs = []
         self.optimized = []
         self.resident = None
         self.closed = False
@@ -128,8 +140,10 @@ class FakeSolver:
         params = np.asarray(values, np.float32).reshape(1, n)
         return initials, params
 
-    def compile(self, drivers=None, duration=1.0, settling_time=0.0, t0=0.0, **kwargs):
-        self.compiled.append(duration)
+    def compile(self, **kwargs):
+        self.compiled.append(dict(kwargs))
+        if getattr(self.system, "broken", False):
+            raise RuntimeError("ptxas failed")
 
     def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False):
         self.optimized.append((initial_values.shape[1], duration, force, auto_size))
@@ -227,6 +241,89 @@ class KeywordTests(unittest.TestCase):
                                               grid_min=3.5e-2, grid_max=3.5, duration=60.0)), 20)
 
 
+class PrecompileWorkerTests(AdapterCase):
+    """cubie_precompile.Worker over kernel lines: one warm build per kernel, compiled in this process with its optimize candidates when the line optimizes, closed, and the progress file tallying the outcomes."""
+
+    def lines(self):
+        first = {}
+        for trial in trials_mod.build_trials([
+                dict(spec(n=8), set="t"), dict(spec(n=32), set="t"), dict(spec(n=8, dt=2.0 ** -12), set="t"),
+                dict(spec(n=8, algorithm="euler"), set="t", optimize=True),
+                dict(spec(n=8, **adaptive()), set="t"),
+                dict(spec(n=8, problem="lorenz96", system_params='{"states":8}', parameter="F", grid_max=16.0), set="t",
+                     optimize=True)]):
+            first.setdefault(trials_mod.kernel_key(trial), trial)
+        return list(first.values())
+
+    def test_every_kernel_is_built_warm_and_compiled_with_candidates_where_it_optimizes(self):
+        lines = self.lines()
+        # tsit5 fixed shares its kernel across dt and n: euler, tsit5 default, tsit5 fixed, lorenz96 tsit5 fixed.
+        self.assertEqual(len(lines), 4)
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 4), path, solver_class=FakeSolver)
+        self.assertEqual(worker.run(), 0)
+        self.assertEqual(len(FakeSolver.made), 4)
+        # euler and lorenz96 optimize; the tsit5 kernels compile the default kernel alone.
+        self.assertEqual([s.compiled for s in FakeSolver.made],
+                         [[{"optimize_candidates": True, "max_parallel": 1}],
+                          [{"optimize_candidates": False, "max_parallel": 1}],
+                          [{"optimize_candidates": False, "max_parallel": 1}],
+                          [{"optimize_candidates": True, "max_parallel": 1}]])
+        for solver in FakeSolver.made:
+            self.assertEqual(solver.optimized, [])
+            self.assertEqual(solver.calls, [])
+            self.assertTrue(solver.closed)
+        # Warm builds: the cache root is untouched, and the resized system was built at its states.
+        from cubie.cache_root import get_cache_root_override
+        self.assertIsNone(get_cache_root_override())
+        self.assertIn(("lorenz96", 8, "cubie", np.float32, 8), self.built)
+        with open(path) as handle:
+            progress = json.load(handle)
+        self.assertEqual(progress["compiled"], [0, 1, 2, 3])
+        self.assertEqual(progress["failed"], [])
+        self.assertIsNone(progress["under_way"])
+
+    def test_a_span_takes_its_slice_and_a_failed_compile_is_tallied(self):
+        lines = self.lines()
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile2.progress")
+
+        def fragile(problem, package, precision=None, states=None):
+            if problem.name == "lorenz96":
+                raise RuntimeError("codegen failed")
+            return FakeSystem(), {name: 0.0 for name in NAMES}
+
+        cubie_adapter.build_system = fragile
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (2, 4), path, solver_class=FakeSolver)
+        self.assertEqual(worker.run(), 0)
+        self.assertEqual(len(FakeSolver.made), 1)
+        with open(path) as handle:
+            progress = json.load(handle)
+        self.assertEqual(progress["compiled"], [2])
+        self.assertEqual(progress["failed"], [[3, "error: RuntimeError: codegen failed"]])
+        self.assertIsNone(progress["under_way"])
+        # A compile that raises after the build closes the solver and is tallied the same way.
+        FakeSolver.made = []
+        cubie_adapter.build_system = lambda *a, **k: (FakeSystem(broken=True), {name: 0.0 for name in NAMES})
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 1), path, solver_class=FakeSolver)
+        self.assertEqual(worker.run(), 0)
+        self.assertTrue(FakeSolver.made[0].closed)
+        with open(path) as handle:
+            self.assertEqual(json.load(handle)["failed"], [[0, "error: RuntimeError: ptxas failed"]])
+
+    def test_each_kernel_compiles_under_the_optimize_watchdog(self):
+        budgets = []
+
+        def recording(run, on_breach, budget_s=None):
+            budgets.append(budget_s)
+            return run()
+
+        with mock.patch.object(cubie_precompile, "run_watchdogged", recording):
+            lines = self.lines()
+            path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
+            cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 2), path, solver_class=FakeSolver).run()
+        self.assertEqual(budgets, [cubie_precompile.OPTIMIZE_SECONDS] * 2)
+
+
 class BuildTests(AdapterCase):
     def test_build_sizes_the_system_from_system_params(self):
         leg = self.adapter.build(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
@@ -241,11 +338,25 @@ class BuildTests(AdapterCase):
         leg.close()
         self.assertTrue(all(s.closed for s in FakeSolver.made))
 
-    def test_compile_compiles_at_the_trials_duration(self):
+    def test_compile_compiles_under_the_kernels_record(self):
         leg = self.adapter.build(trial(n=8))
         self.adapter.compile(leg, trial(n=8, kind="warm"), self.values(8))
-        self.assertEqual(leg.solver.compiled, [1.0])
+        self.assertEqual(leg.solver.compiled, [{}])
+        self.assertEqual(leg.solver.updates, [])
+        # A recorded optimize is applied before the compile, so a cold build times the optimized kernel.
+        self.adapter.optimize(leg, trial(n=64, optimize=True))
         leg.close()
+        leg = self.adapter.build(trial(n=8, cold=True), cold=True)
+        self.adapter.compile(leg, trial(n=8), self.values(8))
+        self.assertEqual(leg.solver.updates, [{"blocksize": 128, "state_location": "shared"}])
+        self.assertEqual(leg.solver.compiled, [{}])
+        leg.close()
+        # An overwriting run applies only its own records.
+        with mock.patch.dict(os.environ, {store.RUN_ENV: "other", store.OVERWRITE_ENV: "1"}):
+            leg = self.adapter.build(trial(n=8))
+            self.adapter.compile(leg, trial(n=8), self.values(8))
+            self.assertEqual(leg.solver.updates, [])
+            leg.close()
 
     def test_a_changed_stepping_updates_the_solver_and_drops_the_resident_inputs(self):
         first = trial(dt=2.0 ** -10, axis="dt")
@@ -364,7 +475,7 @@ class BuildTests(AdapterCase):
         self.assertEqual(self.adapter.optimize(leg, trial(n=64, optimize=True)), "recorded")
         self.assertEqual(len(leg.solver.optimized), 1)
         self.assertEqual(leg.solver.updates[-1], {"blocksize": 128, "state_location": "shared"})
-        self.assertEqual(leg.solver.compiled[-1], 1.0)
+        self.assertEqual(leg.solver.compiled[-1], {})
         path = os.path.join(self.root, "key=" + KEY, "package=cubie", "optimize.csv")
         with open(path) as handle:
             text = handle.read()

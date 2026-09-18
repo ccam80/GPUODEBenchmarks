@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; a solve runs through host arrays (`both`) or on the resident device inputs (`none`)."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; compile builds the kernel under its record; a solve runs through host arrays (`both`) or on the resident device inputs (`none`). `--precompile` on the runner's argv runs cubie_precompile over the trial file instead."""
 
 import gc
 import importlib.metadata
@@ -196,22 +196,29 @@ class CubieAdapter:
     def build(self, trial, cold=False):
         return Build(self.package, self.key, self.root, trial, cold, self.solver_class)
 
+    def recorded(self, trial):
+        """The kernel's optimize record, or None; a run without --resume or --no-overwrite ignores records other runs wrote, so it optimizes every kernel once."""
+        run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
+        return adapter.load_optimized(trial, self.key, root=self.root, run=run)
+
     def compile(self, build, trial, values):
-        # Compile from the solver settings; no grid needed.
+        """Compile the kernel from the solver settings under the kernel's optimize record when there is one; no grid needed."""
         build.apply(trial)
-        build.solver.compile(duration=build.duration)
+        tuned = self.recorded(trial)
+        if tuned is not None:
+            adapter.apply_optimized(build.solver, tuned)
+        build.solver.compile()
 
     def optimize(self, build, trial):
         """Apply and compile the kernel's recorded settings, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; an overwriting run applies only the records it wrote; returns what was done."""
         build.apply(trial)
         build.host_result = None
         build.resident_n = None
-        run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
-        tuned = adapter.load_optimized(trial, self.key, root=self.root, run=run)
+        tuned = self.recorded(trial)
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile(duration=build.duration)
+            build.solver.compile()
             return "recorded"
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
                                      force=True)
@@ -235,8 +242,11 @@ class CubieAdapter:
 
 
 def run(argv, package):
-    """Entry point of a cubie suite: select the backend, then run the trial file through runner.main."""
+    """Entry point of a cubie suite: select the backend, then run the trial file through runner.main, or through cubie_precompile.main under --precompile."""
     adapter.select_backend(package)
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
+    if "--precompile" in argv:
+        import cubie_precompile
+        return cubie_precompile.main(argv, package)
     return runner.main(argv, lambda key, root: CubieAdapter(package, key, root))
