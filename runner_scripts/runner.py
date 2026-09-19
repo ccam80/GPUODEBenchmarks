@@ -12,6 +12,7 @@ import grid as grid_mod
 import store as store_mod
 import trials as trials_mod
 from abandon import History
+from cubie_adapter import PACKAGES as CUBIE_PACKAGES
 from bench_key import dataset_key
 from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, WATCHDOG_SECONDS
 from wp_common import run_watchdogged, timed_min_ms
@@ -92,11 +93,20 @@ class Runner:
         self.suite_rev = store_mod.suite_rev(REPO_ROOT)
         self.build = None
         self.build_key = None
+        self.optimized = False
 
     # -------------------------------------------------------------- rows
+    def compile_status(self, trial):
+        """The compile column of a cubie trial's rows: compile_timeout on a line marked COMPILE_TIMED_OUT, optimized once the line's optimize ran (a record applied or Solver.optimize done), else unoptimized; "" for another package."""
+        if trial["package"] not in CUBIE_PACKAGES:
+            return ""
+        if trial.get("compile") == trials_mod.COMPILE_TIMED_OUT:
+            return store_mod.COMPILE_TIMEOUT
+        return store_mod.COMPILE_OPTIMIZED if self.optimized else store_mod.COMPILE_UNOPTIMIZED
+
     def record(self, trial, transfers, states, **values):
         spec = {field: trial[field] for field in store_mod.TRIAL_FIELDS}
-        row = dict(spec, transfers=transfers, key=self.key, states=states,
+        row = dict(spec, transfers=transfers, key=self.key, states=states, compile=self.compile_status(trial),
                    package_version=self.package_version, suite_rev=self.suite_rev)
         row.update(values)
         return self.store.record(row, floor=self.floor)
@@ -221,7 +231,7 @@ class Runner:
         return self.build, NAN
 
     def run_optimize(self, build, trial, progress_path):
-        """The line's optimize on a build; past OPTIMIZE_SECONDS the watchdog hard-exits and the driver drops the optimize from this line and re-runs it."""
+        """The line's optimize on a build, `self.optimized` True once it is done; past OPTIMIZE_SECONDS the watchdog hard-exits and the driver marks the kernel's compile_key timed out and re-runs its lines without an optimize."""
         write_progress(progress_path, trial, "optimize")
         started = timeit.default_timer()
         try:
@@ -229,11 +239,13 @@ class Runner:
                                "optimize " + label(trial), OPTIMIZE_SECONDS)
             print("optimized {0}: {1} in {2:.1f}s".format(
                 label(trial), done, timeit.default_timer() - started), flush=True)
+            self.optimized = True
         except Exception as exc:  # noqa: BLE001 - the solves run at the solver's own geometry
             print("OPTIMIZE {0} failed: {1}".format(
                 label(trial), failure_reason(classify(exc), exc)), flush=True)
 
     def run_trial(self, trial, history, progress_path, failed_builds):
+        self.optimized = False
         if trial["controller"] not in self.adapter.controllers:
             self.record_failed(trial, "error: unknown controller " + trial["controller"])
             return

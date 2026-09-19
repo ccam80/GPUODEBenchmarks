@@ -308,6 +308,30 @@ class BuildTests(RunnerCase):
         self.assertEqual(adapter.calls[:2], [("build", 8, False), ("optimize", 8, True)])
         self.assertTrue(all(math.isfinite(r["min_ms"]) for r in rows.values()))
         self.assertEqual({r["reason"] for r in rows.values()}, {""})
+        # The failed optimize leaves its line's rows unoptimized; the next line's optimize stands on its own.
+        self.assertEqual({n: r["compile"] for (n, x), r in rows.items() if x == "both"},
+                         {8: "unoptimized", 32: "optimized"})
+
+    def test_every_cubie_row_records_how_its_kernel_was_compiled(self):
+        adapter = FakeAdapter()
+        marked = trials.build_trials([spec(8, optimize=True), spec(32, optimize=True), spec(128)])
+        marked[1] = dict(marked[1], optimize=False, compile=trials.COMPILE_TIMED_OUT)
+        path = trials.write_jsonl(os.path.join(self.tmp, "cubie.jsonl"), marked)
+        self.assertEqual(runner.Runner(adapter, KEY, self.root, repeats=3).run_file(path), 0)
+        rows = {(r["n"], r["transfers"]): r for r in store.Store(self.root).rows()}
+        self.assertEqual({key: r["compile"] for key, r in rows.items()},
+                         {(8, "both"): "optimized", (8, "none"): "optimized",
+                          (32, "both"): "compile_timeout", (32, "none"): "compile_timeout",
+                          (128, "both"): "unoptimized", (128, "none"): "unoptimized"})
+        self.assertEqual([c for c in adapter.calls if c[0] == "optimize"], [("optimize", 8, True)])
+        # A row that never ran carries it too; another package's rows leave the column "".
+        shutil.rmtree(self.root, ignore_errors=True)
+        adapter = FakeAdapter(fail_build=True)
+        status, rows, _ = self.run_specs([spec(8, optimize=True)], adapter)
+        self.assertEqual({r["compile"] for r in rows.values()}, {"unoptimized"})
+        adapter = FakeAdapter()
+        status, rows, _ = self.run_specs([spec(8, package="jax")], adapter)
+        self.assertEqual({r["compile"] for r in rows.values()}, {""})
 
     def test_a_cold_line_that_optimizes_does_so_on_a_warm_build_before_its_timed_build(self):
         adapter = FakeAdapter()

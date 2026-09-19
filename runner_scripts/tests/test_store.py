@@ -94,7 +94,7 @@ class HashTests(unittest.TestCase):
         self.assertEqual(store.GROUP_FIELDS, store.SPEC_FIELDS[:4] + store.SPEC_FIELDS[10:20])
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
             "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
-            "errored_pct", "build_s", "reason", "finals", "package_version",
+            "errored_pct", "build_s", "reason", "compile", "finals", "package_version",
             "suite_rev", "run", "driver", "clock_lock_mhz", "clock_sm_mhz",
             "clock_sm_min_mhz", "clock_throttled", "timed_start_utc", "timed_end_utc",
             "recorded_utc"])
@@ -225,6 +225,13 @@ class SchemaTests(StoreCase):
             self.store.record(row(package="julia"))
         with self.assertRaises(ValueError):
             self.store.record(row(samples_ms="9;2;1.5"))
+        # compile defaults to "" and takes the cubie statuses alone.
+        self.assertEqual(standing["compile"], "")
+        self.assertEqual(store.COMPILE_STATUSES, ("", "optimized", "unoptimized", "compile_timeout"))
+        for status in store.COMPILE_STATUSES:
+            self.assertEqual(self.store.record(row(compile=status))["compile"], status)
+        with self.assertRaises(ValueError):
+            self.store.record(row(compile="timeout"))
 
     def test_given_ids_must_hash_the_spec(self):
         standing = self.store.record(row(run_id=FIXTURE_RUN_ID, trial_id=FIXTURE_TRIAL_ID,
@@ -447,6 +454,16 @@ class FinalsTests(StoreCase):
         self.assertEqual(self.store.record_finals(loose, [[1.0, 2.0, 3.0]] * 2, [1.0, 1.0]),
                          "finals/" + store.trial_id(trial) + ".parquet")
 
+
+    def test_finals_keep_the_grid_order_prefix_of_finals_rows(self):
+        trial = spec(n=store.FINALS_ROWS + 5)
+        states = np.arange((store.FINALS_ROWS + 5) * 3, dtype=np.float64).reshape(-1, 3)
+        codes = [""] * store.FINALS_ROWS + ["MaxIters"] * 5
+        relative = self.store.record_finals(trial, states, np.ones(store.FINALS_ROWS + 5), codes)
+        traj, kept, t_final, retcode = self.store.load_finals(trial["package"], trial["key"], relative)
+        self.assertEqual(traj.tolist(), list(range(store.FINALS_ROWS)))
+        np.testing.assert_array_equal(kept, states[:store.FINALS_ROWS].astype(np.float32))
+        self.assertEqual((t_final.shape[0], set(retcode)), (store.FINALS_ROWS, {""}))
 
     def test_a_golden_row_and_a_prefix_grid_row_share_a_group_id_across_packages(self):
         # The analyses pair rows by group_id and rebuild each grid from its own spec.

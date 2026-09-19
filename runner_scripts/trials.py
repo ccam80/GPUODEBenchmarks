@@ -1,4 +1,4 @@
-"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog, timed), written in difficulty order one JSON object per line."""
+"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog, timed; compile marks a line whose problem, algorithm and controller timed out compiling), written in difficulty order one JSON object per line."""
 
 import functools
 import json
@@ -9,12 +9,17 @@ from algorithms import algorithm_facts
 from protocol import WATCHDOG_SECONDS
 from store import TRIAL_FIELDS, trial_id
 
-TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimize", "watchdog_s", "timed", "sets")
+TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimize", "compile", "watchdog_s", "timed",
+                             "sets")
+# A trial line's compile mark: "" or COMPILE_TIMED_OUT (the store holds a compile_timeout row of its compile_key).
+COMPILE_TIMED_OUT = "timeout"
 TRANSFERS_ORDER = ("both", "none")
 # The fields one package build serves; a line whose values differ from the last needs a new build.
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
 # The fields of one compiled kernel: the build plus every stepping value.
 KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
+# The fields whose kernels share a compile cost; a compile past the watchdog condemns the whole group.
+COMPILE_FIELDS = ("package", "problem", "system_params", "precision", "algorithm", "controller")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
 
@@ -46,6 +51,21 @@ def optimize_key(trial):
         return key
     dt = KERNEL_FIELDS.index("dt")
     return key[:dt] + (None,) + key[dt + 1:]
+
+
+def compile_key(trial):
+    """The kernels a compile timeout condemns, as a tuple of COMPILE_FIELDS; a store row keys the same way."""
+    return tuple(trial[f] for f in COMPILE_FIELDS)
+
+
+def mark_compile_timeouts(trial_list, groups):
+    """The trials with every line of a compile_key in `groups` marked COMPILE_TIMED_OUT and its optimize dropped; the list itself when no line changes."""
+    if not groups:
+        return trial_list
+    marked = [dict(t, optimize=False, compile=COMPILE_TIMED_OUT)
+              if compile_key(t) in groups and (t["optimize"] or t.get("compile") != COMPILE_TIMED_OUT) else t
+              for t in trial_list]
+    return marked if any(a is not b for a, b in zip(marked, trial_list)) else trial_list
 
 
 def family_key(trial):
@@ -127,6 +147,7 @@ def _record(entry):
     record["finals"] = bool(entry["finals"])
     record["cold"] = bool(entry["cold"])
     record["optimize"] = bool(entry["optimize"])
+    record["compile"] = ""
     record["watchdog_s"] = float(entry["watchdog_s"])
     record["timed"] = bool(entry["timed"])
     record["sets"] = sorted(entry["sets"])
@@ -208,6 +229,7 @@ def read_jsonl(path):
             if record.get("sets") is None:
                 record["sets"] = []
             record["optimize"] = bool(record.get("optimize"))
+            record["compile"] = record.get("compile") or ""
             record.setdefault("cold", False)
             record.setdefault("timed", True)
             trials.append(record)
@@ -223,3 +245,8 @@ def counts(trials):
     """(solve count, optimize count, cold count, build count) of a trial list."""
     return (sum(1 for t in trials if t["transfers"]), optimizes_of(trials),
             sum(1 for t in trials if t["cold"]), len(builds_of(trials)))
+
+
+def compile_timeouts_of(trials):
+    """The compile_key groups of a trial list marked COMPILE_TIMED_OUT."""
+    return {compile_key(t) for t in trials if t.get("compile") == COMPILE_TIMED_OUT}

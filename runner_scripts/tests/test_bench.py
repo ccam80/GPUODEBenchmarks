@@ -1,6 +1,8 @@
 """bench.py: flag resolution, the plan output, the -n check over heterogeneous grids, the completeness-aware continuation filters, the runner registry, the cubie precompile step and the watchdog hard-exit loop against a fake runner."""
 
+import contextlib
 import inspect
+import io
 import json
 import os
 import shutil
@@ -20,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 
+import abandon  # noqa: E402
 import bench  # noqa: E402
 import clocks  # noqa: E402
 import completeness  # noqa: E402
@@ -38,7 +41,7 @@ FAKE_RUNNER = '''
 import json, os, sys, time
 from datetime import datetime, timezone
 sys.path.insert(0, r"{runner_scripts}")
-import store
+import abandon, store
 argv = sys.argv[1:]
 path = argv[argv.index("--trials") + 1]
 trials = [json.loads(l) for l in open(path) if l.strip()]
@@ -47,10 +50,14 @@ plan = json.load(open(marker))
 log = os.path.join(os.path.dirname(path), "calls.jsonl")
 with open(log, "a") as h:
     h.write(json.dumps({{"path": os.path.basename(path), "argv": argv,
-                         "ids": [t["trial_id"] for t in trials]}}) + "\\n")
-if "--precompile" in argv:
-    sys.exit(plan.get("precompile_code", 0))
+                         "ids": [t["trial_id"] for t in trials],
+                         "marks": [(t["optimize"], t.get("compile", "")) for t in trials]}}) + "\\n")
 data = store.Store(plan["root"])
+if "--precompile" in argv:
+    if plan.get("compile_timeout"):
+        hung = [t for t in trials if t["trial_id"] == plan["compile_timeout"]][0]
+        abandon.abandon_compile(data, plan["key"], trials, hung, "rev")
+    sys.exit(plan.get("precompile_code", 0))
 for t in trials:
     with open(path + ".progress", "w") as h:
         json.dump({{"trial_id": t["trial_id"], "stage": "solve", "started_utc": "2026-09-09T00:00:00Z",
@@ -572,6 +579,63 @@ class FakeSampler:
             self.thread.join(5)
 
 
+class CompileTimeoutPlanTests(unittest.TestCase):
+    """plan_trials over a store recording a compile timeout: the group's lines are marked and never optimize under any flag, the rows the abandonment wrote count as absent, and the plan's counts say so."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bench_compile_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = os.path.join(self.tmp, "data")
+        self.data = store.Store(self.root)
+
+    def plan(self, *argv):
+        args = bench.parse_args(["plan", "--set", "perf", "-p", "cubie", "-s", "lorenz", "-n", "8,32"] + list(argv))
+        return bench.plan_trials(bench.resolve(args), KEY, self.root, args.resume, args.no_overwrite)["cubie"]
+
+    def test_a_recorded_compile_timeout_marks_its_group_in_every_mode_until_cleared(self):
+        lines = self.plan()
+        self.assertTrue(all(t["optimize"] and t["compile"] == "" for t in lines))
+        tsit5 = [t for t in lines if t["algorithm"] == "tsit5" and t["controller"] == "fixed"]
+        self.assertEqual(len(tsit5), 2)
+        written = abandon.abandon_compile(self.data, KEY, lines, tsit5[0], "rev")
+        self.assertEqual(len(written), 2 * len(tsit5))
+        group = trials.compile_key(tsit5[0])
+        for flags in ((), ("--resume",), ("--no-overwrite",)):
+            planned = self.plan(*flags)
+            marked = [t for t in planned if trials.compile_key(t) == group]
+            # The abandonment's rows count as absent: the group's lines are planned, marked and unoptimized.
+            self.assertEqual(len(marked), len(tsit5), flags)
+            self.assertEqual({(t["optimize"], t["compile"]) for t in marked}, {(False, "timeout")}, flags)
+            self.assertTrue(all(t["optimize"] and t["compile"] == "" for t in planned if t not in marked), flags)
+        audits = completeness.audit(lines, KEY, self.data, "resume")
+        self.assertEqual(audits[tsit5[0]["trial_id"]].reasons(), ["row:both", "row:none", "optimize:absent"])
+        # Clearing the rows is the way back: the group optimizes again.
+        self.assertEqual(self.data.clear(compile=store.COMPILE_TIMEOUT), 2 * len(tsit5))
+        self.assertTrue(all(t["optimize"] and t["compile"] == "" for t in self.plan()))
+        # A finite row the unoptimized run then records keeps the mark and the group stays marked.
+        spec = {f: tsit5[1][f] for f in store.TRIAL_FIELDS}
+        self.data.record(dict(spec, transfers="both", key=KEY, states=3, min_ms=1.0, compile=store.COMPILE_TIMEOUT))
+        planned = self.plan("--resume")
+        self.assertEqual({(t["n"], t["optimize"], t["compile"]) for t in planned if trials.compile_key(t) == group},
+                         {(8, False, "timeout"), (32, False, "timeout")})
+        self.assertEqual([t["transfers"] for t in planned if t["trial_id"] == tsit5[1]["trial_id"]], [["none"]])
+
+    def test_the_plan_counts_name_the_timed_out_compiles(self):
+        lines = self.plan()
+        tsit5 = [t for t in lines if t["algorithm"] == "tsit5" and t["controller"] == "fixed"]
+        abandon.abandon_compile(self.data, KEY, lines, tsit5[0], "rev")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            bench.print_counts({"cubie": self.plan()})
+        head = out.getvalue().splitlines()[0]
+        self.assertTrue(head.startswith("cubie: "), head)
+        self.assertTrue(head.endswith(", 1 compile timed out ({0} lines)".format(len(tsit5))), head)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            bench.print_counts({"cubie": lines})
+        self.assertNotIn("compile timed out", out.getvalue())
+
+
 class HardExitTests(unittest.TestCase):
     """The runner loop against a fake runner under a fake lock and sampler: a hard exit abandons the harder runs of the family and the rest re-runs; every row records the lock and the clocks its window showed; drift fails the run."""
 
@@ -616,13 +680,14 @@ class HardExitTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp", precompile_code=0):
+    def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp", precompile_code=0,
+                  compile_timeout=None):
         args = bench.parse_args(["run", "--set", "perf", "-p", package, "-s", "lorenz", "-n", "8,32,128",
                                  "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
         run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
             json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY, "failed": list(failed),
-                       "precompile_code": precompile_code}, handle)
+                       "precompile_code": precompile_code, "compile_timeout": compile_timeout}, handle)
         status = run.execute()
         with open(os.path.join(run.log_dir, "calls.jsonl")) as handle:
             calls = [json.loads(line) for line in handle]
@@ -810,6 +875,35 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in abandoned),
                          [(32, "both"), (32, "none"), (128, "both"), (128, "none")])
         self.assertEqual({r["algorithm"] for r in abandoned}, {"cash-karp-54"})
+
+    def test_a_compile_the_precompile_abandons_runs_its_lines_unoptimized_from_a_rewritten_trial_file(self):
+        saved = launch.RUNNERS["cubie"]
+        launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
+        self.addCleanup(launch.RUNNERS.__setitem__, "cubie", saved)
+        two = ("-g", "cash-karp-54,classical-rk4")
+        cubie_lines = self.planned("cubie", *two)
+        hung = [t for t in cubie_lines if t["algorithm"] == "cash-karp-54" and t["n"] == 8][0]
+        group = trials.compile_key(hung)
+        # One part: the runner reads the plan file itself, rewritten with the group marked.
+        status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie", compile_timeout=hung["trial_id"])
+        self.assertEqual(status, 0)
+        self.assertEqual([c["path"] for c in calls], ["cubie.jsonl", "cubie.jsonl"])
+        self.assertEqual([tuple(m) for m in calls[0]["marks"]], [(True, "")] * len(cubie_lines))
+        self.assertEqual([tuple(m) for m in calls[1]["marks"]],
+                         [(False, "timeout") if trials.compile_key(t) == group else (True, "") for t in cubie_lines])
+        self.assertEqual(summary, [["cubie", "OK", "-", "0"]])
+        rows = store.Store(self.root).rows()
+        self.assertEqual(len(rows), 2 * len(cubie_lines))
+        self.assertTrue(all(r["min_ms"] == 1.0 for r in rows))
+        # Several parts: every part file carries the marks.
+        shutil.rmtree(self.root, ignore_errors=True)
+        with mock.patch.dict(launch.RESTART_KERNELS, {"cubie": 1}):
+            status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie",
+                                                         compile_timeout=hung["trial_id"])
+        self.assertEqual(status, 0)
+        marks = {i: tuple(m) for c in calls[1:] for i, m in zip(c["ids"], c["marks"])}
+        self.assertEqual(marks, {t["trial_id"]: ((False, "timeout") if trials.compile_key(t) == group else (True, ""))
+                                 for t in cubie_lines})
 
     def test_a_failed_precompile_pass_still_runs_the_runners(self):
         saved = launch.RUNNERS["cubie"]

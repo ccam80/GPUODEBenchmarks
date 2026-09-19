@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports), the host stamps bracketing its timing batch (timed_start_utc, timed_end_utc, written by the runner) and the clocks that window of the run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, its outcome (min_ms, samples_ms, errored_pct, build_s, reason, finals and, on a cubie row, `compile`: optimized, unoptimized or compile_timeout), plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports), the host stamps bracketing its timing batch (timed_start_utc, timed_end_utc, written by the runner) and the clocks that window of the run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
 
 import argparse
 import csv
@@ -40,6 +40,8 @@ SPEC_TYPES = (
 SPEC_FIELDS = tuple(name for name, _ in SPEC_TYPES)
 TRIAL_FIELDS = tuple(f for f in SPEC_FIELDS if f not in ("transfers", "key"))
 FINALS_FIELDS = TRIAL_FIELDS + ("key",)
+# Trajectories a finals file keeps, from the start of the grid; the solve and its timing cover all n.
+FINALS_ROWS = 8192
 ENSEMBLE_FIELDS = ("parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
 GROUP_FIELDS = tuple(f for f in TRIAL_FIELDS
                      if f not in ENSEMBLE_FIELDS and f != "package")
@@ -53,8 +55,8 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
     ("run_id", pa.string()), ("trial_id", pa.string()), ("group_id", pa.string()),
     ("states", pa.int32()), ("min_ms", pa.float64()),
     ("samples_ms", pa.list_(pa.float64())), ("errored_pct", pa.float64()),
-    ("build_s", pa.float64()), ("reason", pa.string()), ("finals", pa.string()),
-    ("package_version", pa.string()), ("suite_rev", pa.string()),
+    ("build_s", pa.float64()), ("reason", pa.string()), ("compile", pa.string()),
+    ("finals", pa.string()), ("package_version", pa.string()), ("suite_rev", pa.string()),
     ("run", pa.string()), ("driver", pa.string()), ("clock_lock_mhz", pa.int64()),
     ("clock_sm_mhz", pa.float64()), ("clock_sm_min_mhz", pa.float64()),
     ("clock_throttled", pa.int64()),
@@ -64,7 +66,14 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
 ])
 COLUMNS = tuple(SCHEMA.names)
 FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s", "clock_sm_mhz", "clock_sm_min_mhz")
-TEXT_VALUE_COLUMNS = ("reason", "finals", "package_version", "suite_rev")
+TEXT_VALUE_COLUMNS = ("reason", "compile", "finals", "package_version", "suite_rev")
+# A cubie row's compile column; "" on other packages. compile_timeout rows mark a group until `clear` drops them.
+COMPILE_OPTIMIZED = "optimized"
+COMPILE_UNOPTIMIZED = "unoptimized"
+COMPILE_TIMEOUT = "compile_timeout"
+COMPILE_STATUSES = ("", COMPILE_OPTIMIZED, COMPILE_UNOPTIMIZED, COMPILE_TIMEOUT)
+# Reason prefix of the row abandon_compile writes before a line of a timed-out group runs.
+COMPILE_TIMEOUT_REASON = "compile timeout at "
 # The run context every writer inherits from bench.py; a row outside a run has "" and null.
 RUN_ENV = "GPUODE_RUN"
 DRIVER_ENV = "GPUODE_DRIVER"
@@ -234,7 +243,10 @@ def make_row(**fields):
     row["samples_ms"] = [float(s) for s in samples]
     for field in TEXT_VALUE_COLUMNS:
         row[field] = _text(fields.get(field))
-    row["run"] = _text(fields.get("run")) or os.environ.get(RUN_ENV, "")
+    if row["compile"] not in COMPILE_STATUSES:
+        raise ValueError("compile '{0}' is not one of {1}".format(
+            row["compile"], ", ".join(repr(s) for s in COMPILE_STATUSES)))
+    row["run"] =_text(fields.get("run")) or os.environ.get(RUN_ENV, "")
     row["driver"] = _text(fields.get("driver")) or os.environ.get(DRIVER_ENV, "")
     lock = fields.get("clock_lock_mhz")
     if lock is None:
@@ -420,7 +432,7 @@ class Store:
         return standing
 
     def record_finals(self, spec, finals, t_final, retcode=None):
-        """Write finals/<trial_id>.parquet of a trial: all n rows in the run precision, each trajectory's final time and the package's failure code text (empty on success or when it reports none); returns the path relative to the package dir."""
+        """Write finals/<trial_id>.parquet of a trial: the first FINALS_ROWS of its n rows in grid order, in the run precision, each trajectory's final time and the package's failure code text (empty on success or when it reports none); returns the path relative to the package dir."""
         ident = spec_of(spec, FINALS_FIELDS)
         dtype = np.float64 if ident["precision"] == "float64" else np.float32
         states = np.asarray(finals, dtype=dtype)
@@ -437,6 +449,9 @@ class Store:
         retcode = [_text(code) for code in retcode]
         if len(retcode) != states.shape[0]:
             raise ValueError("retcode has one code per finals row")
+        # Keep the grid-order prefix: every row of the float64 reference that pairs with it by grid value.
+        kept = min(states.shape[0], FINALS_ROWS)
+        states, t_final, retcode = states[:kept], t_final[:kept], retcode[:kept]
         columns = {"traj": pa.array(np.arange(states.shape[0], dtype=np.int32),
                                     pa.int32())}
         arrow_type = pa.float64() if dtype is np.float64 else pa.float32()

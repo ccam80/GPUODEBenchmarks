@@ -1,4 +1,4 @@
-"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K] [--memory-gb G]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk or once its private memory passes `--memory-gb` after a kernel; a worker that exits early hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build."""
+"""The cubie precompile pass, shared by the CUBIE and CUBIE_MLIR suites: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K] [--memory-gb G]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk or once its private memory passes `--memory-gb` after a kernel; a worker that exits early hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build. A kernel the watchdog takes abandons its compile_key (abandon.abandon_compile): the store records a compile_timeout row for every line of the group, the workers skip the group's remaining kernels, and bench.py marks the group's lines so the runners never optimize them."""
 
 import argparse
 import json
@@ -10,10 +10,12 @@ import timeit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import abandon  # noqa: E402
 import runner  # noqa: E402
+import store as store_mod  # noqa: E402
 import trials as trials_mod  # noqa: E402
 from bench_key import dataset_key  # noqa: E402
-from protocol import OPTIMIZE_SECONDS  # noqa: E402
+from protocol import OPTIMIZE_SECONDS, WATCHDOG_EXIT_CODE  # noqa: E402
 from wp_common import run_watchdogged  # noqa: E402
 
 
@@ -65,14 +67,15 @@ def progress_path(trials_path, start):
 
 
 class Worker:
-    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
+    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; a kernel whose compile_key the store records a compile timeout of is skipped; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
 
     def __init__(self, package, key, root, lines, span, path, solver_class=None, memory_bytes=None):
         self.package, self.key, self.root = package, key, root
         self.lines, self.span, self.path = lines, span, path
+        self.store = store_mod.Store(root)
         self.solver_class = solver_class
         self.memory_bytes = memory_bytes
-        self.progress = {"under_way": None, "compiled": [], "failed": []}
+        self.progress = {"under_way": None, "compiled": [], "failed": [], "skipped": []}
 
     def write_progress(self):
         with open(self.path, "w", encoding="utf-8") as handle:
@@ -89,6 +92,11 @@ class Worker:
     def run(self):
         for index in range(*self.span):
             trial = self.lines[index]
+            if abandon.compile_timed_out(self.store, self.key, trial):
+                self.progress["skipped"].append(index)
+                self.write_progress()
+                print("precompile skipped {0}: its compile timed out".format(runner.label(trial)), flush=True)
+                continue
             self.progress["under_way"] = index
             self.write_progress()
             started = timeit.default_timer()
@@ -119,14 +127,19 @@ class Worker:
 
 
 class Driver:
-    """The parent: chunks of `per_worker` kernels to at most `jobs` workers at once; a worker that exits on a kernel loses it, and the rest of its chunk goes to a new worker, as does the rest of a chunk a worker left over its memory budget."""
+    """The parent: chunks of `per_worker` kernels to at most `jobs` workers at once; a worker that exits on a kernel loses it, and the rest of its chunk goes to a new worker, as does the rest of a chunk a worker left over its memory budget. A kernel the watchdog takes abandons its compile_key in the store (abandon.abandon_compile over `trial_list`, every line of the trial file), which the workers then skip."""
 
-    def __init__(self, path, lines, jobs, per_worker, worker_argv):
+    def __init__(self, path, lines, jobs, per_worker, worker_argv, trial_list, key, root=runner.DATA_ROOT):
         self.path, self.lines = path, lines
         self.jobs, self.worker_argv = jobs, worker_argv
+        self.trial_list, self.key = trial_list, key
+        self.store = store_mod.Store(root)
         self.queue = [(start, min(start + per_worker, len(lines))) for start in range(0, len(lines), per_worker)]
         self.running = {}
-        self.compiled, self.failed, self.lost = [], [], []
+        self.compiled, self.failed, self.lost, self.skipped = [], [], [], []
+        self.abandoned = set()
+        for package in sorted({t["package"] for t in trial_list}):
+            self.abandoned |= abandon.compile_timeouts(self.store, key, package)
         self.launched = 0
 
     def launch(self, span):
@@ -144,6 +157,7 @@ class Driver:
             progress = {}
         self.compiled += progress.get("compiled", [])
         self.failed += [tuple(entry) for entry in progress.get("failed", [])]
+        self.skipped += progress.get("skipped", [])
         under_way = progress.get("under_way")
         if under_way is None:
             if progress.get("next") is not None:
@@ -152,8 +166,21 @@ class Driver:
         self.lost.append(under_way)
         print("PRECOMPILE LOST {0}: the worker exited {1}".format(runner.label(self.lines[under_way]), code),
               flush=True)
+        if code == WATCHDOG_EXIT_CODE:
+            self.abandon(self.lines[under_way])
         if under_way + 1 < end:
             self.queue.insert(0, (under_way + 1, end))
+
+    def abandon(self, trial):
+        """Record the timed-out kernel's compile_key in the store, so the workers skip the group's remaining kernels and no run optimizes it again."""
+        group = trials_mod.compile_key(trial)
+        if group in self.abandoned:
+            return
+        self.abandoned.add(group)
+        rows = abandon.abandon_compile(self.store, self.key, self.trial_list, trial,
+                                       store_mod.suite_rev(runner.REPO_ROOT))
+        print("PRECOMPILE ABANDONED {0} {1} {2}: its compile passed the watchdog; {3} row(s) record it".format(
+            trial["problem"], trial["algorithm"], trial["controller"], len(rows)), flush=True)
 
     def run(self):
         started = timeit.default_timer()
@@ -166,29 +193,30 @@ class Driver:
                 continue
             for proc in finished:
                 self.settle(proc, proc.returncode)
-        print("precompile: {0} kernels, {1} compiled, {2} failed, {3} lost, {4} workers in {5:.0f}s".format(
-            len(self.lines), len(self.compiled), len(self.failed), len(self.lost), self.launched,
-            timeit.default_timer() - started), flush=True)
+        print("precompile: {0} kernels, {1} compiled, {2} failed, {3} lost, {4} skipped, {5} workers in {6:.0f}s".format(
+            len(self.lines), len(self.compiled), len(self.failed), len(self.lost), len(self.skipped),
+            self.launched, timeit.default_timer() - started), flush=True)
         return 0
 
 
 def main(argv, package, key=None, root=runner.DATA_ROOT, solver_class=None, worker_argv=None):
     """Run the pass over a trial file; a `--worker` invocation compiles its span in this process."""
     args = parse_args(argv)
+    trial_list = trials_mod.read_jsonl(args.trials)
     first = {}
-    for trial in trials_mod.read_jsonl(args.trials):
+    for trial in trial_list:
         line = first.setdefault(trials_mod.kernel_key(trial), dict(trial))
         line["optimize"] = line["optimize"] or trial["optimize"]
     lines = list(first.values())
+    key = key or dataset_key()
     if args.worker is not None:
-        return Worker(package, key or dataset_key(), root, lines, args.worker,
-                      progress_path(args.trials, args.worker[0]), solver_class=solver_class,
-                      memory_bytes=int(args.memory_gb * 2 ** 30)).run()
+        return Worker(package, key, root, lines, args.worker, progress_path(args.trials, args.worker[0]),
+                      solver_class=solver_class, memory_bytes=int(args.memory_gb * 2 ** 30)).run()
     if worker_argv is None:
         def worker_argv(start, end):
             return [sys.executable, sys.argv[0], "--trials", args.trials, "--precompile",
                     "--memory-gb", str(args.memory_gb), "--worker", "{0}:{1}".format(start, end)]
-    return Driver(args.trials, lines, args.jobs, args.per_worker, worker_argv).run()
+    return Driver(args.trials, lines, args.jobs, args.per_worker, worker_argv, trial_list, key, root).run()
 
 
 if __name__ == "__main__":

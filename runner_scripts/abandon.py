@@ -1,4 +1,4 @@
-"""The abandon rule shared by the runners and bench.py: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run."""
+"""The abandon rule shared by the runners and bench.py: a run that timed out or ran out of memory abandons every harder run of its family on the same transfers; the rows a hard exit implies; the trials still to run; the compile timeouts the store records per compile_key (`compile = compile_timeout` rows), which mark every line of the group in every later plan until `store.py clear` drops them."""
 
 import json
 
@@ -65,27 +65,60 @@ def remaining(trial_list, current, doomed=()):
     return [t for t in trial_list[index:] if t["transfers"] and t["trial_id"] not in doomed]
 
 
+def compile_timeouts(data, key, package=None):
+    """The compile_key groups the store records a compile timeout of under a key (one package's when named), as a set of tuples."""
+    filters = {"key": key, "compile": store.COMPILE_TIMEOUT}
+    if package:
+        filters["package"] = package
+    return {trials_mod.compile_key(row) for row in data.rows(**filters)}
+
+
+def compile_timed_out(data, key, trial):
+    """True when the trial's own results file holds a compile_timeout row of its compile_key; one file read, for a precompile worker's check before each kernel."""
+    path = data.results_path(trial["package"], key, trial["problem"], trial["algorithm"])
+    group = trials_mod.compile_key(trial)
+    return any(row["compile"] == store.COMPILE_TIMEOUT and trials_mod.compile_key(row) == group
+               for row in data._read_results(path))
+
+
+def abandon_compile(data, key, trial_list, timed_out, suite_rev=""):
+    """Record the compile timeout of `timed_out` (a line of the kernel the watchdog took) for its compile_key: a NaN row, reason COMPILE_TIMEOUT_REASON, compile compile_timeout, for every transfers of every line of the group in `trial_list` that has no row yet; an existing row stands. Returns the rows written."""
+    group = trials_mod.compile_key(timed_out)
+    lines = [t for t in trial_list if trials_mod.compile_key(t) == group]
+    if not lines:
+        return []
+    recorded_ids = {row["run_id"] for row in data.rows(key=key, package=timed_out["package"],
+                                                       problem=timed_out["problem"],
+                                                       algorithm=timed_out["algorithm"])}
+    reason = store.COMPILE_TIMEOUT_REASON + timed_out["trial_id"]
+    rows = []
+    for trial in lines:
+        for transfers, run in run_ids(trial, key).items():
+            if run in recorded_ids:
+                continue
+            spec = {field: trial[field] for field in store.TRIAL_FIELDS}
+            rows.append(dict(spec, transfers=transfers, key=key, states=states_of(trial), reason=reason,
+                             compile=store.COMPILE_TIMEOUT, suite_rev=suite_rev))
+    if rows:
+        data.record_batch(rows)
+    return rows
+
+
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records the kernel's optimize timeout and the compile timeout of its compile_key (abandon_compile), then marks every remaining line of the group, whose optimize goes with it."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
-        current = [t for t in trial_list if t["trial_id"] == progress["trial_id"]]
-    except (OSError, ValueError, KeyError):
-        current = []
-    if not current:
+    except (OSError, ValueError):
         return None
-    current = current[0]
+    current = next((t for t in trial_list if t["trial_id"] == progress.get("trial_id")), None)
+    if current is None:
+        return None
     if progress.get("stage") == "optimize":
         if current["package"] in cubie_adapter.PACKAGES:
             cubie_adapter.record_optimize_timeout(current, key, data.root)
-        kernel = trials_mod.optimize_key(current)
-
-        def dropped(trial):
-            return trial["trial_id"] == current["trial_id"] or (
-                trial["optimize"] and trials_mod.optimize_key(trial) == kernel)
-
-        return [dict(t, optimize=False) if dropped(t) else t for t in remaining(trial_list, current)]
+        abandon_compile(data, key, trial_list, current, suite_rev)
+        return trials_mod.mark_compile_timeouts(remaining(trial_list, current), {trials_mod.compile_key(current)})
     reason = "abandoned: hard-exit at " + current["trial_id"]
     doomed = set()
     rows = []

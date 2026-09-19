@@ -81,7 +81,7 @@ the push the box deletes this key's clock logs a day old that no row names
 |---|---|---|
 | `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm |
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
-| `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid (julia_cpu: the 1024-point prefix) |
+| `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance |
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
@@ -95,10 +95,21 @@ candidates of the kernels whose lines optimize (`bench_cubie.py --trials
 boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
 
+A cubie compile the optimize watchdog takes abandons its problem, algorithm
+and controller: every line of the group without a row gets a NaN row with
+`compile = compile_timeout`, the precompile skips the group's other kernels,
+and the trial file is rewritten with the lines marked `"compile": "timeout"`,
+which run without an optimize. Every plan, under every flag, reads those rows
+and marks the group again; `bench.py plan` counts the timed-out compiles.
+To retry, drop the rows (filter as a JSON file or `-` for stdin):
+`echo '{"compile": "compile_timeout", "problem": "<p>", "algorithm": "<a>"}' | python runner_scripts/store.py clear -`.
+A cubie row's `compile` column is `optimized`, `unoptimized` or
+`compile_timeout`; other packages leave it empty.
+
 ## Data and analyses
 
 Rows live in `data/key=<key>/package=<pkg>/results/<problem>__<algorithm>.parquet`,
-finals in `finals/<trial_id>.parquet` beside them, and the whole tree reads
+finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), and the whole tree reads
 as one DuckDB table:
 
 ```
