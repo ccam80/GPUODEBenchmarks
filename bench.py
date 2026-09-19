@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
-plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: a cubie package precompiles its kernels into the package cache first, with the optimize candidates of the kernels that optimize (four workers of eight kernels, a worker past 6 GB handing the rest of its chunk to a new one), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
+plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: a cubie package precompiles its kernels into the package cache first, with the optimize candidates of the kernels that optimize (four workers of eight kernels, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning the rest of its problem and algorithm, whose lines then run without an optimize), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per build and stepping, once per build across dt for an explicit fixed-step algorithm, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
 Without a flag every selected trial runs, its rows are overwritten and its cubie kernel is optimized again. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row and a timed-out optimize; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
@@ -185,6 +185,18 @@ def plan_trials(plan, key, root, resume=False, no_overwrite=False):
     return {package: groups[package] for package in launch.ordered(list(groups))}
 
 
+def drop_abandoned_optimizes(trial_list, path):
+    """The trials with the optimize dropped from every line whose compile the precompile abandoned."""
+    groups = trials_mod.read_abandoned(path)
+    if not groups:
+        return trial_list
+    dropped = [dict(t, optimize=False) if trials_mod.compile_key(t) in groups else t for t in trial_list]
+    print("Precompile  : {0} line(s) of {1} abandoned compile(s) run without an optimize".format(
+        sum(1 for old, new in zip(trial_list, dropped) if old["optimize"] and not new["optimize"]), len(groups)),
+        flush=True)
+    return dropped
+
+
 def write_plan(directory, by_package):
     """{package: path} of the trial files written under directory."""
     os.makedirs(directory, exist_ok=True)
@@ -308,9 +320,10 @@ class Run:
 
     # ------------------------------------------------------------- packages
     def run_package(self, package, trial_list, path):
-        """Precompile a cubie package's kernels, then drive the package's runners over its trial file, a fresh runner per part of launch.RESTART_KERNELS kernels of whole families; a build that crashed before a hard exit fails the package once every part ends."""
+        """Precompile a cubie package's kernels, then drive the package's runners over its trial file, a fresh runner per part of launch.RESTART_KERNELS kernels of whole families; a compile the precompile abandoned runs its lines without an optimize; a build that crashed before a hard exit fails the package once every part ends."""
         if package in launch.CUBIE_PACKAGES:
             self.step(package + " precompile", package + ".log", launch.precompile_command(package, path))
+            trial_list = drop_abandoned_optimizes(trial_list, path)
         parts = trials_mod.family_parts(trial_list, launch.RESTART_KERNELS.get(package))
         hard_exits, crashed, status = 0, [], 0
         for number, part in enumerate(parts, start=1):

@@ -323,6 +323,20 @@ class PrecompileWorkerTests(AdapterCase):
             progress = json.load(handle)
         self.assertEqual((progress["compiled"], progress["under_way"], progress["next"]), ([0, 1], None, 2))
 
+    def test_a_kernel_of_an_abandoned_compile_is_skipped(self):
+        lines = self.lines()
+        trials_path = os.path.join(self.tmp, "cubie.jsonl")
+        trials_mod.write_abandoned(trials_path, {trials_mod.compile_key(lines[1])})
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 3), path, solver_class=FakeSolver,
+                                         trials_path=trials_path)
+        self.assertEqual(worker.run(), 0)
+        with open(path) as handle:
+            progress = json.load(handle)
+        # lines 1 to 3 are the lorenz tsit5 kernels; the euler line at 0 compiles.
+        self.assertEqual((progress["compiled"], progress["skipped"]), ([0], [1, 2]))
+        self.assertEqual(len(FakeSolver.made), 1)
+
     def test_each_kernel_compiles_under_the_optimize_watchdog(self):
         budgets = []
 

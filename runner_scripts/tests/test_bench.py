@@ -572,6 +572,31 @@ class FakeSampler:
             self.thread.join(5)
 
 
+class AbandonedCompileTests(unittest.TestCase):
+    """bench.drop_abandoned_optimizes: the lines of a compile the precompile abandoned run without an optimize."""
+
+    def spec(self, **overrides):
+        fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32", parameter="rho",
+                      grid_scale="linear", grid_min=0.0, grid_max=21.0, n=8, grid_dtype="float32",
+                      algorithm="tsit5", controller="fixed", dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN,
+                      rtol=NAN, gains="{}", newton_atol=NAN, newton_rtol=NAN, package="cubie",
+                      transfers=["both"], finals=False, build="warm", optimize=True, watchdog_s=120.0,
+                      set="test")
+        fields.update(overrides)
+        return fields
+
+    def test_the_abandoned_groups_lines_lose_their_optimize(self):
+        tmp = tempfile.mkdtemp(prefix="abandoned_test_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "cubie.jsonl")
+        lines = trials.build_trials([self.spec(), self.spec(n=32), self.spec(algorithm="euler")])
+        self.assertIs(bench.drop_abandoned_optimizes(lines, path), lines)
+        trials.write_abandoned(path, {trials.compile_key(self.spec(algorithm="euler"))})
+        dropped = bench.drop_abandoned_optimizes(lines, path)
+        self.assertEqual([(t["algorithm"], t["optimize"]) for t in dropped],
+                         [("euler", False), ("tsit5", True), ("tsit5", True)])
+
+
 class HardExitTests(unittest.TestCase):
     """The runner loop against a fake runner under a fake lock and sampler: a hard exit abandons the harder runs of the family and the rest re-runs; every row records the lock and the clocks its window showed; drift fails the run."""
 

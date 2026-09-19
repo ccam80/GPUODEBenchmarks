@@ -159,6 +159,20 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(sorted(driver.compiled), list(range(10)))
         self.assertEqual(driver.launched, 2)
 
+    def test_a_watchdog_loss_abandons_the_kernels_compile_key(self):
+        status, driver, calls = self.drive(jobs=1, per_worker=4, hang_at=5)
+        self.assertEqual(status, 0)
+        group = trials.compile_key(self.lines[5])
+        self.assertEqual(driver.abandoned, {group})
+        self.assertEqual(trials.read_abandoned(self.path), {group})
+        # A worker that exits for any other reason leaves the group alone.
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        os.makedirs(self.tmp)
+        with open(self.worker, "w", encoding="utf-8") as handle:
+            handle.write(FAKE_WORKER)
+        status, driver, calls = self.drive(jobs=1, per_worker=4, crash_at=7)
+        self.assertEqual((driver.abandoned, trials.read_abandoned(self.path)), (set(), set()))
+
     def test_private_bytes_reads_this_process(self):
         self.assertGreater(cubie_precompile.private_bytes(), 1 << 20)
 

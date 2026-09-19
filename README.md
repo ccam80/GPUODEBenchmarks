@@ -91,7 +91,7 @@ family is abandoned; a runner that never returns hard-exits and the driver re-in
 it with the trials still missing. A cubie package first precompiles the
 kernels of its trial file into the package cache, with the optimize
 candidates of the kernels whose lines optimize (`bench_cubie.py --trials
-<file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one), then runs a fresh runner every 8 kernels at the next family
+<file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning the rest of its problem and algorithm, whose lines then run without an optimize), then runs a fresh runner every 8 kernels at the next family
 boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
 

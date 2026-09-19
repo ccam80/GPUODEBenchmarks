@@ -66,7 +66,7 @@ def remaining(trial_list, current, doomed=()):
 
 
 def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
-    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from every line of its kernel."""
+    """The trials still to run after a hard exit, or None when the progress file names no trial: a hard exit while solving abandons the named trial (the rows of the transfers it ran) and every harder one of its family (each transfers row still absent); one during an optimize records a timeout row and drops the optimize from every line of the kernel's compile_key, which shares its compile cost."""
     try:
         with open(progress_path, encoding="utf-8") as handle:
             progress = json.load(handle)
@@ -79,11 +79,11 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
     if progress.get("stage") == "optimize":
         if current["package"] in cubie_adapter.PACKAGES:
             cubie_adapter.record_optimize_timeout(current, key, data.root)
-        kernel = trials_mod.optimize_key(current)
+        compile_group = trials_mod.compile_key(current)
 
         def dropped(trial):
             return trial["trial_id"] == current["trial_id"] or (
-                trial["optimize"] and trials_mod.optimize_key(trial) == kernel)
+                trial["optimize"] and trials_mod.compile_key(trial) == compile_group)
 
         return [dict(t, optimize=False) if dropped(t) else t for t in remaining(trial_list, current)]
     reason = "abandoned: hard-exit at " + current["trial_id"]

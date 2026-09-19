@@ -15,6 +15,8 @@ TRANSFERS_ORDER = ("both", "none")
 BUILD_FIELDS = ("problem", "system_params", "precision", "algorithm", "controller", "gains")
 # The fields of one compiled kernel: the build plus every stepping value.
 KERNEL_FIELDS = BUILD_FIELDS + ("dt", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")
+# The fields whose kernels share a compile cost: a timeout condemns the rest of the group.
+COMPILE_FIELDS = ("problem", "system_params", "precision", "algorithm")
 # The fields the abandon rule compares within: lines differing only in difficulty.
 FAMILY_FIELDS = ("package", "problem", "precision", "algorithm", "controller", "gains")
 
@@ -46,6 +48,30 @@ def optimize_key(trial):
         return key
     dt = KERNEL_FIELDS.index("dt")
     return key[:dt] + (None,) + key[dt + 1:]
+
+
+def compile_key(trial):
+    """The kernels a compile timeout condemns, as a tuple of COMPILE_FIELDS."""
+    return tuple(trial[f] for f in COMPILE_FIELDS)
+
+
+def abandoned_path(trials_path):
+    return trials_path + ".abandoned.json"
+
+
+def read_abandoned(trials_path):
+    """The compile_key groups a timeout abandoned beside a trial file, as a set of tuples."""
+    try:
+        with open(abandoned_path(trials_path), encoding="utf-8") as handle:
+            return {tuple(group) for group in json.load(handle)}
+    except (OSError, ValueError):
+        return set()
+
+
+def write_abandoned(trials_path, groups):
+    """Name the abandoned compile_key groups beside a trial file."""
+    with open(abandoned_path(trials_path), "w", encoding="utf-8") as handle:
+        json.dump(sorted(list(group) for group in groups), handle)
 
 
 def family_key(trial):
