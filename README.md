@@ -91,9 +91,20 @@ family is abandoned; a runner that never returns hard-exits and the driver re-in
 it with the trials still missing. A cubie package first precompiles the
 kernels of its trial file into the package cache, with the optimize
 candidates of the kernels whose lines optimize (`bench_cubie.py --trials
-<file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning the rest of its problem and algorithm, whose lines then run without an optimize), then runs a fresh runner every 8 kernels at the next family
+<file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one), then runs a fresh runner every 8 kernels at the next family
 boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
+
+A cubie compile the optimize watchdog takes abandons its problem, algorithm
+and controller: every line of the group without a row gets a NaN row with
+`compile = compile_timeout`, the precompile skips the group's other kernels,
+and the trial file is rewritten with the lines marked `"compile": "timeout"`,
+which run without an optimize. Every plan, under every flag, reads those rows
+and marks the group again; `bench.py plan` counts the timed-out compiles.
+To retry, drop the rows (filter as a JSON file or `-` for stdin):
+`echo '{"compile": "compile_timeout", "problem": "<p>", "algorithm": "<a>"}' | python runner_scripts/store.py clear -`.
+A cubie row's `compile` column is `optimized`, `unoptimized` or
+`compile_timeout`; other packages leave it empty.
 
 ## Data and analyses
 

@@ -1,4 +1,4 @@
-"""abandon.py: the abandon rule over a family, the rows a hard exit implies while solving or optimizing, and the trials left to run."""
+"""abandon.py: the abandon rule over a family, the rows a hard exit implies while solving or optimizing, the compile timeouts the store records per compile_key, and the trials left to run."""
 
 import json
 import math
@@ -94,9 +94,18 @@ class AbandonTests(unittest.TestCase):
         trial_list = trials.build_trials([spec(8, True), spec(32, True)])
         self.progress_for(trial_list[0], "optimize")
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
-        self.assertEqual(self.data.rows(), [])
-        # The n = 32 line runs on the hung kernel, so its optimize goes with it.
-        self.assertEqual([(t["n"], t["optimize"]) for t in remaining], [(8, False), (32, False)])
+        # The store records the compile timeout of the group: a NaN row per transfers of every line of it.
+        rows = self.data.rows()
+        self.assertEqual(sorted((r["n"], r["transfers"]) for r in rows),
+                         [(8, "both"), (8, "none"), (32, "both"), (32, "none")])
+        self.assertEqual({(r["compile"], r["reason"], r["suite_rev"]) for r in rows},
+                         {("compile_timeout", "compile timeout at " + trial_list[0]["trial_id"], "rev")})
+        self.assertTrue(all(math.isnan(r["min_ms"]) for r in rows))
+        self.assertEqual(abandon.compile_timeouts(self.data, KEY), {trials.compile_key(trial_list[0])})
+        self.assertEqual(abandon.compile_timeouts(self.data, KEY, "cubie_mlir"), set())
+        # The n = 32 line runs on the hung kernel, so its optimize goes with it; both lines are marked.
+        self.assertEqual([(t["n"], t["optimize"], t["compile"]) for t in remaining],
+                         [(8, False, "timeout"), (32, False, "timeout")])
         import csv
         with open(os.path.join(self.data.root, "key=" + KEY, "package=cubie", "optimize.csv"),
                   newline="", encoding="utf-8") as handle:
@@ -120,6 +129,45 @@ class AbandonTests(unittest.TestCase):
         remaining = abandon.abandon_after_hard_exit(self.data, KEY, trial_list, self.progress, "rev")
         self.assertEqual([(t["algorithm"], t["optimize"]) for t in remaining],
                          [("euler", False), ("tsit5", True), ("tsit5", True), ("tsit5", True)])
+
+    def test_a_compile_timeout_is_recorded_for_the_lines_of_its_group_that_have_no_row(self):
+        trial_list = trials.build_trials([spec(8, True), spec(32, True), spec(8, True, controller="default", atol=1e-5,
+                                                                              rtol=1e-5, dt=NAN),
+                                          spec(8, True, algorithm="euler"), spec(8, True, package="cubie_mlir")])
+        fixed = [t for t in trial_list if t["controller"] == "fixed" and t["algorithm"] == "tsit5"
+                 and t["package"] == "cubie"]
+        self.record_ok(fixed[1])
+        written = abandon.abandon_compile(self.data, KEY, trial_list, fixed[0], "rev")
+        # The adaptive tsit5 line, euler and cubie_mlir are other groups; the n = 32 line's rows stand.
+        self.assertEqual(trials.COMPILE_FIELDS, ("package", "problem", "system_params", "precision", "algorithm",
+                                                 "controller"))
+        self.assertEqual(sorted((r["n"], r["transfers"]) for r in written), [(8, "both"), (8, "none")])
+        rows = self.data.rows()
+        self.assertEqual(sorted((r["n"], r["compile"]) for r in rows),
+                         [(8, "compile_timeout"), (8, "compile_timeout"), (32, ""), (32, "")])
+        self.assertTrue(abandon.compile_timed_out(self.data, KEY, fixed[1]))
+        self.assertFalse(any(abandon.compile_timed_out(self.data, KEY, t) for t in trial_list if t not in fixed))
+        # Marking touches the group's lines alone and hands back the same list when none is in it.
+        marked = trials.mark_compile_timeouts(trial_list, abandon.compile_timeouts(self.data, KEY))
+        self.assertEqual([(t["package"], t["algorithm"], t["controller"], t["optimize"], t["compile"]) for t in marked],
+                         [("cubie", "euler", "fixed", True, ""), ("cubie", "tsit5", "default", True, ""),
+                          ("cubie", "tsit5", "fixed", False, "timeout"), ("cubie", "tsit5", "fixed", False, "timeout"),
+                          ("cubie_mlir", "tsit5", "fixed", True, "")])
+        self.assertIs(trials.mark_compile_timeouts(marked, abandon.compile_timeouts(self.data, KEY)), marked)
+        self.assertIs(trials.mark_compile_timeouts(trial_list, set()), trial_list)
+        self.assertEqual(trials.compile_timeouts_of(marked), {trials.compile_key(fixed[0])})
+        # Recording the same group again writes nothing more.
+        self.assertEqual(abandon.abandon_compile(self.data, KEY, trial_list, fixed[1], "rev"), [])
+        # The marks survive the trial file, and a file written before the column reads "".
+        path = os.path.join(self.tmp, "cubie.jsonl")
+        trials.write_jsonl(path, marked)
+        self.assertEqual([t["compile"] for t in trials.read_jsonl(path)], ["", "", "timeout", "timeout", ""])
+        with open(path, "w", encoding="utf-8") as handle:
+            for line in open(trials.write_jsonl(path + ".old", trial_list), encoding="utf-8"):
+                record = json.loads(line)
+                del record["compile"]
+                handle.write(json.dumps(record) + "\n")
+        self.assertEqual({t["compile"] for t in trials.read_jsonl(path)}, {""})
 
     def test_a_progress_file_naming_no_trial_returns_none(self):
         trial_list = trials.build_trials([spec(8)])

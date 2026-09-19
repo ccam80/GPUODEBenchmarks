@@ -14,6 +14,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
+import abandon  # noqa: E402
 import cubie_bench  # noqa: E402
 import cubie_adapter  # noqa: E402
 import cubie_precompile  # noqa: E402
@@ -323,19 +324,19 @@ class PrecompileWorkerTests(AdapterCase):
             progress = json.load(handle)
         self.assertEqual((progress["compiled"], progress["under_way"], progress["next"]), ([0, 1], None, 2))
 
-    def test_a_kernel_of_an_abandoned_compile_is_skipped(self):
+    def test_a_kernel_whose_group_the_store_records_a_compile_timeout_of_is_skipped(self):
         lines = self.lines()
-        trials_path = os.path.join(self.tmp, "cubie.jsonl")
-        trials_mod.write_abandoned(trials_path, {trials_mod.compile_key(lines[1])})
+        # Lines 2 and 3 are the fixed tsit5 kernels; euler at 0 and the adaptive tsit5 at 1 still compile.
+        self.assertEqual([(t["algorithm"], t["controller"]) for t in lines[:4]],
+                         [("euler", "fixed"), ("tsit5", "default"), ("tsit5", "fixed"), ("tsit5", "fixed")])
+        abandon.abandon_compile(store.Store(self.root), KEY, lines, lines[2])
         path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
-        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 3), path, solver_class=FakeSolver,
-                                         trials_path=trials_path)
+        worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 4), path, solver_class=FakeSolver)
         self.assertEqual(worker.run(), 0)
         with open(path) as handle:
             progress = json.load(handle)
-        # lines 1 to 3 are the lorenz tsit5 kernels; the euler line at 0 compiles.
-        self.assertEqual((progress["compiled"], progress["skipped"]), ([0], [1, 2]))
-        self.assertEqual(len(FakeSolver.made), 1)
+        self.assertEqual((progress["compiled"], progress["skipped"]), ([0, 1], [2, 3]))
+        self.assertEqual(len(FakeSolver.made), 2)
 
     def test_each_kernel_compiles_under_the_optimize_watchdog(self):
         budgets = []

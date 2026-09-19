@@ -94,7 +94,7 @@ class HashTests(unittest.TestCase):
         self.assertEqual(store.GROUP_FIELDS, store.SPEC_FIELDS[:4] + store.SPEC_FIELDS[10:20])
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
             "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
-            "errored_pct", "build_s", "reason", "finals", "package_version",
+            "errored_pct", "build_s", "reason", "compile", "finals", "package_version",
             "suite_rev", "run", "driver", "clock_lock_mhz", "clock_sm_mhz",
             "clock_sm_min_mhz", "clock_throttled", "timed_start_utc", "timed_end_utc",
             "recorded_utc"])
@@ -225,6 +225,13 @@ class SchemaTests(StoreCase):
             self.store.record(row(package="julia"))
         with self.assertRaises(ValueError):
             self.store.record(row(samples_ms="9;2;1.5"))
+        # compile defaults to "" and takes the cubie statuses alone.
+        self.assertEqual(standing["compile"], "")
+        self.assertEqual(store.COMPILE_STATUSES, ("", "optimized", "unoptimized", "compile_timeout"))
+        for status in store.COMPILE_STATUSES:
+            self.assertEqual(self.store.record(row(compile=status))["compile"], status)
+        with self.assertRaises(ValueError):
+            self.store.record(row(compile="timeout"))
 
     def test_given_ids_must_hash_the_spec(self):
         standing = self.store.record(row(run_id=FIXTURE_RUN_ID, trial_id=FIXTURE_TRIAL_ID,

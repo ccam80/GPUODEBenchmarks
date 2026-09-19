@@ -1,8 +1,9 @@
-"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a record for the line's optimize. A recorded row is never dated or checked against a source: an older timing stands whatever was optimized or changed after it."""
+"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a record for the line's optimize. A row abandon_compile wrote for a line before it ran (compile_timeout, NaN, its reason) is no row. A recorded row is never dated or checked against a source: an older timing stands whatever was optimized or changed after it."""
 
 import math
 
 import cubie_adapter
+import store as store_mod
 from abandon import run_ids
 
 MODES = (None, "resume", "no_overwrite")
@@ -43,6 +44,12 @@ def _finite(value):
     return isinstance(value, (int, float)) and math.isfinite(value)
 
 
+def compile_placeholder(row):
+    """True for a row abandon_compile wrote before its line ran: compile_timeout, no time, the compile timeout reason."""
+    return row["compile"] == store_mod.COMPILE_TIMEOUT and not _finite(row["min_ms"]) \
+        and (row["reason"] or "").startswith(store_mod.COMPILE_TIMEOUT_REASON)
+
+
 def optimize_status(record, mode):
     """None when a kernel's optimize.csv record stands, else 'absent' or 'timeout' (a lack under no_overwrite alone)."""
     if record is None:
@@ -63,6 +70,7 @@ def audit(trial_list, key, store, mode=None):
         if not trial["transfers"]:
             continue
         rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
+        rows = {t: None if r is not None and compile_placeholder(r) else r for t, r in rows.items()}
         carried = [r["finals"] for r in rows.values() if r is not None and r["finals"]]
         nan_only = all(r is not None and not _finite(r["min_ms"]) for r in rows.values())
         missing = Missing(trial, bool(carried) or (bool(trial["finals"]) and not nan_only))
