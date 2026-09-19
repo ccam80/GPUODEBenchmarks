@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -109,7 +110,9 @@ class CompareTests(ErrorsCase):
         self.assertAlmostEqual(errors.error(sweep, self.store), expected, places=15)
 
     def test_pairing_is_by_grid_value_not_by_index(self):
-        golden = self.golden()
+        # The golden keeps all its rows here, so the sweep's grid meets it past the stored prefix too.
+        with mock.patch.object(store, "FINALS_ROWS", 1 << 20):
+            golden = self.golden()
         # A 1024-point grid over the full range shares only its two ends with the golden's grid.
         other = self.sweep(grid_max=21.0)
         errs = errors.Errors(self.store)

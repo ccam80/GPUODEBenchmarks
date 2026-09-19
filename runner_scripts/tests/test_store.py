@@ -455,6 +455,16 @@ class FinalsTests(StoreCase):
                          "finals/" + store.trial_id(trial) + ".parquet")
 
 
+    def test_finals_keep_the_grid_order_prefix_of_finals_rows(self):
+        trial = spec(n=store.FINALS_ROWS + 5)
+        states = np.arange((store.FINALS_ROWS + 5) * 3, dtype=np.float64).reshape(-1, 3)
+        codes = [""] * store.FINALS_ROWS + ["MaxIters"] * 5
+        relative = self.store.record_finals(trial, states, np.ones(store.FINALS_ROWS + 5), codes)
+        traj, kept, t_final, retcode = self.store.load_finals(trial["package"], trial["key"], relative)
+        self.assertEqual(traj.tolist(), list(range(store.FINALS_ROWS)))
+        np.testing.assert_array_equal(kept, states[:store.FINALS_ROWS].astype(np.float32))
+        self.assertEqual((t_final.shape[0], set(retcode)), (store.FINALS_ROWS, {""}))
+
     def test_a_golden_row_and_a_prefix_grid_row_share_a_group_id_across_packages(self):
         # The analyses pair rows by group_id and rebuild each grid from its own spec.
         golden = spec(**adaptive(), n=131072, package="julia_cpu", precision="float64",

@@ -40,6 +40,8 @@ SPEC_TYPES = (
 SPEC_FIELDS = tuple(name for name, _ in SPEC_TYPES)
 TRIAL_FIELDS = tuple(f for f in SPEC_FIELDS if f not in ("transfers", "key"))
 FINALS_FIELDS = TRIAL_FIELDS + ("key",)
+# Trajectories a finals file keeps, from the start of the grid; the solve and its timing cover all n.
+FINALS_ROWS = 8192
 ENSEMBLE_FIELDS = ("parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
 GROUP_FIELDS = tuple(f for f in TRIAL_FIELDS
                      if f not in ENSEMBLE_FIELDS and f != "package")
@@ -430,7 +432,7 @@ class Store:
         return standing
 
     def record_finals(self, spec, finals, t_final, retcode=None):
-        """Write finals/<trial_id>.parquet of a trial: all n rows in the run precision, each trajectory's final time and the package's failure code text (empty on success or when it reports none); returns the path relative to the package dir."""
+        """Write finals/<trial_id>.parquet of a trial: the first FINALS_ROWS of its n rows in grid order, in the run precision, each trajectory's final time and the package's failure code text (empty on success or when it reports none); returns the path relative to the package dir."""
         ident = spec_of(spec, FINALS_FIELDS)
         dtype = np.float64 if ident["precision"] == "float64" else np.float32
         states = np.asarray(finals, dtype=dtype)
@@ -447,6 +449,9 @@ class Store:
         retcode = [_text(code) for code in retcode]
         if len(retcode) != states.shape[0]:
             raise ValueError("retcode has one code per finals row")
+        # Keep the grid-order prefix: every row of the float64 reference that pairs with it by grid value.
+        kept = min(states.shape[0], FINALS_ROWS)
+        states, t_final, retcode = states[:kept], t_final[:kept], retcode[:kept]
         columns = {"traj": pa.array(np.arange(states.shape[0], dtype=np.int32),
                                     pa.int32())}
         arrow_type = pa.float64() if dtype is np.float64 else pa.float32()
