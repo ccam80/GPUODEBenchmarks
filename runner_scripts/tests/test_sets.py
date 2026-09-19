@@ -444,8 +444,7 @@ newton = "tol"
         self.assertEqual(radau["controller"], "gustafsson")
         self.assertEqual(json.loads(radau["gains"]), {"safety": 0.9})
         self.assertEqual(json.loads(specs["kvaerno3"]["gains"])["proportional_gain"], 0.1 * 4)
-        # Julia's row equal to cubie's shipped controller is skipped, at the Float32 rounding Julia prints.
-        # beta1 (order + 1) = I + P and beta2 (order + 1) = P of the shipped pi at order 3.
+        # Float32-printed beta1 (order + 1) = I + P and beta2 (order + 1) = P of the shipped pi at order 3: skipped.
         self.write_controllers("lorenz", [
             ("kvaerno3", "PIController", "0.23333333", "0.13333334", "0.2", "10.0", "0.9", "3")])
         self.assertEqual(sets.expand(["m"], KEY, self.root, sets_dir=self.sets_dir), [])
