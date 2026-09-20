@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller, a line style per transfers: none solid, both dashed) and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per stepping and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -22,12 +22,17 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# The figure encoding: a colour per package, a marker per controller, a line style per transfers.
+# The figure encoding: a colour per package, a marker per stepping (one set per card), a line style per transfers.
 COLOURS = {
     "cubie": "tab:blue", "cubie_mlir": "tab:purple", "jax": "tab:red", "pytorch": "darkred",
     "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
 }
-MARKERS = {"fixed": "s", "default": "o", "pi": "^", "pi matched": "v", "gustafsson": "D"}
+PACKAGE_NAMES = {
+    "cubie": "Cubie", "cubie_mlir": "Cubie (MLIR)", "jax": "Diffrax", "pytorch": "torchdiffeq",
+    "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
+}
+STEPPINGS = ("fixed", "adaptive", "matched", "gustafsson")
+MARKER_SETS = (("s", "o", "^", "D"), ("P", "v", "<", "X"), ("*", "p", ">", "h"))
 LINES = {"both": "--", "none": "-"}
 
 
@@ -294,23 +299,71 @@ def usable(rows):
 
 # ---------------------------------------------------------------- encoding
 
-def controller_label(row, cache=None):
-    """The controller a figure keys its marker by: the row's controller, 'pi matched' for a cubie PI row whose gains are not the DIRK tier's (Julia's matched controller)."""
+def stepping(row, cache=None):
+    """The stepping a figure keys its marker by: fixed, adaptive (a package's default controller, or cubie's DIRK-tier PI), matched (a cubie PI row carrying Julia's gains) or gustafsson; None for cubie's default controller, which is not drawn."""
     import cubie_adapter
     controller = row["controller"]
-    if controller == "pi" and row["package"] in cubie_adapter.PACKAGES:
-        tier = tier_gains_json(row["package"], row["algorithm"], cache)
-        if tier is not None and row.get("gains") != tier:
-            return "pi matched"
+    cubie = row["package"] in cubie_adapter.PACKAGES
+    if controller == "fixed":
+        return "fixed"
+    if controller == "default":
+        return None if cubie else "adaptive"
+    if controller == "pi":
+        if cubie:
+            tier = tier_gains_json(row["package"], row["algorithm"], cache)
+            if tier is not None and row.get("gains") != tier:
+                return "matched"
+        return "adaptive"
     return controller
+
+
+def stepping_text(name, row=None):
+    """'Fixed-step dt=0.000977' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
+    if name == "fixed":
+        return "Fixed-step" if row is None else "Fixed-step dt={0:.3g}".format(number(row["dt"]))
+    if name == "adaptive":
+        return "Adaptive steps"
+    return "Adaptive steps ({0})".format("Gustafsson" if name == "gustafsson" else name)
+
+
+def package_name(package):
+    return PACKAGE_NAMES.get(package, package)
+
+
+def problem_name(problem):
+    """The catalogue's display name of a problem."""
+    from problems import load_problems
+    for entry in load_problems():
+        if entry["problem"] == problem:
+            return entry["display"]
+    return problem
+
+
+def algorithm_name(algorithm):
+    """The catalogue's display name of an algorithm."""
+    from algorithms import algorithm_facts
+    try:
+        return algorithm_facts(algorithm)["display"]
+    except SystemExit:
+        return algorithm
+
+
+def key_label(key):
+    """'RTX4070-Super (Win)' from 'windows_RTX-4070-SUPER'."""
+    system, _, gpu = key.partition("_")
+    parts = gpu.split("-")
+    name = "".join(parts[:2]) + "".join("-" + p.capitalize() for p in parts[2:])
+    return "{0} ({1})".format(name, {"windows": "Win", "linux": "Linux"}.get(system, system))
 
 
 def colour(package):
     return COLOURS.get(package, "gray")
 
 
-def marker(controller):
-    return MARKERS.get(controller, "x")
+def marker(name, card=0):
+    """The marker of a stepping on a card; cards past the sets share the last set."""
+    markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
+    return markers[STEPPINGS.index(name)] if name in STEPPINGS else "x"
 
 
 def line(transfers):

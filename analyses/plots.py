@@ -1,9 +1,8 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels), with the points of a problem in <kind>/<problem>.csv. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). A package is a colour, a controller a marker, the transfers a line style (none solid, both dashed); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) along the axis; fewer than two points is no curve. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a stepping a marker, the transfers a line style (none solid, both dashed); cubie's default controller is not drawn; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, stepping, transfers) along the axis; fewer than two points is no curve. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
-import json
 import math
 import os
 import sys
@@ -23,33 +22,37 @@ GPU_PACKAGES = tuple(p for p in store_mod.PACKAGES if p != "julia_cpu")
 STEPPING_FIELDS = ("dt", "atol", "rtol", "newton_atol", "newton_rtol")
 # The fields a series' rows must agree on, but for the ones its axis varies; package, controller and gains name the series.
 CONTEXT_FIELDS = tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package", "controller", "gains"))
+ALL_CARDS = "all_cards"
+LIMITED_DIR = "limited_data"
+LIMITED_POINTS = 3
+GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "states")
+ERROR_LABEL = "RMS error (final state)"
 
 
 class Kind:
-    """One figure kind: its x and y columns, the spec fields the x axis varies, the packages shown, whether transfers splits the series, the rows it takes (timed, with an error, or with a build), and the axis labels."""
+    """One figure kind: its x and y columns, the spec fields the x axis varies, the packages shown, whether transfers splits the series, the rows it takes (timed, with an error, or with a build), the axis labels and whether the title names the state count."""
 
-    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, subtitle,
+    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, states_in_title=True,
                  invert_x=False):
         self.name, self.x, self.y, self.varying = name, x, y, varying
         self.packages, self.by_transfers, self.needs = packages, by_transfers, needs
-        self.x_label, self.y_label, self.subtitle, self.invert_x = x_label, y_label, subtitle, invert_x
+        self.x_label, self.y_label = x_label, y_label
+        self.states_in_title, self.invert_x = states_in_title, invert_x
 
 
 KINDS = (
-    Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed",
-         "n (trajectories)", "time (ms)", ("system_params", "dt", "atol")),
+    Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed", "Trajectories", "Time (s)"),
     Kind("error_vs_runtime", "min_ms", "error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed error",
-         "time (ms)", "error (RMS of the final state against the golden)", ("n", "system_params")),
+         "Time (s)", ERROR_LABEL),
     Kind("error_vs_dt", "dt", "error", ("dt",), store_mod.PACKAGES, False, "fixed error",
-         "dt", "error (RMS of the final state against the golden)", ("system_params",), invert_x=True),
+         "dt", ERROR_LABEL, invert_x=True),
     Kind("error_vs_tol", "atol", "error", STEPPING_FIELDS, store_mod.PACKAGES, False, "adaptive error",
-         "tolerance (atol = rtol)", "error (RMS of the final state against the golden)", ("system_params",),
-         invert_x=True),
+         "Tolerance", ERROR_LABEL, invert_x=True),
     Kind("states", "states", "min_ms", ("system_params",), GPU_PACKAGES, True, "timed",
-         "states", "time (ms)", ("n", "atol")),
+         "States", "Time (s)", states_in_title=False),
 )
 BUILDS = Kind("builds", "states", "build_s", ("system_params",), GPU_PACKAGES, False, "build",
-              "states", "cold build (s)", ("n", "atol"))
+              "States", "Compile time (s)", states_in_title=False)
 KIND_NAMES = tuple(k.name for k in KINDS)
 CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfers", "x", "y",
                "min_ms", "build_s", "error", "errored_pct", "key") + \
@@ -60,11 +63,11 @@ CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfer
 # ------------------------------------------------------------------ rows
 
 def with_errors(rows, errs):
-    """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `controller_label`."""
+    """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `stepping`."""
     cache = {}
     out = []
     for row in shared.usable(rows):
-        out.append(dict(row, error=errs.error(row), controller_label=shared.controller_label(row, cache)))
+        out.append(dict(row, error=errs.error(row), stepping=shared.stepping(row, cache)))
     return out
 
 
@@ -84,8 +87,8 @@ def _artifacts(row):
 
 
 def takes(kind, row):
-    """True when a row belongs on a kind: its package is shown, and it has what the axes need."""
-    if row["package"] not in kind.packages:
+    """True when a row belongs on a kind: its package is shown, it is not cubie's default controller, and it has what the axes need."""
+    if row["package"] not in kind.packages or row["stepping"] is None:
         return False
     if kind.needs == "fixed error" and row["controller"] != "fixed":
         return False
@@ -100,12 +103,11 @@ def takes(kind, row):
     return True
 
 
-def x_of(kind, row):
-    return float(row[kind.x]) if kind.x != "min_ms" else shared.number(row["min_ms"])
-
-
-def y_of(kind, row):
-    return shared.number(row.get(kind.y))
+def value_of(column, row):
+    """A row's value on an axis column; min_ms in seconds."""
+    if column == "min_ms":
+        return shared.number(row["min_ms"]) / 1000.0
+    return float(row[column]) if column in ("n", "states") else shared.number(row.get(column))
 
 
 def loose_first(row):
@@ -115,35 +117,24 @@ def loose_first(row):
 
 
 def series_key(kind, row):
-    return (row["package"], row["controller_label"], row["transfers"] if kind.by_transfers else "")
+    return (row["key"], row["package"], row["stepping"], row["transfers"] if kind.by_transfers else "")
 
 
 def context(kind, row):
     return tuple(shared.cell(row[f]) for f in CONTEXT_FIELDS if f not in kind.varying)
 
 
-def field_label(field, value):
-    """'dt=2^-10', 'tol=1e-05', 'states=32' or 'field=value' from a field and its cell text."""
-    if field == "dt":
-        return "dt=" + shared.dyadic(float(value))
-    if field == "atol":
-        return "tol={0:g}".format(float(value))
-    if field == "system_params":
-        return " ".join("{0}={1}".format(k, v) for k, v in json.loads(value or "{}").items()) or "system_params={}"
-    return "{0}={1}".format(field, value)
-
-
 def series_of(kind, rows):
-    """{(package, controller, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values; fewer than two is no curve."""
+    """{(key, package, stepping, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values; fewer than two is no curve."""
     grouped = {}
     for row in rows:
         if not takes(kind, row):
             continue
-        x = x_of(kind, row)
+        x = value_of(kind.x, row)
         if not math.isfinite(x):
             continue
         grouped.setdefault(series_key(kind, row), {}).setdefault(context(kind, row), []).append(
-            (x, y_of(kind, row), row))
+            (x, value_of(kind.y, row), row))
     out = {}
     for key, contexts in grouped.items():
         points = max(contexts.values(), key=lambda pts: len({x for x, _, _ in pts}))
@@ -154,39 +145,29 @@ def series_of(kind, rows):
         else:
             points.sort(key=lambda p: p[0])
         out[key] = points
-    return dict(sorted(out.items(), key=lambda item: (
-        store_mod.PACKAGES.index(item[0][0]), controller_order(item[0][1]), item[0][2])))
+    return ordered(out)
 
 
-def controller_order(controller):
-    """Fixed, default, pi, pi matched, gustafsson, then any other by name."""
-    known = list(shared.MARKERS)
-    return (known.index(controller), "") if controller in known else (len(known), controller)
+def ordered(series):
+    return dict(sorted(series.items(), key=lambda item: (
+        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.STEPPINGS.index(item[0][2]), item[0][3])))
 
 
-def series_label(key):
-    return " ".join(p for p in key if p)
+def merged(figures):
+    """One series dict from several series dicts of the same figure."""
+    out = {}
+    for series in figures:
+        out.update(series)
+    return ordered(out)
 
 
-def shared_context(kind, series):
-    """'n=131072 states=32 dt=2^-10 tol=1e-05': the kind's subtitle fields every point of a figure agrees on."""
-    parts = []
-    for field in kind.subtitle:
-        values = {shared.cell(p[2][field]) for points in series.values() for p in points}
-        values.discard("nan")
-        if len(values) == 1:
-            value = values.pop()
-            if field == "system_params" and value == "{}":
-                continue
-            parts.append(field_label(field, value))
-    return " ".join(parts)
-
-
-# --------------------------------------------------------------- figures
-
-LIMITED_DIR = "limited_data"
-LIMITED_POINTS = 3
-GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "states")
+def series_label(kind, key, points):
+    """'Cubie (MLIR), Fixed-step dt=0.000977, none' from a series key and its first row; no dt on the dt axis."""
+    _, package, stepping, transfers = key
+    parts = [shared.package_name(package), shared.stepping_text(stepping, None if kind.x == "dt" else points[0][2])]
+    if transfers:
+        parts.append(transfers)
+    return ", ".join(parts)
 
 
 def family(package):
@@ -198,17 +179,34 @@ def limited(series, builds=None):
     """True when a figure compares nothing: one package family, or no series past LIMITED_POINTS points."""
     everything = dict(series)
     everything.update(builds or {})
-    if len({family(key[0]) for key in everything}) <= 1:
+    if len({family(key[1]) for key in everything}) <= 1:
         return True
     return max((len(points) for points in everything.values()), default=0) <= LIMITED_POINTS
 
 
-def draw(panel, kind, series, legend=True):
+# --------------------------------------------------------------- figures
+
+def cards_of(series):
+    return sorted({key[0] for key in series})
+
+
+def draw(panel, kind, series, cards):
+    """Plot every series on a panel; returns [(label, handle)] with a heading per key, for a legend."""
+    entries = []
+    by_card = {}
     for key, points in series.items():
-        package, controller, transfers = key
-        panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(key),
-                   color=shared.colour(package), marker=shared.marker(controller),
-                   linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6)
+        by_card.setdefault(key[0], []).append((key, points))
+    for card in cards:
+        if card not in by_card:
+            continue
+        entries.append((shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
+        for key, points in by_card[card]:
+            _, package, stepping, transfers = key
+            line = panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(kind, key, points),
+                              color=shared.colour(package), marker=shared.marker(stepping, cards.index(card)),
+                              linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
+                              markeredgecolor="black", markeredgewidth=0.5)[0]
+            entries.append((series_label(kind, key, points), line))
     panel.set_xscale("log")
     panel.set_yscale("log")
     if kind.invert_x:
@@ -216,28 +214,34 @@ def draw(panel, kind, series, legend=True):
     panel.set_xlabel(kind.x_label)
     panel.set_ylabel(kind.y_label)
     panel.grid(True, which="both", alpha=0.3)
-    if series and legend:
-        panel.legend(fontsize=7)
+    return entries
 
 
-def title_of(first, algorithm, key, contexts):
-    text = "{0} {1} | {2} | {3}".format(first["problem"], first["precision"], algorithm, key)
-    shown = " | ".join(c for c in contexts if c)
-    return text + ("\n" + shown if shown else "")
+def legend(target, entries, **kwargs):
+    if entries:
+        target.legend([h for _, h in entries], [text for text, _ in entries], fontsize=7, **kwargs)
 
 
-def render(path, kind, series, algorithm, key, builds=None):
-    """One figure of a kind, with the builds panel beside it on the states kind."""
+def title_of(kind, first, algorithm):
+    """'Lorenz 96 problem (32 states): 1s integration time, Vern7 algorithm'."""
+    problem = shared.problem_name(first["problem"]) + " problem"
+    if kind.states_in_title:
+        problem += " ({0} states)".format(first["states"])
+    return "{0}: {1:g}s integration time, {2} algorithm".format(
+        problem, shared.number(first["duration"]), shared.algorithm_name(algorithm))
+
+
+def render(path, kind, series, algorithm, builds=None):
+    """One figure of a kind, with the compile panel beside it on the states kind."""
     plt = shared.pyplot()
     panels = 2 if builds is not None else 1
     fig, axes = plt.subplots(1, panels, figsize=(7.5 * panels, 5.0), squeeze=False)
-    draw(axes[0][0], kind, series)
-    contexts = [shared_context(kind, series)]
+    cards = cards_of(merged([series, builds or {}]))
+    legend(axes[0][0], draw(axes[0][0], kind, series, cards))
     if builds is not None:
-        draw(axes[0][1], BUILDS, builds)
-        contexts.append(shared_context(BUILDS, builds))
+        legend(axes[0][1], draw(axes[0][1], BUILDS, builds, cards))
     first = next(iter((series or builds).values()))[0][2]
-    fig.suptitle(title_of(first, algorithm, key, dict.fromkeys(contexts)), fontsize=10)
+    fig.suptitle(title_of(kind, first, algorithm), fontsize=11)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -251,19 +255,19 @@ def render_grid(path, kind, panels, title):
     columns = min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
     fig, axes = plt.subplots(rows, columns, figsize=(5.0 * columns, 3.8 * rows), squeeze=False)
-    handles = {}
+    cards = cards_of(merged(series for _, series in panels))
+    entries = {}
     for index, (name, series) in enumerate(panels):
         panel = axes[index // columns][index % columns]
-        draw(panel, kind, series, legend=False)
+        for label, handle in draw(panel, kind, series, cards):
+            entries.setdefault(label, handle)
         panel.set_title(name, fontsize=9)
-        for handle, label in zip(*panel.get_legend_handles_labels()):
-            handles.setdefault(label, handle)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
-    fig.suptitle(title, fontsize=11)
-    fig.legend(handles.values(), handles.keys(), fontsize=7, loc="lower center",
-               ncol=min(6, max(1, len(handles))), bbox_to_anchor=(0.5, 0.0))
-    fig.tight_layout(rect=(0.0, 0.03 + 0.02 * math.ceil(len(handles) / 6), 1.0, 0.97))
+    fig.suptitle(title, fontsize=12)
+    legend(fig, list(entries.items()), loc="lower center", ncol=min(5, max(1, len(entries))),
+           bbox_to_anchor=(0.5, 0.0))
+    fig.tight_layout(rect=(0.0, 0.03 + 0.02 * math.ceil(len(entries) / 5), 1.0, 0.97))
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
@@ -273,54 +277,80 @@ def csv_rows(kind, algorithm, series):
     out = []
     for key, points in series.items():
         for x, y, row in points:
-            out.append(dict(row, kind=kind.name, algorithm=algorithm, series=series_label(key), x=x, y=y,
-                            controller=key[1], transfers=key[2] or row["transfers"]))
+            out.append(dict(row, kind=kind.name, algorithm=algorithm, series=series_label(kind, key, points), x=x, y=y,
+                            controller=key[2], transfers=key[3] or row["transfers"]))
     return out
 
 
-def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
-    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/; returns the paths written. A figure comparing nothing goes under <kind>/limited_data/; the grid kinds also get <problem>_algorithms.png and <algorithm>_problems.png."""
-    rows = with_errors(shared.select_rows(store, set_names, where), errors_mod.Errors(store))
-    by_problem = {}
-    for row in rows:
-        by_problem.setdefault((row["key"], row["problem"]), {}).setdefault(row["algorithm"], []).append(row)
+def kind_named(name):
+    return next(k for k in KINDS if k.name == name)
+
+
+def write_tree(out, card, figures, tables):
+    """The figures, CSVs and grids of one output tree <out>/<card>/ from {(problem, algorithm, kind): (series, builds)} and {(kind, problem): rows}; returns the paths written."""
     written = []
     grids = {}
-    for (key, problem), algorithms in sorted(by_problem.items()):
-        tables = {kind.name: [] for kind in KINDS}
-        for algorithm, members in sorted(algorithms.items()):
-            per_trial = one_per_trial(members)
-            for kind in KINDS:
-                series = series_of(kind, members if kind.by_transfers else per_trial)
-                builds = series_of(BUILDS, per_trial) if kind.name == "states" else None
-                tables[kind.name].extend(csv_rows(kind, algorithm, series))
-                if builds:
-                    tables[kind.name].extend(csv_rows(BUILDS, algorithm, builds))
-                if series and kind.name in GRID_KINDS:
-                    grids.setdefault((key, kind.name), {})[(problem, algorithm)] = series
-                if not series and not builds:
-                    continue
-                directory = os.path.join(out, key, kind.name)
-                if limited(series, builds):
-                    directory = os.path.join(directory, LIMITED_DIR)
-                os.makedirs(directory, exist_ok=True)
-                path = os.path.join(directory, "{0}_{1}.png".format(problem, shared.slug(algorithm)))
-                written.append(render(path, kind, series, algorithm, key, builds))
-        for name, table in tables.items():
-            if table:
-                os.makedirs(os.path.join(out, key, name), exist_ok=True)
-                written.append(shared.write_csv(os.path.join(out, key, name, problem + ".csv"), CSV_COLUMNS, table))
-    for (key, name), figures in sorted(grids.items()):
-        kind = next(k for k in KINDS if k.name == name)
-        directory = os.path.join(out, key, name)
-        for problem in sorted({p for p, _ in figures}):
-            panels = [(a, series) for (p, a), series in sorted(figures.items()) if p == problem]
+    for (problem, algorithm, name), (series, builds) in sorted(figures.items()):
+        if series and name in GRID_KINDS:
+            grids.setdefault(name, {})[(problem, algorithm)] = series
+        directory = os.path.join(out, card, name)
+        if limited(series, builds):
+            directory = os.path.join(directory, LIMITED_DIR)
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, "{0}_{1}.png".format(problem, shared.slug(algorithm)))
+        written.append(render(path, kind_named(name), series, algorithm, builds))
+    for (name, problem), table in sorted(tables.items()):
+        os.makedirs(os.path.join(out, card, name), exist_ok=True)
+        written.append(shared.write_csv(os.path.join(out, card, name, problem + ".csv"), CSV_COLUMNS, table))
+    for name, panels_by in sorted(grids.items()):
+        kind = kind_named(name)
+        directory = os.path.join(out, card, name)
+        for problem in sorted({p for p, _ in panels_by}):
+            panels = [(shared.algorithm_name(a), s) for (p, a), s in sorted(panels_by.items()) if p == problem]
             written.append(render_grid(os.path.join(directory, problem + "_algorithms.png"), kind, panels,
-                                       "{0} | {1} | {2}".format(problem, name, key)))
-        for algorithm in sorted({a for _, a in figures}):
-            panels = [(p, series) for (p, a), series in sorted(figures.items()) if a == algorithm]
+                                       "{0} problem: {1}".format(shared.problem_name(problem), kind.y_label)))
+        for algorithm in sorted({a for _, a in panels_by}):
+            panels = [(shared.problem_name(p), s) for (p, a), s in sorted(panels_by.items()) if a == algorithm]
             written.append(render_grid(os.path.join(directory, shared.slug(algorithm) + "_problems.png"), kind,
-                                       panels, "{0} | {1} | {2}".format(algorithm, name, key)))
+                                       panels, "{0} algorithm: {1}".format(shared.algorithm_name(algorithm),
+                                                                          kind.y_label)))
+    return written
+
+
+def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
+    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/ and, with several keys, <out>/all_cards/<kind>/; returns the paths written."""
+    rows = with_errors(shared.select_rows(store, set_names, where), errors_mod.Errors(store))
+    by_figure = {}
+    for row in rows:
+        by_figure.setdefault((row["key"], row["problem"], row["algorithm"]), []).append(row)
+    figures, tables = {}, {}
+    for (key, problem, algorithm), members in sorted(by_figure.items()):
+        per_trial = one_per_trial(members)
+        for kind in KINDS:
+            series = series_of(kind, members if kind.by_transfers else per_trial)
+            builds = series_of(BUILDS, per_trial) if kind.name == "states" else None
+            table = csv_rows(kind, algorithm, series) + (csv_rows(BUILDS, algorithm, builds) if builds else [])
+            if table:
+                tables.setdefault((key, kind.name, problem), []).extend(table)
+            if series or builds:
+                figures[(key, problem, algorithm, kind.name)] = (series, builds)
+    written = []
+    cards = sorted({key for key, _, _, _ in figures} | {key for key, _, _ in tables})
+    for card in cards:
+        written.extend(write_tree(
+            out, card, {(p, a, k): v for (key, p, a, k), v in figures.items() if key == card},
+            {(k, p): t for (key, k, p), t in tables.items() if key == card}))
+    if len(cards) > 1:
+        everything, all_tables = {}, {}
+        for (key, problem, algorithm, name), (series, builds) in figures.items():
+            held = everything.setdefault((problem, algorithm, name), [[], []])
+            held[0].append(series)
+            if builds:
+                held[1].append(builds)
+        for (key, name, problem), table in tables.items():
+            all_tables.setdefault((name, problem), []).extend(table)
+        written.extend(write_tree(out, ALL_CARDS, {
+            k: (merged(s), merged(b) if b else None) for k, (s, b) in everything.items()}, all_tables))
     return written
 
 
