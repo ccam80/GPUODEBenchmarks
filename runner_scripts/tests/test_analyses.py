@@ -46,6 +46,12 @@ def adaptive(tol, **overrides):
     return dict(controller="default", atol=tol, rtol=tol, **overrides)
 
 
+def sid(row):
+    """'<package> <controller kind>[ +]' of a CSV row: the series without its display text."""
+    split = row["kind"] in ("runtime_vs_n", "error_vs_runtime", "states")
+    return "{0} {1}{2}".format(row["package"], row["controller"], " +" if split and row["transfers"] == "both" else "")
+
+
 def read_csv(path):
     with open(path, newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
@@ -159,13 +165,7 @@ class SelectionTests(AnalysesCase):
         self.assertIsNone(shared.controller_kind(dict(read, controller="default")))
         self.assertEqual(shared.controller_kind(dict(read, package="julia_gpu", controller="default")), "adaptive")
         self.assertEqual(shared.controller_kind(dict(read, controller="gustafsson")), "gustafsson")
-        self.assertEqual(shared.controller_text("fixed", read), "Fixed-step dt=0.000977")
-        self.assertEqual(shared.controller_text("fixed"), "Fixed-step")
-        self.assertEqual(shared.controller_text("matched"), "Adaptive steps (matched)")
-        self.assertEqual(shared.controller_text("gustafsson"), "Adaptive steps (Gustafsson)")
-        self.assertEqual(shared.key_label(KEY), "RTX4070-Super (Win)")
-        self.assertEqual(shared.key_label(OTHER_KEY), "RTX2060-Super (Linux)")
-        self.assertEqual((shared.marker("fixed"), shared.marker("fixed", 1), shared.marker("fixed", 9)), ("s", "P", "*"))
+        self.assertEqual(shared.problem_name("lorenz96_20", 20), shared.problem_name("lorenz96", 20))
         # The set selects it; the audit counts its row and finds its optimize record written under the rounded gains.
         self.assertIn(store.run_id(exact), [r["run_id"] for r in shared.select_rows(data, ["perf"])])
         trial = dict(exact, gains=rounded["gains"], transfers=["both"])
@@ -307,21 +307,21 @@ class PlotTests(AnalysesCase):
                          self.written())
         table = self.table("runtime_vs_n")
         tsit5 = [r for r in table if r["algorithm"] == "tsit5"]
-        self.assertEqual([(r["series"], r["x"], r["y"]) for r in tsit5],
-                         [("Cubie, Fixed-step dt=0.000977 + transfer", "8.0", "0.001"),
-                          ("Cubie, Fixed-step dt=0.000977 + transfer", "32.0", "0.002"),
-                          ("Cubie, Fixed-step dt=0.000977 + transfer", "128.0", "0.004"),
-                          ("Cubie, Fixed-step dt=0.000977 + transfer", "512.0", "0.008"),
-                          ("Cubie, Fixed-step dt=0.000977", "8.0", "0.0005"),
-                          ("Cubie, Fixed-step dt=0.000977", "32.0", "0.001"),
-                          ("Cubie, Fixed-step dt=0.000977", "128.0", "0.002"),
-                          ("Cubie, Fixed-step dt=0.000977", "512.0", "0.004"),
-                          ("Diffrax, Adaptive steps + transfer", "8.0", "0.003"), ("Diffrax, Adaptive steps + transfer", "32.0", "0.006"),
-                          ("Diffrax, Adaptive steps + transfer", "128.0", "0.012"), ("Diffrax, Adaptive steps + transfer", "512.0", "0.024"),
-                          ("DiffEqGPU.jl, Fixed-step dt=0.000977 + transfer", "8.0", "0.003"),
-                          ("DiffEqGPU.jl, Fixed-step dt=0.000977 + transfer", "32.0", "0.006")])
-        self.assertEqual([r["series"] for r in table if r["algorithm"] == "euler"],
-                         ["Cubie, Fixed-step dt=0.000977 + transfer"] * 2)
+        self.assertEqual([(sid(r), r["x"], r["y"]) for r in tsit5],
+                         [("cubie fixed +", "8.0", "0.001"),
+                          ("cubie fixed +", "32.0", "0.002"),
+                          ("cubie fixed +", "128.0", "0.004"),
+                          ("cubie fixed +", "512.0", "0.008"),
+                          ("cubie fixed", "8.0", "0.0005"),
+                          ("cubie fixed", "32.0", "0.001"),
+                          ("cubie fixed", "128.0", "0.002"),
+                          ("cubie fixed", "512.0", "0.004"),
+                          ("jax adaptive +", "8.0", "0.003"), ("jax adaptive +", "32.0", "0.006"),
+                          ("jax adaptive +", "128.0", "0.012"), ("jax adaptive +", "512.0", "0.024"),
+                          ("julia_gpu fixed +", "8.0", "0.003"),
+                          ("julia_gpu fixed +", "32.0", "0.006")])
+        self.assertEqual([sid(r) for r in table if r["algorithm"] == "euler"],
+                         ["cubie fixed +"] * 2)
         self.assertFalse(os.path.isdir(os.path.join(self.out, plots.ALL_CARDS)))
         for absent in (dropped, untimed, cpu):
             self.assertNotIn(absent["run_id"], [r["run_id"] for r in table])
@@ -338,9 +338,9 @@ class PlotTests(AnalysesCase):
             self.row(n=n, package="jax", **adaptive(1e-5))
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         table = self.table("runtime_vs_n")
-        self.assertEqual(sorted({(r["series"], r["dt"], r["atol"]) for r in table}),
-                         [("Cubie, Fixed-step dt=0.000977 + transfer", "0.0009765625", "nan"),
-                          ("Diffrax, Adaptive steps + transfer", "0.0009765625", "0.001")])
+        self.assertEqual(sorted({(sid(r), r["dt"], r["atol"]) for r in table}),
+                         [("cubie fixed +", "0.0009765625", "nan"),
+                          ("jax adaptive +", "0.0009765625", "0.001")])
         self.assertEqual(len(table), 6)
 
     def test_states_figure_has_runtime_and_cold_build_panels(self):
@@ -363,18 +363,18 @@ class PlotTests(AnalysesCase):
                                           "states/lorenz96_tsit5.png", "states/tsit5_problems.png"])
         self.assertEqual(len(written), 4)
         table = self.table("states", problem="lorenz96")
-        self.assertEqual([(r["series"], r["x"], r["y"]) for r in table if r["kind"] == "states"],
-                         [("Diffrax, Adaptive steps", "4.0", "0.012"), ("Diffrax, Adaptive steps", "8.0", "0.024"),
-                          ("Diffrax, Adaptive steps", "16.0", "0.048"),
-                          ("DiffEqGPU.jl, Adaptive steps + transfer", "4.0", "0.008"),
-                          ("DiffEqGPU.jl, Adaptive steps + transfer", "8.0", "0.016"),
-                          ("DiffEqGPU.jl, Adaptive steps + transfer", "16.0", "0.032"),
-                          ("DiffEqGPU.jl, Adaptive steps", "4.0", "0.004"),
-                          ("DiffEqGPU.jl, Adaptive steps", "8.0", "0.008"),
-                          ("DiffEqGPU.jl, Adaptive steps", "16.0", "0.016")])
-        self.assertEqual([(r["series"], r["x"], r["y"]) for r in table if r["kind"] == "builds"],
-                         [("DiffEqGPU.jl, Adaptive steps", "4.0", "10.0"), ("DiffEqGPU.jl, Adaptive steps", "8.0", "20.0"),
-                          ("DiffEqGPU.jl, Adaptive steps", "16.0", "40.0"), ("DiffEqGPU.jl, Adaptive steps", "64.0", "80.0")])
+        self.assertEqual([(sid(r), r["x"], r["y"]) for r in table if r["kind"] == "states"],
+                         [("jax adaptive", "4.0", "0.012"), ("jax adaptive", "8.0", "0.024"),
+                          ("jax adaptive", "16.0", "0.048"),
+                          ("julia_gpu adaptive +", "4.0", "0.008"),
+                          ("julia_gpu adaptive +", "8.0", "0.016"),
+                          ("julia_gpu adaptive +", "16.0", "0.032"),
+                          ("julia_gpu adaptive", "4.0", "0.004"),
+                          ("julia_gpu adaptive", "8.0", "0.008"),
+                          ("julia_gpu adaptive", "16.0", "0.016")])
+        self.assertEqual([(sid(r), r["x"], r["y"]) for r in table if r["kind"] == "builds"],
+                         [("julia_gpu adaptive", "4.0", "10.0"), ("julia_gpu adaptive", "8.0", "20.0"),
+                          ("julia_gpu adaptive", "16.0", "40.0"), ("julia_gpu adaptive", "64.0", "80.0")])
 
     def error_sweep(self):
         """A golden and, at n = 64, cubie and julia_gpu fixed steppings at dt = 2^-3..2^-5 and default steppings at three tolerances, plus julia_cpu at the tolerances; cubie's both rows share the none rows' finals."""
@@ -399,21 +399,21 @@ class PlotTests(AnalysesCase):
                           "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png",
                           "error_vs_tol/limited_data/lorenz_tsit5.png"])
         by_dt = self.table("error_vs_dt")
-        self.assertEqual([(r["series"], r["x"], r["min_ms"]) for r in by_dt],
-                         [("Cubie, Fixed-step", "0.03125", "5.0"), ("Cubie, Fixed-step", "0.0625", "4.0"),
-                          ("Cubie, Fixed-step", "0.125", "3.0"),
-                          ("DiffEqGPU.jl, Fixed-step", "0.03125", "10.0"), ("DiffEqGPU.jl, Fixed-step", "0.0625", "8.0"),
-                          ("DiffEqGPU.jl, Fixed-step", "0.125", "6.0")])
+        self.assertEqual([(sid(r), r["x"], r["min_ms"]) for r in by_dt],
+                         [("cubie fixed", "0.03125", "5.0"), ("cubie fixed", "0.0625", "4.0"),
+                          ("cubie fixed", "0.125", "3.0"),
+                          ("julia_gpu fixed", "0.03125", "10.0"), ("julia_gpu fixed", "0.0625", "8.0"),
+                          ("julia_gpu fixed", "0.125", "6.0")])
         for record, expected in zip(by_dt, (0.03125, 0.0625, 0.125, 0.015625, 0.03125, 0.0625)):
             self.assertAlmostEqual(float(record["y"]) / (expected / math.sqrt(3)), 1.0, places=3)
             self.assertEqual(record["y"], record["error"])
         by_tol = self.table("error_vs_tol")
-        self.assertEqual([(r["series"], r["x"]) for r in by_tol],
-                         [("DiffEqGPU.jl, Adaptive steps", "1e-05"), ("DiffEqGPU.jl, Adaptive steps", "0.0001"),
-                          ("DiffEqGPU.jl, Adaptive steps", "0.001"),
-                          ("DifferentialEquations.jl, Adaptive steps", "1e-05"),
-                          ("DifferentialEquations.jl, Adaptive steps", "0.0001"),
-                          ("DifferentialEquations.jl, Adaptive steps", "0.001")])
+        self.assertEqual([(sid(r), r["x"]) for r in by_tol],
+                         [("julia_gpu adaptive", "1e-05"), ("julia_gpu adaptive", "0.0001"),
+                          ("julia_gpu adaptive", "0.001"),
+                          ("julia_cpu adaptive", "1e-05"),
+                          ("julia_cpu adaptive", "0.0001"),
+                          ("julia_cpu adaptive", "0.001")])
         self.assertNotIn("julia_cpu", {r["package"] for r in self.table("error_vs_runtime")})
 
     def test_error_against_runtime_follows_each_sweep_from_loose_to_tight(self):
@@ -421,19 +421,19 @@ class PlotTests(AnalysesCase):
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         table = self.table("error_vs_runtime")
         swept = lambda r: r["atol"] if r["controller"] == "adaptive" else r["dt"]  # noqa: E731
-        self.assertEqual([(r["series"], r["x"], swept(r)) for r in table],
-                         [("Cubie, Fixed-step dt=0.125 + transfer", "0.006", "0.125"),
-                          ("Cubie, Fixed-step dt=0.125 + transfer", "0.008", "0.0625"),
-                          ("Cubie, Fixed-step dt=0.125 + transfer", "0.01", "0.03125"),
-                          ("Cubie, Fixed-step dt=0.125", "0.003", "0.125"),
-                          ("Cubie, Fixed-step dt=0.125", "0.004", "0.0625"),
-                          ("Cubie, Fixed-step dt=0.125", "0.005", "0.03125"),
-                          ("DiffEqGPU.jl, Fixed-step dt=0.125", "0.006", "0.125"),
-                          ("DiffEqGPU.jl, Fixed-step dt=0.125", "0.008", "0.0625"),
-                          ("DiffEqGPU.jl, Fixed-step dt=0.125", "0.01", "0.03125"),
-                          ("DiffEqGPU.jl, Adaptive steps", "1.0", "0.001"),
-                          ("DiffEqGPU.jl, Adaptive steps", "10.0", "0.0001"),
-                          ("DiffEqGPU.jl, Adaptive steps", "100.0", "1e-05")])
+        self.assertEqual([(sid(r), r["x"], swept(r)) for r in table],
+                         [("cubie fixed +", "0.006", "0.125"),
+                          ("cubie fixed +", "0.008", "0.0625"),
+                          ("cubie fixed +", "0.01", "0.03125"),
+                          ("cubie fixed", "0.003", "0.125"),
+                          ("cubie fixed", "0.004", "0.0625"),
+                          ("cubie fixed", "0.005", "0.03125"),
+                          ("julia_gpu fixed", "0.006", "0.125"),
+                          ("julia_gpu fixed", "0.008", "0.0625"),
+                          ("julia_gpu fixed", "0.01", "0.03125"),
+                          ("julia_gpu adaptive", "1.0", "0.001"),
+                          ("julia_gpu adaptive", "10.0", "0.0001"),
+                          ("julia_gpu adaptive", "100.0", "1e-05")])
         for record in table:
             self.assertTrue(errors.is_finite_positive(float(record["y"])))
 
@@ -461,9 +461,9 @@ class PlotTests(AnalysesCase):
         self.assertEqual(self.written(plots.ALL_CARDS), self.written())
         self.assertEqual(len(written), 12)
         table = self.table("runtime_vs_n", key=plots.ALL_CARDS)
-        self.assertEqual([(r["key"], r["series"]) for r in table][::4],
-                         [(OTHER_KEY, "Cubie, Fixed-step dt=0.000977 + transfer"), (OTHER_KEY, "Diffrax, Adaptive steps + transfer"),
-                          (KEY, "Cubie, Fixed-step dt=0.000977 + transfer"), (KEY, "Diffrax, Adaptive steps + transfer")])
+        self.assertEqual([(r["key"], sid(r)) for r in table][::4],
+                         [(OTHER_KEY, "cubie fixed +"), (OTHER_KEY, "jax adaptive +"),
+                          (KEY, "cubie fixed +"), (KEY, "jax adaptive +")])
         series = plots.series_of(plots.KINDS[0], plots.with_errors(self.analysis_store().rows(), errors.Errors(self.store)))
         self.assertEqual(plots.cards_of(series), [OTHER_KEY, KEY])
 

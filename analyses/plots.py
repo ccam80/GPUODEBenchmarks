@@ -30,29 +30,29 @@ ERROR_LABEL = "RMS error (final state)"
 
 
 class Kind:
-    """One figure kind: its x and y columns, the spec fields the x axis varies, the packages shown, whether transfers splits the series, the rows it takes (timed, with an error, or with a build), the axis labels and whether the title names the state count."""
+    """One figure kind: its x and y columns, the spec fields the x axis varies, the packages shown, whether transfers splits the series, the rows it takes (timed, with an error, or with a build), the axis labels and the name a grid title uses."""
 
-    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, states_in_title=True,
+    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, title,
                  invert_x=False):
         self.name, self.x, self.y, self.varying = name, x, y, varying
         self.packages, self.by_transfers, self.needs = packages, by_transfers, needs
-        self.x_label, self.y_label = x_label, y_label
-        self.states_in_title, self.invert_x = states_in_title, invert_x
+        self.x_label, self.y_label, self.title, self.invert_x = x_label, y_label, title, invert_x
 
 
 KINDS = (
-    Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed", "Trajectories", "Time (s)"),
+    Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed", "Trajectories", "Time (s)",
+         "Batch time"),
     Kind("error_vs_runtime", "min_ms", "error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed error",
-         "Time (s)", ERROR_LABEL),
+         "Time (s)", ERROR_LABEL, "Work-precision"),
     Kind("error_vs_dt", "dt", "error", ("dt",), store_mod.PACKAGES, False, "fixed error",
-         "dt", ERROR_LABEL, invert_x=True),
+         "dt", ERROR_LABEL, "Error against step size", invert_x=True),
     Kind("error_vs_tol", "atol", "error", STEPPING_FIELDS, store_mod.PACKAGES, False, "adaptive error",
-         "Tolerance", ERROR_LABEL, invert_x=True),
+         "Tolerance", ERROR_LABEL, "Error against tolerance", invert_x=True),
     Kind("states", "states", "min_ms", ("system_params",), GPU_PACKAGES, True, "timed",
-         "States", "Time (s)", states_in_title=False),
+         "States", "Time (s)", "State size"),
 )
 BUILDS = Kind("builds", "states", "build_s", ("system_params",), GPU_PACKAGES, False, "build",
-              "States", "Compile time (s)", states_in_title=False)
+              "States", "Compile time (s)", "State size")
 KIND_NAMES = tuple(k.name for k in KINDS)
 CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfers", "x", "y",
                "min_ms", "build_s", "error", "errored_pct", "key") + \
@@ -189,7 +189,7 @@ def cards_of(series):
 
 
 def draw(panel, kind, series, cards):
-    """Plot every series on a panel; returns [(label, handle)] with a heading per key, for a legend."""
+    """Plot every series on a panel; returns [(card, label, handle)] with a heading per card, for a legend."""
     entries = []
     by_card = {}
     for key, points in series.items():
@@ -197,14 +197,14 @@ def draw(panel, kind, series, cards):
     for card in cards:
         if card not in by_card:
             continue
-        entries.append((shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
+        entries.append((card, shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
         for key, points in by_card[card]:
             _, package, controller, transfers = key
             line = panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(kind, key, points),
                               color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
                               linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
                               markeredgecolor="black", markeredgewidth=0.5)[0]
-            entries.append((series_label(kind, key, points), line))
+            entries.append((card, series_label(kind, key, points), line))
     panel.set_xscale("log")
     panel.set_yscale("log")
     if kind.invert_x:
@@ -215,18 +215,31 @@ def draw(panel, kind, series, cards):
     return entries
 
 
-def legend(target, entries, **kwargs):
-    if entries:
-        target.legend([h for _, h in entries], [text for text, _ in entries], fontsize=7, **kwargs)
+def legend(target, entries, headings, **kwargs):
+    """A legend of the entries with the heading labels in bold."""
+    if not entries:
+        return
+    box = target.legend([h for _, _, h in entries], [text for _, text, _ in entries], fontsize=7, **kwargs)
+    for text in box.get_texts():
+        if text.get_text() in headings:
+            text.set_fontweight("bold")
 
 
-def title_of(kind, first, algorithm):
+def problem_title(series):
+    """'Lorenz 96 (32 states), 1s integration time' from the rows of a figure; a range when the state count varies."""
+    rows = [p[2] for points in series.values() for p in points]
+    states = sorted({r["states"] for r in rows})
+    text = "{0}".format(states[0]) if len(states) == 1 else "{0} to {1}".format(states[0], states[-1])
+    return "{0}, {1:g}s integration time".format(shared.problem_name(rows[0]["problem"], text),
+                                                  shared.number(rows[0]["duration"]))
+
+
+def title_of(series, algorithm):
     """'Lorenz 96 problem (32 states): 1s integration time, Vern7 algorithm'."""
-    problem = shared.problem_name(first["problem"]) + " problem"
-    if kind.states_in_title:
-        problem += " ({0} states)".format(first["states"])
-    return "{0}: {1:g}s integration time, {2} algorithm".format(
-        problem, shared.number(first["duration"]), shared.algorithm_name(algorithm))
+    problem, _, duration = problem_title(series).partition(", ")
+    return "{0} problem{1}: {2}, {3} algorithm".format(
+        problem.partition(" (")[0], " (" + problem.partition(" (")[2] if " (" in problem else "", duration,
+        shared.algorithm_name(algorithm))
 
 
 def render(path, kind, series, algorithm, builds=None):
@@ -235,11 +248,11 @@ def render(path, kind, series, algorithm, builds=None):
     panels = 2 if builds is not None else 1
     fig, axes = plt.subplots(1, panels, figsize=(7.5 * panels, 5.0), squeeze=False)
     cards = cards_of(merged([series, builds or {}]))
-    legend(axes[0][0], draw(axes[0][0], kind, series, cards))
+    headings = {shared.key_label(c) for c in cards}
+    legend(axes[0][0], draw(axes[0][0], kind, series, cards), headings)
     if builds is not None:
-        legend(axes[0][1], draw(axes[0][1], BUILDS, builds, cards))
-    first = next(iter((series or builds).values()))[0][2]
-    fig.suptitle(title_of(kind, first, algorithm), fontsize=11)
+        legend(axes[0][1], draw(axes[0][1], BUILDS, builds, cards), headings)
+    fig.suptitle(title_of(series or builds, algorithm), fontsize=11)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -252,20 +265,23 @@ def render_grid(path, kind, panels, title):
     count = len(panels)
     columns = min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
-    fig, axes = plt.subplots(rows, columns, figsize=(5.0 * columns, 3.8 * rows), squeeze=False)
+    width = 5.0 * columns
+    fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, 3.8 * rows), squeeze=False)
     cards = cards_of(merged(series for _, series in panels))
+    headings = {shared.key_label(c) for c in cards}
     entries = {}
     for index, (name, series) in enumerate(panels):
         panel = axes[index // columns][index % columns]
-        for label, handle in draw(panel, kind, series, cards):
-            entries.setdefault(label, handle)
+        for card, label, handle in draw(panel, kind, series, cards):
+            entries.setdefault((card, label), handle)
         panel.set_title(name, fontsize=9)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
     fig.suptitle(title, fontsize=12)
-    legend(fig, list(entries.items()), loc="lower center", ncol=min(5, max(1, len(entries))),
-           bbox_to_anchor=(0.5, 0.0))
-    fig.tight_layout(rect=(0.0, 0.03 + 0.02 * math.ceil(len(entries) / 5), 1.0, 0.97))
+    fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
+    listed = sorted(entries.items(), key=lambda item: (cards.index(item[0][0]), 0 if item[0][1] in headings else 1))
+    legend(fig, [(card, label, handle) for (card, label), handle in listed], headings, loc="center left",
+           bbox_to_anchor=(width / (width + 2.6), 0.5), ncol=1)
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
@@ -306,12 +322,13 @@ def write_tree(out, card, figures, tables):
         for problem in sorted({p for p, _ in panels_by}):
             panels = [(shared.algorithm_name(a), s) for (p, a), s in sorted(panels_by.items()) if p == problem]
             written.append(render_grid(os.path.join(directory, problem + "_algorithms.png"), kind, panels,
-                                       "{0} problem: {1}".format(shared.problem_name(problem), kind.y_label)))
+                                       "{0}: {1}, all algorithms".format(
+                                           problem_title(merged(s for _, s in panels)), kind.title)))
         for algorithm in sorted({a for _, a in panels_by}):
-            panels = [(shared.problem_name(p), s) for (p, a), s in sorted(panels_by.items()) if a == algorithm]
+            panels = [(problem_title(s), s) for (p, a), s in sorted(panels_by.items()) if a == algorithm]
             written.append(render_grid(os.path.join(directory, shared.slug(algorithm) + "_problems.png"), kind,
-                                       panels, "{0} algorithm: {1}".format(shared.algorithm_name(algorithm),
-                                                                          kind.y_label)))
+                                       panels, "{0} algorithm: {1}, all problems".format(
+                                           shared.algorithm_name(algorithm), kind.title)))
     return written
 
 

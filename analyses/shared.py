@@ -313,9 +313,11 @@ def controller_kind(row, cache=None):
 
 
 def controller_text(name, row=None):
-    """'Fixed-step dt=0.000977' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
+    """'1024 fixed steps' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
     if name == "fixed":
-        return "Fixed-step" if row is None else "Fixed-step dt={0:.3g}".format(number(row["dt"]))
+        if row is None:
+            return "Fixed-step"
+        return "{0:g} fixed steps".format(round(number(row["duration"]) / number(row["dt"])))
     if name == "adaptive":
         return "Adaptive steps"
     return "Adaptive steps ({0})".format("Gustafsson" if name == "gustafsson" else name)
@@ -325,13 +327,17 @@ def package_name(package):
     return PACKAGE_NAMES.get(package, package)
 
 
-def problem_name(problem):
-    """The catalogue's display name of a problem."""
+def problem_name(problem, states=None):
+    """The catalogue's display name of a problem without a trailing parenthesis, with ' (<states> states)' when given."""
+    import re as re_mod
     from problems import load_problems
+    name = problem
     for entry in load_problems():
         if entry["problem"] == problem:
-            return entry["display"]
-    return problem
+            name = re_mod.sub(r"\s*\([^)]*\)$", "", entry["display"])
+    if states is not None:
+        name += " ({0} states)".format(states)
+    return name
 
 
 def algorithm_name(algorithm):
