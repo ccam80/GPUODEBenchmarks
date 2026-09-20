@@ -1,15 +1,6 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-The base figures of every (key, problem, algorithm) the selected rows hold, under plots/<key>/<problem>/:
-
-  runtime_vs_n_<algorithm>.png      min_ms against n
-  error_vs_runtime_<algorithm>.png  error against the golden, against min_ms, along the dt and tolerance sweeps
-  error_vs_dt_<algorithm>.png       error against dt, the fixed steppings
-  error_vs_tol_<algorithm>.png      error against the tolerance, the adaptive steppings
-  states_<algorithm>.png            min_ms and the cold build time against the state count, side by side
-
-On every figure a package is a colour, a controller a marker (fixed, default, pi, pi matched, gustafsson) and the transfers a line style (both solid, none dashed). julia_cpu appears on the error-against-dt and error-against-tolerance figures only. A series holds the rows of one (package, controller, transfers) that differ only along the axis; when a series would hold several such curves (say two tolerances swept over n) each is its own labelled series, and a lone point is no curve. Rows with errored_pct above 10, untimed rows on the runtime axes and rows without a finite positive error on the error axes are left out. The points of each figure kind of a problem go to <kind>.csv beside the figures.
-With --set, the store is first checked against the sets' canonical trials under every key: what it lacks is printed and written to plots/<key>/incomplete.csv, and the exit code is 1 while anything is lacking.
+Per (key, problem, algorithm) under plots/<key>/<problem>/: runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels) figures, plus one <kind>.csv per problem. A package is a colour, a controller a marker, the transfers a line style; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) whose rows differ only along the axis; a lone point is dropped and a second curve under one series is labelled by what differs. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
 import json
