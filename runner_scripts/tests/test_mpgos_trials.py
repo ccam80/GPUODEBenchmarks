@@ -28,8 +28,7 @@ SCRIPT = os.path.join(os.path.dirname(HERE), "mpgos_trials.py")
 
 def cpp_trials(names, problems=None, n=(8, 32), root=None):
     """The cpp trials of the named sets at the given n list."""
-    specs = sets.expand(list(names), KEY, root or os.path.join(REPO_ROOT, "data"), packages=["cpp"],
-                        problems=problems, n=list(n))
+    specs = sets.expand(list(names), packages=["cpp"], problems=problems, n=list(n))
     return [t for t in trials.build_trials(specs) if t["package"] == "cpp"]
 
 

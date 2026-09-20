@@ -67,24 +67,3 @@ dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = {}
-
-[[stepping]]
-packages = ["cubie", "cubie_mlir"]
-algorithms = "all"
-controller = "matched"
-tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
-dt0 = {duration_times_2_pow = -10}
-dt_min = "none"
-dt_max = "none"
-newton = "tol"
-
-[[stepping]]
-packages = ["cubie", "cubie_mlir"]
-algorithms = "all"
-controller = "pi"
-tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
-dt0 = {duration_times_2_pow = -10}
-dt_min = "none"
-dt_max = "none"
-newton = "tol"
-gains = "dirk_defaults"

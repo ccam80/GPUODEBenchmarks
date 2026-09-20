@@ -38,14 +38,3 @@ dt_min = "none"
 dt_max = "none"
 newton = "tol"
 gains = {}
-
-[[stepping]]
-packages = ["cubie", "cubie_mlir"]
-algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
-controller = "pi"
-tol = [1.0e-5]
-dt0 = {duration_times_2_pow = -10}
-dt_min = "none"
-dt_max = "none"
-newton = "tol"
-gains = "dirk_defaults"

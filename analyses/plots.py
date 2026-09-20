@@ -1,6 +1,6 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a controller kind a marker (fixed, adaptive, matched, Gustafsson), the transfers a line style (solid, dashed with the transfer); cubie's default controller is not drawn; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
 import math
@@ -64,11 +64,7 @@ CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfer
 
 def with_errors(rows, errs):
     """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `controller_kind`."""
-    cache = {}
-    out = []
-    for row in shared.usable(rows):
-        out.append(dict(row, error=errs.error(row), controller_kind=shared.controller_kind(row, cache)))
-    return out
+    return [dict(row, error=errs.error(row), controller_kind=shared.controller_kind(row)) for row in shared.usable(rows)]
 
 
 def one_per_trial(rows):
@@ -87,8 +83,8 @@ def _artifacts(row):
 
 
 def takes(kind, row):
-    """True when a row belongs on a kind: its package is shown, it is not cubie's default controller, and it has what the axes need."""
-    if row["package"] not in kind.packages or row["controller_kind"] is None:
+    """True when a row belongs on a kind: its package is shown and it has what the axes need."""
+    if row["package"] not in kind.packages:
         return False
     if kind.needs == "fixed error" and row["controller"] != "fixed":
         return False

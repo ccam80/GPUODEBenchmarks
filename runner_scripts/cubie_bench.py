@@ -23,7 +23,7 @@ from cubie_systems import final_states, output_types, variable_order  # noqa: E4
 from problems import as_problem  # noqa: E402
 
 PRECISIONS = {"float32": np.float32, "float64": np.float64}
-# The controller names a trial may carry: cubie's own step controllers plus the two shared tokens.
+# The controller names a trial may carry: cubie's own step controllers plus the two shared tokens (default is cubie's own controller where Julia has none that maps).
 CONTROLLERS = ("fixed", "default", "i", "pi", "pid", "gustafsson")
 # The trial fields that reach the Solver only when finite.
 PINNED = ("dt", "dt_min", "dt_max", "newton_atol", "newton_rtol")

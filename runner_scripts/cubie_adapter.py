@@ -62,63 +62,14 @@ def build_system(problem, package, precision=None, states=None):
 
 # -------------------------------------------------------------- controllers
 
-def _resolved(value, order):
-    return float(value(order)) if callable(value) else value
+# The gains a mapped controller carries, rounded so a set declares one spelling whatever Float64 residue the arithmetic leaves.
+GAIN_DIGITS = 12
 
 
-def default_controller(alias, family, order):
-    """Cubie's shipped controller settings for an algorithm; None when the family has no adaptive table."""
-    from cubie.integrators.algorithms import (crank_nicolson, generic_dirk,
-                                              generic_erk, generic_firk,
-                                              generic_rosenbrock_w)
-    tables = {
-        "dirk": generic_dirk.DIRK_ADAPTIVE_DEFAULTS,
-        "erk": generic_erk.ERK_ADAPTIVE_DEFAULTS,
-        "firk": generic_firk.FIRK_ADAPTIVE_DEFAULTS,
-        "rosenbrock": generic_rosenbrock_w.ROSENBROCK_ADAPTIVE_DEFAULTS,
-    }
-    if alias == "crank_nicolson":
-        table = crank_nicolson.CN_DEFAULTS
-    elif family in tables:
-        table = tables[family]
-    else:
-        return None
-    settings = {key: _resolved(value, order)
-                for key, value in table.settings.items()
-                if key in CONTROLLER_KEYS}
-    gains = {"i": ("integral_gain",),
-             "pi": ("integral_gain", "proportional_gain"),
-             "pid": ("integral_gain", "proportional_gain",
-                     "derivative_gain")}
-    allowed = gains.get(settings.get("step_controller"), ())
-    for key in ("integral_gain", "proportional_gain", "derivative_gain"):
-        if key not in allowed:
-            settings.pop(key, None)
-    return settings
-
-
-def pi_tier_controller(order):
-    """The DIRK PI defaults, resolved for an order, applied to any family."""
-    from cubie.integrators.algorithms import generic_dirk
-    return {
-        "step_controller": "pi",
-        "integral_gain": generic_dirk.dirk_default_integral_gain(order),
-        "proportional_gain": generic_dirk.dirk_default_proportional_gain(
-            order),
-        "safety": 0.9,
-        "min_step_shrink": 0.2,
-        "max_step_growth": 10.0,
-    }
-
-
-# Julia prints its controller constants at the run precision, so a Float32 table agrees with an exact value to about 1e-7.
-FLOAT32_REL_TOL = 1e-6
-
-
-def matched_controller(constants, order):
-    """Cubie settings reproducing Julia's resolved controller, or (None, reason); cubie's PI exponent (I + P) / (2 (order + 1)) on the squared norm matches Julia's beta1 on the norm. A PI controller within FLOAT32_REL_TOL of the DIRK PI tier at the order returns the tier's exact values, so a Float32-printed table names the same trial as gains = dirk_defaults."""
+def julia_controller(constants, order):
+    """Cubie settings reproducing Julia's default controller for an algorithm, or None when Julia has none that maps; cubie's PI exponent (I + P) / (2 (order + 1)) on the squared norm matches Julia's beta1 on the norm and P / (order + 1) its beta2, and its Gustafsson controller Julia's PredictiveController."""
     if constants is None:
-        return None, "no julia controller constants"
+        return None
     if constants["controller"] == "PIController":
         proportional = constants["beta2"] * (order + 1)
         settings = {
@@ -129,30 +80,17 @@ def matched_controller(constants, order):
             "min_step_shrink": constants["qmin"],
             "max_step_growth": constants["qmax"],
         }
-        tier = pi_tier_controller(order)
-        return (tier if controllers_equal(settings, tier, FLOAT32_REL_TOL) else settings), None
-    if constants["controller"] == "PredictiveController":
-        return {"step_controller": "gustafsson",
-                "safety": constants["gamma"]}, None
-    return None, "unmapped julia controller {0}".format(
-        constants["controller"])
-
-
-def controllers_equal(a, b, rel_tol=1e-9):
-    """Same controller name and the same numeric keys within rel_tol."""
-    import numpy as np
-    if a is None or b is None:
-        return False
-    if a.get("step_controller") != b.get("step_controller"):
-        return False
-    keys = (set(a) | set(b)) - {"step_controller"}
-    for key in keys:
-        if key not in a or key not in b:
-            return False
-        if not np.isclose(float(a[key]), float(b[key]), rtol=rel_tol,
-                          atol=0.0):
-            return False
-    return True
+    elif constants["controller"] == "PredictiveController":
+        settings = {
+            "step_controller": "gustafsson",
+            "safety": constants["gamma"],
+            "min_step_shrink": constants["qmin"],
+            "max_step_growth": constants["qmax"],
+        }
+    else:
+        return None
+    return {key: value if key == "step_controller" else float(round(value, GAIN_DIGITS))
+            for key, value in settings.items()}
 
 
 # ------------------------------------------------------------------ solvers

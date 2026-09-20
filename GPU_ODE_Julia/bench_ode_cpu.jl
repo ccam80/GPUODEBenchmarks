@@ -1,4 +1,4 @@
-# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a trial file, one system and solver per build (consecutive lines of one system, algorithm, controller and precision) in the trial's element type; every transfers entry times the same call, finals land when asked, and each adaptive build's resolved controller goes to controllers/<problem>.csv under the run key.
+# The julia_cpu runner: DifferentialEquations.jl on EnsembleThreads over a trial file, one system and solver per build (consecutive lines of one system, algorithm, controller and precision) in the trial's element type; every transfers entry times the same call and finals land when asked.
 #   julia -t auto --project=. GPU_ODE_Julia/bench_ode_cpu.jl --trials <path> [--floor]
 
 using OrdinaryDiffEq
@@ -29,8 +29,6 @@ include(joinpath(SCRIPTS, "results.jl"))
 const PACKAGE = "julia_cpu"
 const WARM_N = 8
 const CONTROLLERS = ("fixed", "default")
-const CONTROLLER_COLUMNS = ("algorithm", "controller", "beta1", "beta2", "qmin", "qmax",
-    "gamma", "order")
 const FLOAT_FIELDS = ("duration", "grid_min", "grid_max", "dt", "dt_min", "dt_max", "atol",
     "rtol", "newton_atol", "newton_rtol", "watchdog_s")
 # The solvers' own warnings (dt below eps, instability) are per trajectory; the row's retcodes carry them.
@@ -284,48 +282,6 @@ function write_progress(ctx, trial, stage = "solve")
         "started_utc" => stamp)))
 end
 
-controllers_path(ctx, problem) = joinpath(ctx.root, "key=" * ctx.key, "package=" * PACKAGE,
-    "controllers", problem * ".csv")
-
-"Resolve the step controller OrdinaryDiffEq picks for an adaptive build and merge its row into controllers/<problem>.csv under the key."
-function export_controller(ctx, trial, prob, alg, ::Type{T}) where {T}
-    kw = solve_kwargs(trial, T)
-    integ = init(prob, alg; abstol = kw[:abstol], reltol = kw[:reltol],
-        (haskey(kw, :dt) ? (dt = kw[:dt],) : (;))..., save_everystep = false, verbose = QUIET)
-    ctrl = integ.controller_cache.controller
-    basic = hasproperty(ctrl, :basic) ? ctrl.basic : ctrl
-    field(obj, name) = hasproperty(obj, name) ? string(getproperty(obj, name)) : ""
-    row = Dict("algorithm" => trial["algorithm"], "controller" => string(typeof(ctrl).name.name),
-        "beta1" => field(ctrl, :beta1), "beta2" => field(ctrl, :beta2),
-        "qmin" => field(basic, :qmin), "qmax" => field(basic, :qmax),
-        "gamma" => field(basic, :gamma), "order" => string(OrdinaryDiffEqCore.alg_order(alg)))
-    path = controllers_path(ctx, trial["problem"])
-    # Other algorithms' rows stay; an algorithm or cubie_alias column names them.
-    kept = Dict{String, String}[]
-    if isfile(path)
-        lines = filter(!isempty, strip.(readlines(path)))
-        header = String.(split(lines[1], ','))
-        for line in lines[2:end]
-            fields = String.(split(line, ','))
-            while length(fields) < length(header)
-                push!(fields, "")
-            end
-            existing = Dict{String, String}(zip(header, fields))
-            existing["algorithm"] = get(existing, "algorithm", get(existing, "cubie_alias", ""))
-            existing["algorithm"] == row["algorithm"] || push!(kept, existing)
-        end
-    end
-    mkpath(dirname(path))
-    open(path, "w") do io
-        println(io, join(CONTROLLER_COLUMNS, ","))
-        for entry in vcat(kept, [row])
-            println(io, join([get(entry, c, "") for c in CONTROLLER_COLUMNS], ","))
-        end
-    end
-    println("  controller: $(row["controller"]) beta1=$(row["beta1"]) beta2=$(row["beta2"]) " *
-            "qmin=$(row["qmin"]) qmax=$(row["qmax"]) gamma=$(row["gamma"]) -> $(path)")
-end
-
 # --------------------------------------------------------------------- builds
 
 "Record every transfers row of a trial with one reason."
@@ -372,16 +328,6 @@ function run_build(ctx, lines, failures)
     lead["cold"] == true && (build_s = elapsed)
     println(@sprintf("  built%s: %.2f s", lead["cold"] == true ? " cold" : "", elapsed))
     states = length(system.golden_index)
-
-    first_default = findfirst(l -> l["controller"] == "default" && !isempty(l["transfers"]) &&
-        isempty(rejection(l, alg)), lines)
-    if first_default !== nothing
-        try
-            export_controller(ctx, lines[first_default], prob, alg, T)
-        catch err
-            println("  controller export failed: $(error_reason(err))")
-        end
-    end
 
     for trial in lines
         isempty(trial["transfers"]) && continue
