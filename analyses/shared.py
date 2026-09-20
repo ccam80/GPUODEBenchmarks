@@ -1,8 +1,7 @@
-"""What the analysis scripts share: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, the most complete row of a run_id stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels, the figure style and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and two rows of one run_id are refused), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller kind and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import os
@@ -23,13 +22,18 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# Colour and marker per package, shared by every figure.
-STYLE = {
-    "cubie": ("tab:blue", "*"), "cubie_mlir": ("tab:purple", "h"),
-    "jax": ("tab:red", "D"), "pytorch": ("darkred", "x"),
-    "myokit_cuda": ("black", "s"), "cpp": ("tab:orange", "^"),
-    "julia_gpu": ("tab:green", "o"), "julia_cpu": ("tab:cyan", "v"),
+# The figure encoding: a colour per package, a marker per controller kind (one set per card), a line style per transfers.
+COLOURS = {
+    "cubie": "tab:blue", "cubie_mlir": "tab:purple", "jax": "tab:red", "pytorch": "darkred",
+    "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
 }
+PACKAGE_NAMES = {
+    "cubie": "Cubie", "cubie_mlir": "Cubie (MLIR)", "jax": "Diffrax", "pytorch": "torchdiffeq",
+    "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
+}
+CONTROLLER_KINDS = ("fixed", "adaptive", "matched", "gustafsson")
+MARKER_SETS = (("s", "o", "^", "D"), ("P", "v", "<", "X"), ("*", "p", ">", "h"))
+LINES = {"both": "--", "none": "-"}
 
 
 def under_suite_python():
@@ -52,7 +56,7 @@ def under_suite_python():
 # ------------------------------------------------------------------- flags
 
 def parser(description):
-    """The argument parser every script starts from: --set (repeatable) or --where, --root and --out."""
+    """The argument parser: --set (repeatable) or --where, --root and --out."""
     p = argparse.ArgumentParser(description=description,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--set", action="append", default=[], metavar="NAME",
@@ -86,7 +90,7 @@ def pull_store(args):
 # ------------------------------------------------------------------- store
 
 class AnalysisStore:
-    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and of the rows one run_id then holds the most complete stands (most_complete). Everything else is the underlying Store."""
+    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and two rows of one run_id raise. Everything else is the underlying Store."""
 
     def __init__(self, root):
         import store as store_mod
@@ -98,7 +102,7 @@ class AnalysisStore:
         return getattr(self._store, name)
 
     def rows(self, sql_where="", **eq_filters):
-        return most_complete(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
+        return unique(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
 
     def optimize_rows(self, package, key, root=None):
         """Every optimize.csv record of a package under a key, its gains in the current form."""
@@ -121,6 +125,15 @@ def tier_gains(package, algorithm, cache=None):
     if cache is not None:
         cache[ident] = settings
     return settings
+
+
+def tier_gains_json(package, algorithm, cache=None):
+    """The tier's gains as the canonical JSON a row carries; None when there is no tier."""
+    import store as store_mod
+    tier = tier_gains(package, algorithm, cache)
+    if tier is None:
+        return None
+    return store_mod.canonical_json({k: v for k, v in tier.items() if k != "step_controller"})
 
 
 def normalise_gains(row, cache=None, ids=True):
@@ -148,20 +161,16 @@ def normalise_gains(row, cache=None, ids=True):
     return rewritten
 
 
-def most_complete(rows):
-    """One row per run_id, in first-appearance order: a timed row over an untimed, then one with its cold build time, then one with finals, then the latest recorded."""
-    standing = {}
+def unique(rows):
+    """The rows, one per run_id; ValueError naming the run_id when two rows share one."""
+    seen = {}
     for row in rows:
-        held = standing.get(row["run_id"])
-        if held is None or _rank(row) > _rank(held):
-            standing[row["run_id"]] = row
-    return list(standing.values())
-
-
-def _rank(row):
-    stamp = row.get("recorded_utc")
-    return (math.isfinite(number(row.get("min_ms"))), math.isfinite(number(row.get("build_s"))),
-            bool(row.get("finals")), stamp.timestamp() if stamp is not None else float("-inf"))
+        held = seen.get(row["run_id"])
+        if held is not None:
+            raise ValueError("two rows of run_id {0}: {1}/{2} gains {3!r} and {4!r}".format(
+                row["run_id"], row["key"], row["package"], held.get("gains"), row.get("gains")))
+        seen[row["run_id"]] = row
+    return list(seen.values())
 
 
 # --------------------------------------------------------------- selection
@@ -269,6 +278,10 @@ def number(value):
         return NAN
 
 
+def timed(row):
+    return math.isfinite(number(row.get("min_ms")))
+
+
 def within_errored_limit(row):
     """False when errored_pct is a number above the limit; an absent or NaN column keeps the row."""
     pct = number(row.get("errored_pct"))
@@ -279,20 +292,83 @@ def usable(rows):
     return [row for row in rows if within_errored_limit(row)]
 
 
-# ------------------------------------------------------------------ labels
+# ---------------------------------------------------------------- encoding
 
-def stepping_label(row):
-    """'fixed dt=2^-10' or '<controller> tol=1e-05' with the gains and Newton tolerance when set."""
-    if row["controller"] == "fixed":
-        text = "fixed dt=" + dyadic(number(row["dt"]))
-    else:
-        text = "{0} tol={1:g}".format(row["controller"], number(row["atol"]))
-        if row.get("gains") not in (None, "", "{}"):
-            text += " gains=" + row["gains"]
-    newton = number(row.get("newton_atol"))
-    if not math.isnan(newton):
-        text += " newton={0:g}".format(newton)
-    return text
+def controller_kind(row, cache=None):
+    """The kind of controller a figure keys its marker by: fixed, adaptive (a package's default controller, or cubie's DIRK-tier PI), matched (a cubie PI row carrying Julia's gains) or gustafsson; None for cubie's default controller, which is not drawn."""
+    import cubie_adapter
+    controller = row["controller"]
+    cubie = row["package"] in cubie_adapter.PACKAGES
+    if controller == "fixed":
+        return "fixed"
+    if controller == "default":
+        return None if cubie else "adaptive"
+    if controller == "pi":
+        if cubie:
+            tier = tier_gains_json(row["package"], row["algorithm"], cache)
+            if tier is not None and row.get("gains") != tier:
+                return "matched"
+        return "adaptive"
+    return controller
+
+
+def controller_text(name, row=None):
+    """'1024 fixed steps' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
+    if name == "fixed":
+        if row is None:
+            return "Fixed-step"
+        return "{0:g} fixed steps".format(round(number(row["duration"]) / number(row["dt"])))
+    if name == "adaptive":
+        return "Adaptive steps"
+    return "Adaptive steps ({0})".format("Gustafsson" if name == "gustafsson" else name)
+
+
+def package_name(package):
+    return PACKAGE_NAMES.get(package, package)
+
+
+def problem_name(problem, states=None):
+    """The catalogue's display name of a problem without a trailing parenthesis, with ' (<states> states)' when given."""
+    import re as re_mod
+    from problems import load_problems
+    name = problem
+    for entry in load_problems():
+        if entry["problem"] == problem:
+            name = re_mod.sub(r"\s*\([^)]*\)$", "", entry["display"])
+    if states is not None:
+        name += " ({0} states)".format(states)
+    return name
+
+
+def algorithm_name(algorithm):
+    """The catalogue's display name of an algorithm."""
+    from algorithms import algorithm_facts
+    try:
+        return algorithm_facts(algorithm)["display"]
+    except SystemExit:
+        return algorithm
+
+
+def key_label(key):
+    """'RTX4070-Super (Win)' from 'windows_RTX-4070-SUPER'."""
+    system, _, gpu = key.partition("_")
+    parts = gpu.split("-")
+    name = "".join(parts[:2]) + "".join("-" + p.capitalize() for p in parts[2:])
+    return "{0} ({1})".format(name, {"windows": "Win", "linux": "Linux"}.get(system, system))
+
+
+def colour(package):
+    return COLOURS.get(package, "gray")
+
+
+def marker(name, card=0):
+    """The marker of a controller kind on a card; cards past the sets share the last set."""
+    markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
+    return markers[CONTROLLER_KINDS.index(name)] if name in CONTROLLER_KINDS else "x"
+
+
+def line(transfers):
+    return LINES.get(transfers, ":")
 
 
 def dyadic(value):
@@ -304,26 +380,8 @@ def dyadic(value):
     return "{0:g}".format(value)
 
 
-def system_label(row):
-    text = row["problem"]
-    params = row.get("system_params") or "{}"
-    if params != "{}":
-        text += " " + " ".join("{0}={1}".format(k, v) for k, v in json.loads(params).items())
-    return text + " " + row["precision"]
-
-
 def slug(text):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")
-
-
-def short_hash(values):
-    return hashlib.sha1(repr(tuple(values)).encode("utf-8")).hexdigest()[:8]
-
-
-def output_dir(out, key, problem):
-    path = os.path.join(out, key, problem)
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 # ------------------------------------------------------------------ output
@@ -375,7 +433,3 @@ def pyplot():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     return plt
-
-
-def style(package):
-    return STYLE.get(package, ("gray", "."))
