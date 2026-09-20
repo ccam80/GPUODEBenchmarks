@@ -66,14 +66,15 @@ class ListingTests(unittest.TestCase):
                          [("RK4", 8), ("RK4", 32), ("RK4", 131072), ("RKCK45", 8), ("RKCK45", 32),
                           ("RKCK45", 131072)])
         self.assertTrue(all(b["sd"] == "-" and not b["cold"] for b in lorenz))
-        # Every states point, the default 32 included, builds its binary cold.
+        # Every states point, the default 32 included, builds its adaptive binary cold; the fixed one stays warm.
         states = [b for b in builds if b["problem"] == "lorenz96" and b["cold"]]
         self.assertEqual(sorted({int(b["sd"]) for b in states}), [4, 8, 16, 32, 64, 128])
-        self.assertEqual({b["nt"] for b in states}, {131072})
+        self.assertEqual({(b["nt"], b["solver"]) for b in states}, {(131072, "RKCK45")})
         merged = [b for b in builds if b["problem"] == "lorenz96" and b["sd"] == "32"]
         self.assertEqual(len(merged), 6)
-        self.assertEqual(sorted((b["nt"], b["cold"]) for b in merged),
-                         [(8, False), (8, False), (32, False), (32, False), (131072, True), (131072, True)])
+        self.assertEqual(sorted((b["nt"], b["solver"], b["cold"]) for b in merged),
+                         [(8, "RK4", False), (8, "RKCK45", False), (32, "RK4", False), (32, "RKCK45", False),
+                          (131072, "RK4", False), (131072, "RKCK45", True)])
         # Every trial has a build.
         for t in trial_list:
             self.assertIn(mpgos_trials.build_key(t), keys, t["trial_id"])

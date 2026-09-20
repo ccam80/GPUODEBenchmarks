@@ -114,26 +114,43 @@ as one DuckDB table:
 
 ```
 python runner_scripts/store.py query "SELECT package, n, min_ms FROM results WHERE problem = 'lorenz'"
-python analyses/timing.py --x n      --set perf         # min_ms against n
-python analyses/timing.py --x states --set states       # min_ms and build_s against states
-python analyses/timing.py --x error  --set golden_grid  # min_ms against error
-python analyses/agreement.py --set golden_grid          # errors and package-pair differences
+python analyses/plots.py --set perf --set golden_grid --set states
 ```
 
-`data/` is an untracked mirror of the store; the analyses pull it before reading.
+`data/` is an untracked mirror of the store; the analysis pulls it before reading.
 
-Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
-and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, what
-each key's store lacks of the set (rows, cold build times, finals files,
-optimize records) is printed per package, written to
+`analyses/plots.py` takes `--set` (repeatable) or `--where "<sql>"`, reads
+every key, and writes the base figures of every (key, problem, algorithm)
+under `plots/<key>/<problem>/`:
+
+| figure | x | y | rows |
+|---|---|---|---|
+| `runtime_vs_n_<algorithm>.png` | n | min_ms | the GPU packages |
+| `error_vs_runtime_<algorithm>.png` | min_ms | error against the golden | the GPU packages, along the dt and tolerance sweeps |
+| `error_vs_dt_<algorithm>.png` | dt | error | every package, the fixed steppings |
+| `error_vs_tol_<algorithm>.png` | tolerance | error | every package, the adaptive steppings |
+| `states_<algorithm>.png` | states | min_ms and, beside it, the cold build time | the GPU packages of a resized problem |
+
+A package is a colour, a controller a marker (`fixed`, `default`, `pi`,
+`pi matched` for a cubie PI row carrying Julia's matched gains rather than
+the DIRK tier's, `gustafsson`) and the transfers a line style (`both` solid,
+`none` dashed). A series holds the rows of one package, controller and
+transfers that differ only along the axis; a lone point is no curve, and a
+series that would hold two curves (two tolerances swept over n, say) is
+split and labelled by what differs. julia_cpu, whose timing is not of
+interest, appears on the error-against-dt and error-against-tolerance
+figures only. Rows with `errored_pct` above 10 are dropped. The points of
+each figure kind of a problem go to `<kind>.csv` beside the figures. With
+`--set`, what each key's store lacks of the set (rows, cold build times,
+finals files, optimize records) is printed per package, written to
 `plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a
 group the store records a compile timeout of wants no optimize record.
 
 Rows read in the store's current form: a column a file lacks reads as null,
 a cubie PI row within Float32 rounding of the DIRK PI tier carries the
 tier's exact gains and finds its optimize record under either spelling, and
-the most complete row of a run_id stands (timed, then with build time, then
-with finals, then latest). The golden of a system is its julia_cpu float64
+the fastest row of a run_id stands (the lowest finite min_ms; among untimed
+rows one with build time, then with finals, then latest). The golden of a system is its julia_cpu float64
 finals row running the problem's golden algorithm. A CSV leaves out the
 columns no row captured.
 

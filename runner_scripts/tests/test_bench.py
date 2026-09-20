@@ -205,8 +205,8 @@ class PlanTests(unittest.TestCase):
     def test_plan_merges_a_point_with_its_declarations_in_every_set_file(self):
         for argv in (("--set", "perf"), ("--set", "states"), ("--set", "golden_grid"),
                      ("--set", "golden_grid,states,perf")):
-            by_package = self.plan(*argv, "-p", "cpp", "-s", "lorenz96", "-g", "classical-rk4", "-n", "131072",
-                                   "--mode", "fixed", "--dt", str(2.0 ** -10))
+            by_package = self.plan(*argv, "-p", "cpp", "-s", "lorenz96", "-g", "cash-karp-54", "-n", "131072",
+                                   "--mode", "adaptive", "--controller", "default", "--tol", "1e-5")
             point = [t for t in by_package["cpp"] if t["system_params"] == '{"states":32}']
             self.assertEqual([(t["cold"], t["finals"], t["transfers"], t["optimize"], t["sets"]) for t in point],
                              [(True, True, ["both", "none"], False, ["golden_grid", "perf", "states"])], argv)
@@ -273,7 +273,7 @@ class CompletenessTests(unittest.TestCase):
             handle.write(text)
 
     def test_a_cold_line_needs_a_finite_build_time_on_every_row(self):
-        states = self.plan("--set", "states", "-p", "cpp", "-g", "classical-rk4")["cpp"]
+        states = self.plan("--set", "states", "-p", "cpp", "-g", "cash-karp-54")["cpp"]
         self.assertEqual(len(states), 6)
         self.assertEqual({t["cold"] for t in states}, {True})
         for transfers in ("both", "none"):

@@ -1,8 +1,7 @@
-"""What the analysis scripts share: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, the most complete row of a run_id stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels, the figure style and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller, a line style per transfers) and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import os
@@ -23,13 +22,13 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# Colour and marker per package, shared by every figure.
-STYLE = {
-    "cubie": ("tab:blue", "*"), "cubie_mlir": ("tab:purple", "h"),
-    "jax": ("tab:red", "D"), "pytorch": ("darkred", "x"),
-    "myokit_cuda": ("black", "s"), "cpp": ("tab:orange", "^"),
-    "julia_gpu": ("tab:green", "o"), "julia_cpu": ("tab:cyan", "v"),
+# The figure encoding: a colour per package, a marker per controller, a line style per transfers.
+COLOURS = {
+    "cubie": "tab:blue", "cubie_mlir": "tab:purple", "jax": "tab:red", "pytorch": "darkred",
+    "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
 }
+MARKERS = {"fixed": "s", "default": "o", "pi": "^", "pi matched": "v", "gustafsson": "D"}
+LINES = {"both": "-", "none": "--"}
 
 
 def under_suite_python():
@@ -52,7 +51,7 @@ def under_suite_python():
 # ------------------------------------------------------------------- flags
 
 def parser(description):
-    """The argument parser every script starts from: --set (repeatable) or --where, --root and --out."""
+    """The argument parser: --set (repeatable) or --where, --root and --out."""
     p = argparse.ArgumentParser(description=description,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--set", action="append", default=[], metavar="NAME",
@@ -86,7 +85,7 @@ def pull_store(args):
 # ------------------------------------------------------------------- store
 
 class AnalysisStore:
-    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and of the rows one run_id then holds the most complete stands (most_complete). Everything else is the underlying Store."""
+    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and of the rows one run_id then holds the fastest stands (fastest). Everything else is the underlying Store."""
 
     def __init__(self, root):
         import store as store_mod
@@ -98,7 +97,7 @@ class AnalysisStore:
         return getattr(self._store, name)
 
     def rows(self, sql_where="", **eq_filters):
-        return most_complete(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
+        return fastest(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
 
     def optimize_rows(self, package, key, root=None):
         """Every optimize.csv record of a package under a key, its gains in the current form."""
@@ -121,6 +120,15 @@ def tier_gains(package, algorithm, cache=None):
     if cache is not None:
         cache[ident] = settings
     return settings
+
+
+def tier_gains_json(package, algorithm, cache=None):
+    """The tier's gains as the canonical JSON a row carries; None when there is no tier."""
+    import store as store_mod
+    tier = tier_gains(package, algorithm, cache)
+    if tier is None:
+        return None
+    return store_mod.canonical_json({k: v for k, v in tier.items() if k != "step_controller"})
 
 
 def normalise_gains(row, cache=None, ids=True):
@@ -148,8 +156,8 @@ def normalise_gains(row, cache=None, ids=True):
     return rewritten
 
 
-def most_complete(rows):
-    """One row per run_id, in first-appearance order: a timed row over an untimed, then one with its cold build time, then one with finals, then the latest recorded."""
+def fastest(rows):
+    """One row per run_id, in first-appearance order: the lowest finite min_ms; among untimed rows one with its cold build time, then one with finals, then the latest recorded."""
     standing = {}
     for row in rows:
         held = standing.get(row["run_id"])
@@ -159,8 +167,9 @@ def most_complete(rows):
 
 
 def _rank(row):
+    ms = number(row.get("min_ms"))
     stamp = row.get("recorded_utc")
-    return (math.isfinite(number(row.get("min_ms"))), math.isfinite(number(row.get("build_s"))),
+    return (math.isfinite(ms), -ms if math.isfinite(ms) else 0.0, math.isfinite(number(row.get("build_s"))),
             bool(row.get("finals")), stamp.timestamp() if stamp is not None else float("-inf"))
 
 
@@ -269,6 +278,10 @@ def number(value):
         return NAN
 
 
+def timed(row):
+    return math.isfinite(number(row.get("min_ms")))
+
+
 def within_errored_limit(row):
     """False when errored_pct is a number above the limit; an absent or NaN column keeps the row."""
     pct = number(row.get("errored_pct"))
@@ -279,20 +292,29 @@ def usable(rows):
     return [row for row in rows if within_errored_limit(row)]
 
 
-# ------------------------------------------------------------------ labels
+# ---------------------------------------------------------------- encoding
 
-def stepping_label(row):
-    """'fixed dt=2^-10' or '<controller> tol=1e-05' with the gains and Newton tolerance when set."""
-    if row["controller"] == "fixed":
-        text = "fixed dt=" + dyadic(number(row["dt"]))
-    else:
-        text = "{0} tol={1:g}".format(row["controller"], number(row["atol"]))
-        if row.get("gains") not in (None, "", "{}"):
-            text += " gains=" + row["gains"]
-    newton = number(row.get("newton_atol"))
-    if not math.isnan(newton):
-        text += " newton={0:g}".format(newton)
-    return text
+def controller_label(row, cache=None):
+    """The controller a figure keys its marker by: the row's controller, 'pi matched' for a cubie PI row whose gains are not the DIRK tier's (Julia's matched controller)."""
+    import cubie_adapter
+    controller = row["controller"]
+    if controller == "pi" and row["package"] in cubie_adapter.PACKAGES:
+        tier = tier_gains_json(row["package"], row["algorithm"], cache)
+        if tier is not None and row.get("gains") != tier:
+            return "pi matched"
+    return controller
+
+
+def colour(package):
+    return COLOURS.get(package, "gray")
+
+
+def marker(controller):
+    return MARKERS.get(controller, "x")
+
+
+def line(transfers):
+    return LINES.get(transfers, ":")
 
 
 def dyadic(value):
@@ -304,26 +326,8 @@ def dyadic(value):
     return "{0:g}".format(value)
 
 
-def system_label(row):
-    text = row["problem"]
-    params = row.get("system_params") or "{}"
-    if params != "{}":
-        text += " " + " ".join("{0}={1}".format(k, v) for k, v in json.loads(params).items())
-    return text + " " + row["precision"]
-
-
 def slug(text):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")
-
-
-def short_hash(values):
-    return hashlib.sha1(repr(tuple(values)).encode("utf-8")).hexdigest()[:8]
-
-
-def output_dir(out, key, problem):
-    path = os.path.join(out, key, problem)
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 # ------------------------------------------------------------------ output
@@ -375,7 +379,3 @@ def pyplot():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     return plt
-
-
-def style(package):
-    return STYLE.get(package, ("gray", "."))

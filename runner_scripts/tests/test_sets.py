@@ -230,14 +230,17 @@ class ShippedSetTests(unittest.TestCase):
                          [4, 8, 16, 32, 64, 128])
         loaded = sets.load_set("states")
         self.assertNotIn("julia_cpu", loaded["set"]["packages"])
+        # The one stepping is the default adaptive controller: a fixed-only package (pytorch, myokit_cuda) has no line.
+        self.assertEqual({s["controller"] for s in specs}, {"default"})
         expected = {package: leg_count(loaded, package, "lorenz96") * 6 for package in loaded["set"]["packages"]}
-        self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected["cubie"], 102)
-        self.assertEqual(expected["julia_gpu"], 60)
+        self.assertEqual(dict(by_package_kind(specs)), {p: c for p, c in expected.items() if c})
+        self.assertEqual(expected["cubie"], 36)
+        self.assertEqual(expected["julia_gpu"], 30)
+        self.assertEqual((expected["pytorch"], expected["myokit_cuda"]), (0, 0))
         built = self.trials["states"]
         # Every line is its own cold build, one solve each.
-        self.assertEqual(line_counts(built, "cubie"), (102, 102, 102, 102))
-        self.assertEqual(line_counts(built, "jax"), (36, 0, 36, 36))
+        self.assertEqual(line_counts(built, "cubie"), (36, 36, 36, 36))
+        self.assertEqual(line_counts(built, "jax"), (12, 0, 12, 12))
         self.assertEqual({t["cold"] for t in built}, {True})
 
     def test_golden_grid_counts(self):
@@ -544,16 +547,16 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertEqual(reverse, built)
 
     def test_every_set_file_declares_the_contract_of_a_requested_point(self):
-        """The lorenz96 default-states point at n = 131072: perf (warm), states (cold) and golden_grid (finals, none) declare it, each optimizing cubie; each request alone yields the same line."""
+        """The lorenz96 default-states point at n = 131072 under the default controller at tol 1e-5: perf (warm), states (cold) and golden_grid (finals, none) declare it, each optimizing cubie; each request alone yields the same line."""
         declared = sets.declarations(KEY, self.root, packages=["cubie"], problems=["lorenz96"],
                                      algorithms=["kvaerno3"])
         expected = None
         for names in (["perf"], ["states"], ["golden_grid"], ["golden_grid", "perf"], ["perf", "states", "golden_grid"]):
             specs = sets.narrow(sets.expand(names, KEY, self.root, packages=["cubie"], problems=["lorenz96"],
-                                            algorithms=["kvaerno3"]), mode="fixed")
+                                            algorithms=["kvaerno3"]), mode="adaptive", controllers=["default"], tols=[1e-5])
             built = trials.build_trials(specs, declared)
             point = [t for t in built if t["n"] == 131072 and t["system_params"] == '{"states":32}'
-                     and t["dt"] == 2.0 ** -10]
+                     and t["atol"] == 1e-5]
             self.assertEqual(len(point), 1, names)
             contract = {k: point[0][k] for k in ("cold", "finals", "transfers", "optimize", "watchdog_s", "timed", "sets")}
             if expected is None:
@@ -565,14 +568,14 @@ class MergeAndNarrowTests(unittest.TestCase):
         # perf alone: the other eleven counts of the 32-state build stay warm and unshared.
         perf = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
                                                            problems=["lorenz96"], algorithms=["kvaerno3"]),
-                                               mode="fixed"), declared)
+                                               mode="adaptive", controllers=["default"], tols=[1e-5]), declared)
         self.assertEqual([t["n"] for t in perf], PERF_N)
         self.assertEqual([(t["cold"], t["finals"], t["sets"]) for t in perf if t["n"] != 131072],
                          [(False, False, ["perf"])] * 11)
         # Without the declarations the request alone decides.
         alone = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
                                                             problems=["lorenz96"], algorithms=["kvaerno3"]),
-                                                mode="fixed"))
+                                                mode="adaptive", controllers=["default"], tols=[1e-5]))
         self.assertEqual({t["finals"] for t in alone}, {False})
         self.assertEqual({t["cold"] for t in alone}, {False})
 
