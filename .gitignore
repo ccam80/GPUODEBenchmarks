@@ -34,7 +34,7 @@ GPU_ODE_CUBIE_MLIR/generated/
 GPU_ODE_MYOKIT_CUDA/generated/
 
 # The result store mirror; the box is the only store (docs/remote-store.md)
-/data/
+/data
 
 # Orchestrator run logs
 /logs/
