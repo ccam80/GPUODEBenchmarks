@@ -152,9 +152,10 @@ class FakeSolver:
             raise AssertionError("optimize without auto_size")
         return FakeOptimizeResult(SIZED_RUNS, duration * SIZED_FRACTION)
 
-    def solve(self, initial_values, parameters, duration, on_device=False):
+    def solve(self, initial_values, parameters, duration, on_device=False, nan_error_trajectories=True):
         n = initial_values.shape[1]
         self.calls.append((n, on_device))
+        self.nan_error_trajectories = nan_error_trajectories
         if on_device:
             if self.resident is None or initial_values is not self.resident[0]:
                 raise AssertionError("device solve without the resident inputs")
@@ -425,6 +426,12 @@ class BuildTests(AdapterCase):
         self.adapter.solve(leg, trial(n=32, ordinal=1), self.values(32), "none")
         self.assertEqual(leg.solver.calls, [(8, False), (8, True), (8, True), (32, False), (32, True)])
         self.assertEqual(leg.grid_n, 32)
+        leg.close()
+
+    def test_solves_keep_the_states_of_failed_runs(self):
+        leg = self.adapter.build(trial(n=8))
+        self.adapter.solve(leg, trial(n=8), self.values(8), "both")
+        self.assertIs(leg.solver.nan_error_trajectories, False)
         leg.close()
 
     def test_finals_carry_the_status_flags_and_the_duration_of_clean_runs(self):
