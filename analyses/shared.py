@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller, a line style per transfers) and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller, a line style per transfers: none solid, both dashed) and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -28,7 +28,7 @@ COLOURS = {
     "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
 }
 MARKERS = {"fixed": "s", "default": "o", "pi": "^", "pi matched": "v", "gustafsson": "D"}
-LINES = {"both": "-", "none": "--"}
+LINES = {"both": "--", "none": "-"}
 
 
 def under_suite_python():

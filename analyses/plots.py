@@ -1,6 +1,6 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels), with the points of a problem in <kind>/<problem>.csv. A package is a colour, a controller a marker, the transfers a line style; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) along the axis; fewer than two points is no curve. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels), with the points of a problem in <kind>/<problem>.csv. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). A package is a colour, a controller a marker, the transfers a line style (none solid, both dashed); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) along the axis; fewer than two points is no curve. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
 import json
@@ -184,7 +184,26 @@ def shared_context(kind, series):
 
 # --------------------------------------------------------------- figures
 
-def draw(panel, kind, series):
+LIMITED_DIR = "limited_data"
+LIMITED_POINTS = 3
+GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "states")
+
+
+def family(package):
+    """The package family a comparison counts: the two cubie backends are one."""
+    return "cubie" if package in ("cubie", "cubie_mlir") else package
+
+
+def limited(series, builds=None):
+    """True when a figure compares nothing: one package family, or no series past LIMITED_POINTS points."""
+    everything = dict(series)
+    everything.update(builds or {})
+    if len({family(key[0]) for key in everything}) <= 1:
+        return True
+    return max((len(points) for points in everything.values()), default=0) <= LIMITED_POINTS
+
+
+def draw(panel, kind, series, legend=True):
     for key, points in series.items():
         package, controller, transfers = key
         panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(key),
@@ -197,7 +216,7 @@ def draw(panel, kind, series):
     panel.set_xlabel(kind.x_label)
     panel.set_ylabel(kind.y_label)
     panel.grid(True, which="both", alpha=0.3)
-    if series:
+    if series and legend:
         panel.legend(fontsize=7)
 
 
@@ -225,6 +244,31 @@ def render(path, kind, series, algorithm, key, builds=None):
     return path
 
 
+def render_grid(path, kind, panels, title):
+    """One figure with a subplot per (name, series), one legend for the whole figure."""
+    plt = shared.pyplot()
+    count = len(panels)
+    columns = min(4, math.ceil(math.sqrt(count)))
+    rows = math.ceil(count / columns)
+    fig, axes = plt.subplots(rows, columns, figsize=(5.0 * columns, 3.8 * rows), squeeze=False)
+    handles = {}
+    for index, (name, series) in enumerate(panels):
+        panel = axes[index // columns][index % columns]
+        draw(panel, kind, series, legend=False)
+        panel.set_title(name, fontsize=9)
+        for handle, label in zip(*panel.get_legend_handles_labels()):
+            handles.setdefault(label, handle)
+    for index in range(count, rows * columns):
+        axes[index // columns][index % columns].set_axis_off()
+    fig.suptitle(title, fontsize=11)
+    fig.legend(handles.values(), handles.keys(), fontsize=7, loc="lower center",
+               ncol=min(6, max(1, len(handles))), bbox_to_anchor=(0.5, 0.0))
+    fig.tight_layout(rect=(0.0, 0.03 + 0.02 * math.ceil(len(handles) / 6), 1.0, 0.97))
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def csv_rows(kind, algorithm, series):
     out = []
     for key, points in series.items():
@@ -235,12 +279,13 @@ def csv_rows(kind, algorithm, series):
 
 
 def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
-    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/; returns the paths written."""
+    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/; returns the paths written. A figure comparing nothing goes under <kind>/limited_data/; the grid kinds also get <problem>_algorithms.png and <algorithm>_problems.png."""
     rows = with_errors(shared.select_rows(store, set_names, where), errors_mod.Errors(store))
     by_problem = {}
     for row in rows:
         by_problem.setdefault((row["key"], row["problem"]), {}).setdefault(row["algorithm"], []).append(row)
     written = []
+    grids = {}
     for (key, problem), algorithms in sorted(by_problem.items()):
         tables = {kind.name: [] for kind in KINDS}
         for algorithm, members in sorted(algorithms.items()):
@@ -251,15 +296,31 @@ def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
                 tables[kind.name].extend(csv_rows(kind, algorithm, series))
                 if builds:
                     tables[kind.name].extend(csv_rows(BUILDS, algorithm, builds))
+                if series and kind.name in GRID_KINDS:
+                    grids.setdefault((key, kind.name), {})[(problem, algorithm)] = series
                 if not series and not builds:
                     continue
                 directory = os.path.join(out, key, kind.name)
+                if limited(series, builds):
+                    directory = os.path.join(directory, LIMITED_DIR)
                 os.makedirs(directory, exist_ok=True)
                 path = os.path.join(directory, "{0}_{1}.png".format(problem, shared.slug(algorithm)))
                 written.append(render(path, kind, series, algorithm, key, builds))
         for name, table in tables.items():
             if table:
+                os.makedirs(os.path.join(out, key, name), exist_ok=True)
                 written.append(shared.write_csv(os.path.join(out, key, name, problem + ".csv"), CSV_COLUMNS, table))
+    for (key, name), figures in sorted(grids.items()):
+        kind = next(k for k in KINDS if k.name == name)
+        directory = os.path.join(out, key, name)
+        for problem in sorted({p for p, _ in figures}):
+            panels = [(a, series) for (p, a), series in sorted(figures.items()) if p == problem]
+            written.append(render_grid(os.path.join(directory, problem + "_algorithms.png"), kind, panels,
+                                       "{0} | {1} | {2}".format(problem, name, key)))
+        for algorithm in sorted({a for _, a in figures}):
+            panels = [(p, series) for (p, a), series in sorted(figures.items()) if a == algorithm]
+            written.append(render_grid(os.path.join(directory, shared.slug(algorithm) + "_problems.png"), kind,
+                                       panels, "{0} | {1} | {2}".format(algorithm, name, key)))
     return written
 
 

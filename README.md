@@ -134,12 +134,16 @@ in `plots/<key>/<kind>/<problem>.csv`:
 
 A package is a colour, a controller a marker (`fixed`, `default`, `pi`,
 `pi matched` for a cubie PI row carrying Julia's matched gains rather than
-the DIRK tier's, `gustafsson`) and the transfers a line style (`both` solid,
-`none` dashed). A series holds the rows of one package, controller and
+the DIRK tier's, `gustafsson`) and the transfers a line style (`none` solid,
+`both` dashed). A series holds the rows of one package, controller and
 transfers along the axis; a lone point is no curve. julia_cpu, whose
 timing is not of interest, appears on the error-against-dt and
 error-against-tolerance figures only. Rows with `errored_pct` above 10 are
-dropped. With
+dropped. A figure with one package family (the two cubie backends count as
+one) or no series past three points goes under `<kind>/limited_data/`. The
+`runtime_vs_n`, `error_vs_runtime` and `states` kinds also get
+`<problem>_algorithms.png`, a subplot per algorithm, and
+`<algorithm>_problems.png`, a subplot per problem. With
 `--set`, what each key's store lacks of the set (rows, cold build times,
 finals files, optimize records) is printed per package, written to
 `plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a

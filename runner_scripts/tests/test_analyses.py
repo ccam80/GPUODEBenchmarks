@@ -78,10 +78,12 @@ class AnalysesCase(unittest.TestCase):
                                transfers="none", min_ms=NAN)
 
     def written(self, key=KEY):
-        """'<kind>/<name>' of every file under a key's output, sorted."""
+        """'<kind>/[limited_data/]<name>' of every file under a key's kind directories, sorted."""
         directory = os.path.join(self.out, key)
-        return sorted(kind + "/" + name for kind in os.listdir(directory) if os.path.isdir(os.path.join(directory, kind))
-                      for name in os.listdir(os.path.join(directory, kind))) if os.path.isdir(directory) else []
+        if not os.path.isdir(directory):
+            return []
+        return sorted(os.path.relpath(os.path.join(base, name), directory).replace(os.sep, "/")
+                      for base, _, names in os.walk(directory) for name in names if base != directory)
 
     def analysis_store(self):
         return shared.AnalysisStore(self.root)
@@ -282,7 +284,7 @@ class CompletenessTests(AnalysesCase):
 
 class PlotTests(AnalysesCase):
     def test_runtime_against_n_is_one_figure_per_algorithm_with_a_series_per_package_controller_and_transfers(self):
-        for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0)):
+        for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0), (512, 8.0)):
             self.row(n=n, min_ms=ms)
             self.row(n=n, min_ms=ms / 2, transfers="none")
             self.row(n=n, min_ms=3.0 * ms, **adaptive(1e-5))
@@ -297,19 +299,21 @@ class PlotTests(AnalysesCase):
         self.row(n=8, min_ms=5.0, algorithm="euler")
         self.row(n=32, min_ms=6.0, algorithm="euler")
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
-        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_euler.png",
-                                          "runtime_vs_n/lorenz_tsit5.png"])
+        # euler has one package: limited data. The grids hold every algorithm and every problem.
+        self.assertEqual(self.written(), ["runtime_vs_n/euler_problems.png", "runtime_vs_n/limited_data/lorenz_euler.png",
+                                          "runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_algorithms.png",
+                                          "runtime_vs_n/lorenz_tsit5.png", "runtime_vs_n/tsit5_problems.png"])
         self.assertEqual(sorted(os.path.relpath(p, os.path.join(self.out, KEY)).replace(os.sep, "/") for p in written),
                          self.written())
         table = self.table("runtime_vs_n")
         tsit5 = [r for r in table if r["algorithm"] == "tsit5"]
         self.assertEqual([(r["series"], r["x"], r["y"]) for r in tsit5],
                          [("cubie fixed both", "8.0", "1.0"), ("cubie fixed both", "32.0", "2.0"),
-                          ("cubie fixed both", "128.0", "4.0"),
+                          ("cubie fixed both", "128.0", "4.0"), ("cubie fixed both", "512.0", "8.0"),
                           ("cubie fixed none", "8.0", "0.5"), ("cubie fixed none", "32.0", "1.0"),
-                          ("cubie fixed none", "128.0", "2.0"),
+                          ("cubie fixed none", "128.0", "2.0"), ("cubie fixed none", "512.0", "4.0"),
                           ("cubie default both", "8.0", "3.0"), ("cubie default both", "32.0", "6.0"),
-                          ("cubie default both", "128.0", "12.0"),
+                          ("cubie default both", "128.0", "12.0"), ("cubie default both", "512.0", "24.0"),
                           ("julia_gpu fixed both", "8.0", "3.0"), ("julia_gpu fixed both", "32.0", "6.0")])
         self.assertEqual([r["series"] for r in table if r["algorithm"] == "euler"], ["cubie fixed both"] * 2)
         for absent in (dropped, untimed, cpu):
@@ -345,8 +349,10 @@ class PlotTests(AnalysesCase):
         self.store.record(dict(spec(problem="lorenz96", system_params={"states": 64}, n=131072, transfers="none",
                                     **adaptive(1e-5)), states=64, min_ms=NAN, build_s=80.0))
         written = plots.run(self.analysis_store(), set_names=["states"], out=self.out)
-        self.assertEqual(self.written(), ["states/lorenz96.csv", "states/lorenz96_tsit5.png"])
-        self.assertEqual(len(written), 2)
+        # Three timed points per package, but the builds panel has four: not limited data.
+        self.assertEqual(self.written(), ["states/lorenz96.csv", "states/lorenz96_algorithms.png",
+                                          "states/lorenz96_tsit5.png", "states/tsit5_problems.png"])
+        self.assertEqual(len(written), 4)
         table = self.table("states", problem="lorenz96")
         self.assertEqual([(r["series"], r["x"], r["y"]) for r in table if r["kind"] == "states"],
                          [("cubie default both", "4.0", "8.0"), ("cubie default both", "8.0", "16.0"),
@@ -378,8 +384,9 @@ class PlotTests(AnalysesCase):
         self.error_sweep()
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         self.assertEqual([n for n in self.written() if n.endswith(".png")],
-                         ["error_vs_dt/lorenz_tsit5.png", "error_vs_runtime/lorenz_tsit5.png",
-                          "error_vs_tol/lorenz_tsit5.png"])
+                         ["error_vs_dt/limited_data/lorenz_tsit5.png", "error_vs_runtime/limited_data/lorenz_tsit5.png",
+                          "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png",
+                          "error_vs_tol/limited_data/lorenz_tsit5.png"])
         by_dt = self.table("error_vs_dt")
         self.assertEqual([(r["series"], r["x"], r["min_ms"]) for r in by_dt],
                          [("cubie fixed", "0.03125", "5.0"), ("cubie fixed", "0.0625", "4.0"),
@@ -412,6 +419,16 @@ class PlotTests(AnalysesCase):
                           ("julia_gpu fixed none", "10.0", "0.03125")])
         for record in table:
             self.assertTrue(errors.is_finite_positive(float(record["y"])))
+
+    def test_a_figure_comparing_nothing_is_limited_data(self):
+        four = {(package, "fixed", "both"): [(float(n), 1.0, {}) for n in (8, 32, 128, 512)] for package in ("cubie", "jax")}
+        self.assertFalse(plots.limited(four))
+        self.assertTrue(plots.limited({k: v[:3] for k, v in four.items()}))
+        cubies = {(package, "fixed", "both"): four[("cubie", "fixed", "both")] for package in ("cubie", "cubie_mlir")}
+        self.assertTrue(plots.limited(cubies))
+        self.assertTrue(plots.limited({}))
+        # The builds panel counts.
+        self.assertFalse(plots.limited(cubies, {("jax", "fixed", ""): four[("jax", "fixed", "both")]}))
 
     def test_no_curve_writes_nothing(self):
         self.row(n=8)
