@@ -1,6 +1,6 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a stepping a marker, the transfers a line style (none solid, both dashed); cubie's default controller is not drawn; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, stepping, transfers) along the axis; fewer than two points is no curve. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a controller kind a marker (fixed, adaptive, matched, Gustafsson), the transfers a line style (solid, dashed with the transfer); cubie's default controller is not drawn; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
 import math
@@ -63,11 +63,11 @@ CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfer
 # ------------------------------------------------------------------ rows
 
 def with_errors(rows, errs):
-    """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `stepping`."""
+    """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `controller_kind`."""
     cache = {}
     out = []
     for row in shared.usable(rows):
-        out.append(dict(row, error=errs.error(row), stepping=shared.stepping(row, cache)))
+        out.append(dict(row, error=errs.error(row), controller_kind=shared.controller_kind(row, cache)))
     return out
 
 
@@ -88,7 +88,7 @@ def _artifacts(row):
 
 def takes(kind, row):
     """True when a row belongs on a kind: its package is shown, it is not cubie's default controller, and it has what the axes need."""
-    if row["package"] not in kind.packages or row["stepping"] is None:
+    if row["package"] not in kind.packages or row["controller_kind"] is None:
         return False
     if kind.needs == "fixed error" and row["controller"] != "fixed":
         return False
@@ -117,7 +117,7 @@ def loose_first(row):
 
 
 def series_key(kind, row):
-    return (row["key"], row["package"], row["stepping"], row["transfers"] if kind.by_transfers else "")
+    return (row["key"], row["package"], row["controller_kind"], row["transfers"] if kind.by_transfers else "")
 
 
 def context(kind, row):
@@ -125,7 +125,7 @@ def context(kind, row):
 
 
 def series_of(kind, rows):
-    """{(key, package, stepping, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values; fewer than two is no curve."""
+    """{(key, package, controller kind, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values and needs two."""
     grouped = {}
     for row in rows:
         if not takes(kind, row):
@@ -150,7 +150,7 @@ def series_of(kind, rows):
 
 def ordered(series):
     return dict(sorted(series.items(), key=lambda item: (
-        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.STEPPINGS.index(item[0][2]), item[0][3])))
+        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.CONTROLLER_KINDS.index(item[0][2]), item[0][3])))
 
 
 def merged(figures):
@@ -162,12 +162,10 @@ def merged(figures):
 
 
 def series_label(kind, key, points):
-    """'Cubie (MLIR), Fixed-step dt=0.000977, none' from a series key and its first row; no dt on the dt axis."""
-    _, package, stepping, transfers = key
-    parts = [shared.package_name(package), shared.stepping_text(stepping, None if kind.x == "dt" else points[0][2])]
-    if transfers:
-        parts.append(transfers)
-    return ", ".join(parts)
+    """'Cubie (MLIR), Fixed-step dt=0.000977 + transfer' from a series key and its first row; ' + transfer' for the both transfers, no dt on the dt axis."""
+    _, package, controller, transfers = key
+    parts = [shared.package_name(package), shared.controller_text(controller, None if kind.x == "dt" else points[0][2])]
+    return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
 
 
 def family(package):
@@ -201,9 +199,9 @@ def draw(panel, kind, series, cards):
             continue
         entries.append((shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
         for key, points in by_card[card]:
-            _, package, stepping, transfers = key
+            _, package, controller, transfers = key
             line = panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(kind, key, points),
-                              color=shared.colour(package), marker=shared.marker(stepping, cards.index(card)),
+                              color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
                               linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
                               markeredgecolor="black", markeredgewidth=0.5)[0]
             entries.append((series_label(kind, key, points), line))

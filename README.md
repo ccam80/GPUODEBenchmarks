@@ -132,12 +132,13 @@ in `plots/<key>/<kind>/<problem>.csv`:
 | `error_vs_tol` | tolerance | error | every package, the adaptive steppings |
 | `states` | states | min_ms and, beside it, the cold build time | the GPU packages of a resized problem |
 
-A package is a colour, a stepping a marker (fixed-step; adaptive steps,
-which is a package's default controller or cubie's DIRK-tier PI; adaptive
-steps matched, a cubie PI row carrying Julia's gains; Gustafsson) and the
-transfers a line style (`none` solid, `both` dashed). Cubie's own default
-controller is not drawn. A series holds the rows of one key, package,
-stepping and transfers along the axis; a lone point is no curve. julia_cpu,
+A package is a colour, a controller kind a marker (fixed-step; adaptive
+steps, which is a package's default controller or cubie's DIRK-tier PI;
+adaptive steps matched, a cubie PI row carrying Julia's gains; Gustafsson)
+and the transfers a line style (solid; dashed and labelled `+ transfer` when
+the timing includes the transfers). Cubie's own default controller is not
+drawn. A series holds the rows of one key, package, controller kind and
+transfers along the axis and is drawn when it has two or more x values. julia_cpu,
 whose timing is not of interest, appears on the error-against-dt and
 error-against-tolerance figures only. Rows with `errored_pct` above 10 are
 dropped. A figure with one package family (the two cubie backends count as
@@ -155,8 +156,7 @@ group the store records a compile timeout of wants no optimize record.
 Rows read in the store's current form: a column a file lacks reads as null,
 a cubie PI row within Float32 rounding of the DIRK PI tier carries the
 tier's exact gains and finds its optimize record under either spelling, and
-the fastest row of a run_id stands (the lowest finite min_ms; among untimed
-rows one with build time, then with finals, then latest). The golden of a system is its julia_cpu float64
+two rows of one run_id are refused. The golden of a system is its julia_cpu float64
 finals row running the problem's golden algorithm. A CSV leaves out the
 columns no row captured.
 

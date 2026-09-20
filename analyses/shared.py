@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and of the rows one run_id then holds the fastest stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per stepping and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and two rows of one run_id are refused), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller kind and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -22,7 +22,7 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# The figure encoding: a colour per package, a marker per stepping (one set per card), a line style per transfers.
+# The figure encoding: a colour per package, a marker per controller kind (one set per card), a line style per transfers.
 COLOURS = {
     "cubie": "tab:blue", "cubie_mlir": "tab:purple", "jax": "tab:red", "pytorch": "darkred",
     "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
@@ -31,7 +31,7 @@ PACKAGE_NAMES = {
     "cubie": "Cubie", "cubie_mlir": "Cubie (MLIR)", "jax": "Diffrax", "pytorch": "torchdiffeq",
     "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
 }
-STEPPINGS = ("fixed", "adaptive", "matched", "gustafsson")
+CONTROLLER_KINDS = ("fixed", "adaptive", "matched", "gustafsson")
 MARKER_SETS = (("s", "o", "^", "D"), ("P", "v", "<", "X"), ("*", "p", ">", "h"))
 LINES = {"both": "--", "none": "-"}
 
@@ -90,7 +90,7 @@ def pull_store(args):
 # ------------------------------------------------------------------- store
 
 class AnalysisStore:
-    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and of the rows one run_id then holds the fastest stands (fastest). Everything else is the underlying Store."""
+    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and two rows of one run_id raise. Everything else is the underlying Store."""
 
     def __init__(self, root):
         import store as store_mod
@@ -102,7 +102,7 @@ class AnalysisStore:
         return getattr(self._store, name)
 
     def rows(self, sql_where="", **eq_filters):
-        return fastest(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
+        return unique(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
 
     def optimize_rows(self, package, key, root=None):
         """Every optimize.csv record of a package under a key, its gains in the current form."""
@@ -161,21 +161,16 @@ def normalise_gains(row, cache=None, ids=True):
     return rewritten
 
 
-def fastest(rows):
-    """One row per run_id, in first-appearance order: the lowest finite min_ms; among untimed rows one with its cold build time, then one with finals, then the latest recorded."""
-    standing = {}
+def unique(rows):
+    """The rows, one per run_id; ValueError naming the run_id when two rows share one."""
+    seen = {}
     for row in rows:
-        held = standing.get(row["run_id"])
-        if held is None or _rank(row) > _rank(held):
-            standing[row["run_id"]] = row
-    return list(standing.values())
-
-
-def _rank(row):
-    ms = number(row.get("min_ms"))
-    stamp = row.get("recorded_utc")
-    return (math.isfinite(ms), -ms if math.isfinite(ms) else 0.0, math.isfinite(number(row.get("build_s"))),
-            bool(row.get("finals")), stamp.timestamp() if stamp is not None else float("-inf"))
+        held = seen.get(row["run_id"])
+        if held is not None:
+            raise ValueError("two rows of run_id {0}: {1}/{2} gains {3!r} and {4!r}".format(
+                row["run_id"], row["key"], row["package"], held.get("gains"), row.get("gains")))
+        seen[row["run_id"]] = row
+    return list(seen.values())
 
 
 # --------------------------------------------------------------- selection
@@ -299,8 +294,8 @@ def usable(rows):
 
 # ---------------------------------------------------------------- encoding
 
-def stepping(row, cache=None):
-    """The stepping a figure keys its marker by: fixed, adaptive (a package's default controller, or cubie's DIRK-tier PI), matched (a cubie PI row carrying Julia's gains) or gustafsson; None for cubie's default controller, which is not drawn."""
+def controller_kind(row, cache=None):
+    """The kind of controller a figure keys its marker by: fixed, adaptive (a package's default controller, or cubie's DIRK-tier PI), matched (a cubie PI row carrying Julia's gains) or gustafsson; None for cubie's default controller, which is not drawn."""
     import cubie_adapter
     controller = row["controller"]
     cubie = row["package"] in cubie_adapter.PACKAGES
@@ -317,7 +312,7 @@ def stepping(row, cache=None):
     return controller
 
 
-def stepping_text(name, row=None):
+def controller_text(name, row=None):
     """'Fixed-step dt=0.000977' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
     if name == "fixed":
         return "Fixed-step" if row is None else "Fixed-step dt={0:.3g}".format(number(row["dt"]))
@@ -361,9 +356,9 @@ def colour(package):
 
 
 def marker(name, card=0):
-    """The marker of a stepping on a card; cards past the sets share the last set."""
+    """The marker of a controller kind on a card; cards past the sets share the last set."""
     markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
-    return markers[STEPPINGS.index(name)] if name in STEPPINGS else "x"
+    return markers[CONTROLLER_KINDS.index(name)] if name in CONTROLLER_KINDS else "x"
 
 
 def line(transfers):
