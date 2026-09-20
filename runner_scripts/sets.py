@@ -312,7 +312,8 @@ def _controller(stepping, package, algorithm, problem, key, root, where):
                 raise SetError(where + ": dirk_defaults needs controller = \"pi\"")
         shipped = cubie_adapter.default_controller(algorithm.name, algorithm["family"],
                                                    algorithm["order"])
-        if cubie_adapter.controllers_equal(settings, shipped):
+        # Julia's table is printed at Float32, so the shipped comparison allows that rounding.
+        if cubie_adapter.controllers_equal(settings, shipped, cubie_adapter.FLOAT32_REL_TOL):
             return None
         settings = dict(settings)
         return settings.pop("step_controller"), settings

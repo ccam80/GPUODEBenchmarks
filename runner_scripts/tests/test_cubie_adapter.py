@@ -79,6 +79,23 @@ class ControllerMappingTests(unittest.TestCase):
         self.assertAlmostEqual(settings["min_step_shrink"], 0.2)
         self.assertAlmostEqual(settings["max_step_growth"], 10.0)
 
+    def test_float32_printed_constants_snap_to_the_dirk_pi_tier(self):
+        # Julia's Float32 table for tsit5: beta1 0.14, beta2 0.08 at order 5 is the DIRK PI tier (0.36, 0.48).
+        tier = adapter.pi_tier_controller(5)
+        constants = {"controller": "PIController", "beta1": float("0.14"), "beta2": float("0.08"),
+                     "qmin": 0.2, "qmax": 10.0, "gamma": 0.9}
+        settings, why = adapter.matched_controller(constants, 5)
+        self.assertIsNone(why)
+        self.assertEqual(settings, tier)
+        rounded = {"controller": "PIController", "beta1": 0.23333333, "beta2": 0.13333334,
+                   "qmin": 0.2, "qmax": 10.0, "gamma": 0.9}
+        self.assertEqual(adapter.matched_controller(rounded, 3)[0], adapter.pi_tier_controller(3))
+        # A controller that differs beyond Float32 rounding keeps Julia's values.
+        other = dict(rounded, beta1=0.25)
+        settings, _ = adapter.matched_controller(other, 3)
+        self.assertNotEqual(settings, adapter.pi_tier_controller(3))
+        self.assertAlmostEqual(settings["integral_gain"], 0.25 * 4 - 0.13333334 * 4)
+
     def test_predictive_controller_maps_to_gustafsson(self):
         constants = {"controller": "PredictiveController", "beta1": None,
                      "beta2": None, "qmin": 0.2, "qmax": 8.0, "gamma": 0.9}

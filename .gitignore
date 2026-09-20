@@ -51,3 +51,6 @@ GPU_ODE_MYOKIT_CUDA/models/generated/
 
 # Figures and CSVs written by the analyses
 /plots/
+
+# MPGOS build cache; a symlink in worktrees
+GPU_ODE_MPGOS/build_cache

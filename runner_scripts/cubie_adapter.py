@@ -111,20 +111,26 @@ def pi_tier_controller(order):
     }
 
 
+# Julia prints its controller constants at the run precision, so a Float32 table agrees with an exact value to about 1e-7.
+FLOAT32_REL_TOL = 1e-6
+
+
 def matched_controller(constants, order):
-    """Cubie settings reproducing Julia's resolved controller, or (None, reason); cubie's PI exponent (I + P) / (2 (order + 1)) on the squared norm matches Julia's beta1 on the norm."""
+    """Cubie settings reproducing Julia's resolved controller, or (None, reason); cubie's PI exponent (I + P) / (2 (order + 1)) on the squared norm matches Julia's beta1 on the norm. A PI controller within FLOAT32_REL_TOL of the DIRK PI tier at the order returns the tier's exact values, so a Float32-printed table names the same trial as gains = dirk_defaults."""
     if constants is None:
         return None, "no julia controller constants"
     if constants["controller"] == "PIController":
         proportional = constants["beta2"] * (order + 1)
-        return {
+        settings = {
             "step_controller": "pi",
             "integral_gain": constants["beta1"] * (order + 1) - proportional,
             "proportional_gain": proportional,
             "safety": constants["gamma"],
             "min_step_shrink": constants["qmin"],
             "max_step_growth": constants["qmax"],
-        }, None
+        }
+        tier = pi_tier_controller(order)
+        return (tier if controllers_equal(settings, tier, FLOAT32_REL_TOL) else settings), None
     if constants["controller"] == "PredictiveController":
         return {"step_controller": "gustafsson",
                 "safety": constants["gamma"]}, None

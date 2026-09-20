@@ -444,11 +444,32 @@ newton = "tol"
         self.assertEqual(radau["controller"], "gustafsson")
         self.assertEqual(json.loads(radau["gains"]), {"safety": 0.9})
         self.assertEqual(json.loads(specs["kvaerno3"]["gains"])["proportional_gain"], 0.1 * 4)
-        # Julia's row equal to cubie's shipped controller is skipped.
-        # beta1 (order + 1) = I + P and beta2 (order + 1) = P of the shipped pi at order 3.
+        # Float32-printed beta1 (order + 1) = I + P and beta2 (order + 1) = P of the shipped pi at order 3: skipped.
         self.write_controllers("lorenz", [
-            ("kvaerno3", "PIController", "0.2333333333333333", "0.1333333333333333", "0.2", "10.0", "0.9", "3")])
+            ("kvaerno3", "PIController", "0.23333333", "0.13333334", "0.2", "10.0", "0.9", "3")])
         self.assertEqual(sets.expand(["m"], KEY, self.root, sets_dir=self.sets_dir), [])
+
+    def test_matched_within_float32_of_the_pi_tier_is_one_trial_with_dirk_defaults(self):
+        import trials
+        self.write_set("m", self.ADAPTIVE.format(controller="matched", gains=""))
+        self.write_set("p", self.ADAPTIVE.format(controller="pi", gains='gains = "dirk_defaults"'))
+        # tsit5 at order 5: the tier is (0.24, 0.32); Julia's Float32 table prints beta1 0.093333334, beta2 0.053333335.
+        self.write_controllers("lorenz", [
+            ("tsit5", "PIController", "0.093333334", "0.053333335", "0.2", "10.0", "0.9", "5")])
+        matched = sets.expand(["m"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
+        tier = sets.expand(["p"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
+        self.assertEqual(len(matched), 1)
+        self.assertEqual(len(tier), 1)
+        self.assertEqual(matched[0]["gains"], tier[0]["gains"])
+        merged = trials.build_trials(matched + tier)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["sets"], ["m", "p"])
+        # Beyond Float32 rounding the matched controller stays Julia's and is its own trial.
+        self.write_controllers("lorenz", [
+            ("tsit5", "PIController", "0.1", "0.053333335", "0.2", "10.0", "0.9", "5")])
+        matched = sets.expand(["m"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
+        self.assertNotEqual(matched[0]["gains"], tier[0]["gains"])
+        self.assertEqual(len(trials.build_trials(matched + tier)), 2)
 
     def test_pi_with_dirk_defaults_skips_dirk_algorithms(self):
         self.write_set("p", self.ADAPTIVE.format(controller="pi", gains='gains = "dirk_defaults"'))
