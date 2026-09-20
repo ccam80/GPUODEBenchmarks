@@ -59,12 +59,14 @@ def optimize_status(record, mode):
     return None
 
 
-def audit(trial_list, key, store, mode=None):
-    """{trial_id: Missing} of the lines with transfers under a key; 'no_overwrite' wants a finite time, None and 'resume' any row."""
+def audit(trial_list, key, store, mode=None, optimize_rows=None):
+    """{trial_id: Missing} of the lines with transfers under a key; 'no_overwrite' wants a finite time, None and 'resume' any row; `optimize_rows(package, key, root)` supplies a package's optimize records, cubie_adapter's when None."""
     if mode not in MODES:
         raise ValueError("mode is one of None, resume, no_overwrite")
+    if optimize_rows is None:
+        optimize_rows = cubie_adapter.optimize_rows
     recorded = {row["run_id"]: row for row in store.rows(key=key)}
-    optimize_rows = {}
+    records = {}
     out = {}
     for trial in trial_list:
         if not trial["transfers"]:
@@ -84,9 +86,9 @@ def audit(trial_list, key, store, mode=None):
             missing.finals = True
         if trial["optimize"] and trial["package"] in cubie_adapter.PACKAGES:
             package = trial["package"]
-            if package not in optimize_rows:
-                optimize_rows[package] = cubie_adapter.optimize_rows(package, key, store.root)
-            record = cubie_adapter.find_optimized(optimize_rows[package], cubie_adapter.kernel_ident(trial, key))
+            if package not in records:
+                records[package] = optimize_rows(package, key, store.root)
+            record = cubie_adapter.find_optimized(records[package], cubie_adapter.kernel_ident(trial, key))
             missing.optimize = optimize_status(record, mode)
             missing.optimize_timed_out = record is not None and record.get("label") == "timeout" \
                 and missing.optimize is None

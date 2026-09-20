@@ -170,7 +170,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     shared.check_selection(args)
     shared.pull_store(args)
-    store = store_mod.Store(args.root)
+    store = shared.AnalysisStore(args.root)
     lacking = shared.report_incomplete(store, args.set, args.out) if args.set else 0
     written, skipped = run(store, args.x, args.set, args.where, args.out)
     for path in written:

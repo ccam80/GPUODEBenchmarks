@@ -126,7 +126,16 @@ Both analyses take `--set` (repeatable) or `--where "<sql>"`, read every key,
 and write figures and CSVs under `plots/<key>/<problem>/`. With `--set`, what
 each key's store lacks of the set (rows, cold build times, finals files,
 optimize records) is printed per package, written to
-`plots/<key>/incomplete.csv`, and exits the script 1 after its outputs.
+`plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a
+group the store records a compile timeout of wants no optimize record.
+
+Rows read in the store's current form: a column a file lacks reads as null,
+a cubie PI row within Float32 rounding of the DIRK PI tier carries the
+tier's exact gains and finds its optimize record under either spelling, and
+the most complete row of a run_id stands (timed, then with build time, then
+with finals, then latest). The golden of a system is its julia_cpu float64
+finals row running the problem's golden algorithm. A CSV leaves out the
+columns no row captured.
 
 ## Using the store
 

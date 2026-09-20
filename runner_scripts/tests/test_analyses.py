@@ -1,6 +1,7 @@
-"""The analysis scripts: selection by set or predicate with the ensemble fields ignored, the errored and untimed filters, timing figures and CSVs on the n, states and error axes, and the agreement CSVs and figures."""
+"""The analysis scripts: the store read in its current form (a PI row within Float32 rounding of the DIRK tier, the most complete row of a run_id), selection by set or predicate with the ensemble fields ignored, the errored and untimed filters, the completeness report with the store's compile timeouts marked, CSVs without the columns no row captured, timing figures and CSVs on the n, states and error axes, and the agreement CSVs and figures."""
 
 import csv
+import json
 import math
 import os
 import shutil
@@ -15,7 +16,10 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "analyses"))
 
+import abandon  # noqa: E402
+import cubie_adapter  # noqa: E402
 import grid  # noqa: E402
+import sets  # noqa: E402
 import store  # noqa: E402
 import agreement  # noqa: E402
 import shared  # noqa: E402
@@ -100,6 +104,70 @@ class SelectionTests(AnalysesCase):
         self.assertFalse(timing.timed({"min_ms": NAN}))
         self.assertTrue(timing.timed({"min_ms": 0.5}))
 
+    def pi_spec(self, package="cubie", n=8, **overrides):
+        """The perf set's cubie PI point of lorenz tsit5 at n on both transfers, as the set declares it (the tier's exact gains)."""
+        specs = [s for s in sets.expand(["perf"], KEY, self.root, packages=[package], algorithms=["tsit5"], n=[n])
+                 if s["controller"] == "pi" and s["problem"] == "lorenz"]
+        self.assertEqual(len(specs), 1)
+        fields = {f: specs[0][f] for f in store.SPEC_FIELDS if f in specs[0]}
+        return dict(fields, transfers="both", key=KEY, **overrides)
+
+    @staticmethod
+    def rounded(gains):
+        """The gains as a Float32 table prints them."""
+        return {k: float(np.float32(v)) for k, v in json.loads(gains).items()}
+
+    def test_a_pi_row_within_float32_rounding_of_the_tier_reads_as_the_tier(self):
+        exact = self.pi_spec()
+        self.assertEqual(json.loads(exact["gains"])["proportional_gain"], 0.4800000000000001)
+        rounded = self.store.record(dict(exact, gains=self.rounded(exact["gains"]), states=3, min_ms=2.0))
+        self.assertNotEqual(rounded["gains"], exact["gains"])
+        self.assertNotEqual(rounded["run_id"], store.run_id(exact))
+        # Other gains, and a package outside cubie, read as written.
+        other = self.store.record(dict(exact, gains={"integral_gain": 0.5, "proportional_gain": 0.1}, states=3))
+        jax = self.store.record(dict(exact, package="jax", gains=self.rounded(exact["gains"]), states=3))
+        data = shared.AnalysisStore(self.root)
+        rows = {r["run_id"]: r for r in data.rows()}
+        self.assertEqual(set(rows), {store.run_id(exact), other["run_id"], jax["run_id"]})
+        read = rows[store.run_id(exact)]
+        self.assertEqual((read["gains"], read["trial_id"], read["group_id"], read["min_ms"], read["finals"]),
+                         (exact["gains"], store.trial_id(exact), store.group_id(exact), 2.0, ""))
+        self.assertEqual(rows[jax["run_id"]]["gains"], jax["gains"])
+        self.assertEqual(sorted(r["run_id"] for r in data.rows(key=KEY, package="cubie")),
+                         sorted([store.run_id(exact), other["run_id"]]))
+        self.assertIs(shared.normalise_gains(read), read)
+        # The set selects it; the audit counts its row and finds its optimize record written under the rounded gains.
+        self.assertIn(store.run_id(exact), [r["run_id"] for r in shared.select_rows(data, ["perf"])])
+        trial = dict(exact, gains=rounded["gains"], transfers=["both"])
+        cubie_adapter.record_optimize_timeout(trial, KEY, self.root)
+        self.assertEqual(cubie_adapter.optimize_rows("cubie", KEY, self.root)[0]["gains"], rounded["gains"])
+        self.assertEqual(data.optimize_rows("cubie", KEY)[0]["gains"], exact["gains"])
+        lacking = {m.trial["trial_id"]: m.reasons() for _, m in shared.incomplete(data, ["perf"])}
+        self.assertEqual(lacking.get(store.trial_id(exact)), ["row:none"])
+
+    def test_the_most_complete_row_of_a_run_id_stands(self):
+        exact = self.pi_spec()
+        cold = self.store.record(dict(exact, states=3, min_ms=1.0, build_s=3.0,
+                                      recorded_utc="2026-09-19T06:23:42Z"))
+        self.store.record(dict(exact, gains=self.rounded(exact["gains"]), states=3, min_ms=1.1,
+                               recorded_utc="2026-09-19T06:26:46Z"))
+        rows = shared.AnalysisStore(self.root).rows()
+        self.assertEqual([(r["run_id"], r["min_ms"], r["build_s"]) for r in rows], [(cold["run_id"], 1.0, 3.0)])
+        timed = dict(cold, run_id="y", min_ms=1.0, build_s=NAN)
+        untimed = dict(cold, run_id="y", min_ms=NAN, build_s=3.0)
+        self.assertEqual([r["min_ms"] for r in shared.most_complete([untimed, timed])], [1.0])
+        earlier = dict(timed, recorded_utc=cold["recorded_utc"].replace(year=2025))
+        self.assertEqual([r["recorded_utc"] for r in shared.most_complete([earlier, timed])], [timed["recorded_utc"]])
+        self.assertEqual([r["recorded_utc"] for r in shared.most_complete([timed, earlier])], [timed["recorded_utc"]])
+
+    def test_a_csv_leaves_out_the_columns_no_row_captured(self):
+        rows = [{"a": 1.0, "b": NAN, "c": "", "d": None, "e": [], "f": "x"},
+                {"a": NAN, "b": NAN, "c": "", "d": None, "e": [1.0], "f": ""}]
+        self.assertEqual(shared.captured_columns(("a", "b", "c", "d", "e", "f", "g"), rows), ["a", "e", "f"])
+        self.assertEqual(shared.captured_columns(("a", "b"), []), ["a", "b"])
+        path = shared.write_csv(os.path.join(self.tmp, "t.csv"), ("a", "b", "c", "d", "e", "f", "g"), rows)
+        self.assertEqual(read_csv(path), [{"a": "1.0", "e": "", "f": "x"}, {"a": "nan", "e": "1.0", "f": ""}])
+
     def test_flags_need_a_set_or_a_predicate(self):
         with self.assertRaises(SystemExit):
             timing.main(["--no-sync", "--x", "n", "--root", self.root, "--out", self.out])
@@ -139,7 +207,8 @@ class CompletenessTests(AnalysesCase):
         self.assertEqual(count, 2)
         for key in (KEY, OTHER_KEY):
             table = read_csv(os.path.join(self.out, key, "incomplete.csv"))
-            self.assertEqual(list(table[0]), list(shared.INCOMPLETE_COLUMNS))
+            # A fixed stepping captures no atol.
+            self.assertEqual(list(table[0]), [c for c in shared.INCOMPLETE_COLUMNS if c != "atol"])
             self.assertEqual([(r["key"], r["package"], r["n"], r["sets"], r["missing"]) for r in table],
                              [(key, "cpp", "32", "keep tiny", "row:none finals" if key == OTHER_KEY else "finals")])
         # The 32-point's finals file completes this key; the other key still lacks its row.
@@ -155,6 +224,25 @@ class CompletenessTests(AnalysesCase):
         self.store.record_finals(other, np.zeros((32, 3)), np.full(32, 1.0))
         self.assertEqual(shared.incomplete(self.store, ["tiny"], self.sets_dir), [])
         self.assertEqual(shared.report_incomplete(self.store, ["tiny"], self.out, self.sets_dir), 0)
+
+    def test_a_compile_timeout_the_store_records_marks_its_lines_as_a_plan_does(self):
+        def lines():
+            return [t for t in shared.canonical_trials(self.store, ["perf"], KEY)
+                    if (t["package"], t["problem"], t["algorithm"], t["controller"]) ==
+                    ("cubie", "lorenz", "tsit5", "fixed")]
+        perf = lines()
+        self.assertTrue(perf)
+        self.assertEqual({(t["optimize"], t["compile"]) for t in perf}, {(True, "")})
+        abandon.abandon_compile(self.store, KEY, perf, perf[0])
+        marked = lines()
+        self.assertEqual({(t["optimize"], t["compile"]) for t in marked}, {(False, "timeout")})
+        # The rows abandon_compile wrote are no rows, and no line of the group wants an optimize record.
+        ids = {t["trial_id"] for t in marked}
+        lacking = {m.trial["trial_id"]: m.reasons() for _, m in shared.incomplete(self.store, ["perf"])
+                   if m.trial["trial_id"] in ids}
+        self.assertEqual(set(lacking), ids)
+        self.assertEqual({tuple(v[:2]) for v in lacking.values()}, {("row:both", "row:none")})
+        self.assertEqual({tuple(v[2:]) for v in lacking.values()}, {(), ("finals",)})
 
     def test_the_scripts_report_a_shipped_set_the_store_lacks_and_exit_1(self):
         self.row(n=8)
@@ -192,7 +280,10 @@ class TimingTests(AnalysesCase):
                           ("julia_gpu", "8.0", "3.0"), ("julia_gpu", "32.0", "6.0")])
         self.assertNotIn(dropped["run_id"], [r["run_id"] for r in big])
         self.assertNotIn(untimed["run_id"], [r["run_id"] for r in big])
-        self.assertEqual(list(big[0]), list(timing.CSV_COLUMNS))
+        # No build time, error, errored share, finals or reason on these rows: their columns are left out.
+        self.assertEqual(list(big[0]), [c for c in timing.CSV_COLUMNS if c not in (
+            "build_s", "error", "errored_pct", "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol",
+            "reason", "finals")])
         none = [n for n in names if "_none_" in n and n.endswith(".csv")]
         self.assertEqual([r["min_ms"] for r in read_csv(os.path.join(self.out, KEY, "lorenz", none[0]))],
                          ["0.5", "1.0", "2.0"])
@@ -264,13 +355,15 @@ class AgreementTests(AnalysesCase):
         self.assertTrue(names[2].startswith("agreement_tsit5_fixed_") and names[2].endswith(".png"))
         self.assertEqual(sorted(os.path.basename(p) for p in written), names)
         table = read_csv(os.path.join(self.out, KEY, "lorenz", "agreement.csv"))
-        self.assertEqual(list(table[0]), list(agreement.ROW_COLUMNS))
+        self.assertEqual(list(table[0]), [c for c in agreement.ROW_COLUMNS if c not in (
+            "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")])
         self.assertEqual([(r["package"], r["dt"]) for r in table],
                          [("cubie", "0.125"), ("julia_gpu", "0.125"), ("cubie", "0.0625"), ("julia_gpu", "0.0625")])
         for record, expected in zip(table, (0.125, 0.125, 0.0625, 0.0625)):
             self.assertAlmostEqual(float(record["error"]) / (expected / math.sqrt(3)), 1.0, places=3)
         pairs = read_csv(os.path.join(self.out, KEY, "lorenz", "agreement_pairs.csv"))
-        self.assertEqual(list(pairs[0]), list(agreement.PAIR_COLUMNS))
+        self.assertEqual(list(pairs[0]), [c for c in agreement.PAIR_COLUMNS if c not in (
+            "dt_min", "dt_max", "atol", "rtol", "newton_atol", "newton_rtol")])
         self.assertEqual([(p["package_a"], p["package_b"], p["dt"]) for p in pairs],
                          [("cubie", "julia_gpu", "0.125"), ("cubie", "julia_gpu", "0.0625")])
         for record, expected in zip(pairs, (0.25, 0.125)):
