@@ -77,15 +77,17 @@ class AnalysesCase(unittest.TestCase):
                                dt=NAN, atol=1e-13, rtol=1e-13, package="julia_cpu",
                                transfers="none", min_ms=NAN)
 
-    def written(self, key=KEY, problem="lorenz"):
-        directory = os.path.join(self.out, key, problem)
-        return sorted(os.listdir(directory)) if os.path.isdir(directory) else []
+    def written(self, key=KEY):
+        """'<kind>/<name>' of every file under a key's output, sorted."""
+        directory = os.path.join(self.out, key)
+        return sorted(kind + "/" + name for kind in os.listdir(directory) if os.path.isdir(os.path.join(directory, kind))
+                      for name in os.listdir(os.path.join(directory, kind))) if os.path.isdir(directory) else []
 
     def analysis_store(self):
         return shared.AnalysisStore(self.root)
 
     def table(self, name, key=KEY, problem="lorenz"):
-        return read_csv(os.path.join(self.out, key, problem, name + ".csv"))
+        return read_csv(os.path.join(self.out, key, name, problem + ".csv"))
 
 
 class SelectionTests(AnalysesCase):
@@ -295,8 +297,10 @@ class PlotTests(AnalysesCase):
         self.row(n=8, min_ms=5.0, algorithm="euler")
         self.row(n=32, min_ms=6.0, algorithm="euler")
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
-        self.assertEqual(self.written(), ["runtime_vs_n.csv", "runtime_vs_n_euler.png", "runtime_vs_n_tsit5.png"])
-        self.assertEqual(sorted(os.path.basename(p) for p in written), self.written())
+        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_euler.png",
+                                          "runtime_vs_n/lorenz_tsit5.png"])
+        self.assertEqual(sorted(os.path.relpath(p, os.path.join(self.out, KEY)).replace(os.sep, "/") for p in written),
+                         self.written())
         table = self.table("runtime_vs_n")
         tsit5 = [r for r in table if r["algorithm"] == "tsit5"]
         self.assertEqual([(r["series"], r["x"], r["y"]) for r in tsit5],
@@ -314,16 +318,18 @@ class PlotTests(AnalysesCase):
         self.assertEqual(list(table[0]), [c for c in plots.CSV_COLUMNS if c not in (
             "build_s", "error", "errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason", "finals")])
 
-    def test_two_curves_under_one_series_are_told_apart_by_what_differs(self):
-        for n in (8, 32):
+    def test_a_series_keeps_the_stepping_with_the_most_points(self):
+        for n in (8, 32, 128):
             self.row(n=n, dt=2.0 ** -10)
+            self.row(n=n, **adaptive(1e-3))
+        for n in (8, 32):
             self.row(n=n, dt=2.0 ** -8)
             self.row(n=n, **adaptive(1e-5))
-            self.row(n=n, **adaptive(1e-3))
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
-        self.assertEqual(sorted({r["series"] for r in self.table("runtime_vs_n")}),
-                         ["cubie default both tol=0.001", "cubie default both tol=1e-05",
-                          "cubie fixed both dt=2^-10", "cubie fixed both dt=2^-8"])
+        table = self.table("runtime_vs_n")
+        self.assertEqual(sorted({(r["series"], r["dt"], r["atol"]) for r in table}),
+                         [("cubie default both", "0.0009765625", "0.001"), ("cubie fixed both", "0.0009765625", "nan")])
+        self.assertEqual(len(table), 6)
 
     def test_states_figure_has_runtime_and_cold_build_panels(self):
         for states, build in ((4, 10.0), (8, 20.0), (16, 40.0)):
@@ -339,16 +345,17 @@ class PlotTests(AnalysesCase):
         self.store.record(dict(spec(problem="lorenz96", system_params={"states": 64}, n=131072, transfers="none",
                                     **adaptive(1e-5)), states=64, min_ms=NAN, build_s=80.0))
         written = plots.run(self.analysis_store(), set_names=["states"], out=self.out)
-        self.assertEqual(self.written(problem="lorenz96"), ["builds.csv", "states.csv", "states_tsit5.png"])
-        self.assertEqual(len(written), 3)
-        self.assertEqual([(r["series"], r["x"], r["y"]) for r in self.table("states", problem="lorenz96")],
+        self.assertEqual(self.written(), ["states/lorenz96.csv", "states/lorenz96_tsit5.png"])
+        self.assertEqual(len(written), 2)
+        table = self.table("states", problem="lorenz96")
+        self.assertEqual([(r["series"], r["x"], r["y"]) for r in table if r["kind"] == "states"],
                          [("cubie default both", "4.0", "8.0"), ("cubie default both", "8.0", "16.0"),
                           ("cubie default both", "16.0", "32.0"),
                           ("cubie default none", "4.0", "4.0"), ("cubie default none", "8.0", "8.0"),
                           ("cubie default none", "16.0", "16.0"),
                           ("jax default none", "4.0", "12.0"), ("jax default none", "8.0", "24.0"),
                           ("jax default none", "16.0", "48.0")])
-        self.assertEqual([(r["series"], r["x"], r["y"]) for r in self.table("builds", problem="lorenz96")],
+        self.assertEqual([(r["series"], r["x"], r["y"]) for r in table if r["kind"] == "builds"],
                          [("cubie default", "4.0", "10.0"), ("cubie default", "8.0", "20.0"),
                           ("cubie default", "16.0", "40.0"), ("cubie default", "64.0", "80.0")])
 
@@ -371,7 +378,8 @@ class PlotTests(AnalysesCase):
         self.error_sweep()
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         self.assertEqual([n for n in self.written() if n.endswith(".png")],
-                         ["error_vs_dt_tsit5.png", "error_vs_runtime_tsit5.png", "error_vs_tol_tsit5.png"])
+                         ["error_vs_dt/lorenz_tsit5.png", "error_vs_runtime/lorenz_tsit5.png",
+                          "error_vs_tol/lorenz_tsit5.png"])
         by_dt = self.table("error_vs_dt")
         self.assertEqual([(r["series"], r["x"], r["min_ms"]) for r in by_dt],
                          [("cubie fixed", "0.03125", "5.0"), ("cubie fixed", "0.0625", "4.0"),

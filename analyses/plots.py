@@ -1,6 +1,6 @@
 """plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
 
-Per (key, problem, algorithm) under plots/<key>/<problem>/: runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels) figures, plus one <kind>.csv per problem. A package is a colour, a controller a marker, the transfers a line style; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) whose rows differ only along the axis; a lone point is dropped and a second curve under one series is labelled by what differs. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and cold build panels), with the points of a problem in <kind>/<problem>.csv. A package is a colour, a controller a marker, the transfers a line style; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (package, controller, transfers) along the axis; fewer than two points is no curve. With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
 """
 
 import json
@@ -28,26 +28,28 @@ CONTEXT_FIELDS = tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package",
 class Kind:
     """One figure kind: its x and y columns, the spec fields the x axis varies, the packages shown, whether transfers splits the series, the rows it takes (timed, with an error, or with a build), and the axis labels."""
 
-    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, invert_x=False):
+    def __init__(self, name, x, y, varying, packages, by_transfers, needs, x_label, y_label, subtitle,
+                 invert_x=False):
         self.name, self.x, self.y, self.varying = name, x, y, varying
         self.packages, self.by_transfers, self.needs = packages, by_transfers, needs
-        self.x_label, self.y_label, self.invert_x = x_label, y_label, invert_x
+        self.x_label, self.y_label, self.subtitle, self.invert_x = x_label, y_label, subtitle, invert_x
 
 
 KINDS = (
     Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed",
-         "n (trajectories)", "time (ms)"),
+         "n (trajectories)", "time (ms)", ("system_params", "dt", "atol")),
     Kind("error_vs_runtime", "min_ms", "error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed error",
-         "time (ms)", "error (RMS of the final state against the golden)"),
+         "time (ms)", "error (RMS of the final state against the golden)", ("n", "system_params")),
     Kind("error_vs_dt", "dt", "error", ("dt",), store_mod.PACKAGES, False, "fixed error",
-         "dt", "error (RMS of the final state against the golden)", invert_x=True),
+         "dt", "error (RMS of the final state against the golden)", ("system_params",), invert_x=True),
     Kind("error_vs_tol", "atol", "error", STEPPING_FIELDS, store_mod.PACKAGES, False, "adaptive error",
-         "tolerance (atol = rtol)", "error (RMS of the final state against the golden)", invert_x=True),
+         "tolerance (atol = rtol)", "error (RMS of the final state against the golden)", ("system_params",),
+         invert_x=True),
     Kind("states", "states", "min_ms", ("system_params",), GPU_PACKAGES, True, "timed",
-         "states", "time (ms)"),
+         "states", "time (ms)", ("n", "atol")),
 )
 BUILDS = Kind("builds", "states", "build_s", ("system_params",), GPU_PACKAGES, False, "build",
-              "states", "cold build (s)")
+              "states", "cold build (s)", ("n", "atol"))
 KIND_NAMES = tuple(k.name for k in KINDS)
 CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfers", "x", "y",
                "min_ms", "build_s", "error", "errored_pct", "key") + \
@@ -131,20 +133,8 @@ def field_label(field, value):
     return "{0}={1}".format(field, value)
 
 
-def context_suffix(kind, contexts):
-    """{context: ' field=value ...'} naming what tells the surviving contexts of one series apart; '' with one context."""
-    if len(contexts) < 2:
-        return {c: "" for c in contexts}
-    fields = [f for f in CONTEXT_FIELDS if f not in kind.varying]
-    differing = [i for i, f in enumerate(fields) if len({c[i] for c in contexts}) > 1]
-    # The tolerance names rtol and the Newton tolerances that a set derives from it.
-    if "atol" in fields and fields.index("atol") in differing:
-        differing = [i for i in differing if fields[i] not in ("rtol", "newton_atol", "newton_rtol")]
-    return {c: " " + " ".join(field_label(fields[i], c[i]) for i in differing) for c in contexts}
-
-
 def series_of(kind, rows):
-    """{(package, controller, transfers, suffix): [points]} of one algorithm's rows on a kind; a point is (x, y, row). A series holds one context; a context with fewer than two distinct x values is dropped."""
+    """{(package, controller, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values; fewer than two is no curve."""
     grouped = {}
     for row in rows:
         if not takes(kind, row):
@@ -152,22 +142,20 @@ def series_of(kind, rows):
         x = x_of(kind, row)
         if not math.isfinite(x):
             continue
-        grouped.setdefault((series_key(kind, row), context(kind, row)), []).append((x, y_of(kind, row), row))
-    curves = {k: v for k, v in grouped.items() if len({x for x, _, _ in v}) >= 2}
-    by_key = {}
-    for (key, ctx), points in curves.items():
-        by_key.setdefault(key, {})[ctx] = points
+        grouped.setdefault(series_key(kind, row), {}).setdefault(context(kind, row), []).append(
+            (x, y_of(kind, row), row))
     out = {}
-    for key, contexts in by_key.items():
-        suffixes = context_suffix(kind, list(contexts))
-        for ctx, points in contexts.items():
-            if kind.x == "min_ms":
-                points.sort(key=lambda p: loose_first(p[2]))
-            else:
-                points.sort(key=lambda p: p[0])
-            out[key + (suffixes[ctx],)] = points
+    for key, contexts in grouped.items():
+        points = max(contexts.values(), key=lambda pts: len({x for x, _, _ in pts}))
+        if len({x for x, _, _ in points}) < 2:
+            continue
+        if kind.x == "min_ms":
+            points.sort(key=lambda p: loose_first(p[2]))
+        else:
+            points.sort(key=lambda p: p[0])
+        out[key] = points
     return dict(sorted(out.items(), key=lambda item: (
-        store_mod.PACKAGES.index(item[0][0]), controller_order(item[0][1]), item[0][2], item[0][3])))
+        store_mod.PACKAGES.index(item[0][0]), controller_order(item[0][1]), item[0][2])))
 
 
 def controller_order(controller):
@@ -177,16 +165,13 @@ def controller_order(controller):
 
 
 def series_label(key):
-    package, controller, transfers, suffix = key
-    return " ".join(p for p in (package, controller, transfers) if p) + suffix
+    return " ".join(p for p in key if p)
 
 
 def shared_context(kind, series):
-    """'n=131072 states=32 dt=2^-10 tol=1e-05': the displayed fields every point of a figure agrees on."""
+    """'n=131072 states=32 dt=2^-10 tol=1e-05': the kind's subtitle fields every point of a figure agrees on."""
     parts = []
-    for field in ("n", "system_params", "dt", "atol"):
-        if field == kind.x or field in kind.varying:
-            continue
+    for field in kind.subtitle:
         values = {shared.cell(p[2][field]) for points in series.values() for p in points}
         values.discard("nan")
         if len(values) == 1:
@@ -201,7 +186,7 @@ def shared_context(kind, series):
 
 def draw(panel, kind, series):
     for key, points in series.items():
-        package, controller, transfers, _ = key
+        package, controller, transfers = key
         panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(key),
                    color=shared.colour(package), marker=shared.marker(controller),
                    linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6)
@@ -250,32 +235,31 @@ def csv_rows(kind, algorithm, series):
 
 
 def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
-    """Write every figure and CSV of the selected rows; returns the paths written."""
+    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/; returns the paths written."""
     rows = with_errors(shared.select_rows(store, set_names, where), errors_mod.Errors(store))
     by_problem = {}
     for row in rows:
         by_problem.setdefault((row["key"], row["problem"]), {}).setdefault(row["algorithm"], []).append(row)
     written = []
     for (key, problem), algorithms in sorted(by_problem.items()):
-        directory = os.path.join(out, key, problem)
-        os.makedirs(directory, exist_ok=True)
         tables = {kind.name: [] for kind in KINDS}
-        tables[BUILDS.name] = []
         for algorithm, members in sorted(algorithms.items()):
             per_trial = one_per_trial(members)
             for kind in KINDS:
-                series = series_of(kind, per_trial if not kind.by_transfers else members)
-                builds = series_of(BUILDS, one_per_trial(members)) if kind.name == "states" else None
+                series = series_of(kind, members if kind.by_transfers else per_trial)
+                builds = series_of(BUILDS, per_trial) if kind.name == "states" else None
                 tables[kind.name].extend(csv_rows(kind, algorithm, series))
                 if builds:
-                    tables[BUILDS.name].extend(csv_rows(BUILDS, algorithm, builds))
+                    tables[kind.name].extend(csv_rows(BUILDS, algorithm, builds))
                 if not series and not builds:
                     continue
-                path = os.path.join(directory, "{0}_{1}.png".format(kind.name, shared.slug(algorithm)))
-                written.append(render(path, kind, series, algorithm, key, builds if kind.name == "states" else None))
+                directory = os.path.join(out, key, kind.name)
+                os.makedirs(directory, exist_ok=True)
+                path = os.path.join(directory, "{0}_{1}.png".format(problem, shared.slug(algorithm)))
+                written.append(render(path, kind, series, algorithm, key, builds))
         for name, table in tables.items():
             if table:
-                written.append(shared.write_csv(os.path.join(directory, name + ".csv"), CSV_COLUMNS, table))
+                written.append(shared.write_csv(os.path.join(out, key, name, problem + ".csv"), CSV_COLUMNS, table))
     return written
 
 

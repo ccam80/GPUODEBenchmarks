@@ -120,27 +120,26 @@ python analyses/plots.py --set perf --set golden_grid --set states
 `data/` is an untracked mirror of the store; the analysis pulls it before reading.
 
 `analyses/plots.py` takes `--set` (repeatable) or `--where "<sql>"`, reads
-every key, and writes the base figures of every (key, problem, algorithm)
-under `plots/<key>/<problem>/`:
+every key, and writes the base figures of every (key, problem, algorithm) as
+`plots/<key>/<kind>/<problem>_<algorithm>.png`, with the points of a problem
+in `plots/<key>/<kind>/<problem>.csv`:
 
-| figure | x | y | rows |
+| kind | x | y | rows |
 |---|---|---|---|
-| `runtime_vs_n_<algorithm>.png` | n | min_ms | the GPU packages |
-| `error_vs_runtime_<algorithm>.png` | min_ms | error against the golden | the GPU packages, along the dt and tolerance sweeps |
-| `error_vs_dt_<algorithm>.png` | dt | error | every package, the fixed steppings |
-| `error_vs_tol_<algorithm>.png` | tolerance | error | every package, the adaptive steppings |
-| `states_<algorithm>.png` | states | min_ms and, beside it, the cold build time | the GPU packages of a resized problem |
+| `runtime_vs_n` | n | min_ms | the GPU packages |
+| `error_vs_runtime` | min_ms | error against the golden | the GPU packages, along the dt and tolerance sweeps |
+| `error_vs_dt` | dt | error | every package, the fixed steppings |
+| `error_vs_tol` | tolerance | error | every package, the adaptive steppings |
+| `states` | states | min_ms and, beside it, the cold build time | the GPU packages of a resized problem |
 
 A package is a colour, a controller a marker (`fixed`, `default`, `pi`,
 `pi matched` for a cubie PI row carrying Julia's matched gains rather than
 the DIRK tier's, `gustafsson`) and the transfers a line style (`both` solid,
 `none` dashed). A series holds the rows of one package, controller and
-transfers that differ only along the axis; a lone point is no curve, and a
-series that would hold two curves (two tolerances swept over n, say) is
-split and labelled by what differs. julia_cpu, whose timing is not of
-interest, appears on the error-against-dt and error-against-tolerance
-figures only. Rows with `errored_pct` above 10 are dropped. The points of
-each figure kind of a problem go to `<kind>.csv` beside the figures. With
+transfers along the axis; a lone point is no curve. julia_cpu, whose
+timing is not of interest, appears on the error-against-dt and
+error-against-tolerance figures only. Rows with `errored_pct` above 10 are
+dropped. With
 `--set`, what each key's store lacks of the set (rows, cold build times,
 finals files, optimize records) is printed per package, written to
 `plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a
