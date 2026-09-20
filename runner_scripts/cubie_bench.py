@@ -231,9 +231,9 @@ class CubieAdapter:
         return build.device_solve(values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a host result: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
+        """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
         from cubie.result_codes import decode_status_codes
-        finals = np.array(final_states(build.system, result, build.row))
+        finals = np.asarray(final_states(build.system, result, build.row))
         codes = np.asarray(result.status_codes).reshape(-1)
         names = decode_status_codes(codes)
         retcode = ["|".join(names[index]) if index in names else "" for index in range(codes.shape[0])]
