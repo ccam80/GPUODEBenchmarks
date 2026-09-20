@@ -152,10 +152,10 @@ def controllers_equal(a, b, rel_tol=1e-9):
 # ------------------------------------------------------------------ solvers
 
 def solve(solver, initial_values, parameters, duration, on_device=False):
-    """One solve at the solver's own launch geometry; a device solve is synchronised before returning."""
+    """One solve at the solver's own launch geometry, keeping the states of failed runs beside their status codes; a device solve is synchronised before returning."""
     result = solver.solve(initial_values=initial_values,
                           parameters=parameters, duration=duration,
-                          on_device=on_device)
+                          nan_error_trajectories=False, on_device=on_device)
     if on_device:
         result.stream.synchronize()
     return result
