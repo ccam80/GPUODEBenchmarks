@@ -1,4 +1,4 @@
-"""What the analysis scripts share: the suite interpreter, the --set/--where flags, the completeness report of a named set's canonical trials under every key, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels and the figure style."""
+"""What the analysis scripts share: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, the most complete row of a run_id stands), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, row labels, the figure style and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -83,6 +83,87 @@ def pull_store(args):
         raise SystemExit("store: pull FAILED; pass --no-sync to read {0} as it is".format(args.root))
 
 
+# ------------------------------------------------------------------- store
+
+class AnalysisStore:
+    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and of the rows one run_id then holds the most complete stands (most_complete). Everything else is the underlying Store."""
+
+    def __init__(self, root):
+        import store as store_mod
+        self._store = store_mod.Store(root)
+        self.root = root
+        self._tiers = {}
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    def rows(self, sql_where="", **eq_filters):
+        return most_complete(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
+
+    def optimize_rows(self, package, key, root=None):
+        """Every optimize.csv record of a package under a key, its gains in the current form."""
+        import cubie_adapter
+        return [normalise_gains(r, self._tiers, ids=False)
+                for r in cubie_adapter.optimize_rows(package, key, root or self.root)]
+
+
+def tier_gains(package, algorithm, cache=None):
+    """The DIRK PI tier controller at a cubie algorithm's catalogue order, None when the package has no row of the algorithm; cached per (package, algorithm) in `cache`."""
+    import cubie_adapter
+    from algorithms import get_algorithm
+    ident = (package, algorithm)
+    if cache is not None and ident in cache:
+        return cache[ident]
+    entry = get_algorithm(algorithm, package)
+    settings = None
+    if entry is not None and entry["order"] is not None:
+        settings = dict(cubie_adapter.pi_tier_controller(entry["order"]))
+    if cache is not None:
+        cache[ident] = settings
+    return settings
+
+
+def normalise_gains(row, cache=None, ids=True):
+    """The row (or optimize record) with its gains rewritten to the DIRK PI tier's exact values, and with `ids` its ids rehashed, when it is a cubie PI row within FLOAT32_REL_TOL of the tier; the row itself otherwise."""
+    import cubie_adapter
+    import store as store_mod
+    if row.get("package") not in cubie_adapter.PACKAGES or row.get("controller") != "pi":
+        return row
+    tier = tier_gains(row["package"], row["algorithm"], cache)
+    if tier is None:
+        return row
+    exact = store_mod.canonical_json({k: v for k, v in tier.items() if k != "step_controller"})
+    if row["gains"] == exact:
+        return row
+    try:
+        gains = json.loads(row["gains"] or "{}")
+    except ValueError:
+        return row
+    if not isinstance(gains, dict) or not cubie_adapter.controllers_equal(
+            tier, dict(gains, step_controller="pi"), cubie_adapter.FLOAT32_REL_TOL):
+        return row
+    rewritten = dict(row, gains=exact)
+    if ids:
+        rewritten.update(store_mod.ids(rewritten))
+    return rewritten
+
+
+def most_complete(rows):
+    """One row per run_id, in first-appearance order: a timed row over an untimed, then one with its cold build time, then one with finals, then the latest recorded."""
+    standing = {}
+    for row in rows:
+        held = standing.get(row["run_id"])
+        if held is None or _rank(row) > _rank(held):
+            standing[row["run_id"]] = row
+    return list(standing.values())
+
+
+def _rank(row):
+    stamp = row.get("recorded_utc")
+    return (math.isfinite(number(row.get("min_ms"))), math.isfinite(number(row.get("build_s"))),
+            bool(row.get("finals")), stamp.timestamp() if stamp is not None else float("-inf"))
+
+
 # --------------------------------------------------------------- selection
 
 def store_keys(store):
@@ -95,12 +176,14 @@ def store_keys(store):
 
 
 def canonical_trials(store, set_names, key, sets_dir=None):
-    """The canonical trials the named sets expand to under a key: every point merged with its declarations in every set file."""
+    """The canonical trials the named sets expand to under a key: every point merged with its declarations in every set file, the lines of a problem, algorithm and controller the store records a compile timeout of marked as a plan marks them (no optimize record wanted)."""
+    import abandon
     import sets
     import trials
     sets_dir = sets_dir or sets.SETS_DIR
-    return trials.build_trials(sets.expand(list(set_names), key, store.root, sets_dir=sets_dir),
-                               sets.declarations(key, store.root, sets_dir=sets_dir))
+    trial_list = trials.build_trials(sets.expand(list(set_names), key, store.root, sets_dir=sets_dir),
+                                     sets.declarations(key, store.root, sets_dir=sets_dir))
+    return trials.mark_compile_timeouts(trial_list, abandon.compile_timeouts(store, key))
 
 
 INCOMPLETE_COLUMNS = ("key", "package", "trial_id", "problem", "system_params", "precision",
@@ -111,9 +194,10 @@ def incomplete(store, set_names, sets_dir=None):
     """[(key, Missing)] of every canonical trial of the sets whose rows or artifacts the store lacks under that key, in key and file order."""
     import completeness
     out = []
+    records = getattr(store, "optimize_rows", None)
     for key in store_keys(store):
         trial_list = canonical_trials(store, set_names, key, sets_dir)
-        audits = completeness.audit(trial_list, key, store)
+        audits = completeness.audit(trial_list, key, store, optimize_rows=records)
         out.extend((key, missing) for missing in audits.values() if not missing.complete())
     return out
 
@@ -254,13 +338,34 @@ def cell(value):
     return str(value)
 
 
+def captured(value):
+    """False for what a row never recorded: None, empty text, NaN, an empty list."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value != ""
+    if isinstance(value, float):
+        return not math.isnan(value)
+    if isinstance(value, list):
+        return bool(value)
+    return True
+
+
+def captured_columns(columns, rows):
+    """The columns some row carries a captured value of, in order; every column when there are no rows."""
+    if not rows:
+        return list(columns)
+    return [c for c in columns if any(captured(row.get(c)) for row in rows)]
+
+
 def write_csv(path, columns, rows):
-    """rows as CSV with LF line ends; NaN written as nan, lists ';'-joined."""
+    """rows as CSV with LF line ends; NaN written as nan, lists ';'-joined; a column no row captured is left out."""
+    kept = captured_columns(columns, rows)
     with open(path, "w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(columns)
+        writer.writerow(kept)
         for row in rows:
-            writer.writerow([cell(row.get(c)) for c in columns])
+            writer.writerow([cell(row.get(c)) for c in kept])
     return path
 
 

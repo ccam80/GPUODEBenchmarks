@@ -182,6 +182,19 @@ class GoldenLookupTests(ErrorsCase):
         self.assertEqual(errs.golden_of(sweep)["run_id"], golden["run_id"])
         self.assertEqual(len(errs.goldens()), 1)
 
+    def test_the_catalogue_golden_algorithm_stands_over_a_row_of_another(self):
+        # An earlier golden run under a since-replaced algorithm stays in the store beside the catalogue's.
+        self.assertEqual(errors.golden_algorithm("lorenz"), "Vern9")
+        self.assertIsNone(errors.golden_algorithm("nosuchproblem"))
+        earlier = self.record(golden_spec(key=OTHER_KEY, algorithm="DFBDF", atol=1e-10, rtol=1e-10),
+                              solution(grid.grid(golden_spec())))
+        errs = errors.Errors(self.store)
+        self.assertEqual(errs.golden_of(self.sweep())["run_id"], earlier["run_id"])
+        current = self.golden(key=KEY)
+        errs = errors.Errors(self.store)
+        self.assertEqual(len(errs.goldens()), 2)
+        self.assertEqual(errs.golden_of(self.sweep())["run_id"], current["run_id"])
+
     def test_more_than_one_golden_raises_naming_the_rows(self):
         first = self.golden(key=KEY)
         second = self.golden(key=OTHER_KEY)

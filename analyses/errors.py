@@ -1,4 +1,4 @@
-"""The one comparison of finals: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored; golden_of() finds the julia_cpu float64 finals row of the same system under any key; error() compares a row with it."""
+"""The one comparison of finals: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored; golden_of() finds the julia_cpu float64 finals row of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it."""
 
 import math
 import os
@@ -13,6 +13,7 @@ if RUNNER_SCRIPTS not in sys.path:
 
 import grid  # noqa: E402
 import store as store_mod  # noqa: E402
+from problems import load_problems  # noqa: E402
 
 NAN = float("nan")
 GOLDEN_PACKAGE = "julia_cpu"
@@ -84,10 +85,13 @@ class Errors:
         return self._goldens
 
     def golden_of(self, row):
-        """The golden row of the same problem, system_params and duration; None when absent; raises naming the rows when more than one exists."""
+        """The golden row of the same problem, system_params and duration; None when absent; among rows of several algorithms those of the catalogue's golden algorithm stand; raises naming the rows when more than one remains."""
         matches = [g for g in self.goldens() if _same_system(g, row)]
         if not matches:
             return None
+        preferred = [g for g in matches if g["algorithm"] == golden_algorithm(row["problem"])]
+        if preferred:
+            matches = preferred
         if len(matches) > 1:
             raise ValueError("more than one golden for {0} {1} duration {2}: {3}".format(
                 row["problem"], row["system_params"], row["duration"],
@@ -102,6 +106,14 @@ class Errors:
         if golden is None:
             return NAN
         return self.compare(row, golden)
+
+
+def golden_algorithm(problem):
+    """The catalogue's golden algorithm of a problem; None for a problem it does not list."""
+    for entry in load_problems():
+        if entry["problem"] == problem:
+            return entry["golden_algorithm"]
+    return None
 
 
 def compare(a, b, store):
