@@ -782,7 +782,9 @@ class HardExitTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bench.parse_args(["run", "--set", "perf", "--no-lock-clocks"])
         self.assertNotIn("--no-lock-clocks", bench.__doc__)
-        with mock.patch.object(bench, "configure_clocks", self.real_configure):
+        no_rows = os.path.join(self.tmp, "gpu_clocks.conf")
+        with mock.patch.object(bench, "configure_clocks",
+                               lambda key, explicit="": self.real_configure(key, explicit, conf=no_rows)):
             with self.assertRaises(SystemExit) as caught:
                 self.run_bench()
         self.assertIn("No clock target for 'RTX-4070-SUPER'", str(caught.exception))
