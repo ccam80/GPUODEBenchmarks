@@ -19,7 +19,12 @@ specs as one JSONL trial file per package and hands each file to that
 package's runner, which keeps one build while consecutive lines share a
 system, algorithm and controller, times every trial after one untimed
 warm-up, and records one row per (spec, transfers) in the parquet
-store under `data/`. The analyses compute every error offline from the
+store under `data/`. A cubie package's default adaptive controller is
+Julia's for the algorithm (`runner_scripts/julia_controllers.csv`, written
+by `julia_controllers.jl` from OrdinaryDiffEq's defaults and mapped to
+cubie's gains by `cubie_adapter.julia_controller`) and cubie's own where
+Julia has none that maps; the spec carries the resolved controller and
+gains. The analyses compute every error offline from the
 finals files. Contracts: `store.py` (spec columns, hashes, schema), `trials.py`, `runner.py`, `sets.py`, `completeness.py` (what a stored trial must carry to be reused).
 
 ## Setup
@@ -132,12 +137,10 @@ in `plots/<key>/<kind>/<problem>.csv`:
 | `error_vs_tol` | tolerance | error | every package, the adaptive steppings |
 | `states` | states | min_ms and, beside it, the cold build time | the GPU packages of a resized problem |
 
-A package is a colour, a controller kind a marker (fixed-step; adaptive
-steps, which is a package's default controller or cubie's DIRK-tier PI;
-adaptive steps matched, a cubie PI row carrying Julia's gains; Gustafsson)
-and the transfers a line style (solid; dashed and labelled `+ transfer` when
-the timing includes the transfers). Cubie's own default controller is not
-drawn. A series holds the rows of one key, package, controller kind and
+A package is a colour, a stepping kind a marker (fixed-step; adaptive
+steps) and the transfers a line style (solid; dashed and labelled
+`+ transfer` when the timing includes the transfers). A series holds the
+rows of one key, package, stepping kind and
 transfers along the axis and is drawn when it has two or more x values. julia_cpu,
 whose timing is not of interest, appears on the error-against-dt and
 error-against-tolerance figures only. Rows with `errored_pct` above 10 are
@@ -153,10 +156,7 @@ finals files, optimize records) is printed per package, written to
 `plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a
 group the store records a compile timeout of wants no optimize record.
 
-Rows read in the store's current form: a column a file lacks reads as null,
-a cubie PI row within Float32 rounding of the DIRK PI tier carries the
-tier's exact gains and finds its optimize record under either spelling, and
-two rows of one run_id are refused. The golden of a system is its julia_cpu float64
+A column a file lacks reads as null, and two rows of one run_id are refused. The golden of a system is its julia_cpu float64
 finals row running the problem's golden algorithm. A CSV leaves out the
 columns no row captured.
 

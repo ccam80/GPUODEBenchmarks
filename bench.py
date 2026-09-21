@@ -2,7 +2,7 @@
 """bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
 plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: a cubie package precompiles its kernels into the package cache first, with the optimize candidates of the kernels that optimize (four workers of eight kernels, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning its problem, algorithm and controller, recorded as compile_timeout rows the plan marks in every run until `store.py clear` drops them), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
--p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or a set token such as matched.
+-p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or the stepping token that produced it.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per build and stepping, once per build across dt for an explicit fixed-step algorithm, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
 Without a flag every selected trial runs, its rows are overwritten and its cubie kernel is optimized again. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row and a timed-out optimize; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
@@ -164,7 +164,7 @@ def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
     return kept
 
 
-def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
+def canonical_trials(plan, sets_dir=sets.SETS_DIR):
     """The trials of the flags: the named sets' specs, narrowed, each merged with its declarations in every set file; SystemExit when -n names a count no grid of the named sets lists."""
     unknown = sorted(set(plan["n"] or []) - set(sets.declared_counts(plan["sets"], sets_dir)))
     if unknown:
@@ -173,15 +173,15 @@ def canonical_trials(plan, key, root, sets_dir=sets.SETS_DIR):
             ", ".join(str(c) for c in unknown)))
     narrowing = dict(packages=plan["packages"], problems=plan["problems"],
                      algorithms=plan["algorithms"], n=plan["n"], sets_dir=sets_dir)
-    specs = sets.expand(plan["sets"], key, root, **narrowing)
+    specs = sets.expand(plan["sets"], **narrowing)
     specs = sets.narrow(specs, mode=plan["mode"], controllers=plan["controllers"],
                         tols=plan["tols"], dts=plan["dts"])
-    return trials_mod.build_trials(specs, sets.declarations(key, root, **narrowing))
+    return trials_mod.build_trials(specs, sets.declarations(**narrowing))
 
 
 def plan_trials(plan, key, root, resume=False, no_overwrite=False):
     """{package: trials} for the flags, in run order; under every flag a line whose problem, algorithm and controller the store records a compile timeout of is marked first and never optimizes, so its rows need no optimize record (`store.py clear` on the compile_timeout rows lets it try again)."""
-    all_trials = trials_mod.mark_compile_timeouts(canonical_trials(plan, key, root),
+    all_trials = trials_mod.mark_compile_timeouts(canonical_trials(plan),
                                                   abandon.compile_timeouts(store.Store(root), key))
     all_trials = continue_filter(all_trials, key, root, resume, no_overwrite)
     groups = trials_mod.by_package(all_trials)

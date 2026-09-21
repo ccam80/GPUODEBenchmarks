@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize flag; declarations() expands every set file so a point's specs from all of them can merge. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize flag; declarations() expands every set file so a point's specs from all of them can merge. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -13,6 +13,7 @@ from store import PACKAGES, canonical_json
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SETS_DIR = os.path.join(REPO_ROOT, "sets")
+JULIA_CONTROLLERS_CSV = os.path.join(REPO_ROOT, "runner_scripts", "julia_controllers.csv")
 
 NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
@@ -172,6 +173,8 @@ def load_set(name, sets_dir=SETS_DIR):
             stepping.setdefault("dt_min", "none")
             stepping.setdefault("dt_max", "none")
             stepping.setdefault("gains", {})
+            if not isinstance(stepping["gains"], dict):
+                raise SetError(where + ": gains must be a table")
         stepping.setdefault("newton", "none")
     return {"name": os.path.splitext(os.path.basename(path))[0], "path": path,
             "set": head, "grid": grids, "stepping": steppings}
@@ -269,56 +272,38 @@ def _algorithms(package, kind, head, stepping, problem, catalogue):
     return rows
 
 
-def controllers_table(key, problem, root="data"):
-    """julia_cpu's resolved controller constants for a problem under a key, keyed by algorithm; {} when the file is absent."""
-    path = os.path.join(root, "key=" + key, "package=julia_cpu", "controllers", problem + ".csv")
-    if not os.path.isfile(path):
-        return {}
-    table = {}
-    with open(path, newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            name = row.get("algorithm") or row.get("cubie_alias")
-            entry = {"controller": row["controller"]}
-            for field in ("beta1", "beta2", "qmin", "qmax", "gamma", "order"):
-                raw = row.get(field, "")
-                entry[field] = float(raw) if raw not in ("", None) else None
-            table[name] = entry
-    return table
+_JULIA_CONTROLLERS = None
 
 
-def _controller(stepping, package, algorithm, problem, key, root, where):
-    """(controller, gains) of an adaptive stepping for one algorithm, or None when the entry is skipped."""
+def julia_controllers():
+    """Julia's default controller constants keyed by algorithm, from runner_scripts/julia_controllers.csv."""
+    global _JULIA_CONTROLLERS
+    if _JULIA_CONTROLLERS is None:
+        table = {}
+        with open(JULIA_CONTROLLERS_CSV, newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                entry = {"controller": row["controller"]}
+                for field in ("beta1", "beta2", "qmin", "qmax", "gamma", "order"):
+                    raw = row.get(field, "")
+                    entry[field] = float(raw) if raw not in ("", None) else None
+                table[row["algorithm"]] = entry
+        _JULIA_CONTROLLERS = table
+    return _JULIA_CONTROLLERS
+
+
+def _controller(stepping, package, algorithm, where):
+    """(controller, gains) of an adaptive stepping for one algorithm: the stepping's own, or for a cubie package's default Julia's controller when the algorithm has one that maps."""
     import cubie_adapter
     token = stepping["controller"]
     gains = stepping["gains"]
-    if token == "default":
-        if gains == "dirk_defaults":
-            raise SetError(where + ": dirk_defaults needs controller = \"pi\"")
-        return "default", dict(gains)
-    if token == "matched" or gains == "dirk_defaults":
-        if package not in CUBIE_PACKAGES:
-            raise SetError("{0}: {1} applies to the cubie packages only".format(
-                where, "matched" if token == "matched" else "dirk_defaults"))
-        if algorithm["order"] is None:
-            raise SetError(where + ": matched and dirk_defaults need a catalogue algorithm")
-        if token == "matched":
-            constants = controllers_table(key, problem.name, root).get(algorithm.name)
-            settings, _ = cubie_adapter.matched_controller(constants, algorithm["order"])
-            if settings is None:
-                return None
-        else:
-            settings = cubie_adapter.pi_tier_controller(algorithm["order"])
-            if settings["step_controller"] != token:
-                raise SetError(where + ": dirk_defaults needs controller = \"pi\"")
-        shipped = cubie_adapter.default_controller(algorithm.name, algorithm["family"],
-                                                   algorithm["order"])
-        # Julia's table is printed at Float32, so the shipped comparison allows that rounding.
-        if cubie_adapter.controllers_equal(settings, shipped, cubie_adapter.FLOAT32_REL_TOL):
-            return None
-        settings = dict(settings)
-        return settings.pop("step_controller"), settings
     if not isinstance(gains, dict):
-        raise SetError(where + ": gains must be a table or \"dirk_defaults\"")
+        raise SetError(where + ": gains must be a table")
+    if token == "default" and package in CUBIE_PACKAGES and algorithm["order"] is not None:
+        settings = cubie_adapter.julia_controller(julia_controllers().get(algorithm.name),
+                                                  algorithm["order"])
+        if settings is not None:
+            settings = dict(settings)
+            return settings.pop("step_controller"), settings
     return token, dict(gains)
 
 
@@ -340,7 +325,7 @@ def _newton(stepping, algorithm, tol, where):
     raise SetError(where + ": newton must be \"tol\", \"none\" or {atol, rtol}")
 
 
-def _steppings(stepping, package, algorithm, problem, key, root, where):
+def _steppings(stepping, package, algorithm, problem, where):
     """The stepping column values, one dict per dt or tolerance."""
     duration = problem["duration"]
     out = []
@@ -351,10 +336,7 @@ def _steppings(stepping, package, algorithm, problem, key, root, where):
                         "atol": NAN, "rtol": NAN, "gains": canonical_json({}),
                         "newton_atol": atol, "newton_rtol": rtol})
         return out
-    resolved = _controller(stepping, package, algorithm, problem, key, root, where)
-    if resolved is None:
-        return out
-    controller, gains = resolved
+    controller, gains = _controller(stepping, package, algorithm, where)
     tols = stepping["tol"]
     if tols == GOLDEN_TOL:
         tols = [problem["golden_tol"]]
@@ -379,8 +361,7 @@ def _optimize_for(table, package):
     return table is not None and (table["packages"] == "all" or package in table["packages"])
 
 
-def expand(names, key, root="data", packages=None, problems=None, algorithms=None, n=None,
-           sets_dir=SETS_DIR):
+def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_dir=SETS_DIR):
     """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems`, `algorithms` and `n` narrow; a grid keeps the counts of its n list that `n` names."""
     catalogue = load_algorithms()
     problem_rows = load_problems()
@@ -412,7 +393,7 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
                         for params in _system_params(grid, problem, gwhere):
                             for algorithm in rows:
                                 for values in _steppings(stepping, package, algorithm, problem,
-                                                         key, root, swhere):
+                                                         swhere):
                                     for count in n_list:
                                         spec = {
                                             "problem": problem.name,
@@ -438,11 +419,10 @@ def expand(names, key, root="data", packages=None, problems=None, algorithms=Non
     return specs
 
 
-def declarations(key, root="data", packages=None, problems=None, algorithms=None, n=None,
-                 sets_dir=SETS_DIR):
+def declarations(packages=None, problems=None, algorithms=None, n=None, sets_dir=SETS_DIR):
     """The specs of every set file under sets_dir, narrowed like expand(): the declarations a requested point merges with."""
-    return expand(set_names(sets_dir), key, root, packages=packages, problems=problems,
-                  algorithms=algorithms, n=n, sets_dir=sets_dir)
+    return expand(set_names(sets_dir), packages=packages, problems=problems, algorithms=algorithms,
+                  n=n, sets_dir=sets_dir)
 
 
 def declared_counts(names, sets_dir=SETS_DIR):
@@ -482,10 +462,9 @@ def narrow(specs, mode=None, controllers=None, tols=None, dts=None):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit("usage: sets.py <set>[,<set>] [key]")
-    given = sys.argv[2] if len(sys.argv) > 2 else "plan"
+        sys.exit("usage: sets.py <set>[,<set>]")
     counts = {}
-    for spec in expand(sys.argv[1].split(","), given):
+    for spec in expand(sys.argv[1].split(",")):
         counts[spec["package"]] = counts.get(spec["package"], 0) + 1
     for package, count in counts.items():
         print("{0} {1}".format(package, count))

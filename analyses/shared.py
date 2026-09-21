@@ -1,8 +1,7 @@
-"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read in its current form whatever form a row was written in (a cubie PI row within Float32 rounding of the DIRK tier carries the tier's exact gains, and two rows of one run_id are refused), the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per controller kind and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read with two rows of one run_id refused, the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per stepping kind (fixed or adaptive) and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
-import json
 import math
 import os
 import re
@@ -31,8 +30,8 @@ PACKAGE_NAMES = {
     "cubie": "Cubie", "cubie_mlir": "Cubie (MLIR)", "jax": "Diffrax", "pytorch": "torchdiffeq",
     "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
 }
-CONTROLLER_KINDS = ("fixed", "adaptive", "matched", "gustafsson")
-MARKER_SETS = (("s", "o", "^", "D"), ("P", "v", "<", "X"), ("*", "p", ">", "h"))
+CONTROLLER_KINDS = ("fixed", "adaptive")
+MARKER_SETS = (("s", "o"), ("P", "v"), ("*", "p"))
 LINES = {"both": "--", "none": "-"}
 
 
@@ -90,75 +89,23 @@ def pull_store(args):
 # ------------------------------------------------------------------- store
 
 class AnalysisStore:
-    """A store whose rows and optimize records read in the current form: the gains of a cubie PI row within Float32 rounding of the DIRK PI tier at its algorithm's order are the tier's exact gains (the form a set declares since the rounding rule), a row's ids hash the rewritten spec, and two rows of one run_id raise. Everything else is the underlying Store."""
+    """A store whose rows read one per run_id (two rows of one run_id raise) and whose optimize records come from cubie_adapter; everything else is the underlying Store."""
 
     def __init__(self, root):
         import store as store_mod
         self._store = store_mod.Store(root)
         self.root = root
-        self._tiers = {}
 
     def __getattr__(self, name):
         return getattr(self._store, name)
 
     def rows(self, sql_where="", **eq_filters):
-        return unique(normalise_gains(r, self._tiers) for r in self._store.rows(sql_where, **eq_filters))
+        return unique(self._store.rows(sql_where, **eq_filters))
 
     def optimize_rows(self, package, key, root=None):
-        """Every optimize.csv record of a package under a key, its gains in the current form."""
+        """Every optimize.csv record of a package under a key."""
         import cubie_adapter
-        return [normalise_gains(r, self._tiers, ids=False)
-                for r in cubie_adapter.optimize_rows(package, key, root or self.root)]
-
-
-def tier_gains(package, algorithm, cache=None):
-    """The DIRK PI tier controller at a cubie algorithm's catalogue order, None when the package has no row of the algorithm; cached per (package, algorithm) in `cache`."""
-    import cubie_adapter
-    from algorithms import get_algorithm
-    ident = (package, algorithm)
-    if cache is not None and ident in cache:
-        return cache[ident]
-    entry = get_algorithm(algorithm, package)
-    settings = None
-    if entry is not None and entry["order"] is not None:
-        settings = dict(cubie_adapter.pi_tier_controller(entry["order"]))
-    if cache is not None:
-        cache[ident] = settings
-    return settings
-
-
-def tier_gains_json(package, algorithm, cache=None):
-    """The tier's gains as the canonical JSON a row carries; None when there is no tier."""
-    import store as store_mod
-    tier = tier_gains(package, algorithm, cache)
-    if tier is None:
-        return None
-    return store_mod.canonical_json({k: v for k, v in tier.items() if k != "step_controller"})
-
-
-def normalise_gains(row, cache=None, ids=True):
-    """The row (or optimize record) with its gains rewritten to the DIRK PI tier's exact values, and with `ids` its ids rehashed, when it is a cubie PI row within FLOAT32_REL_TOL of the tier; the row itself otherwise."""
-    import cubie_adapter
-    import store as store_mod
-    if row.get("package") not in cubie_adapter.PACKAGES or row.get("controller") != "pi":
-        return row
-    tier = tier_gains(row["package"], row["algorithm"], cache)
-    if tier is None:
-        return row
-    exact = store_mod.canonical_json({k: v for k, v in tier.items() if k != "step_controller"})
-    if row["gains"] == exact:
-        return row
-    try:
-        gains = json.loads(row["gains"] or "{}")
-    except ValueError:
-        return row
-    if not isinstance(gains, dict) or not cubie_adapter.controllers_equal(
-            tier, dict(gains, step_controller="pi"), cubie_adapter.FLOAT32_REL_TOL):
-        return row
-    rewritten = dict(row, gains=exact)
-    if ids:
-        rewritten.update(store_mod.ids(rewritten))
-    return rewritten
+        return cubie_adapter.optimize_rows(package, key, root or self.root)
 
 
 def unique(rows):
@@ -190,8 +137,8 @@ def canonical_trials(store, set_names, key, sets_dir=None):
     import sets
     import trials
     sets_dir = sets_dir or sets.SETS_DIR
-    trial_list = trials.build_trials(sets.expand(list(set_names), key, store.root, sets_dir=sets_dir),
-                                     sets.declarations(key, store.root, sets_dir=sets_dir))
+    trial_list = trials.build_trials(sets.expand(list(set_names), sets_dir=sets_dir),
+                                     sets.declarations(sets_dir=sets_dir))
     return trials.mark_compile_timeouts(trial_list, abandon.compile_timeouts(store, key))
 
 
@@ -248,14 +195,13 @@ def report_incomplete(store, set_names, out, sets_dir=None):
 
 
 def selection_pairs(store, set_names=(), where=""):
-    """The (group_id, package) pairs the sets expand to under every key of the store, or the pairs of the rows a SQL predicate matches."""
+    """The (group_id, package) pairs the sets expand to, or the pairs of the rows a SQL predicate matches."""
     import sets
     import store as store_mod
     pairs = set()
     if set_names:
-        for key in store_keys(store):
-            for spec in sets.expand(list(set_names), key, store.root):
-                pairs.add((store_mod.group_id(spec), spec["package"]))
+        for spec in sets.expand(list(set_names)):
+            pairs.add((store_mod.group_id(spec), spec["package"]))
     else:
         for row in store.rows(sql_where=where):
             pairs.add((row["group_id"], row["package"]))
@@ -294,33 +240,18 @@ def usable(rows):
 
 # ---------------------------------------------------------------- encoding
 
-def controller_kind(row, cache=None):
-    """The kind of controller a figure keys its marker by: fixed, adaptive (a package's default controller, or cubie's DIRK-tier PI), matched (a cubie PI row carrying Julia's gains) or gustafsson; None for cubie's default controller, which is not drawn."""
-    import cubie_adapter
-    controller = row["controller"]
-    cubie = row["package"] in cubie_adapter.PACKAGES
-    if controller == "fixed":
-        return "fixed"
-    if controller == "default":
-        return None if cubie else "adaptive"
-    if controller == "pi":
-        if cubie:
-            tier = tier_gains_json(row["package"], row["algorithm"], cache)
-            if tier is not None and row.get("gains") != tier:
-                return "matched"
-        return "adaptive"
-    return controller
+def controller_kind(row):
+    """The stepping kind a figure keys its marker by: fixed or adaptive."""
+    return "fixed" if row["controller"] == "fixed" else "adaptive"
 
 
 def controller_text(name, row=None):
-    """'1024 fixed steps' (or 'Fixed-step' without a row), 'Adaptive steps', 'Adaptive steps (matched)' or 'Adaptive steps (Gustafsson)'."""
+    """'1024 fixed steps' (or 'Fixed-step' without a row) or 'Adaptive steps'."""
     if name == "fixed":
         if row is None:
             return "Fixed-step"
         return "{0:g} fixed steps".format(round(number(row["duration"]) / number(row["dt"])))
-    if name == "adaptive":
-        return "Adaptive steps"
-    return "Adaptive steps ({0})".format("Gustafsson" if name == "gustafsson" else name)
+    return "Adaptive steps"
 
 
 def package_name(package):
@@ -362,7 +293,7 @@ def colour(package):
 
 
 def marker(name, card=0):
-    """The marker of a controller kind on a card; cards past the sets share the last set."""
+    """The marker of a stepping kind on a card; cards past the sets share the last set."""
     markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
     return markers[CONTROLLER_KINDS.index(name)] if name in CONTROLLER_KINDS else "x"
 

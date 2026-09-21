@@ -1,7 +1,6 @@
-"""The analysis script: the store read in its current form (a PI row within Float32 rounding of the DIRK tier, two rows of one run_id refused), selection by set or predicate with the ensemble fields ignored, the errored and untimed filters, the completeness report with the store's compile timeouts marked, CSVs without the columns no row captured, and the base figures of a (key, problem, algorithm): runtime against n, error against runtime, error against dt, error against tolerance, and runtime with cold build time against the state count."""
+"""The analysis script: the store read with two rows of one run_id refused, selection by set or predicate with the ensemble fields ignored, the errored and untimed filters, the completeness report with the store's compile timeouts marked, CSVs without the columns no row captured, and the base figures of a (key, problem, algorithm): runtime against n, error against runtime, error against dt, error against tolerance, and runtime with cold build time against the state count."""
 
 import csv
-import json
 import math
 import os
 import shutil
@@ -17,9 +16,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "analyses"))
 
 import abandon  # noqa: E402
-import cubie_adapter  # noqa: E402
 import grid  # noqa: E402
-import sets  # noqa: E402
 import store  # noqa: E402
 import errors  # noqa: E402
 import plots  # noqa: E402
@@ -125,66 +122,6 @@ class SelectionTests(AnalysesCase):
         self.assertFalse(shared.timed({"min_ms": NAN}))
         self.assertTrue(shared.timed({"min_ms": 0.5}))
 
-    def pi_spec(self, package="cubie", n=8, **overrides):
-        """The perf set's cubie PI point of lorenz tsit5 at n on both transfers, as the set declares it (the tier's exact gains)."""
-        specs = [s for s in sets.expand(["perf"], KEY, self.root, packages=[package], algorithms=["tsit5"], n=[n])
-                 if s["controller"] == "pi" and s["problem"] == "lorenz"]
-        self.assertEqual(len(specs), 1)
-        fields = {f: specs[0][f] for f in store.SPEC_FIELDS if f in specs[0]}
-        return dict(fields, transfers="both", key=KEY, **overrides)
-
-    @staticmethod
-    def rounded(gains):
-        """The gains as a Float32 table prints them."""
-        return {k: float(np.float32(v)) for k, v in json.loads(gains).items()}
-
-    def test_a_pi_row_within_float32_rounding_of_the_tier_reads_as_the_tier(self):
-        exact = self.pi_spec()
-        self.assertEqual(json.loads(exact["gains"])["proportional_gain"], 0.4800000000000001)
-        rounded = self.store.record(dict(exact, gains=self.rounded(exact["gains"]), states=3, min_ms=2.0))
-        self.assertNotEqual(rounded["gains"], exact["gains"])
-        self.assertNotEqual(rounded["run_id"], store.run_id(exact))
-        # Other gains, and a package outside cubie, read as written.
-        other = self.store.record(dict(exact, gains={"integral_gain": 0.5, "proportional_gain": 0.1}, states=3))
-        jax = self.store.record(dict(exact, package="jax", gains=self.rounded(exact["gains"]), states=3))
-        data = self.analysis_store()
-        rows = {r["run_id"]: r for r in data.rows()}
-        self.assertEqual(set(rows), {store.run_id(exact), other["run_id"], jax["run_id"]})
-        read = rows[store.run_id(exact)]
-        self.assertEqual((read["gains"], read["trial_id"], read["group_id"], read["min_ms"], read["finals"]),
-                         (exact["gains"], store.trial_id(exact), store.group_id(exact), 2.0, ""))
-        self.assertEqual(rows[jax["run_id"]]["gains"], jax["gains"])
-        self.assertEqual(sorted(r["run_id"] for r in data.rows(key=KEY, package="cubie")),
-                         sorted([store.run_id(exact), other["run_id"]]))
-        self.assertIs(shared.normalise_gains(read), read)
-        # The tier's row is the adaptive kind on a figure; other gains are Julia's matched controller; cubie's default is not drawn.
-        self.assertEqual(shared.controller_kind(read), "adaptive")
-        self.assertEqual(shared.controller_kind(rows[other["run_id"]]), "matched")
-        self.assertEqual(shared.controller_kind(rows[jax["run_id"]]), "adaptive")
-        self.assertEqual(shared.controller_kind(dict(read, controller="fixed")), "fixed")
-        self.assertIsNone(shared.controller_kind(dict(read, controller="default")))
-        self.assertEqual(shared.controller_kind(dict(read, package="julia_gpu", controller="default")), "adaptive")
-        self.assertEqual(shared.controller_kind(dict(read, controller="gustafsson")), "gustafsson")
-        self.assertEqual(shared.problem_name("lorenz96_20", 20), shared.problem_name("lorenz96", 20))
-        # The set selects it; the audit counts its row and finds its optimize record written under the rounded gains.
-        self.assertIn(store.run_id(exact), [r["run_id"] for r in shared.select_rows(data, ["perf"])])
-        trial = dict(exact, gains=rounded["gains"], transfers=["both"])
-        cubie_adapter.record_optimize_timeout(trial, KEY, self.root)
-        self.assertEqual(cubie_adapter.optimize_rows("cubie", KEY, self.root)[0]["gains"], rounded["gains"])
-        self.assertEqual(data.optimize_rows("cubie", KEY)[0]["gains"], exact["gains"])
-        lacking = {m.trial["trial_id"]: m.reasons() for _, m in shared.incomplete(data, ["perf"])}
-        self.assertEqual(lacking.get(store.trial_id(exact)), ["row:none"])
-
-    def test_two_rows_of_one_run_id_are_refused(self):
-        exact = self.pi_spec()
-        self.store.record(dict(exact, states=3, min_ms=1.5))
-        self.store.record(dict(exact, gains=self.rounded(exact["gains"]), states=3, min_ms=1.1))
-        with self.assertRaises(ValueError) as caught:
-            self.analysis_store().rows()
-        self.assertIn(store.run_id(exact), str(caught.exception))
-        self.assertEqual([r["run_id"] for r in shared.unique([dict(exact, run_id="a"), dict(exact, run_id="b")])],
-                         ["a", "b"])
-
     def test_a_csv_leaves_out_the_columns_no_row_captured(self):
         rows = [{"a": 1.0, "b": NAN, "c": "", "d": None, "e": [], "f": "x"},
                 {"a": NAN, "b": NAN, "c": "", "d": None, "e": [1.0], "f": ""}]
@@ -286,7 +223,6 @@ class PlotTests(AnalysesCase):
             self.row(n=n, min_ms=ms)
             self.row(n=n, min_ms=ms / 2, transfers="none")
             self.row(n=n, min_ms=3.0 * ms, package="jax", **adaptive(1e-5))
-            # cubie's default controller is not drawn.
             self.row(n=n, min_ms=9.0 * ms, **adaptive(1e-5))
         self.row(n=8, min_ms=3.0, package="julia_gpu")
         self.row(n=32, min_ms=6.0, package="julia_gpu")
@@ -316,6 +252,8 @@ class PlotTests(AnalysesCase):
                           ("cubie fixed", "32.0", "0.001"),
                           ("cubie fixed", "128.0", "0.002"),
                           ("cubie fixed", "512.0", "0.004"),
+                          ("cubie adaptive +", "8.0", "0.009"), ("cubie adaptive +", "32.0", "0.018"),
+                          ("cubie adaptive +", "128.0", "0.036"), ("cubie adaptive +", "512.0", "0.072"),
                           ("jax adaptive +", "8.0", "0.003"), ("jax adaptive +", "32.0", "0.006"),
                           ("jax adaptive +", "128.0", "0.012"), ("jax adaptive +", "512.0", "0.024"),
                           ("julia_gpu fixed +", "8.0", "0.003"),

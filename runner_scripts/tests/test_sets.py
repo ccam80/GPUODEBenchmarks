@@ -1,4 +1,4 @@
-"""Set expansion: the shipped sets' counts against the catalogues, the julia_cpu prefix grid, matched and pi controller resolution, the canonical trial merge and file order, the narrowing flags, and the schema checks."""
+"""Set expansion: the shipped sets' counts against the catalogues, the julia_cpu prefix grid, the controller resolution, the canonical trial merge and file order, the narrowing flags, and the schema checks."""
 
 import json
 import os
@@ -26,6 +26,7 @@ KEY = "windows_RTX-4070-SUPER"
 DATA = os.path.join(ROOT, "data")
 NAN = float("nan")
 OPTIMIZE_N = 262144
+CUBIE_GOLDEN_GRID = 3320
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
 
@@ -65,40 +66,12 @@ def stepping_values(stepping):
     return len(stepping["tol"])
 
 
-def pi_algorithms(package, names=None):
-    """Adaptive algorithms (within names when given) whose DIRK PI defaults differ from cubie's shipped controller."""
-    import cubie_adapter
-    out = []
-    for row in capable(package, "adaptive"):
-        if names is not None and row.name not in names:
-            continue
-        shipped = cubie_adapter.default_controller(row.name, row["family"], row["order"])
-        if not cubie_adapter.controllers_equal(cubie_adapter.pi_tier_controller(row["order"]), shipped):
-            out.append(row)
-    return out
-
-
 def problems_of(package):
     return [row for row in PROBLEMS.values() if row.supports(package)]
 
 
-def matched_algorithms(package, names, problem):
-    """Adaptive algorithms whose julia_cpu controller row under data/ maps to a controller other than cubie's shipped one."""
-    import cubie_adapter
-    table = sets.controllers_table(KEY, problem, DATA)
-    out = []
-    for row in capable(package, "adaptive"):
-        if row.name not in names or row.name not in table:
-            continue
-        settings, _ = cubie_adapter.matched_controller(table[row.name], row["order"])
-        shipped = cubie_adapter.default_controller(row.name, row["family"], row["order"])
-        if settings is not None and not cubie_adapter.controllers_equal(settings, shipped):
-            out.append(row)
-    return out
-
-
 def stepping_algorithms(loaded, index, package, problem):
-    """The catalogue rows one stepping of a loaded set yields for a package and problem: its list narrowed by capability, pi and matched minus the shipped matches."""
+    """The catalogue rows one stepping of a loaded set yields for a package and problem: its list narrowed by capability."""
     stepping = loaded["stepping"][index]
     kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
     names = [r.name for r in capable(package, kind)]
@@ -106,10 +79,6 @@ def stepping_algorithms(loaded, index, package, problem):
         names = [n for n in names if n in stepping["algorithms"]]
     if stepping["packages"] != "all" and package not in stepping["packages"]:
         return []
-    if stepping["controller"] == "pi":
-        return pi_algorithms(package, names)
-    if stepping["controller"] == "matched":
-        return matched_algorithms(package, names, problem)
     return [r for r in capable(package, kind) if r.name in names]
 
 
@@ -122,7 +91,7 @@ class ShippedSetTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.expanded = {name: sets.expand([name], KEY, root=DATA) for name in sets.set_names()}
+        cls.expanded = {name: sets.expand([name]) for name in sets.set_names()}
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
     def test_the_four_sets_ship(self):
@@ -138,7 +107,7 @@ class ShippedSetTests(unittest.TestCase):
         expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 1632, "cubie_mlir": 1632, "jax": 360, "pytorch": 180,
+        self.assertEqual(expected, {"cubie": 1248, "cubie_mlir": 1248, "jax": 360, "pytorch": 180,
                                     "myokit_cuda": 36, "cpp": 120, "julia_gpu": 960})
         # The timed algorithms are exactly those two package families run in the stepping kind.
         timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
@@ -150,7 +119,7 @@ class ShippedSetTests(unittest.TestCase):
         built = self.trials["perf"]
         self.assertEqual(dict(solve_counts(built)), expected)
         # One optimize per kernel; perf gives each build one stepping.
-        self.assertEqual(line_counts(built, "cubie"), (1632, 136, 0, 136))
+        self.assertEqual(line_counts(built, "cubie"), (1248, 104, 0, 104))
         self.assertEqual(line_counts(built, "jax"), (360, 0, 0, 30))
         self.assertEqual(line_counts(built, "julia_gpu"), (960, 0, 0, 80))
         self.assertEqual({t["cold"] for t in built}, {False})
@@ -169,7 +138,7 @@ class ShippedSetTests(unittest.TestCase):
         for field in ("dt_min", "dt_max", "atol", "rtol"):
             self.assertTrue(np.isnan(fixed["kvaerno3"][field]), field)
         self.assertEqual(fixed["kvaerno3"]["gains"], "{}")
-        default = {s["algorithm"]: s for s in lorenz if s["controller"] == "default"}
+        default = {s["algorithm"]: s for s in lorenz if s["stepping"] == "default"}
         self.assertEqual((default["kvaerno3"]["atol"], default["kvaerno3"]["rtol"]), (1e-5, 1e-5))
         self.assertEqual(default["kvaerno3"]["dt"], 2.0 ** -10)
         # No shipped set pins the step floor or cap.
@@ -178,7 +147,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(default["kvaerno3"]["newton_atol"], 1e-5)
         self.assertTrue(np.isnan(default["tsit5"]["newton_atol"]))
         pollu = [s for s in specs if s["problem"] == "pollu" and s["package"] == "cubie"
-                 and s["controller"] == "default" and s["algorithm"] == "kvaerno3"][0]
+                 and s["stepping"] == "default" and s["algorithm"] == "kvaerno3"][0]
         self.assertEqual(pollu["dt"], 60.0 * 2.0 ** -10)
         self.assertTrue(np.isnan(pollu["dt_min"]))
         self.assertEqual((pollu["parameter"], pollu["grid_scale"], pollu["grid_min"], pollu["grid_max"]),
@@ -204,24 +173,6 @@ class ShippedSetTests(unittest.TestCase):
             for field in ("dt_min", "dt_max"):
                 self.assertTrue(all(np.isnan(s[field]) for s in specs), (name, field))
 
-    def test_perf_pi_stepping_skips_the_shipped_dirk_controller(self):
-        specs = [s for s in self.expanded["perf"] if s["stepping"] == "pi" and s["problem"] == "lorenz"
-                 and s["package"] == "cubie" and s["n"] == 8]
-        names = sorted(s["algorithm"] for s in specs)
-        self.assertEqual(names, sorted(r.name for r in stepping_algorithms(sets.load_set("perf"), 2, "cubie", "lorenz")))
-        self.assertEqual(names, ["cash-karp-54", "rosenbrock23_sciml", "tsit5", "vern7"])
-        for absent in ("kvaerno3", "kvaerno5"):
-            self.assertNotIn(absent, names)
-        self.assertIn("tsit5", names)
-        tsit5 = [s for s in specs if s["algorithm"] == "tsit5"][0]
-        self.assertEqual(tsit5["controller"], "pi")
-        gains = json.loads(tsit5["gains"])
-        self.assertEqual(set(gains), {"integral_gain", "proportional_gain", "safety",
-                                      "min_step_shrink", "max_step_growth"})
-        self.assertEqual(gains["proportional_gain"], 0.4 * 6 / 5)
-        self.assertEqual(tsit5["newton_atol"] == tsit5["newton_atol"], False)
-        self.assertNotIn("julia_gpu", {s["package"] for s in self.expanded["perf"] if s["stepping"] == "pi"})
-
     def test_states_counts(self):
         specs = self.expanded["states"]
         self.assertEqual({s["problem"] for s in specs}, {"lorenz96"})
@@ -231,7 +182,7 @@ class ShippedSetTests(unittest.TestCase):
         loaded = sets.load_set("states")
         self.assertNotIn("julia_cpu", loaded["set"]["packages"])
         # The one stepping is the default adaptive controller: a fixed-only package (pytorch, myokit_cuda) has no line.
-        self.assertEqual({s["controller"] for s in specs}, {"default"})
+        self.assertEqual({s["stepping"] for s in specs}, {"default"})
         expected = {package: leg_count(loaded, package, "lorenz96") * 6 for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), {p: c for p, c in expected.items() if c})
         self.assertEqual(expected["cubie"], 36)
@@ -247,9 +198,7 @@ class ShippedSetTests(unittest.TestCase):
         specs = self.expanded["golden_grid"]
         self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
         self.assertEqual({s["finals"] for s in specs}, {True})
-        tables = [p for p in PROBLEMS if sets.controllers_table(KEY, p, DATA)]
-        self.assertEqual({s["stepping"] for s in specs},
-                         {"fixed", "default", "pi"} | ({"matched"} if tables else set()))
+        self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default"})
         loaded = sets.load_set("golden_grid")
         expected = {}
         for package in loaded["set"]["packages"]:
@@ -259,12 +208,10 @@ class ShippedSetTests(unittest.TestCase):
                     count += len(stepping_algorithms(loaded, index, package, problem.name)) * stepping_values(stepping)
             expected[package] = count
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        # The cubie counts grow with the julia_cpu controller tables under data/; the others are fixed.
         self.assertEqual({p: expected[p] for p in ("jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu")},
                          {"jax": 315, "pytorch": 180, "myokit_cuda": 30, "cpp": 100, "julia_gpu": 800,
                           "julia_cpu": 3192})
-        matched = sum(1 for s in specs if s["stepping"] == "matched" and s["package"] == "cubie")
-        self.assertEqual(expected["cubie"], 4104 + matched)
+        self.assertEqual(expected["cubie"], CUBIE_GOLDEN_GRID)
         # Every algorithm a package runs at a fixed step is stepped: the two fixed steppings together name them all.
         fixed_named = set(loaded["stepping"][0]["algorithms"]) | set(loaded["stepping"][1]["algorithms"])
         self.assertEqual(fixed_named, set(FACTS))
@@ -285,8 +232,8 @@ class ShippedSetTests(unittest.TestCase):
         shared = [t for t in built if t["package"] == "cubie" and trials.shares_dt_optimize(t)]
         self.assertEqual((lines, optimized, cold),
                          (expected["cubie"], expected["cubie"] - len(shared) + len({trials.build_key(t) for t in shared}), 0))
-        # One build per (problem, algorithm, controller, gains); a matched entry resolving to pi shares the pi build.
-        self.assertGreaterEqual(builds, 8 * (23 + 17 + 14))
+        # One build per (problem, algorithm, controller, gains).
+        self.assertGreaterEqual(builds, 8 * (23 + 17))
         self.assertEqual(line_counts(built, "julia_cpu"), (3192, 0, 0, 8 * (21 + 18)))
         self.assertEqual(line_counts(built, "pytorch"), (180, 0, 0, 15))
 
@@ -347,7 +294,7 @@ class ShippedSetTests(unittest.TestCase):
                 store.spec_of(dict(spec, transfers=spec["transfers"][0], key=KEY))
 
     def test_declarations_expand_every_set_file_and_declared_counts_union_the_grids(self):
-        every = sets.declarations(KEY, root=DATA, packages=["julia_cpu"], problems=["lorenz"])
+        every = sets.declarations(packages=["julia_cpu"], problems=["lorenz"])
         self.assertEqual({s["set"] for s in every}, {"golden", "golden_grid"})
         self.assertEqual({s["n"] for s in every}, {1024, 131072})
         self.assertEqual(sets.declared_counts(["golden_grid"]), [1024, 131072])
@@ -355,60 +302,24 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
 
     def test_set_module_cli_prints_counts(self):
-        out = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "sets.py"), "golden", KEY],
+        out = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "sets.py"), "golden"],
                              capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.strip(), "julia_cpu 8")
 
 
-class FakeControllers:
-    """cubie_adapter's controller functions without cubie: shipped i for erk, pi for dirk, gustafsson for firk."""
-
-    @staticmethod
-    def default_controller(alias, family, order):
-        if family == "erk":
-            return {"step_controller": "i", "integral_gain": 1.2, "safety": 0.9,
-                    "min_step_shrink": 0.2, "max_step_growth": 10.0}
-        if family == "dirk":
-            return FakeControllers.pi_tier_controller(order)
-        if family in ("firk", "rosenbrock", "implicit"):
-            return {"step_controller": "gustafsson", "safety": 0.9, "min_step_shrink": 0.2,
-                    "max_step_growth": 8.0}
-        return None
-
-    @staticmethod
-    def pi_tier_controller(order):
-        return {"step_controller": "pi", "integral_gain": 0.3 * 4 / order,
-                "proportional_gain": 0.4 * 4 / order, "safety": 0.9,
-                "min_step_shrink": 0.2, "max_step_growth": 10.0}
-
-
 class ControllerResolutionTests(unittest.TestCase):
-    """matched and pi steppings through cubie_adapter's mapping functions, with the shipped tables faked."""
+    """The stepping controllers through cubie_adapter's mapping."""
 
     def setUp(self):
-        import cubie_adapter
         self.tmp = tempfile.mkdtemp(prefix="sets_")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.sets_dir = os.path.join(self.tmp, "sets")
         os.makedirs(self.sets_dir)
-        self.root = os.path.join(self.tmp, "data")
-        for name in ("default_controller", "pi_tier_controller"):
-            original = getattr(cubie_adapter, name)
-            setattr(cubie_adapter, name, getattr(FakeControllers, name))
-            self.addCleanup(setattr, cubie_adapter, name, original)
 
     def write_set(self, name, text):
         with open(os.path.join(self.sets_dir, name + ".toml"), "w", encoding="utf-8") as handle:
             handle.write(text)
-
-    def write_controllers(self, problem, rows):
-        directory = os.path.join(self.root, "key=" + KEY, "package=julia_cpu", "controllers")
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, problem + ".csv"), "w", encoding="utf-8", newline="") as handle:
-            handle.write("cubie_alias,controller,beta1,beta2,qmin,qmax,gamma,order\n")
-            for row in rows:
-                handle.write(",".join(row) + "\n")
 
     ADAPTIVE = '''
 [set]
@@ -426,69 +337,9 @@ newton = "tol"
 {gains}
 '''
 
-    def test_matched_resolves_julias_row_and_skips_absent_and_shipped_ones(self):
-        self.write_set("m", self.ADAPTIVE.format(controller="matched", gains=""))
-        self.assertEqual(sets.expand(["m"], KEY, self.root, sets_dir=self.sets_dir), [])
-        self.write_controllers("lorenz", [
-            ("tsit5", "PIController", "0.28", "0.04", "0.2", "10.0", "0.9", "5"),
-            ("radau_iia_5", "PredictiveController", "", "", "0.2", "8.0", "0.9", "5"),
-            ("kvaerno3", "PIController", "0.1", "0.1", "0.2", "10.0", "0.9", "3"),
-            ("ros3p", "Other", "", "", "", "", "", "3"),
-        ])
-        specs = {s["algorithm"]: s for s in sets.expand(["m"], KEY, self.root, sets_dir=self.sets_dir)}
-        self.assertEqual(sorted(specs), ["kvaerno3", "radau_iia_5", "tsit5"])
-        tsit5 = specs["tsit5"]
-        self.assertEqual(tsit5["controller"], "pi")
-        self.assertEqual(json.loads(tsit5["gains"]), {
-            "integral_gain": 0.28 * 6 - 0.04 * 6, "proportional_gain": 0.04 * 6, "safety": 0.9,
-            "min_step_shrink": 0.2, "max_step_growth": 10.0})
-        self.assertEqual(tsit5["stepping"], "matched")
-        radau = specs["radau_iia_5"]
-        self.assertEqual(radau["controller"], "gustafsson")
-        self.assertEqual(json.loads(radau["gains"]), {"safety": 0.9})
-        self.assertEqual(json.loads(specs["kvaerno3"]["gains"])["proportional_gain"], 0.1 * 4)
-        # Float32-printed beta1 (order + 1) = I + P and beta2 (order + 1) = P of the shipped pi at order 3: skipped.
-        self.write_controllers("lorenz", [
-            ("kvaerno3", "PIController", "0.23333333", "0.13333334", "0.2", "10.0", "0.9", "3")])
-        self.assertEqual(sets.expand(["m"], KEY, self.root, sets_dir=self.sets_dir), [])
-
-    def test_matched_within_float32_of_the_pi_tier_is_one_trial_with_dirk_defaults(self):
-        import trials
-        self.write_set("m", self.ADAPTIVE.format(controller="matched", gains=""))
-        self.write_set("p", self.ADAPTIVE.format(controller="pi", gains='gains = "dirk_defaults"'))
-        # tsit5 at order 5: the tier is (0.24, 0.32); Julia's Float32 table prints beta1 0.093333334, beta2 0.053333335.
-        self.write_controllers("lorenz", [
-            ("tsit5", "PIController", "0.093333334", "0.053333335", "0.2", "10.0", "0.9", "5")])
-        matched = sets.expand(["m"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
-        tier = sets.expand(["p"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
-        self.assertEqual(len(matched), 1)
-        self.assertEqual(len(tier), 1)
-        self.assertEqual(matched[0]["gains"], tier[0]["gains"])
-        merged = trials.build_trials(matched + tier)
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0]["sets"], ["m", "p"])
-        # Beyond Float32 rounding the matched controller stays Julia's and is its own trial.
-        self.write_controllers("lorenz", [
-            ("tsit5", "PIController", "0.1", "0.053333335", "0.2", "10.0", "0.9", "5")])
-        matched = sets.expand(["m"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
-        self.assertNotEqual(matched[0]["gains"], tier[0]["gains"])
-        self.assertEqual(len(trials.build_trials(matched + tier)), 2)
-
-    def test_pi_with_dirk_defaults_skips_dirk_algorithms(self):
-        self.write_set("p", self.ADAPTIVE.format(controller="pi", gains='gains = "dirk_defaults"'))
-        specs = sets.expand(["p"], KEY, self.root, sets_dir=self.sets_dir)
-        names = {s["algorithm"] for s in specs}
-        self.assertEqual(names, {r.name for r in capable("cubie", "adaptive") if r["family"] != "dirk"})
-        for spec in specs:
-            self.assertEqual(spec["controller"], "pi")
-            gains = json.loads(spec["gains"])
-            self.assertEqual(gains["integral_gain"], 0.3 * 4 / FACTS[spec["algorithm"]]["order"])
-            self.assertEqual(gains["proportional_gain"], 0.4 * 4 / FACTS[spec["algorithm"]]["order"])
-            self.assertEqual(spec["stepping"], "pi")
-
     def test_explicit_gains_and_a_named_controller_pass_through(self):
         self.write_set("g", self.ADAPTIVE.format(controller="pid", gains="gains = {kp = 0.7, ki = 0.4}"))
-        specs = sets.expand(["g"], KEY, self.root, algorithms=["tsit5"], sets_dir=self.sets_dir)
+        specs = sets.expand(["g"], algorithms=["tsit5"], sets_dir=self.sets_dir)
         self.assertEqual(len(specs), 1)
         self.assertEqual((specs[0]["controller"], specs[0]["gains"]), ("pid", '{"ki":0.4,"kp":0.7}'))
 
@@ -496,7 +347,7 @@ newton = "tol"
         # The same stepping asks for newton = "tol"; the (package, algorithm) row decides who gets it.
         text = self.ADAPTIVE.format(controller="default", gains="").replace('["cubie"]', '["cubie", "julia_gpu", "jax"]')
         self.write_set("nw", text)
-        specs = sets.expand(["nw"], KEY, self.root, algorithms=["kvaerno3", "tsit5"], sets_dir=self.sets_dir)
+        specs = sets.expand(["nw"], algorithms=["kvaerno3", "tsit5"], sets_dir=self.sets_dir)
         by_key = {(s["package"], s["algorithm"]): s for s in specs}
         self.assertEqual(set(by_key), {("cubie", "kvaerno3"), ("cubie", "tsit5"), ("julia_gpu", "kvaerno3"),
                                        ("julia_gpu", "tsit5"), ("jax", "kvaerno3"), ("jax", "tsit5")})
@@ -506,28 +357,12 @@ newton = "tol"
             self.assertTrue(np.isnan(by_key[pair]["newton_atol"]), pair)
             self.assertTrue(np.isnan(by_key[pair]["newton_rtol"]), pair)
 
-    def test_matched_and_dirk_defaults_are_cubie_only(self):
-        text = self.ADAPTIVE.format(controller="matched", gains="").replace('["cubie"]', '["jax"]')
-        self.write_set("bad", text)
-        self.write_controllers("lorenz", [("tsit5", "PIController", "0.28", "0.04", "0.2", "10.0", "0.9", "5")])
-        with self.assertRaises(sets.SetError):
-            sets.expand(["bad"], KEY, self.root, sets_dir=self.sets_dir)
-
 
 class MergeAndNarrowTests(unittest.TestCase):
-    """Merge, ordinals and narrowing against an empty data root, so no controllers table resolves a matched stepping."""
-
-    def setUp(self):
-        import cubie_adapter
-        for name in ("default_controller", "pi_tier_controller"):
-            original = getattr(cubie_adapter, name)
-            setattr(cubie_adapter, name, getattr(FakeControllers, name))
-            self.addCleanup(setattr, cubie_adapter, name, original)
-        self.root = tempfile.mkdtemp(prefix="sets_narrow_")
-        self.addCleanup(shutil.rmtree, self.root, True)
+    """Merge, ordinals and narrowing."""
 
     def test_a_trial_shared_by_two_sets_merges_transfers_and_finals(self):
-        specs = sets.expand(["perf", "golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"])
+        specs = sets.expand(["perf", "golden_grid"], packages=["jax"], problems=["lorenz"])
         built = trials.build_trials(specs)
         shared = [t for t in built if t["n"] == 131072 and t["controller"] == "fixed"
                   and t["algorithm"] == "kvaerno3" and t["dt"] == 2.0 ** -10]
@@ -542,17 +377,16 @@ class MergeAndNarrowTests(unittest.TestCase):
         at_131072 = [dt for n, dt in kvaerno3 if n == 131072]
         self.assertEqual(at_131072, [2.0 ** -k for k in range(1, 14)])
         self.assertEqual([n for n, _ in kvaerno3], sorted(n for n, _ in kvaerno3))
-        reverse = trials.build_trials(sets.expand(["golden_grid", "perf"], KEY, self.root,
-                                                  packages=["jax"], problems=["lorenz"]))
+        reverse = trials.build_trials(sets.expand(["golden_grid", "perf"], packages=["jax"], problems=["lorenz"]))
         self.assertEqual(reverse, built)
 
     def test_every_set_file_declares_the_contract_of_a_requested_point(self):
         """The lorenz96 default-states point at n = 131072 under the default controller at tol 1e-5: perf (warm), states (cold) and golden_grid (finals, none) declare it, each optimizing cubie; each request alone yields the same line."""
-        declared = sets.declarations(KEY, self.root, packages=["cubie"], problems=["lorenz96"],
+        declared = sets.declarations(packages=["cubie"], problems=["lorenz96"],
                                      algorithms=["kvaerno3"])
         expected = None
         for names in (["perf"], ["states"], ["golden_grid"], ["golden_grid", "perf"], ["perf", "states", "golden_grid"]):
-            specs = sets.narrow(sets.expand(names, KEY, self.root, packages=["cubie"], problems=["lorenz96"],
+            specs = sets.narrow(sets.expand(names, packages=["cubie"], problems=["lorenz96"],
                                             algorithms=["kvaerno3"]), mode="adaptive", controllers=["default"], tols=[1e-5])
             built = trials.build_trials(specs, declared)
             point = [t for t in built if t["n"] == 131072 and t["system_params"] == '{"states":32}'
@@ -566,14 +400,14 @@ class MergeAndNarrowTests(unittest.TestCase):
                                     "watchdog_s": protocol.WATCHDOG_SECONDS, "timed": True,
                                     "sets": ["golden_grid", "perf", "states"]})
         # perf alone: the other eleven counts of the 32-state build stay warm and unshared.
-        perf = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
+        perf = trials.build_trials(sets.narrow(sets.expand(["perf"], packages=["cubie"],
                                                            problems=["lorenz96"], algorithms=["kvaerno3"]),
                                                mode="adaptive", controllers=["default"], tols=[1e-5]), declared)
         self.assertEqual([t["n"] for t in perf], PERF_N)
         self.assertEqual([(t["cold"], t["finals"], t["sets"]) for t in perf if t["n"] != 131072],
                          [(False, False, ["perf"])] * 11)
         # Without the declarations the request alone decides.
-        alone = trials.build_trials(sets.narrow(sets.expand(["perf"], KEY, self.root, packages=["cubie"],
+        alone = trials.build_trials(sets.narrow(sets.expand(["perf"], packages=["cubie"],
                                                             problems=["lorenz96"], algorithms=["kvaerno3"]),
                                                 mode="adaptive", controllers=["default"], tols=[1e-5]))
         self.assertEqual({t["finals"] for t in alone}, {False})
@@ -632,17 +466,17 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertFalse(trials.harder(dict(tol, atol=1e-4, rtol=1e-4), tol))
 
     def test_the_file_order_runs_the_easy_lines_first(self):
-        built = trials.build_trials(sets.expand(["golden_grid"], KEY, self.root, packages=["jax"],
+        built = trials.build_trials(sets.expand(["golden_grid"], packages=["jax"],
                                                 problems=["lorenz"], algorithms=["kvaerno3"]))
         self.assertEqual([t["dt"] for t in built if t["controller"] == "fixed"], [2.0 ** -k for k in range(1, 14)])
         self.assertEqual([t["atol"] for t in built if t["controller"] != "fixed"], TOLS)
         self.assertEqual(len(trials.builds_of(built)), 2)
-        perf = trials.build_trials(sets.expand(["perf"], KEY, self.root, packages=["jax"], problems=["lorenz"],
+        perf = trials.build_trials(sets.expand(["perf"], packages=["jax"], problems=["lorenz"],
                                                algorithms=["tsit5"]))
         self.assertEqual([t["n"] for t in perf if t["controller"] == "fixed"], PERF_N)
 
     def test_narrowing_by_package_problem_algorithm_and_n(self):
-        specs = sets.expand(["perf"], KEY, self.root, packages=["pytorch"], problems=["pollu", "lorenz"],
+        specs = sets.expand(["perf"], packages=["pytorch"], problems=["pollu", "lorenz"],
                             algorithms=["euler", "tsit5"], n=[8, 32])
         self.assertEqual({s["package"] for s in specs}, {"pytorch"})
         self.assertEqual({s["problem"] for s in specs}, {"lorenz", "pollu"})
@@ -650,33 +484,31 @@ class MergeAndNarrowTests(unittest.TestCase):
         self.assertEqual(sorted({s["n"] for s in specs}), [8, 32])
         self.assertEqual(len(specs), 2 * 2 * 2)
         # A grid keeps only the counts n names.
-        golden = sets.expand(["golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"],
+        golden = sets.expand(["golden_grid"], packages=["jax"], problems=["lorenz"],
                              algorithms=["kvaerno3"], n=[16, 131072])
         self.assertEqual({s["n"] for s in golden}, {131072})
-        self.assertEqual(sets.expand(["golden_grid"], KEY, self.root, packages=["jax"], problems=["lorenz"],
+        self.assertEqual(sets.expand(["golden_grid"], packages=["jax"], problems=["lorenz"],
                                      algorithms=["kvaerno3"], n=[16]), [])
 
     def test_narrowing_by_mode_controller_tol_and_dt(self):
-        specs = sets.expand(["golden_grid"], KEY, self.root, packages=["cubie"], problems=["lorenz"],
+        specs = sets.expand(["golden_grid"], packages=["cubie"], problems=["lorenz"],
                             algorithms=["rosenbrock23_sciml"])
-        self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default", "pi"})
+        self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default"})
         fixed = sets.narrow(specs, mode="fixed")
         self.assertEqual({s["controller"] for s in fixed}, {"fixed"})
         self.assertEqual(len(fixed), 13)
         adaptive = sets.narrow(specs, mode="adaptive")
-        self.assertEqual(len(adaptive), 14)
+        self.assertEqual(len(adaptive), 7)
         self.assertEqual({s["controller"] for s in sets.narrow(specs, controllers=["pi"])}, {"pi"})
         self.assertEqual(len(sets.narrow(specs, controllers=["default", "fixed"])), 20)
         tol = sets.narrow(specs, tols=[1e-5])
-        self.assertEqual([(s["controller"], s["atol"]) for s in tol], [("default", 1e-5), ("pi", 1e-5)])
+        self.assertEqual([(s["controller"], s["atol"]) for s in tol], [("pi", 1e-5)])
         dt = sets.narrow(specs, dts=[2.0 ** -10, 0.5])
         self.assertEqual(sorted(s["dt"] for s in dt), [2.0 ** -10, 0.5])
         both = sets.narrow(specs, tols=[1e-3], dts=[0.25])
         self.assertEqual(sorted((s["controller"], s["dt"] if s["controller"] == "fixed" else s["atol"])
-                                for s in both), [("default", 1e-3), ("fixed", 0.25), ("pi", 1e-3)])
+                                for s in both), [("fixed", 0.25), ("pi", 1e-3)])
         self.assertEqual(sets.narrow(specs, mode="fixed", tols=[1e-3]), [])
-        matched = sets.narrow(specs, controllers=["matched"])
-        self.assertEqual(matched, [])
 
 
 class SchemaTests(unittest.TestCase):
@@ -702,7 +534,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(loaded["stepping"][0]["newton"], "none")
         self.assertIsNone(head["optimize"])
         self.assertIsNone(head["untimed"])
-        specs = sets.expand(["s"], KEY, sets_dir=self.tmp)
+        specs = sets.expand(["s"], sets_dir=self.tmp)
         self.assertEqual({s["timed"] for s in specs}, {True})
         self.assertEqual(len(specs), len(capable("jax", "fixed")))
         self.assertEqual({s["dt"] for s in specs}, {0.5})
@@ -718,39 +550,39 @@ class SchemaTests(unittest.TestCase):
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["jax"]\n'))
         loaded = sets.load_set("s", self.tmp)
         self.assertEqual(loaded["set"]["untimed"], {"packages": ["jax"]})
-        specs = sets.expand(["s"], KEY, sets_dir=self.tmp)
+        specs = sets.expand(["s"], sets_dir=self.tmp)
         self.assertEqual({s["timed"] for s in specs}, {False})
         self.assertEqual({t["timed"] for t in trials.build_trials(specs)}, {False})
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["nobody"]\n'))
         with self.assertRaises(sets.SetError):
             sets.load_set("s", self.tmp)
         # The shipped golden_grid times every package but the reference.
-        specs = sets.expand(["golden_grid"], KEY, packages=["julia_cpu", "cpp"], problems=["lorenz"])
+        specs = sets.expand(["golden_grid"], packages=["julia_cpu", "cpp"], problems=["lorenz"])
         self.assertEqual({(s["package"], s["timed"]) for s in specs}, {("julia_cpu", False), ("cpp", True)})
 
     def test_optimize_table_names_the_packages(self):
         text = self.MINIMAL.replace("[[grid]]\nn = [8]", "[[grid]]\nn = [8, 32]") + \
             '\n[set.optimize]\npackages = ["jax"]\n'
         self.write(text)
-        specs = sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"])
+        specs = sets.expand(["s"], sets_dir=self.tmp, algorithms=["euler"])
         self.assertEqual({s["optimize"] for s in specs}, {True})
         built = trials.build_trials(specs)
         self.assertEqual([(t["n"], t["optimize"]) for t in built], [(8, True), (32, True)])
         # Without packages the table names every package of the set.
         self.write(text.replace('[set.optimize]\npackages = ["jax"]\n', '[set.optimize]\n'))
-        built = trials.build_trials(sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"]))
+        built = trials.build_trials(sets.expand(["s"], sets_dir=self.tmp, algorithms=["euler"]))
         self.assertEqual([(t["n"], t["optimize"]) for t in built], [(8, True), (32, True)])
         self.write(text.replace('[set.optimize]\npackages = ["jax"]', '[set.optimize]\npackages = ["cubie"]'))
-        built = trials.build_trials(sets.expand(["s"], KEY, sets_dir=self.tmp, algorithms=["euler"]))
+        built = trials.build_trials(sets.expand(["s"], sets_dir=self.tmp, algorithms=["euler"]))
         self.assertEqual({t["optimize"] for t in built}, {False})
         # Any key but packages is refused.
         for bad in ('per = "kernel"', 'per = "solve"', 'n = 64', 'shape = 1'):
             self.write(text + bad + "\n")
             with self.assertRaises(sets.SetError, msg=bad):
-                sets.expand(["s"], KEY, sets_dir=self.tmp)
+                sets.expand(["s"], sets_dir=self.tmp)
         self.write(text.replace('packages = ["jax"]', 'packages = ["fortran"]'))
         with self.assertRaises(sets.SetError):
-            sets.expand(["s"], KEY, sets_dir=self.tmp)
+            sets.expand(["s"], sets_dir=self.tmp)
 
     def test_bad_sets_are_refused(self):
         bad = {
@@ -772,7 +604,7 @@ class SchemaTests(unittest.TestCase):
         for label, text in bad.items():
             self.write(text)
             with self.assertRaises(sets.SetError, msg=label):
-                sets.expand(["s"], KEY, sets_dir=self.tmp)
+                sets.expand(["s"], sets_dir=self.tmp)
         with self.assertRaises(sets.SetError):
             sets.load_set("nosuchset", self.tmp)
 
@@ -782,14 +614,14 @@ class SchemaTests(unittest.TestCase):
                 '[[stepping]]\ncontroller = "default"\ntol = [1e-3, 1e-4]\ndt0 = {duration_times_2_pow = -2}\n'
                 'dt_min = 0.25\ndt_max = {duration_times = 0.5}\n')
         self.write(text)
-        specs = {s["problem"]: s for s in sets.expand(["s"], KEY, sets_dir=self.tmp) if s["atol"] == 1e-3}
+        specs = {s["problem"]: s for s in sets.expand(["s"], sets_dir=self.tmp) if s["atol"] == 1e-3}
         self.assertEqual((specs["lorenz"]["grid_min"], specs["lorenz"]["grid_max"], specs["lorenz"]["grid_scale"]),
                          (0.0, 2.0, "linear"))
         self.assertEqual((specs["pollu"]["grid_min"], specs["pollu"]["grid_max"], specs["pollu"]["grid_scale"]),
                          (0.1, 2.0, "linear"))
         self.assertEqual((specs["pollu"]["dt"], specs["pollu"]["dt_min"], specs["pollu"]["dt_max"]),
                          (15.0, 0.25, 30.0))
-        self.assertEqual(len(sets.expand(["s"], KEY, sets_dir=self.tmp)), 4)
+        self.assertEqual(len(sets.expand(["s"], sets_dir=self.tmp)), 4)
 
 
 class WatchdogBudgetTests(unittest.TestCase):
@@ -805,7 +637,7 @@ class WatchdogBudgetTests(unittest.TestCase):
         self.assertEqual(sets.load_set("golden")["set"]["watchdog"], 86400.0)
         for name in ("perf", "states", "golden_grid"):
             self.assertEqual(sets.load_set(name)["set"]["watchdog"], protocol.WATCHDOG_SECONDS)
-        specs = sets.expand(["golden"], KEY, problems=["lorenz"])
+        specs = sets.expand(["golden"], problems=["lorenz"])
         self.assertEqual({s["watchdog_s"] for s in specs}, {86400.0})
         self.assertEqual({t["watchdog_s"] for t in trials.build_trials(specs)}, {86400.0})
 
@@ -813,7 +645,7 @@ class WatchdogBudgetTests(unittest.TestCase):
         base = '[set]\npackages = ["jax"]\nproblems = ["lorenz"]\nalgorithms = ["euler"]\n{0}[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n'
         self.write("short", base.format("watchdog = 60\n"))
         self.write("long", base.format("watchdog = 600\n"))
-        specs = sets.expand(["short", "long"], KEY, sets_dir=self.tmp)
+        specs = sets.expand(["short", "long"], sets_dir=self.tmp)
         built = trials.build_trials(specs)
         self.assertEqual(len(built), 1)
         self.assertEqual({t["watchdog_s"] for t in built}, {600.0})
@@ -826,14 +658,7 @@ class WatchdogBudgetTests(unittest.TestCase):
 
 class TrialFileTests(unittest.TestCase):
     def test_jsonl_round_trip_writes_null_for_nan_and_only_the_trial_fields(self):
-        import cubie_adapter
-        saved = (cubie_adapter.default_controller, cubie_adapter.pi_tier_controller)
-        cubie_adapter.default_controller = FakeControllers.default_controller
-        cubie_adapter.pi_tier_controller = FakeControllers.pi_tier_controller
-        try:
-            built = trials.build_trials(sets.expand(["perf"], KEY, packages=["cpp"], problems=["lorenz"], n=[8]))
-        finally:
-            cubie_adapter.default_controller, cubie_adapter.pi_tier_controller = saved
+        built = trials.build_trials(sets.expand(["perf"], packages=["cpp"], problems=["lorenz"], n=[8]))
         tmp = tempfile.mkdtemp(prefix="trials_")
         self.addCleanup(shutil.rmtree, tmp, True)
         path = trials.write_jsonl(os.path.join(tmp, "cpp.jsonl"), built)
