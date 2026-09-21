@@ -195,6 +195,37 @@ class GoldenLookupTests(ErrorsCase):
         self.assertEqual(len(errs.goldens()), 2)
         self.assertEqual(errs.golden_of(self.sweep())["run_id"], current["run_id"])
 
+    def traced(self, fields, stretch, drop_peak=(), errored=()):
+        """Record a row whose traced first state is sin(4 pi t stretch) over the first 8 grid points: peaks at t = 0.125 and 0.625 for stretch 1; a listed trajectory loses its second peak, another is NaN throughout."""
+        times = store.trace_times()
+        n = 8
+        states = np.zeros((n, times.shape[0], 3))
+        states[:, :, 0] = np.sin(4.0 * np.pi * times * stretch)
+        states[:, :, 1] = times
+        for traj in drop_peak:
+            states[traj, times > 0.5, 0] = -1.0
+        for traj in errored:
+            states[traj] = np.nan
+        relative = self.store.record_traces(fields, states)
+        return self.store.record(dict(fields, states=3, traces=relative, errored_pct=0.0))
+
+    def test_peak_error_is_the_mean_absolute_percent_error_of_the_peak_times(self):
+        golden = self.traced(golden_spec(), 1.0)
+        run = self.traced(spec(grid_max=grid.grid_point("linear", 0.0, 21.0, N_GOLDEN, N_SWEEP - 1)),
+                          1.0 / 1.02, drop_peak=(3,), errored=(4,))
+        errs = errors.Errors(self.store)
+        self.assertEqual(errs.golden_of(run)["run_id"], golden["run_id"])
+        _, peaks, errored = errs.peak_times(golden)
+        np.testing.assert_allclose(peaks[0], [0.125, 0.625], atol=2e-4)
+        self.assertEqual([len(p) for p in peaks], [2] * 8)
+        _, peaks, errored = errs.peak_times(run)
+        np.testing.assert_allclose(peaks[0], [0.1275, 0.6375], atol=2e-4)
+        self.assertEqual((len(peaks[3]), len(peaks[4]), bool(errored[4])), (1, 0, True))
+        # Every peak is 2% late; trajectory 3 lacks a peak and 4 is errored, so neither counts.
+        self.assertAlmostEqual(errs.peak_error(run), 2.0, delta=0.05)
+        self.assertTrue(math.isnan(errs.peak_error(self.sweep())))
+        self.assertTrue(math.isnan(errs.peak_error(dict(run, traces=""))))
+
     def test_more_than_one_golden_raises_naming_the_rows(self):
         first = self.golden(key=KEY)
         second = self.golden(key=OTHER_KEY)

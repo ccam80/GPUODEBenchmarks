@@ -187,7 +187,8 @@ class PlotTests(AnalysesCase):
             self.assertNotIn(absent["run_id"], [r["run_id"] for r in table])
         # No build time, error, errored share, finals or reason on these rows: their columns are left out.
         self.assertEqual(list(table[0]), [c for c in plots.CSV_COLUMNS if c not in (
-            "build_s", "error", "errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason", "finals", "traces")])
+            "build_s", "error", "peak_error", "errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason",
+            "finals", "traces")])
 
     def test_a_series_keeps_the_stepping_with_the_most_points(self):
         for n in (8, 32, 128):
