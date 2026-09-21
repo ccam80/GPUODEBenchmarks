@@ -130,8 +130,7 @@ python analyses/plots.py --kind error_vs_runtime --where "problem = 'lorenz' AND
 n included) matches, and writes every kind, or the kinds `--kind` names
 (repeatable), as the base figures of every (key, problem, algorithm) in
 `plots/<key>/<kind>/<problem>_<algorithm>.png`, with the points of a problem
-in `plots/<key>/<kind>/<problem>.csv`. The sets are the run's grouping of
-trials, not the analysis's: what a key's store lacks of a set is
+in `plots/<key>/<kind>/<problem>.csv`. What a key's store lacks of a set is
 `bench.py plan --set <name> --resume`.
 
 | kind | x | y | rows |
