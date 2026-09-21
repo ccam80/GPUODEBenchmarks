@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem).
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); runtime_vs_n and error_vs_runtime also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
 """
 
 import math
@@ -26,6 +26,13 @@ ALL_CARDS = "all_cards"
 LIMITED_DIR = "limited_data"
 LIMITED_POINTS = 3
 GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "states")
+# The kinds that also draw every algorithm of a problem on one axis, <problem>.png.
+COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime")
+ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
+                     "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
+                     "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
+PACKAGE_MARKERS = {"cubie": "o", "cubie_mlir": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
+                   "julia_gpu": "P", "julia_cpu": "X"}
 ERROR_LABEL = "RMS error against the golden"
 
 
@@ -284,6 +291,40 @@ def render_grid(path, kind, panels, title):
     return path
 
 
+def render_combined(path, kind, panels, title):
+    """One figure with every (algorithm, series) on one axis: a colour per algorithm, a marker per package (filled for adaptive steps, hollow for fixed), a line style per transfers; the legend lists one entry per line."""
+    plt = shared.pyplot()
+    fig, axis = plt.subplots(1, 1, figsize=(10.0, 6.0))
+    entries = []
+    for index, (name, series) in enumerate(panels):
+        colour = ALGORITHM_COLOURS[index % len(ALGORITHM_COLOURS)]
+        for key, points in series.items():
+            _, package, controller, transfers = key
+            label = "{0}, {1}".format(name, series_label(kind, key, points))
+            if len(cards_of(series)) > 1:
+                label = "{0} [{1}]".format(label, shared.key_label(key[0]))
+            line = axis.plot([p[0] for p in points], [p[1] for p in points], label=label, color=colour,
+                             marker=PACKAGE_MARKERS.get(package, "x"),
+                             markerfacecolor=colour if controller == "adaptive" else "white",
+                             linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
+                             markeredgecolor=colour, markeredgewidth=1.0)[0]
+            entries.append((label, line))
+    axis.set_xscale("log")
+    axis.set_yscale("log")
+    if kind.invert_x:
+        axis.invert_xaxis()
+    axis.set_xlabel(kind.x_label)
+    axis.set_ylabel(kind.y_label)
+    axis.grid(True, which="both", alpha=0.3)
+    axis.set_title(title, fontsize=11)
+    fig.legend([h for _, h in entries], [text for text, _ in entries], fontsize=7, loc="center left",
+               bbox_to_anchor=(0.72, 0.5))
+    fig.tight_layout(rect=(0.0, 0.0, 0.72, 1.0))
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def csv_rows(kind, algorithm, series):
     out = []
     for key, points in series.items():
@@ -321,6 +362,10 @@ def write_tree(out, card, figures, tables):
             written.append(render_grid(os.path.join(directory, problem + "_algorithms.png"), kind, panels,
                                        "{0}: {1}, all algorithms".format(
                                            problem_title(merged(s for _, s in panels)), kind.title)))
+            if name in COMBINED_KINDS:
+                written.append(render_combined(os.path.join(directory, problem + ".png"), kind, panels,
+                                               "{0}: {1}".format(problem_title(merged(s for _, s in panels)),
+                                                                 kind.title)))
         for algorithm in sorted({a for _, a in panels_by}):
             panels = [(problem_title(s), s) for (p, a), s in sorted(panels_by.items()) if a == algorithm]
             written.append(render_grid(os.path.join(directory, shared.slug(algorithm) + "_problems.png"), kind,

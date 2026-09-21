@@ -158,8 +158,9 @@ class PlotTests(AnalysesCase):
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         # euler has one package: limited data. The grids hold every algorithm and every problem.
         self.assertEqual(self.written(), ["runtime_vs_n/euler_problems.png", "runtime_vs_n/limited_data/lorenz_euler.png",
-                                          "runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_algorithms.png",
-                                          "runtime_vs_n/lorenz_tsit5.png", "runtime_vs_n/tsit5_problems.png"])
+                                          "runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz.png",
+                                          "runtime_vs_n/lorenz_algorithms.png", "runtime_vs_n/lorenz_tsit5.png",
+                                          "runtime_vs_n/tsit5_problems.png"])
         self.assertEqual(sorted(os.path.relpath(p, os.path.join(self.out, KEY)).replace(os.sep, "/") for p in written),
                          self.written())
         table = self.table("runtime_vs_n")
@@ -255,8 +256,8 @@ class PlotTests(AnalysesCase):
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         self.assertEqual([n for n in self.written() if n.endswith(".png")],
                          ["error_vs_dt/limited_data/lorenz_tsit5.png", "error_vs_runtime/limited_data/lorenz_tsit5.png",
-                          "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png",
-                          "error_vs_tol/limited_data/lorenz_tsit5.png"])
+                          "error_vs_runtime/lorenz.png", "error_vs_runtime/lorenz_algorithms.png",
+                          "error_vs_runtime/tsit5_problems.png", "error_vs_tol/limited_data/lorenz_tsit5.png"])
         by_dt = self.table("error_vs_dt")
         self.assertEqual([(sid(r), r["x"], r["min_ms"]) for r in by_dt],
                          [("cubie fixed", "0.03125", "5.0"), ("cubie fixed", "0.0625", "4.0"),
@@ -314,11 +315,12 @@ class PlotTests(AnalysesCase):
                 self.row(n=n, min_ms=ms, key=key)
                 self.row(n=n, min_ms=3.0 * ms, key=key, package="jax", **adaptive(1e-5))
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
-        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_algorithms.png",
-                                          "runtime_vs_n/lorenz_tsit5.png", "runtime_vs_n/tsit5_problems.png"])
+        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz.png",
+                                          "runtime_vs_n/lorenz_algorithms.png", "runtime_vs_n/lorenz_tsit5.png",
+                                          "runtime_vs_n/tsit5_problems.png"])
         self.assertEqual(self.written(OTHER_KEY), self.written())
         self.assertEqual(self.written(plots.ALL_CARDS), self.written())
-        self.assertEqual(len(written), 12)
+        self.assertEqual(len(written), 15)
         table = self.table("runtime_vs_n", key=plots.ALL_CARDS)
         self.assertEqual([(r["key"], sid(r)) for r in table][::4],
                          [(OTHER_KEY, "cubie fixed +"), (OTHER_KEY, "jax adaptive +"),
@@ -333,9 +335,9 @@ class PlotTests(AnalysesCase):
             self.row(n=n, min_ms=3.0 * ms, package="jax", transfers="none", **adaptive(1e-5))
         written = plots.run(self.analysis_store(), kinds=["error_vs_runtime"], out=self.out)
         self.assertEqual(self.written(), ["error_vs_runtime/limited_data/lorenz_tsit5.png",
-                                          "error_vs_runtime/lorenz.csv", "error_vs_runtime/lorenz_algorithms.png",
-                                          "error_vs_runtime/tsit5_problems.png"])
-        self.assertEqual(len(written), 4)
+                                          "error_vs_runtime/lorenz.csv", "error_vs_runtime/lorenz.png",
+                                          "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png"])
+        self.assertEqual(len(written), 5)
         plots.run(self.analysis_store(), where="problem = 'lorenz' AND algorithm = 'tsit5'",
                   kinds=["runtime_vs_n", "error_vs_dt"], out=self.out)
         self.assertEqual({n.partition("/")[0] for n in self.written()},
