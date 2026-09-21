@@ -4,7 +4,7 @@
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK, OrdinaryDiffEqExplicitRK
 using OrdinaryDiffEqVerner, OrdinaryDiffEqSDIRK, OrdinaryDiffEqFIRK
-using OrdinaryDiffEqRosenbrock, OrdinaryDiffEqBDF
+using OrdinaryDiffEqRosenbrock, OrdinaryDiffEqBDF, OrdinaryDiffEqAdamsBashforthMoulton
 import OrdinaryDiffEqCore
 # The slim OrdinaryDiffEq v7 umbrella doesn't re-export the ensemble API.
 using SciMLBase: EnsembleProblem, EnsembleThreads, ReturnCode, remake, init
@@ -225,6 +225,34 @@ function ensemble_solve(system, prob, alg, points, kwargs)
     return finals, t_final, retcode
 end
 
+"States of `points` at every protocol sample time, as (state, sample, trajectory) in T; a trajectory that ends early holds NaN past its last sample."
+function trace_solve(system, prob, alg, points, kwargs)
+    T = eltype(prob.u0)
+    index = system.golden_index
+    saveat = T.(TRACE_EVERY_S .* (1:TRACE_SAMPLES))
+    eprob = EnsembleProblem(prob;
+        prob_func = (pr, ctx) -> remake(pr,
+            u0 = Vector{T}(system.u0_for(points[ctx.sim_id])),
+            p = T[points[ctx.sim_id]], tspan = (zero(T), T(TRACE_SPAN_S))),
+        output_func = (sol, ctx) -> ((sol.t, sol.u), false),
+        safetycopy = false)
+    kw = Dict{Symbol, Any}(kwargs)
+    kw[:saveat] = saveat
+    kw[:save_everystep] = false
+    kw[:save_start] = false
+    sim = solve(eprob, alg, EnsembleThreads(); trajectories = length(points), kw...)
+    out = fill(T(NaN), length(index), TRACE_SAMPLES, length(points))
+    for i in 1:length(points)
+        ts, us = sim.u[i]
+        for (j, t) in enumerate(ts)
+            sample = round(Int, Float64(t) / TRACE_EVERY_S)
+            1 <= sample <= TRACE_SAMPLES || continue
+            out[:, sample, i] .= us[j][index]
+        end
+    end
+    return out
+end
+
 # ---------------------------------------------------------------- outcomes
 
 function root_error(err)
@@ -269,10 +297,10 @@ end
 
 "One store row of a trial under a transfers value; the run key and version stamps come from ctx."
 function trial_row(ctx, trial, transfers; states, min_ms = NaN, samples_ms = Float64[],
-        errored_pct = NaN, build_s = NaN, reason = "", finals = "", timed_start_utc = nothing,
+        errored_pct = NaN, build_s = NaN, reason = "", finals = "", traces = "", timed_start_utc = nothing,
         timed_end_utc = nothing)
     spec = merge(trial, Dict{String, Any}("transfers" => transfers, "key" => ctx.key))
-    return store_row(spec; states, min_ms, samples_ms, errored_pct, build_s, reason, finals,
+    return store_row(spec; states, min_ms, samples_ms, errored_pct, build_s, reason, finals, traces,
         package_version = ctx.version, suite_rev = ctx.suite_rev, timed_start_utc, timed_end_utc)
 end
 
@@ -339,6 +367,7 @@ function run_build(ctx, lines, failures)
         label = trial_label(trial)
         line_build_s = trial === lead ? build_s : NaN
         finals_path = ""
+        traces_path = ""
         rows = Dict{String, Any}[]
         for transfers in trial["transfers"]
             abandoned = abandon_reason(trial, transfers, failures)
@@ -361,9 +390,16 @@ function run_build(ctx, lines, failures)
                     spec = merge(trial, Dict{String, Any}("key" => ctx.key))
                     finals_path = store_finals(spec, finals, t_final; retcode, root = ctx.root)
                 end
+                if get(trial, "traces", false) == true && isempty(traces_path) && outcome == "ok"
+                    write_progress(ctx, trial, "trace")
+                    spec = merge(trial, Dict{String, Any}("key" => ctx.key))
+                    traced = run_watchdogged(() -> trace_solve(system, prob, alg, points[1:min(end, TRACE_ROWS)], kwargs),
+                        () -> println("WATCHDOG $(label): trace never returned"); budget_s = trial["watchdog_s"] + 30.0)
+                    traces_path = store_traces(spec, traced; root = ctx.root)
+                end
             end
             push!(rows, trial_row(ctx, trial, transfers; states, min_ms = ms, samples_ms = samples,
-                errored_pct = pct, build_s = line_build_s, reason = why, finals = finals_path,
+                errored_pct = pct, build_s = line_build_s, reason = why, finals = finals_path, traces = traces_path,
                 timed_start_utc = started, timed_end_utc = ended))
             println(@sprintf("  %s %s: %s ms, errored=%s%%%s", label, transfers,
                 isnan(ms) ? "nan" : @sprintf("%.3f", ms), isnan(pct) ? "nan" : @sprintf("%.1f", pct),

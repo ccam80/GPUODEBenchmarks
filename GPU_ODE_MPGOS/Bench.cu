@@ -352,7 +352,7 @@ void FillSolverObject(Solver& Scan, const std::vector<PRECISION>& Values, PRECIS
 	}
 }
 
-// Time one transfers mode (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule; Untimed runs once with no warm-up.
+// Time one transfers mode (both: h2d, kernel, d2h; none: kernel only) with an untimed warm-up then the repeat schedule; Untimed runs once with no warm-up, as does a first run past the protocol's single-run seconds.
 static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Values, PRECISION Duration, bool Both, bool Untimed)
 {
 	TimingResult result;
@@ -398,6 +398,7 @@ static TimingResult TimeTransfers(Solver& Scan, const std::vector<PRECISION>& Va
 			return result;
 		}
 		if (Untimed) { result.min_ms = Ms; break; }
+		if (r == 0 && Ms > PROTOCOL_SINGLE_RUN_SECONDS * 1000.0) { result.min_ms = Ms; break; }   // a long first run is the timing
 		if (r == 0) continue;   // r == 0 is warm-up
 		Timed.push_back(Ms);
 		if (std::isnan(result.min_ms) || Ms < result.min_ms) result.min_ms = Ms;

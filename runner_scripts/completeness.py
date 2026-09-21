@@ -1,4 +1,4 @@
-"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a record for the line's optimize. A row abandon_compile wrote for a line before it ran (compile_timeout, NaN, its reason) is no row. A recorded row is never dated or checked against a source: an older timing stands whatever was optimized or changed after it."""
+"""What the store lacks of each trial under one key: transfers rows, the cold build time of a cold line, a readable finals file, a readable traces file, a record for the line's optimize. A row abandon_compile wrote for a line before it ran (compile_timeout, NaN, its reason) is no row. A recorded row is never dated or checked against a source: an older timing stands whatever was optimized or changed after it."""
 
 import math
 
@@ -10,23 +10,25 @@ MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted); rows all NaN want neither, `optimize` (the line's optimize record is absent, or timed out under no_overwrite), `optimize_timed_out` (a timed-out record that stands under resume)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted), `traces` (no readable traces file while traces are wanted); rows all NaN want none, `optimize` (the line's optimize record is absent, or timed out under no_overwrite), `optimize_timed_out` (a timed-out record that stands under resume)."""
 
-    def __init__(self, trial, wants_finals):
+    def __init__(self, trial, wants_finals, wants_traces=False):
         self.trial = trial
+        self.wants_traces = wants_traces
         self.rows = []
         self.build = []
         self.finals = False
+        self.traces = False
         self.optimize = None
         self.optimize_timed_out = False
         self.wants_finals = wants_finals
 
     def complete(self):
-        return not (self.rows or self.build or self.finals or self.optimize)
+        return not (self.rows or self.build or self.finals or self.traces or self.optimize)
 
     def transfers(self):
         """The transfers to run again: every one when the optimize record is lacking or a requested output (the build time, the finals) is, so the timing, build time and finals of a trial come from one execution; else those without a complete row."""
-        if self.optimize or self.build or self.finals:
+        if self.optimize or self.build or self.finals or self.traces:
             return list(self.trial["transfers"])
         return [t for t in self.trial["transfers"] if t in set(self.rows)]
 
@@ -35,6 +37,8 @@ class Missing:
         out = ["row:" + t for t in self.rows] + ["build:" + t for t in self.build]
         if self.finals:
             out.append("finals")
+        if self.traces:
+            out.append("traces")
         if self.optimize:
             out.append("optimize:" + self.optimize)
         return out
@@ -84,6 +88,11 @@ def audit(trial_list, key, store, mode=None, optimize_rows=None):
         if missing.wants_finals and not any(store.finals_readable(trial["package"], key, relative)
                                             for relative in carried):
             missing.finals = True
+        traced = [r["traces"] for r in rows.values() if r is not None and r.get("traces")]
+        missing.wants_traces = bool(traced) or (bool(trial.get("traces")) and not nan_only)
+        if missing.wants_traces and not any(store.traces_readable(trial["package"], key, relative)
+                                            for relative in traced):
+            missing.traces = True
         if trial["optimize"] and trial["package"] in cubie_adapter.PACKAGES:
             package = trial["package"]
             if package not in records:

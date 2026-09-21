@@ -57,18 +57,18 @@ KIND_NAMES = tuple(k.name for k in KINDS)
 CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfers", "x", "y",
                "min_ms", "build_s", "error", "errored_pct", "key") + \
     tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package", "algorithm", "controller")) + \
-    ("run_id", "trial_id", "group_id", "states", "reason", "finals")
+    ("run_id", "trial_id", "group_id", "states", "reason", "finals", "traces")
 
 
 # ------------------------------------------------------------------ rows
 
 def with_errors(rows, errs):
-    """The usable rows, each with its `error` against the golden (NaN without finals or golden) and `controller_kind`."""
+    """The usable rows, each with its `error` against the golden (NaN without finals or traces, or without a golden) and `controller_kind`."""
     return [dict(row, error=errs.error(row), controller_kind=shared.controller_kind(row)) for row in shared.usable(rows)]
 
 
 def one_per_trial(rows):
-    """One row per (key, trial_id): the both and none rows of a trial share its finals."""
+    """One row per (key, trial_id): the both and none rows of a trial share its finals and traces."""
     seen = {}
     for row in rows:
         ident = (row["key"], row["trial_id"])
@@ -79,7 +79,7 @@ def one_per_trial(rows):
 
 
 def _artifacts(row):
-    return (bool(row.get("finals")), math.isfinite(shared.number(row.get("build_s"))))
+    return (bool(row.get("finals")) or bool(row.get("traces")), math.isfinite(shared.number(row.get("build_s"))))
 
 
 def takes(kind, row):

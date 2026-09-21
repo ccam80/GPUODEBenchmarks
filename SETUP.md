@@ -49,7 +49,8 @@ python GPU_ODE_CUBIE_MLIR/setup_environment.py
 
 The first builds `GPU_ODE_CUBIE/venv` with `uv`: `cubie` from PyPI with both
 backends (`cuda13` and `mlir-cuda13` extras) and its test extra, plus
-`pyarrow`, `duckdb` and `matplotlib`. That venv is also the suite
+`pyarrow`, `duckdb`, `matplotlib` and `cellmlmanip` (cubie's CellML loader,
+for the Fabbri-Linder problem). That venv is also the suite
 interpreter: `bench.py`, the store CLI, the Julia and C++ runners' store
 writes and the analyses all run under it. The second script only links
 `GPU_ODE_CUBIE_MLIR/venv` to it (a symlink, or a junction on Windows) and

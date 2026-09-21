@@ -24,3 +24,4 @@ Vern9,Vern9(),,golden reference algorithm named by problems.csv
 Rodas5P,Rodas5P(),,golden reference algorithm named by problems.csv
 RadauIIA9,RadauIIA9(),,golden reference algorithm named by problems.csv
 RadauIIA5,RadauIIA5(),,golden reference algorithm named by problems.csv
+VCABM,VCABM(),,golden reference algorithm named by problems.csv: variable-coefficient Adams-Bashforth-Moulton to order 12

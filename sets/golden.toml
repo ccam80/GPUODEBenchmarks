@@ -1,4 +1,4 @@
-# The float64 reference finals: julia_cpu runs each problem's golden algorithm at its golden tolerance on the full grid, every step-size pin left to the package, a day per solve, untimed.
+# The float64 reference finals: julia_cpu runs each problem's golden algorithm at its golden tolerance on the full grid (the Fabbri-Linder model on its 1024-point lattice, traced at the protocol's samples), every step-size pin left to the package, a day per solve, untimed.
 
 [set]
 packages   = ["julia_cpu"]
@@ -6,6 +6,7 @@ problems   = "all"
 algorithms = "golden_algorithm"
 precision  = "float64"
 finals     = true
+traces     = ["fabbri_linder"]
 transfers  = ["none"]
 build      = "warm"
 watchdog   = 86400
@@ -21,6 +22,9 @@ min = "default"
 max = "default"
 n = [131072]
 system_params = {}
+
+[grid.problems]
+fabbri_linder = {max = 1023.0, n = [1024]}
 
 [[stepping]]
 packages = "all"

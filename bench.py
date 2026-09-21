@@ -159,7 +159,7 @@ def continue_filter(trial_list, key, root, resume=False, no_overwrite=False):
         missing = audits.get(trial["trial_id"])
         if missing is None or missing.complete():
             continue
-        kept.append(dict(trial, transfers=missing.transfers(), finals=missing.wants_finals,
+        kept.append(dict(trial, transfers=missing.transfers(), finals=missing.wants_finals, traces=missing.wants_traces,
                          optimize=trial["optimize"] and not missing.optimize_timed_out))
     return kept
 

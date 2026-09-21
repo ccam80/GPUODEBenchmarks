@@ -1,4 +1,4 @@
-"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, its outcome (min_ms, samples_ms, errored_pct, build_s, reason, finals and, on a cubie row, `compile`: optimized, unoptimized or compile_timeout), plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports), the host stamps bracketing its timing batch (timed_start_utc, timed_end_utc, written by the runner) and the clocks that window of the run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
+"""The result store: data/key=<os>_<gpu>/package=<pkg>/results/<problem>__<algorithm>.parquet per (problem, algorithm), finals/<trial_id>.parquet and traces/<trial_id>.parquet beside it, DuckDB over the tree; a row is its run spec, hashed to run_id (the replace key), trial_id and group_id, its outcome (min_ms, samples_ms, errored_pct, build_s, reason, finals, traces and, on a cubie row, `compile`: optimized, unoptimized or compile_timeout), plus the run it was recorded in (run, driver, clock_lock_mhz from the GPUODE_RUN, GPUODE_DRIVER and GPUODE_CLOCK_LOCK_MHZ environment bench.py exports), the host stamps bracketing its timing batch (timed_start_utc, timed_end_utc, written by the runner) and the clocks that window of the run's log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled, filled by annotate). CLI: store.py [--root DIR] record <rows.json|-> [--floor] | finals <spec.json> <finals.csv> | traces <spec.json> <states.bin> --samples M --states K --dtype f32|f64 | status <run_id> | query "<sql over results>" | clear <filter.json> | hash <spec.json> | annotate <run> <clocks.csv> [--package P] [--key K]."""
 
 import argparse
 import csv
@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from protocol import TRACE_EVERY_S, TRACE_ROWS, TRACE_SAMPLES
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,6 +44,7 @@ TRIAL_FIELDS = tuple(f for f in SPEC_FIELDS if f not in ("transfers", "key"))
 FINALS_FIELDS = TRIAL_FIELDS + ("key",)
 # Trajectories a finals file keeps, from the start of the grid; the solve and its timing cover all n.
 FINALS_ROWS = 8192
+# A traces file holds the first TRACE_ROWS grid points, every state at TRACE_SAMPLES times TRACE_EVERY_S apart.
 ENSEMBLE_FIELDS = ("parameter", "grid_scale", "grid_min", "grid_max", "n", "grid_dtype")
 GROUP_FIELDS = tuple(f for f in TRIAL_FIELDS
                      if f not in ENSEMBLE_FIELDS and f != "package")
@@ -56,7 +59,7 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
     ("states", pa.int32()), ("min_ms", pa.float64()),
     ("samples_ms", pa.list_(pa.float64())), ("errored_pct", pa.float64()),
     ("build_s", pa.float64()), ("reason", pa.string()), ("compile", pa.string()),
-    ("finals", pa.string()), ("package_version", pa.string()), ("suite_rev", pa.string()),
+    ("finals", pa.string()), ("traces", pa.string()), ("package_version", pa.string()), ("suite_rev", pa.string()),
     ("run", pa.string()), ("driver", pa.string()), ("clock_lock_mhz", pa.int64()),
     ("clock_sm_mhz", pa.float64()), ("clock_sm_min_mhz", pa.float64()),
     ("clock_throttled", pa.int64()),
@@ -66,7 +69,7 @@ SCHEMA = pa.schema([(name, _ARROW[kind]) for name, kind in SPEC_TYPES] + [
 ])
 COLUMNS = tuple(SCHEMA.names)
 FLOAT_VALUE_COLUMNS = ("min_ms", "errored_pct", "build_s", "clock_sm_mhz", "clock_sm_min_mhz")
-TEXT_VALUE_COLUMNS = ("reason", "compile", "finals", "package_version", "suite_rev")
+TEXT_VALUE_COLUMNS = ("reason", "compile", "finals", "traces", "package_version", "suite_rev")
 # A cubie row's compile column; "" on other packages. compile_timeout rows mark a group until `clear` drops them.
 COMPILE_OPTIMIZED = "optimized"
 COMPILE_UNOPTIMIZED = "unoptimized"
@@ -358,6 +361,16 @@ def finals_name(spec):
     return "finals/" + trial_id(spec) + ".parquet"
 
 
+def traces_name(spec):
+    """traces/<trial_id>.parquet, relative to the package dir."""
+    return "traces/" + trial_id(spec) + ".parquet"
+
+
+def trace_times():
+    """The sample times of a traces file: TRACE_EVERY_S to TRACE_SPAN_S."""
+    return TRACE_EVERY_S * np.arange(1, TRACE_SAMPLES + 1, dtype=np.float64)
+
+
 def errored_mask(states, t_final, retcode, duration):
     """bool[m]: a non-finite state, a final time off duration by more than T_FINAL_RTOL, or a non-empty retcode."""
     states = np.asarray(states)
@@ -466,7 +479,7 @@ class Store:
         return relative
 
     def finals_readable(self, package, key, relative):
-        """True when a package-relative finals path names a parquet file whose metadata reads."""
+        """True when a package-relative finals or traces path names a parquet file whose metadata reads."""
         if not relative:
             return False
         path = os.path.join(self.package_dir(package, key), *relative.split("/"))
@@ -477,6 +490,47 @@ class Store:
         except Exception:  # noqa: BLE001 - an unreadable file is a missing artifact
             return False
         return True
+
+    traces_readable = finals_readable
+
+    def record_traces(self, spec, states):
+        """Write traces/<trial_id>.parquet of a trial from states[n, TRACE_SAMPLES, k] over the first n <= TRACE_ROWS grid points, in the run precision, one row per (traj, sample) with the sample time; returns the path relative to the package dir."""
+        ident = spec_of(spec, FINALS_FIELDS)
+        dtype = np.float64 if ident["precision"] == "float64" else np.float32
+        states = np.asarray(states, dtype=dtype)
+        if states.ndim != 3 or states.shape[1] != TRACE_SAMPLES:
+            raise ValueError("traces is trajectories x {0} samples x states".format(TRACE_SAMPLES))
+        if not 1 <= states.shape[0] <= min(TRACE_ROWS, ident["n"]):
+            raise ValueError("traces has {0} trajectories for n = {1}".format(states.shape[0], ident["n"]))
+        n, m, k = states.shape
+        columns = {"traj": pa.array(np.repeat(np.arange(n, dtype=np.int32), m), pa.int32()),
+                   "sample": pa.array(np.tile(np.arange(1, m + 1, dtype=np.int32), n), pa.int32()),
+                   "t": pa.array(np.tile(trace_times(), n), pa.float64())}
+        arrow_type = pa.float64() if dtype is np.float64 else pa.float32()
+        flat = states.reshape(n * m, k)
+        for j in range(k):
+            columns["s{0}".format(j + 1)] = pa.array(flat[:, j], arrow_type)
+        relative = traces_name(ident)
+        _write_parquet(os.path.join(self.package_dir(ident["package"], ident["key"]), *relative.split("/")),
+                       pa.table(columns))
+        return relative
+
+    def load_traces(self, package, key, relative):
+        """(traj int32[n], times float64[m], states [n, m, k] in the stored precision) of a traces file by its package-relative path."""
+        table = pq.read_table(os.path.join(self.package_dir(package, key), *relative.split("/")))
+        names = [c for c in table.column_names if c[0] == "s" and c[1:].isdigit()]
+        names.sort(key=lambda c: int(c[1:]))
+        dtype = np.float64 if names and str(table.schema.field(names[0]).type) == "double" else np.float32
+        traj = table.column("traj").to_numpy()
+        sample = table.column("sample").to_numpy()
+        order = np.lexsort((sample, traj))
+        ids = np.unique(traj)
+        m = int(sample.max()) if sample.size else 0
+        flat = np.column_stack([table.column(c).to_numpy() for c in names]) if names \
+            else np.zeros((table.num_rows, 0), dtype)
+        states = flat[order].reshape(ids.shape[0], m, len(names)).astype(dtype)
+        times = table.column("t").to_numpy()[order][:m]
+        return ids.astype(np.int32), times.astype(np.float64), states
 
     def load_finals(self, package, key, relative):
         """(traj int32[m], states [m, k] in the stored precision, t_final float64[m], retcode str[m]) of a finals file by its package-relative path."""
@@ -658,6 +712,12 @@ def _cli(argv):
     finals = commands.add_parser("finals")
     finals.add_argument("spec")
     finals.add_argument("finals")
+    traces = commands.add_parser("traces")
+    traces.add_argument("spec")
+    traces.add_argument("states")
+    traces.add_argument("--samples", type=int, required=True)
+    traces.add_argument("--states", dest="state_count", type=int, required=True)
+    traces.add_argument("--dtype", choices=("f32", "f64"), required=True)
     status = commands.add_parser("status")
     status.add_argument("run_id")
     query = commands.add_parser("query")
@@ -683,6 +743,11 @@ def _cli(argv):
     if args.command == "finals":
         finals, t_final, retcode = _read_finals_csv(args.finals)
         print(store.record_finals(_read_json(args.spec), finals, t_final, retcode))
+        return 0
+    if args.command == "traces":
+        dtype = np.float64 if args.dtype == "f64" else np.float32
+        states = np.fromfile(args.states, dtype=dtype).reshape(-1, args.samples, args.state_count)
+        print(store.record_traces(_read_json(args.spec), states))
         return 0
     if args.command == "status":
         print(store.status(args.run_id))

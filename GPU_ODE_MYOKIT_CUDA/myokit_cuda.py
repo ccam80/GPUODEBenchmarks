@@ -45,6 +45,42 @@ void myokit_cuda_integrate(
 }
 """
 
+_TRACE_KERNEL = r"""
+
+extern "C" __global__
+void myokit_cuda_trace(
+    Real *states,
+    const Real *diffusion_current,
+    Real *samples,
+    const int cell_count,
+    const Real dt,
+    const int steps_per_sample,
+    const int sample_count)
+{
+    const int cell = blockDim.x * blockIdx.x + threadIdx.x;
+    if (cell >= cell_count) {
+        return;
+    }
+
+    Real state[NDIM];
+    for (int state_index = 0; state_index < NDIM; ++state_index) {
+        state[state_index] =
+            states[state_index * cell_count + cell];
+    }
+
+    const Real input = diffusion_current[cell];
+    for (int sample = 0; sample < sample_count; ++sample) {
+        for (int step = 0; step < steps_per_sample; ++step) {
+            iterate_euler_cu(dt, state, input, (Real *)0);
+        }
+        for (int state_index = 0; state_index < NDIM; ++state_index) {
+            samples[(sample * NDIM + state_index) * cell_count + cell] =
+                state[state_index];
+        }
+    }
+}
+"""
+
 _UNSUPPORTED_NVRTC_INCLUDE = "#include <float.h>\n"
 
 
@@ -131,6 +167,8 @@ class MyokitCudaModel:
         The value passed for each trajectory then replaces this variable in
         the exported equations.  When omitted, a zero-valued unused binding
         is added for models such as Fabbri-Linder.
+    prepare : callable, optional
+        Edits the imported ``myokit.Model`` before the binding and export.
     block_size : int, optional
         CUDA launch block size.
     """
@@ -139,6 +177,7 @@ class MyokitCudaModel:
         self,
         cellml_path,
         diffusion_variable=None,
+        prepare=None,
         block_size=128,
     ):
         myokit, cupy = _import_dependencies()
@@ -152,6 +191,8 @@ class MyokitCudaModel:
 
         importer = myokit.formats.importer("cellml")
         model = importer.model(str(self.cellml_path))
+        if prepare is not None:
+            prepare(model)
         _ensure_diffusion_binding(model, diffusion_variable)
         model.validate()
 
@@ -190,15 +231,16 @@ class MyokitCudaModel:
             "",
             1,
         )
-        self.cuda_source = nvrtc_source + _LAUNCH_KERNEL
+        self.cuda_source = nvrtc_source + _LAUNCH_KERNEL + _TRACE_KERNEL
         self._module = cupy.RawModule(
             code=self.cuda_source,
             options=("--std=c++11",),
-            name_expressions=("myokit_cuda_integrate",),
+            name_expressions=("myokit_cuda_integrate", "myokit_cuda_trace"),
         )
         self._kernel = self._module.get_function(
             "myokit_cuda_integrate"
         )
+        self._trace_kernel = self._module.get_function("myokit_cuda_trace")
 
     @property
     def state_count(self):
@@ -289,6 +331,47 @@ class MyokitCudaModel:
         )
         self._cupy.cuda.get_current_stream().synchronize()
         return self._cupy.asnumpy(device_states).T
+
+    def trace(self, dt, steps_per_sample, sample_count, initial_states,
+              diffusion_values):
+        """Euler steps with the state kept after every ``steps_per_sample``, as ``(cells, samples, states)``."""
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("dt must be finite and positive")
+        if int(steps_per_sample) != steps_per_sample or steps_per_sample <= 0:
+            raise ValueError("steps_per_sample must be a positive integer")
+        if int(sample_count) != sample_count or sample_count <= 0:
+            raise ValueError("sample_count must be a positive integer")
+        host_states = _validate_float32(initial_states, "initial_states")
+        if host_states.ndim != 2 or host_states.shape[0] != self.state_count:
+            raise ValueError("initial_states must have shape (states, cells)")
+        cell_count = int(host_states.shape[1])
+        host_diffusion = _validate_float32(
+            diffusion_values, "diffusion_values", (cell_count,)
+        )
+        device_states = self._cupy.asarray(host_states)
+        device_diffusion = self._cupy.asarray(host_diffusion)
+        device_samples = self._cupy.empty(
+            (int(sample_count), self.state_count, cell_count),
+            dtype=np.float32,
+        )
+        grid_size = (
+            (cell_count + self.block_size - 1) // self.block_size
+        )
+        self._trace_kernel(
+            (grid_size,),
+            (self.block_size,),
+            (
+                device_states,
+                device_diffusion,
+                device_samples,
+                np.int32(cell_count),
+                np.float32(dt),
+                np.int32(steps_per_sample),
+                np.int32(sample_count),
+            ),
+        )
+        self._cupy.cuda.get_current_stream().synchronize()
+        return self._cupy.asnumpy(device_samples).transpose(2, 0, 1)
 
     def to_device(self, initial_states, diffusion_values):
         """Upload the inputs once, for timing runs that exclude transfers."""

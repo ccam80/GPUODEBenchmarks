@@ -19,7 +19,7 @@ from launch import julia_command  # noqa: E402
 class PythonViewTests(unittest.TestCase):
     def test_only_the_three_tables_remain(self):
         self.assertEqual(sorted(protocol.PROTOCOL), sorted(protocol.TABLES))
-        self.assertEqual(protocol.TABLES, ("repeats", "watchdog"))
+        self.assertEqual(protocol.TABLES, ("repeats", "watchdog", "traces"))
         for gone in ("ensemble", "fixed", "adaptive", "newton", "plots", "optimize"):
             self.assertNotIn(gone, protocol.PROTOCOL)
         for name in ("N_WP", "STATES_GRID", "TOLS", "TIMING_TOL", "NEWTON_ATOL", "parse_ns"):

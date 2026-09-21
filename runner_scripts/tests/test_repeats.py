@@ -42,6 +42,18 @@ class TimerCase(unittest.TestCase):
             timeit.default_timer = original
 
 
+class TestSingleRun(TimerCase):
+    def test_a_first_run_past_the_single_run_seconds_is_the_timing(self):
+        saved = wp_common.SINGLE_RUN_SECONDS
+        wp_common.SINGLE_RUN_SECONDS = 2.0
+        self.addCleanup(setattr, wp_common, "SINGLE_RUN_SECONDS", saved)
+        best, result, samples = self.run_timed([2.5, 0.1, 0.1])
+        self.assertEqual((best, result, samples), (2500.0, 1, [2500.0]))
+        best, result, samples = self.run_timed([1.9] + [1.0] * 12)
+        self.assertEqual(len(samples), 11)
+        self.assertEqual(best, 1000.0)
+
+
 class TestRepeatBounds(unittest.TestCase):
     def test_table(self):
         self.assertEqual(repeat_bounds(0.05, 20), (20, 20))

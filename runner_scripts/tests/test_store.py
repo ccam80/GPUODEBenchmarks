@@ -83,6 +83,58 @@ class StoreCase(unittest.TestCase):
                             "results", "{0}__{1}.parquet".format(problem, algorithm))
 
 
+class TraceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="store_traces_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.store = store.Store(self.tmp)
+
+    def spec(self, **overrides):
+        fields = dict(problem="lorenz", system_params="{}", duration=1.0, precision="float32", parameter="rho",
+                      grid_scale="linear", grid_min=0.0, grid_max=21.0, n=2048, grid_dtype="float32",
+                      algorithm="tsit5", controller="fixed", dt=2.0 ** -10, dt_min=NAN, dt_max=NAN, atol=NAN,
+                      rtol=NAN, gains="{}", newton_atol=NAN, newton_rtol=NAN, package="cubie", key=KEY)
+        fields.update(overrides)
+        return fields
+
+    def test_traces_round_trip_in_the_run_precision(self):
+        from protocol import TRACE_ROWS, TRACE_SAMPLES
+        states = np.random.default_rng(1).random((5, TRACE_SAMPLES, 3)).astype(np.float64)
+        relative = self.store.record_traces(self.spec(), states)
+        self.assertEqual(relative, "traces/" + store.trial_id(self.spec()) + ".parquet")
+        self.assertTrue(self.store.traces_readable("cubie", KEY, relative))
+        traj, times, back = self.store.load_traces("cubie", KEY, relative)
+        self.assertEqual(list(traj), [0, 1, 2, 3, 4])
+        np.testing.assert_array_equal(times, store.trace_times())
+        self.assertEqual((times[0], times[-1], len(times)), (0.001, 1.0, TRACE_SAMPLES))
+        self.assertEqual(back.dtype, np.float32)
+        np.testing.assert_array_equal(back, states.astype(np.float32))
+        wide = self.store.record_traces(self.spec(precision="float64"), states)
+        self.assertEqual(self.store.load_traces("cubie", KEY, wide)[2].dtype, np.float64)
+        for bad in (states[:, :10, :], np.zeros((TRACE_ROWS + 1, TRACE_SAMPLES, 3)), states[0]):
+            with self.assertRaises(ValueError):
+                self.store.record_traces(self.spec(), bad)
+        with self.assertRaises(ValueError):
+            self.store.record_traces(self.spec(n=4), states)
+        self.assertFalse(self.store.traces_readable("cubie", KEY, ""))
+
+    def test_the_traces_cli_takes_a_raw_array(self):
+        from protocol import TRACE_SAMPLES
+        states = np.random.default_rng(2).random((3, TRACE_SAMPLES, 2)).astype(np.float32)
+        raw = os.path.join(self.tmp, "states.bin")
+        states.tofile(raw)
+        spec_path = os.path.join(self.tmp, "spec.json")
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump({k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in self.spec().items()}, handle)
+        out = subprocess.run([sys.executable, store.__file__, "--root", self.tmp, "traces", spec_path, raw,
+                              "--samples", str(TRACE_SAMPLES), "--states", "2", "--dtype", "f32"],
+                             capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        relative = out.stdout.strip()
+        traj, times, back = self.store.load_traces("cubie", KEY, relative)
+        np.testing.assert_array_equal(back, states)
+
+
 class HashTests(unittest.TestCase):
     def test_the_identity_is_exactly_the_run_spec_in_table_order(self):
         self.assertEqual(store.SPEC_FIELDS, (
@@ -94,7 +146,7 @@ class HashTests(unittest.TestCase):
         self.assertEqual(store.GROUP_FIELDS, store.SPEC_FIELDS[:4] + store.SPEC_FIELDS[10:20])
         self.assertEqual(list(store.COLUMNS), list(store.SPEC_FIELDS) + [
             "run_id", "trial_id", "group_id", "states", "min_ms", "samples_ms",
-            "errored_pct", "build_s", "reason", "compile", "finals", "package_version",
+            "errored_pct", "build_s", "reason", "compile", "finals", "traces", "package_version",
             "suite_rev", "run", "driver", "clock_lock_mhz", "clock_sm_mhz",
             "clock_sm_min_mhz", "clock_throttled", "timed_start_utc", "timed_end_utc",
             "recorded_utc"])

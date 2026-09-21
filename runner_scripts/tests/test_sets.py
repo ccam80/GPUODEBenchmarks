@@ -27,6 +27,8 @@ DATA = os.path.join(ROOT, "data")
 NAN = float("nan")
 OPTIMIZE_N = 262144
 CUBIE_GOLDEN_GRID = 3320
+FABBRI_N = 131072
+FABBRI_GOLDEN_N = 1024
 PERF_N = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 2097152, 8388608, 16777216]
 TOLS = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
 
@@ -66,8 +68,12 @@ def stepping_values(stepping):
     return len(stepping["tol"])
 
 
-def problems_of(package):
-    return [row for row in PROBLEMS.values() if row.supports(package)]
+def problems_of(package, loaded=None):
+    """The catalogue rows a package implements, narrowed to a loaded set's problem list."""
+    rows = [row for row in PROBLEMS.values() if row.supports(package)]
+    if loaded is not None and loaded["set"]["problems"] != "all":
+        rows = [row for row in rows if row.name in loaded["set"]["problems"]]
+    return rows
 
 
 def stepping_algorithms(loaded, index, package, problem):
@@ -94,8 +100,8 @@ class ShippedSetTests(unittest.TestCase):
         cls.expanded = {name: sets.expand([name]) for name in sets.set_names()}
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
-    def test_the_four_sets_ship(self):
-        self.assertEqual(sets.set_names(), ["golden", "golden_grid", "perf", "states"])
+    def test_the_five_sets_ship(self):
+        self.assertEqual(sets.set_names(), ["fabbri_linder", "golden", "golden_grid", "perf", "states"])
 
     def test_perf_counts(self):
         specs = self.expanded["perf"]
@@ -104,7 +110,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["finals"] for s in specs}, {False})
         self.assertNotIn("julia_cpu", by_package_kind(specs))
         loaded = sets.load_set("perf")
-        expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package)) * len(PERF_N)
+        expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package, loaded)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
         self.assertEqual(expected, {"cubie": 1248, "cubie_mlir": 1248, "jax": 360, "pytorch": 180,
@@ -203,7 +209,7 @@ class ShippedSetTests(unittest.TestCase):
         expected = {}
         for package in loaded["set"]["packages"]:
             count = 0
-            for problem in problems_of(package):
+            for problem in problems_of(package, loaded):
                 for index, stepping in enumerate(loaded["stepping"]):
                     count += len(stepping_algorithms(loaded, index, package, problem.name)) * stepping_values(stepping)
             expected[package] = count
@@ -236,6 +242,10 @@ class ShippedSetTests(unittest.TestCase):
         self.assertGreaterEqual(builds, 8 * (23 + 17))
         self.assertEqual(line_counts(built, "julia_cpu"), (3192, 0, 0, 8 * (21 + 18)))
         self.assertEqual(line_counts(built, "pytorch"), (180, 0, 0, 15))
+        self.assertEqual(line_counts(built, "myokit_cuda"), (30, 0, 0, 3))
+        # The Fabbri-Linder model has its own set.
+        self.assertNotIn("fabbri_linder", {s["problem"] for s in specs})
+        self.assertNotIn("fabbri_linder", {s["problem"] for s in self.expanded["perf"]})
 
     def test_golden_grid_optimizes_every_cubie_kernel_once(self):
         built = [t for t in self.trials["golden_grid"] if t["package"] == "cubie" and t["problem"] == "lorenz"]
@@ -252,21 +262,59 @@ class ShippedSetTests(unittest.TestCase):
 
     def test_golden_counts_and_values(self):
         specs = self.expanded["golden"]
-        self.assertEqual(len(specs), 8)
+        self.assertEqual(len(specs), 9)
         self.assertEqual({s["package"] for s in specs}, {"julia_cpu"})
         for spec in specs:
             problem = PROBLEMS[spec["problem"]]
+            fabbri = spec["problem"] == "fabbri_linder"
             self.assertEqual(spec["algorithm"], problem["golden_algorithm"])
             self.assertEqual((spec["atol"], spec["rtol"]), (problem["golden_tol"], problem["golden_tol"]))
             self.assertEqual((spec["precision"], spec["n"], spec["controller"], spec["gains"]),
-                             ("float64", 131072, "default", "{}"))
+                             ("float64", FABBRI_GOLDEN_N if fabbri else 131072, "default", "{}"))
             for field in ("dt", "dt_min", "dt_max", "newton_atol", "newton_rtol"):
                 self.assertTrue(np.isnan(spec[field]), field)
-            self.assertEqual((spec["grid_min"], spec["grid_max"]), (problem["sweep_min"], problem["sweep_max"]))
+            self.assertEqual((spec["grid_min"], spec["grid_max"]),
+                             (problem["sweep_min"], 1023.0 if fabbri else problem["sweep_max"]))
             self.assertTrue(spec["finals"])
+            self.assertEqual(spec["traces"], fabbri)
             self.assertEqual(spec["transfers"], ["none"])
         built = self.trials["golden"]
-        self.assertEqual(line_counts(built, "julia_cpu"), (8, 0, 0, 8))
+        self.assertEqual(line_counts(built, "julia_cpu"), (9, 0, 0, 9))
+
+    def test_the_fabbri_golden_is_the_traced_1024_point_head_of_the_grid(self):
+        golden = [s for s in self.expanded["golden"] if s["problem"] == "fabbri_linder"][0]
+        self.assertEqual((golden["algorithm"], golden["atol"], golden["n"]), ("VCABM", 1e-12, FABBRI_GOLDEN_N))
+        full = [s for s in self.expanded["fabbri_linder"] if s["package"] == "cubie_mlir"][0]
+        self.assertEqual((full["n"], full["grid_min"], full["grid_max"]), (FABBRI_N, 0.0, 131071.0))
+        np.testing.assert_array_equal(grid.grid(golden), grid.grid(full)[:FABBRI_GOLDEN_N])
+        self.assertEqual(golden["grid_max"], grid.grid_point("linear", 0.0, 131071.0, FABBRI_N, FABBRI_GOLDEN_N - 1))
+        # The traced rows of every run are exactly the golden's points.
+        self.assertEqual(FABBRI_GOLDEN_N, protocol.TRACE_ROWS)
+        self.assertTrue(golden["traces"] and full["traces"])
+        self.assertFalse(full["finals"])
+
+    def test_fabbri_linder_counts(self):
+        specs = self.expanded["fabbri_linder"]
+        self.assertEqual({s["problem"] for s in specs}, {"fabbri_linder"})
+        self.assertEqual({s["n"] for s in specs}, {FABBRI_N})
+        self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
+        self.assertEqual({(s["finals"], s["traces"]) for s in specs}, {(False, True)})
+        self.assertEqual({s["watchdog_s"] for s in specs}, {1800.0})
+        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 124, "myokit_cuda": 5})
+        euler = sorted({s["dt"] for s in specs if s["algorithm"] == "euler"})
+        self.assertEqual(euler, [2.5e-7, 1e-6, 5e-6, 2e-5, 1e-4])
+        self.assertEqual({s["dt"] for s in specs if s["package"] == "myokit_cuda"}, set(euler))
+        self.assertEqual({s["algorithm"] for s in specs if s["controller"] == "fixed"}, {"euler"})
+        self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
+        self.assertEqual({s["dt"] for s in specs if s["controller"] != "fixed"}, {1e-4})
+        self.assertEqual(len({s["algorithm"] for s in specs if s["controller"] != "fixed"}), 17)
+        built = self.trials["fabbri_linder"]
+        self.assertEqual(line_counts(built, "cubie_mlir"), (124, 120, 0, 18))
+        self.assertEqual(line_counts(built, "myokit_cuda"), (5, 0, 0, 1))
+        self.assertEqual({t["optimize"] for t in built if t["package"] == "cubie_mlir"}, {True})
+        self.assertEqual({t["traces"] for t in built}, {True})
+        # No other set declares the problem, so the contract is this set's alone.
+        self.assertEqual({tuple(t["sets"]) for t in built}, {("fabbri_linder",)})
 
     def test_julia_cpu_golden_grid_is_the_1024_prefix_of_the_131072_grid(self):
         julia = [s for s in self.expanded["golden_grid"] if s["package"] == "julia_cpu"]
@@ -279,6 +327,8 @@ class ShippedSetTests(unittest.TestCase):
             return all(a[f] == b[f] or (a[f] != a[f] and b[f] != b[f]) for f in stepping)
 
         for problem in PROBLEMS.values():
+            if problem.name == "fabbri_linder":
+                continue
             short = [s for s in julia if s["problem"] == problem.name][0]
             full = [s for s in others if s["problem"] == problem.name and same(s, short)][0]
             np.testing.assert_array_equal(grid.grid(short), grid.grid(full)[:1024], problem.name)
@@ -299,13 +349,16 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["n"] for s in every}, {1024, 131072})
         self.assertEqual(sets.declared_counts(["golden_grid"]), [1024, 131072])
         self.assertEqual(sets.declared_counts(["perf", "golden_grid"]), sorted(set(PERF_N) | {1024}))
-        self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
+        # golden's per-problem n override counts too.
+        self.assertEqual(sets.declared_counts(["states", "golden"]), [FABBRI_GOLDEN_N, 131072])
+        self.assertEqual({s["set"] for s in sets.declarations(problems=["fabbri_linder"])}, {"fabbri_linder", "golden"})
+        self.assertEqual(sets.declared_counts(["fabbri_linder"]), [FABBRI_N])
 
     def test_set_module_cli_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "sets.py"), "golden"],
                              capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout.strip(), "julia_cpu 8")
+        self.assertEqual(out.stdout.strip(), "julia_cpu 9")
 
 
 class ControllerResolutionTests(unittest.TestCase):
@@ -623,6 +676,22 @@ class SchemaTests(unittest.TestCase):
                          (15.0, 0.25, 30.0))
         self.assertEqual(len(sets.expand(["s"], sets_dir=self.tmp)), 4)
 
+    def test_a_problem_override_may_carry_its_own_counts(self):
+        text = ('[set]\npackages = ["cubie"]\nproblems = ["pollu", "lorenz"]\nalgorithms = ["tsit5"]\n'
+                '[[grid]]\nn = [8, 32]\n[grid.problems]\npollu = {n = [16], max = 2.0}\n'
+                '[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n')
+        self.write(text)
+        specs = sets.expand(["s"], sets_dir=self.tmp)
+        self.assertEqual(sorted((s["problem"], s["n"]) for s in specs), [("lorenz", 8), ("lorenz", 32), ("pollu", 16)])
+        self.assertEqual([s["grid_max"] for s in specs if s["problem"] == "pollu"], [2.0])
+        self.assertEqual(sets.declared_counts(["s"], self.tmp), [8, 16, 32])
+        # -n keeps an override count like any other.
+        self.assertEqual([(s["problem"], s["n"]) for s in sets.expand(["s"], n=[16], sets_dir=self.tmp)], [("pollu", 16)])
+        for bad in ("pollu = {n = 16}", "pollu = {n = [1]}", "pollu = {n = [8.0]}", "pollu = {counts = [8]}"):
+            self.write(text.replace("pollu = {n = [16], max = 2.0}", bad))
+            with self.assertRaises(sets.SetError, msg=bad):
+                sets.expand(["s"], sets_dir=self.tmp)
+
 
 class WatchdogBudgetTests(unittest.TestCase):
     def setUp(self):
@@ -635,6 +704,7 @@ class WatchdogBudgetTests(unittest.TestCase):
 
     def test_the_golden_set_allows_a_day_per_solve(self):
         self.assertEqual(sets.load_set("golden")["set"]["watchdog"], 86400.0)
+        self.assertEqual(sets.load_set("fabbri_linder")["set"]["watchdog"], 1800.0)
         for name in ("perf", "states", "golden_grid"):
             self.assertEqual(sets.load_set(name)["set"]["watchdog"], protocol.WATCHDOG_SECONDS)
         specs = sets.expand(["golden"], problems=["lorenz"])

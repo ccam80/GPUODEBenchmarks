@@ -1,4 +1,4 @@
-"""Run-time constants from protocol.toml ([repeats], [watchdog]); `python protocol.py get <table.key>` prints one value, `--cxx-header <path>` writes the C++ header."""
+"""Run-time constants from protocol.toml ([repeats], [watchdog], [traces]); `python protocol.py get <table.key>` prints one value, `--cxx-header <path>` writes the C++ header."""
 
 import os
 import sys
@@ -10,19 +10,26 @@ PROTOCOL_TOML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 with open(PROTOCOL_TOML, "rb") as _handle:
     PROTOCOL = tomllib.load(_handle)
 
-TABLES = ("repeats", "watchdog")
+TABLES = ("repeats", "watchdog", "traces")
 
 _repeats = PROTOCOL["repeats"]
 _watchdog = PROTOCOL["watchdog"]
+_traces = PROTOCOL["traces"]
 
 REPEAT_CAP = int(_repeats["cap"])
 REPEAT_SCHEDULE = tuple((float(limit), int(floor), int(ceiling))
                         for limit, floor, ceiling in _repeats["schedule"])
 REPEAT_SPREAD = float(_repeats["spread"])
+SINGLE_RUN_SECONDS = float(_repeats["single_run_seconds"])
 
 WATCHDOG_SECONDS = float(_watchdog["seconds"])
 WATCHDOG_EXIT_CODE = int(_watchdog["exit_code"])
 OPTIMIZE_SECONDS = float(_watchdog["optimize_seconds"])
+
+TRACE_ROWS = int(_traces["rows"])
+TRACE_EVERY_S = float(_traces["every"])
+TRACE_SPAN_S = float(_traces["span"])
+TRACE_SAMPLES = int(round(TRACE_SPAN_S / TRACE_EVERY_S))
 
 
 def get(path):
@@ -45,6 +52,7 @@ def cxx_header():
              "#pragma once", "#include <cmath>",
              "#define PROTOCOL_REPEAT_CAP {0}".format(REPEAT_CAP),
              "#define PROTOCOL_REPEAT_SPREAD {0}".format(_cxx_literal(REPEAT_SPREAD)),
+             "#define PROTOCOL_SINGLE_RUN_SECONDS {0}".format(_cxx_literal(SINGLE_RUN_SECONDS)),
              "#define PROTOCOL_WATCHDOG_SECONDS {0}".format(_cxx_literal(WATCHDOG_SECONDS)),
              "#define PROTOCOL_WATCHDOG_EXIT_CODE {0}".format(WATCHDOG_EXIT_CODE),
              "#define PROTOCOL_REPEAT_SCHEDULE_ROWS {0}".format(len(REPEAT_SCHEDULE)),

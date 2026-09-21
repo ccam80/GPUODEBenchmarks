@@ -111,11 +111,12 @@ def main():
         print("Failed to install cubie")
         return 1
 
-    # The suite interpreter: the result store needs pyarrow and DuckDB, the analyses matplotlib.
-    print("Installing the result-store and analysis dependencies (pyarrow, duckdb, matplotlib)...")
+    # The suite interpreter: the result store needs pyarrow and DuckDB, the analyses matplotlib; cubie's CellML
+    # loader (the Fabbri-Linder problem) needs cellmlmanip.
+    print("Installing the result-store, analysis and CellML dependencies (pyarrow, duckdb, matplotlib, cellmlmanip)...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
-                        "pyarrow", "duckdb", "matplotlib"]):
-        print("Failed to install pyarrow, duckdb and matplotlib")
+                        "pyarrow", "duckdb", "matplotlib", "cellmlmanip"]):
+        print("Failed to install pyarrow, duckdb, matplotlib and cellmlmanip")
         return 1
 
     # Verify each backend resolves under its env var. The backend is read once
@@ -139,9 +140,9 @@ def main():
         print("Warning: CUDA verification failed")
 
     if not run_command([str(venv_python), "-c",
-                        "import pyarrow, duckdb; print('pyarrow', pyarrow.__version__, "
-                        "'duckdb', duckdb.__version__)"]):
-        print("Failed to import pyarrow and duckdb")
+                        "import pyarrow, duckdb, cellmlmanip; print('pyarrow', pyarrow.__version__, "
+                        "'duckdb', duckdb.__version__, 'cellmlmanip', cellmlmanip.__version__)"]):
+        print("Failed to import pyarrow, duckdb and cellmlmanip")
         return 1
 
     print("\nCUBIE environment setup complete!")

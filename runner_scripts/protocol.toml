@@ -1,8 +1,9 @@
 # Run-time constants shared by every runner: Python loads it directly, Julia through protocol.jl, C++ through the header protocol.py generates. Sweeps, tolerances, pins and the packages that optimize are spelled out in the set files under sets/; a cubie optimize runs once per kernel and sizes its own batch and duration.
 
-# Rows are [first-run seconds below, floor, ceiling]; a run stops past its floor once median/min - 1 is within spread.
+# Rows are [first-run seconds below, floor, ceiling]; a run stops past its floor once median/min - 1 is within spread. A first run past single_run_seconds is the timing itself: no warm-up, no repeats.
 [repeats]
 cap = 20
+single_run_seconds = 30
 schedule = [[0.1, 20, 20], [3.0, 10, 10], [5.0, 5, 10], [inf, 3, 10]]
 spread = 0.02
 
@@ -11,3 +12,9 @@ seconds = 120
 exit_code = 3
 # Hard-exit budget of a line's optimize; its solves then run at the solver's own geometry.
 optimize_seconds = 600
+
+# A traced run also solves the first `rows` grid points untimed and keeps every state at t = every, 2 every, ..., span.
+[traces]
+rows = 1024
+every = 0.001
+span = 1.0

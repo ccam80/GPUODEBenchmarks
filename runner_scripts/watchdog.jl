@@ -105,7 +105,7 @@ function repeats_done(timed_s, lo, hi)
     return _median(timed_s) / minimum(timed_s) - 1.0 <= REPEAT_SPREAD
 end
 
-"(ms, samples, result) after one warm-up; ms is NaN when a run breaches cap_s, result is the last solve's return value. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."
+"(ms, samples, result) after one warm-up, or of the first run alone when it passes SINGLE_RUN_SECONDS; ms is NaN when a run breaches cap_s, result is the last solve's return value. samples holds every attempt in ms, warm-up first. The repeat count follows the first timed run's duration, capped at `repeats`."
 function watchdogged_min_ms(f, on_breach, repeats; cap_s = WATCHDOG_SECONDS)
     samples = Float64[]
     timed = Float64[]
@@ -117,7 +117,10 @@ function watchdogged_min_ms(f, on_breach, repeats; cap_s = WATCHDOG_SECONDS)
         clear_deadline()
         push!(samples, elapsed * 1000.0)
         elapsed > cap_s && return (NaN, samples, result)
-        length(samples) == 1 && continue   # the warm-up carries the compile
+        if length(samples) == 1
+            elapsed > SINGLE_RUN_SECONDS && return (elapsed * 1000.0, samples, result)
+            continue   # the warm-up carries the compile
+        end
         push!(timed, elapsed)
         length(timed) == 1 && ((lo, hi) = repeat_bounds(timed[1], repeats))
         repeats_done(timed, lo, hi) &&

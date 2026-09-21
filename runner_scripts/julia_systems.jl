@@ -1,10 +1,17 @@
-# ModelingToolkit system definitions, one per problem, compiled and code-generated in a chosen element type; include problems.jl first (the lorenz96 builders read their default size from it).
+# ModelingToolkit system definitions, one per problem, compiled and code-generated in a chosen element type; include problems.jl first (the lorenz96 builders read their default size from it). The Fabbri-Linder model is the one entry without a ModelingToolkit system: its right-hand side is generated/fabbri_linder_rhs.jl, written by fabbri_export.py from cubie's parse of the CellML file, with ForwardDiff for the Jacobian.
 
 using LinearAlgebra
 using StaticArrays
+using ForwardDiff
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t, D_nounits as D
 using SciMLBase: ODEFunction, ODEProblem
+
+include(joinpath(@__DIR__, "fabbri.jl"))
+include(joinpath(@__DIR__, "generated", "fabbri_linder_rhs.jl"))
+
+"The unknown names of an entry in its own order: the ModelingToolkit unknowns, or the generated system's state list."
+unknown_names(system) = system.sys === nothing ? system.names : string.(unknowns(system.sys))
 
 "Unknown-order values for a symbolic->value map in T; absent unknowns get zero."
 function _ordered_values(sys, valmap, ::Type{T}) where {T}
@@ -373,6 +380,25 @@ function _nand_gate_entry(::Type{T}) where {T}
         consistent_u0 = true)
 end
 
+# --- Fabbri-Linder human sinoatrial node model -----------------------------
+"The generated right-hand side as the runner's rhs!(du, u, p, t): p[1] is the lattice index whose ACh and Iso levels fabbri.jl decodes, in p's own real type so a dual-number u leaves the inputs plain."
+function _fabbri_rhs!(du, u, p, t)
+    ach, iso = fabbri_inputs(p[1], eltype(p))
+    fabbri_linder_rhs!(du, u, ach, iso, t)
+    return nothing
+end
+
+function _fabbri_linder_entry(::Type{T}) where {T}
+    n = length(FABBRI_LINDER_Y0)
+    u0 = SVector{n, T}(T.(FABBRI_LINDER_Y0))
+    rhs(u, p, t) = (du = MVector{n, eltype(u)}(undef); _fabbri_rhs!(du, u, p, t); SVector(du))
+    jac(u, p, t) = ForwardDiff.jacobian(v -> rhs(v, p, t), u)
+    jac!(J, u, p, t) = (ForwardDiff.jacobian!(J, (dv, v) -> _fabbri_rhs!(dv, v, p, t), similar(u), u); nothing)
+    return (sys = nothing, names = copy(FABBRI_LINDER_STATES), n = n, rhs = rhs, rhs! = _fabbri_rhs!,
+        jac = jac, jac! = jac!, tgrad = nothing, mass_matrix = nothing, u0 = u0, u0_for = (p -> u0),
+        golden_index = SVector{n, Int}(1:n))
+end
+
 # Builders by problem name, each taking the element type.
 const _ENTRY_BUILDERS = Dict{String, Function}(
     "lorenz" => _lorenz_entry,
@@ -383,6 +409,7 @@ const _ENTRY_BUILDERS = Dict{String, Function}(
     "ring_modulator" => _ring_modulator_entry,
     "ring_modulator_index2" => _ring_modulator_index2_entry,
     "nand_gate" => _nand_gate_entry,
+    "fabbri_linder" => _fabbri_linder_entry,
 )
 
 const _ENTRIES = Dict{Tuple{String, DataType}, Any}()

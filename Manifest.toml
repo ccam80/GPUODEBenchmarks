@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-rc3"
 manifest_format = "2.1"
-project_hash = "536905de7df50356bf6b99729f7f07eff353906f"
+project_hash = "055917c3c376d023bdebceb5c646e3659dce9ffd"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "5970c86505ae9c07bf5bc521ef2bbbb3849e8b7b"
@@ -2123,6 +2123,13 @@ git-tree-sha1 = "da227ccbb64503939fa067b169817eec404c04f4"
 registries = "General"
 uuid = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 version = "7.6.0"
+
+[[deps.OrdinaryDiffEqAdamsBashforthMoulton]]
+deps = ["DiffEqBase", "FastBroadcast", "MuladdMacro", "OrdinaryDiffEqCore", "OrdinaryDiffEqLowOrderRK", "RecursiveArrayTools", "Reexport", "SciMLBase"]
+git-tree-sha1 = "06d247112233b24ebd00a681e2979026a93f79a5"
+registries = "General"
+uuid = "89bda076-bce5-4f1c-845f-551c83cdda9a"
+version = "2.2.0"
 
 [[deps.OrdinaryDiffEqBDF]]
 deps = ["ADTypes", "ArrayInterface", "DiffEqBase", "FastBroadcast", "LinearAlgebra", "MacroTools", "MuladdMacro", "OrdinaryDiffEqCore", "OrdinaryDiffEqDifferentiation", "OrdinaryDiffEqNonlinearSolve", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Preferences", "RecursiveArrayTools", "Reexport", "SciMLBase", "TruncatedStacktraces"]
