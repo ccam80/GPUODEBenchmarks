@@ -681,10 +681,10 @@ class HardExitTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def run_bench(self, hung=None, code=3, *argv, lock="", failed=(), package="cpp", precompile_code=0,
-                  compile_timeout=None):
+                  compile_timeout=None, key=KEY):
         args = bench.parse_args(["run", "--set", "perf", "-p", package, "-s", "lorenz", "-n", "8,32,128",
                                  "--cooldown", "0"] + ([lock] if lock else []) + list(argv))
-        run = bench.Run(args, bench.resolve(args), key=KEY, data_root=self.root, logs_root=self.logs)
+        run = bench.Run(args, bench.resolve(args), key=key, data_root=self.root, logs_root=self.logs)
         with open(os.path.join(run.log_dir, "plan.json"), "w") as handle:
             json.dump({"trial_id": hung, "code": code, "root": self.root, "key": KEY, "failed": list(failed),
                        "precompile_code": precompile_code, "compile_timeout": compile_timeout}, handle)
@@ -782,10 +782,11 @@ class HardExitTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bench.parse_args(["run", "--set", "perf", "--no-lock-clocks"])
         self.assertNotIn("--no-lock-clocks", bench.__doc__)
+        # A card the shipped table has no row for.
         with mock.patch.object(bench, "configure_clocks", self.real_configure):
             with self.assertRaises(SystemExit) as caught:
-                self.run_bench()
-        self.assertIn("No clock target for 'RTX-4070-SUPER'", str(caught.exception))
+                self.run_bench(key="windows_RTX-NONE")
+        self.assertIn("No clock target for 'RTX-NONE'", str(caught.exception))
         self.assertNotIn("--no-lock-clocks", str(caught.exception))
         self.assertNotIn(store.RUN_ENV, os.environ)
         self.assertEqual(store.Store(self.root).rows(), [])
