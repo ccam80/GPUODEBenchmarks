@@ -65,7 +65,7 @@ store_stamp(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS.sss") * "Z"
 
 "One complete store row: the spec fields of a trial or spec Dict with the value columns; timed_start_utc and timed_end_utc are the host DateTimes bracketing the timing batch (nothing on a row never timed); store.py hashes run_id, trial_id and group_id."
 function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_pct = NaN,
-        build_s = NaN, reason = "", finals = "", package_version = "", suite_rev = "",
+        build_s = NaN, reason = "", finals = "", traces = "", package_version = "", suite_rev = "",
         timed_start_utc = nothing, timed_end_utc = nothing, recorded_utc = nothing)
     row = store_spec(spec)
     stamp = recorded_utc === nothing ? Dates.now(Dates.UTC) : recorded_utc
@@ -78,6 +78,7 @@ function store_row(spec; states, min_ms = NaN, samples_ms = Float64[], errored_p
     row["build_s"] = Float64(build_s)
     row["reason"] = String(reason)
     row["finals"] = String(finals)
+    row["traces"] = String(traces)
     row["package_version"] = String(package_version)
     row["suite_rev"] = String(suite_rev)
     row["recorded_utc"] = store_stamp(stamp)
@@ -125,6 +126,23 @@ function store_finals(spec, finals::AbstractMatrix, t_final; retcode = nothing, 
         end
     finally
         rm(csv_path; force = true)
+    end
+end
+
+"Write the traces file of a trial from states[k, m, n] (state, sample, trajectory) in T; returns traces/<trial_id>.parquet relative to the package dir."
+function store_traces(spec, states::AbstractArray{T, 3}; root = nothing) where {T}
+    bin_path = tempname() * ".bin"
+    open(bin_path, "w") do io
+        write(io, states)
+    end
+    dtype = T === Float64 ? "f64" : "f32"
+    try
+        return _with_spec_file(spec, STORE_FINALS_FIELDS) do spec_path
+            String(strip(read(_store_cmd(["traces", spec_path, bin_path, "--samples", string(size(states, 2)),
+                "--states", string(size(states, 1)), "--dtype", dtype]; root = root), String)))
+        end
+    finally
+        rm(bin_path; force = true)
     end
 end
 

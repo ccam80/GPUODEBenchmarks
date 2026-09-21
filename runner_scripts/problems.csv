@@ -7,3 +7,4 @@ pollu,Pollution,20,60.0,k1,3.5e-2,3.5,log,Rodas5P,1.0e-13,cubie|cubie_mlir|julia
 ring_modulator,Ring modulator,15,1.0e-3,Cs,2.0e-13,2.0e-9,log,Rodas5P,1.0e-10,cubie|cubie_mlir|julia_gpu|julia_cpu|jax|pytorch|cpp
 ring_modulator_index2,Ring modulator (index 2),15,1.0e-3,Uin1_amplitude,0.0,0.5,linear,RadauIIA9,1.0e-10,cubie|cubie_mlir|julia_gpu|julia_cpu
 nand_gate,NAND gate,14,80.0,c9,2.5e-5,1.0e-4,linear,RadauIIA5,1.0e-10,cubie|cubie_mlir|julia_gpu|julia_cpu
+fabbri_linder,Fabbri-Linder SAN,35,2.0,ach_iso,0.0,131071.0,linear,VCABM,1.0e-12,cubie|cubie_mlir|julia_cpu|myokit_cuda

@@ -6,12 +6,42 @@ using StaticArrays
 # The solver table spans every OrdinaryDiffEq sub-library the runner loads.
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK, OrdinaryDiffEqExplicitRK
 using OrdinaryDiffEqSDIRK, OrdinaryDiffEqFIRK, OrdinaryDiffEqRosenbrock, OrdinaryDiffEqVerner
-using OrdinaryDiffEqBDF
+using OrdinaryDiffEqBDF, OrdinaryDiffEqAdamsBashforthMoulton
+using JSON
 
 include(joinpath(dirname(@__DIR__), "golden", "verify_references.jl"))
 include(joinpath(dirname(@__DIR__), "julia_tableaus.jl"))
 
 const RESIDUAL_LIMIT = Dict(Float64 => 1e-12, Float32 => 1e-6)
+const FABBRI_CHECK = joinpath(dirname(@__DIR__), "generated", "fabbri_linder_rhs_check.json")
+
+@testset "fabbri.jl and the generated Fabbri-Linder right-hand side" begin
+    # The head lattice carries the four corners; the fill reaches both range ends by bit reversal.
+    @test fabbri_levels(0.0) == (0.0, 0.0)
+    @test fabbri_levels(31.0) == (0.0, 1.0) && fabbri_levels(992.0) == (1.0, 0.0) && fabbri_levels(1023.0) == (1.0, 1.0)
+    @test fabbri_inputs(1023.0, Float32) == (100.0f0, 1000.0f0)
+    @test fabbri_inputs(1.0, Float64) == (0.0, 1000.0 / 31)
+    @test fabbri_levels(Float64(fabbri_bit_reverse((255 << FABBRI_ISO_BITS) | 511))) == (1.0, 1.0)
+    @test fabbri_lattice_index(131071.4) == 131071 && fabbri_lattice_index(-3.0) == 0 && fabbri_lattice_index(2.5) == 2
+    head = [fabbri_levels(Float64(i)) for i in 0:1023]
+    @test length(unique(head)) == 1024 && length(unique(first.(head))) == 32 && length(unique(last.(head))) == 32
+    # The generated function reproduces the exporter's float64 check points.
+    check = JSON.parsefile(FABBRI_CHECK)
+    @test check["states"] == FABBRI_LINDER_STATES
+    for point in eachindex(check["t"])
+        u = Float64.(check["u"][point])
+        du = similar(u)
+        fabbri_linder_rhs!(du, u, check["ach"][point], check["iso"][point], check["t"][point])
+        expected = Float64.(check["du"][point])
+        @test maximum(abs.(du .- expected) ./ max.(abs.(expected), 1e-300)) <= 1e-9
+    end
+    # The Jacobian is finite on the ACh = 0 edge of the lattice, where 1/ACh terms take their limit.
+    system = julia_system("fabbri_linder", Float64)
+    J = zeros(Float64, system.n, system.n)
+    system.jac!(J, Vector{Float64}(system.u0), [0.0], 0.0)
+    @test all(isfinite, J)
+    @test all(isfinite, system.jac(system.u0, SVector{1, Float64}(0.0), 0.0))
+end
 
 @testset "julia_systems.jl" begin
     for row in load_problems(), T in (Float32, Float64)

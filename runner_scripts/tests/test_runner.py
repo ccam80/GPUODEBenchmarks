@@ -98,6 +98,15 @@ class FakeAdapter:
             raise ValueError("bad " + transfers)
         return {"n": int(values.shape[0]), "values": np.asarray(values)}
 
+    def trace(self, leg, trial, values):
+        self.calls.append(("trace", trial["n"], int(values.shape[0])))
+        if self.behaviour.get(("trace", trial["n"])) == "error":
+            raise RuntimeError("no samples")
+        from protocol import TRACE_SAMPLES
+        states = np.zeros((int(values.shape[0]), TRACE_SAMPLES, 3), np.float32)
+        states[:, :, 0] = np.asarray(values)[:, None]
+        return states
+
     def finals(self, leg, result):
         n = result["n"]
         finals = np.tile(result["values"][:, None], (1, 3)).astype(np.float32)
@@ -128,6 +137,38 @@ class RunnerCase(unittest.TestCase):
         status = runner.Runner(adapter, KEY, self.root, floor=floor, repeats=3).run_file(path)
         rows = {(r["n"], r["transfers"]): r for r in store.Store(self.root).rows()}
         return status, rows, path
+
+
+class TraceTests(RunnerCase):
+    def test_a_traced_trial_solves_its_head_once_more_and_records_the_file(self):
+        from protocol import TRACE_ROWS, TRACE_SAMPLES
+        adapter = FakeAdapter()
+        status, rows, path = self.run_specs([spec(8, traces=True), spec(2048, traces=True), spec(32)], adapter)
+        self.assertEqual(status, 0)
+        traces = [c for c in adapter.calls if c[0] == "trace"]
+        # One trace per trial after its first good solve, over the first TRACE_ROWS points at most.
+        self.assertEqual(traces, [("trace", 8, 8), ("trace", 2048, TRACE_ROWS)])
+        data = store.Store(self.root)
+        for n in (8, 2048):
+            for transfers in ("both", "none"):
+                relative = rows[(n, transfers)]["traces"]
+                self.assertTrue(relative.startswith("traces/"))
+                self.assertTrue(data.traces_readable("cubie", KEY, relative))
+            traj, times, states = data.load_traces("cubie", KEY, rows[(n, "both")]["traces"])
+            self.assertEqual(states.shape, (min(n, TRACE_ROWS), TRACE_SAMPLES, 3))
+            self.assertEqual(times[0], 0.001)
+        self.assertEqual(rows[(32, "both")]["traces"], "")
+        self.assertEqual(rows[(8, "both")]["traces"], rows[(8, "none")]["traces"])
+
+    def test_a_failed_trace_leaves_the_timing_row_without_a_file(self):
+        adapter = FakeAdapter({("trace", 8): "error", (32, "both"): "error", (32, "none"): "error"})
+        status, rows, path = self.run_specs([spec(8, traces=True), spec(32, traces=True)], adapter)
+        self.assertEqual(status, 0)
+        self.assertTrue(math.isfinite(rows[(8, "both")]["min_ms"]))
+        self.assertEqual(rows[(8, "both")]["traces"], "")
+        # A trial whose solves fail never traces.
+        self.assertEqual([c for c in adapter.calls if c[0] == "trace"], [("trace", 8, 8), ("trace", 8, 8)])
+        self.assertEqual(rows[(32, "both")]["traces"], "")
 
 
 class OutcomeTests(RunnerCase):

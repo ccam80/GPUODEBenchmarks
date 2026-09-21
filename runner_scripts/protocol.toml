@@ -11,3 +11,9 @@ seconds = 120
 exit_code = 3
 # Hard-exit budget of a line's optimize; its solves then run at the solver's own geometry.
 optimize_seconds = 600
+
+# A traced run also solves the first `rows` grid points untimed and keeps every state at t = every, 2 every, ..., span.
+[traces]
+rows = 1024
+every = 0.001
+span = 1.0

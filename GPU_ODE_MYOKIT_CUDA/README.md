@@ -29,3 +29,13 @@ GPU_ODE_MYOKIT_CUDA/venv/Scripts/python.exe GPU_ODE_MYOKIT_CUDA/bench_myokit_cud
 
 The kernel is fixed-step forward Euler in float32; any other algorithm,
 precision or controller records a failed row.
+
+For the Fabbri-Linder model (`runner_scripts/models/fabbri_linder.cellml`,
+the published model with the interface declarations Myokit's parser needs)
+the adapter sets `Rate_modulation_experiments.ANS` to 1 and promotes
+`ACh_cas` and `Iso_cas` to zero-derivative states, so the kernel integrates
+37 states with each trajectory's inputs in rows 36 and 37 of the initial
+state array (`runner_scripts/fabbri.py`); the finals return the 35 model
+states in reference order. A traced run launches `myokit_cuda_trace`, which
+keeps the state after each block of steps spanning the 1 ms sample
+interval, so the step must divide it.

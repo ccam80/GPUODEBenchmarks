@@ -35,6 +35,13 @@ def lorenz96(states, n=8):
     return trial(n, problem="lorenz96", system_params='{"states":%d}' % states, parameter="F", grid_max=16.0)
 
 
+def fabbri_trial(n=8, **overrides):
+    """A Fabbri-Linder trial: the lattice index grid over 2 s at dt 2 x 2^-15."""
+    fields = dict(problem="fabbri_linder", duration=2.0, parameter="ach_iso", grid_max=131071.0, dt=2.0 * 2.0 ** -15)
+    fields.update(overrides)
+    return trial(n, **fields)
+
+
 class DeviceArray:
     """A device buffer stand-in wrapping a host array, with cupy's copy, item assignment and get."""
 
@@ -55,20 +62,50 @@ class DeviceArray:
         return self.host.copy()
 
 
+class FakeVariable:
+    """A myokit variable stand-in: its rhs and whether it was promoted to a state."""
+
+    def __init__(self):
+        self.rhs = None
+        self.promoted = None
+
+    def set_rhs(self, value):
+        self.rhs = value
+
+    def promote(self, initial):
+        self.promoted = initial
+
+
+class FakeMyokitModel:
+    """A myokit model stand-in the prepare hook edits: variables by qualified name."""
+
+    def __init__(self):
+        self.variables = {}
+
+    def get(self, qname):
+        return self.variables.setdefault(qname, FakeVariable())
+
+
 class FakeModel:
-    """Records its construction and every launch; the kernel adds step_count * dt * diffusion to every state."""
+    """Records its construction (the prepare hook runs on a fake myokit model) and every launch; the kernel adds step_count * dt * diffusion to every state."""
 
     made = []
 
-    def __init__(self, cellml_path, diffusion_variable=None, block_size=128):
+    def __init__(self, cellml_path, diffusion_variable=None, prepare=None, block_size=128):
         self.cellml_path = str(cellml_path)
         self.diffusion_variable = diffusion_variable
+        self.prepared = None
+        if prepare is not None:
+            self.prepared = FakeMyokitModel()
+            prepare(self.prepared)
         name = os.path.basename(self.cellml_path)
         if name.startswith("lorenz96"):
             count = int(name[len("lorenz96_"):-len(".cellml")]) if "_" in name else 32
             self.state_names = tuple("lorenz96.x{0}".format(i) for i in range(1, count + 1))
         elif name.startswith("lorenz"):
             self.state_names = ("lorenz.x", "lorenz.y", "lorenz.z")
+        elif name.startswith("fabbri"):
+            self.state_names = myokit_bench.FABBRI_QNAMES + myokit_bench.FABBRI_INPUT_QNAMES
         else:
             self.state_names = tuple("pleiades.{0}{1}".format(p, i) for p in "xyuv" for i in range(1, 8))
         self.initial_state = np.arange(len(self.state_names), dtype=np.float32)
@@ -93,6 +130,13 @@ class FakeModel:
         self.launches.append(("upload", int(initial_states.shape[1])))
         return DeviceArray(initial_states), DeviceArray(diffusion_values)
 
+    def trace(self, dt, steps_per_sample, sample_count, initial_states, diffusion_values):
+        self.launches.append(("trace", int(initial_states.shape[1]), dt, steps_per_sample, sample_count))
+        samples = np.empty((initial_states.shape[1], sample_count, initial_states.shape[0]), np.float32)
+        for sample in range(sample_count):
+            samples[:, sample, :] = self._integrate(dt, steps_per_sample * (sample + 1), initial_states, diffusion_values).T
+        return samples
+
     def solve_on_device(self, dt, step_count, device_states, device_diffusion):
         self.launches.append(("device", int(device_states.shape[1]), dt, step_count))
         device_states.host[...] = self._integrate(dt, step_count, device_states.host, device_diffusion.host)
@@ -116,6 +160,13 @@ class ChecksTests(unittest.TestCase):
         for bad in (NAN, 0.0, -1.0):
             with self.assertRaises(ValueError):
                 myokit_bench.step_count(1.0, bad)
+
+    def test_a_trace_step_divides_the_sample_interval(self):
+        self.assertEqual(myokit_bench.steps_per_sample(1e-4), 10)
+        self.assertEqual(myokit_bench.steps_per_sample(2.5e-7), 4000)
+        for bad in (3e-7, 7e-6, 2e-3):
+            with self.assertRaises(ValueError):
+                myokit_bench.steps_per_sample(bad)
 
     def test_finals_end_at_the_duration_with_no_retcode(self):
         finals, t_final, retcode = myokit_bench.finals_of(np.ones((4, 3), np.float32), 3.0)
@@ -153,6 +204,23 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(myokit_bench.state_names("lorenz96", 4),
                          ("lorenz96.x1", "lorenz96.x2", "lorenz96.x3", "lorenz96.x4"))
         self.assertEqual(len(myokit_bench.state_names("pleiades", 28)), 28)
+
+    def test_the_fabbri_model_is_the_shared_file_with_its_inputs_as_states(self):
+        import fabbri
+        self.assertEqual(myokit_bench.model_path("fabbri_linder", 35, self.tmp), fabbri.MODEL_PATH)
+        self.assertTrue(os.path.isfile(fabbri.MODEL_PATH))
+        self.assertIsNone(myokit_bench.diffusion_variable("fabbri_linder", "ach_iso"))
+        names = myokit_bench.state_names("fabbri_linder", 35)
+        self.assertEqual(len(names), 37)
+        self.assertEqual(names[-2:], (fabbri.ACH_QNAME, fabbri.ISO_QNAME))
+        # Myokit's qualified names flatten to the reference order.
+        self.assertEqual(tuple(fabbri.myokit_name(q) for q in names[:35]), fabbri.STATE_ORDER)
+        self.assertIsNone(myokit_bench.prepare_model("lorenz"))
+        model = FakeMyokitModel()
+        myokit_bench.prepare_model("fabbri_linder")(model)
+        self.assertEqual(model.variables[fabbri.ANS_QNAME].rhs, 1)
+        for qname in (fabbri.ACH_QNAME, fabbri.ISO_QNAME):
+            self.assertEqual((model.variables[qname].promoted, model.variables[qname].rhs), (0.0, 0))
 
 
 class BuildTests(unittest.TestCase):
@@ -268,6 +336,59 @@ class BuildTests(unittest.TestCase):
         warm = self.adapter.build(trial(), cold=False)
         warm.close()
         self.assertEqual(len(swaps), 2)
+
+    def test_a_fabbri_build_sets_the_input_states_from_the_lattice_and_hands_back_the_model_states(self):
+        import fabbri
+        record = fabbri_trial(n=4)
+        leg = self.adapter.build(record)
+        self.assertEqual(leg.states, 35)
+        self.assertEqual(leg.model.cellml_path, fabbri.MODEL_PATH)
+        self.assertIsNone(leg.model.diffusion_variable)
+        self.assertEqual(leg.model.prepared.variables[fabbri.ANS_QNAME].rhs, 1)
+        self.assertEqual(leg.input_rows, (35, 36))
+        self.assertEqual(leg.columns, list(range(35)))
+        values = self.values(record)
+        initial, diffusion = leg.inputs(values)
+        self.assertEqual(initial.shape, (37, 4))
+        self.assertEqual(list(diffusion), [0.0] * 4)
+        ach, iso = fabbri.inputs(values, np.float32)
+        np.testing.assert_array_equal(initial[35], ach)
+        np.testing.assert_array_equal(initial[36], iso)
+        np.testing.assert_array_equal(initial[:35, 1], np.arange(35, dtype=np.float32))
+        # The inputs are rebuilt for another grid of the same n.
+        other = fabbri_trial(n=4, grid_max=3.0)
+        initial_other, _ = leg.inputs(self.values(other))
+        np.testing.assert_array_equal(initial_other[35], fabbri.inputs(self.values(other), np.float32)[0])
+        self.assertEqual(leg.initial_n, 4)
+        result = self.adapter.solve(leg, record, values, "both")
+        self.assertEqual(leg.model.launches[-1], ("host", 4, 2.0 * 2.0 ** -15, 32768))
+        finals, t_final, retcode = self.adapter.finals(leg, result)
+        # The diffusion value is zero, so every state comes back unchanged; the two input states are dropped.
+        self.assertEqual(finals.shape, (4, 35))
+        np.testing.assert_array_equal(finals[2], np.arange(35, dtype=np.float32))
+        self.assertEqual(list(t_final), [2.0] * 4)
+        device = self.adapter.solve(leg, record, values, "none")
+        self.assertEqual(leg.model.launches[-2][0], "upload")
+        self.assertEqual(self.adapter.finals(leg, device)[0].shape, (4, 35))
+        leg.close()
+
+    def test_a_trace_samples_the_model_states_over_the_first_second(self):
+        from protocol import TRACE_SAMPLES
+        leg = self.adapter.build(trial(n=4))
+        record = trial(n=4, dt=1e-4)
+        states = self.adapter.trace(leg, record, self.values(record))
+        self.assertEqual(leg.model.launches[-1], ("trace", 4, 1e-4, 10, TRACE_SAMPLES))
+        self.assertEqual(states.shape, (4, TRACE_SAMPLES, 3))
+        # The fake kernel adds t * rho; rho = 0, 7, 14, 21 and the last sample is at 1 s.
+        np.testing.assert_allclose(states[:, -1, 0], [0.0, 7.0, 14.0, 21.0], rtol=1e-5)
+        np.testing.assert_allclose(states[3, 0, 0], 21.0 * 0.001, rtol=1e-4)
+        leg.close()
+        fab = fabbri_trial(n=4, dt=5e-6)
+        leg = self.adapter.build(fab)
+        states = self.adapter.trace(leg, fab, self.values(fab))
+        self.assertEqual(states.shape, (4, TRACE_SAMPLES, 35))
+        self.assertEqual(leg.model.launches[-1][3], 200)
+        leg.close()
 
     def test_version_reads_myokit_and_optimize_is_refused(self):
         with self.assertRaises(NotImplementedError):

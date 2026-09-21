@@ -24,7 +24,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_default_problem_is_registered(self):
         self.assertIn(DEFAULT_PROBLEM, problem_names())
-        self.assertEqual(len(problem_names()), 8)
+        self.assertEqual(len(problem_names()), 9)
 
     def test_rows_are_typed_and_name_known_packages(self):
         for row in load_problems():
@@ -54,7 +54,9 @@ class RegistryTests(unittest.TestCase):
 
     def test_resolve_filters_by_package(self):
         self.assertEqual([r.name for r in resolve_problems("all", "myokit_cuda")],
-                         ["lorenz", "lorenz96", "pleiades"])
+                         ["lorenz", "lorenz96", "pleiades", "fabbri_linder"])
+        self.assertEqual([r.name for r in resolve_problems("all", "cpp")],
+                         ["lorenz", "lorenz96", "pleiades", "pollu", "ring_modulator"])
         self.assertEqual([], resolve_problems("all", "nosuchpackage"))
         self.assertEqual([DEFAULT_PROBLEM], [r.name for r in resolve_problems(DEFAULT_PROBLEM)])
         self.assertEqual(len(resolve_problems("all", "julia_gpu")), 8)

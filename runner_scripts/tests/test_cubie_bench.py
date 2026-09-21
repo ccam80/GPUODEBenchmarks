@@ -84,11 +84,12 @@ class FakeDeviceResult:
 
 
 class FakeSolution:
-    """state (time, variables, runs) with one save; status codes per run."""
+    """state (time, variables, runs) with one save, or `saves` of them; status codes per run."""
 
-    def __init__(self, n, codes=None):
-        self.state = np.zeros((1, len(NAMES), n), dtype=np.float32)
-        self.state[0] = np.arange(len(NAMES) * n, dtype=np.float32).reshape(len(NAMES), n)
+    def __init__(self, n, codes=None, saves=1):
+        self.state = np.zeros((saves, len(NAMES), n), dtype=np.float32)
+        self.state[:] = np.arange(len(NAMES) * n, dtype=np.float32).reshape(len(NAMES), n)
+        self.state += np.arange(saves, dtype=np.float32)[:, None, None]
         self.status_codes = np.zeros(n, dtype=np.int32) if codes is None else np.asarray(codes, np.int32)
 
 
@@ -135,10 +136,11 @@ class FakeSolver:
         self.updates.append(dict(updates))
 
     def build_grid(self, initial_values, parameters):
+        self.grids = getattr(self, "grids", []) + [dict(parameters)]
         values = next(iter(parameters.values()))
         n = len(values)
         initials = np.zeros((len(initial_values), n), np.float32)
-        params = np.asarray(values, np.float32).reshape(1, n)
+        params = np.stack([np.asarray(v, np.float32) for v in parameters.values()])
         return initials, params
 
     def compile(self, **kwargs):
@@ -161,6 +163,8 @@ class FakeSolver:
                 raise AssertionError("device solve without the resident inputs")
             return FakeDeviceResult()
         self.resident = (FakeDeviceArray(initial_values), FakeDeviceArray(parameters))
+        if "save_every" in self.kwargs:
+            return FakeSolution(n, self.codes, saves=int(round(duration / self.kwargs["save_every"])) + 1)
         return FakeSolution(n, self.codes)
 
     @property
@@ -194,6 +198,59 @@ class AdapterCase(unittest.TestCase):
     def values(self, n):
         import grid
         return grid.grid(trial(n))
+
+
+class GridTests(AdapterCase):
+    def test_a_build_passes_the_problem_parameter_arrays_of_the_grid(self):
+        import fabbri
+        import grid
+        leg = self.adapter.build(trial(n=4))
+        self.adapter.solve(leg, trial(n=4), self.values(4), "both")
+        self.assertEqual(list(leg.solver.grids[-1]), ["rho"])
+        np.testing.assert_array_equal(leg.solver.grids[-1]["rho"], np.float32([0, 7, 14, 21]))
+        leg.close()
+        record = trial(n=4, problem="fabbri_linder", duration=2.0, parameter="ach_iso", grid_max=131071.0,
+                       algorithm="euler", dt=2.0 * 2.0 ** -15)
+        leg = self.adapter.build(record)
+        self.assertEqual(leg.states, 35)
+        self.assertEqual(self.built[-1][:2], ("fabbri_linder", 35))
+        values = grid.grid(record)
+        self.adapter.solve(leg, record, values, "both")
+        passed = leg.solver.grids[-1]
+        self.assertEqual(list(passed), [fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER])
+        ach, iso = fabbri.inputs(values, np.float32)
+        np.testing.assert_array_equal(passed[fabbri.ACH_PARAMETER], ach)
+        np.testing.assert_array_equal(passed[fabbri.ISO_PARAMETER], iso)
+        self.assertEqual(leg.grid_arrays[1].shape, (2, 4))
+        leg.close()
+
+
+class TraceTests(AdapterCase):
+    def test_a_trace_runs_a_second_solver_that_saves_every_sample(self):
+        from protocol import TRACE_EVERY_S, TRACE_SAMPLES, TRACE_SPAN_S
+        leg = self.adapter.build(trial(n=4))
+        record = trial(n=4)
+        self.adapter.solve(leg, record, self.values(4), "both")
+        states = self.adapter.trace(leg, record, self.values(4))
+        self.assertEqual(states.shape, (4, TRACE_SAMPLES, 3))
+        tracer = leg.trace_solver
+        self.assertIsNot(tracer, leg.solver)
+        self.assertEqual(tracer.kwargs["save_every"], TRACE_EVERY_S)
+        self.assertEqual({k: v for k, v in tracer.kwargs.items() if k != "save_every"}, leg.solver.kwargs)
+        self.assertEqual(tracer.calls, [(4, False)])
+        # The initial save is dropped; sample s of run r, variable v is v * n + r + s.
+        self.assertEqual(states[1, 0, 2], 2 * 4 + 1 + 1)
+        self.assertEqual(states[3, -1, 0], 3 + TRACE_SAMPLES)
+        self.assertEqual(len(FakeSolver.made), 2)
+        # A changed stepping drops the trace solver with the kernel; close closes both.
+        self.adapter.solve(leg, trial(n=4, dt=2.0 ** -11), self.values(4), "both")
+        self.assertIsNone(leg.trace_solver)
+        self.assertTrue(tracer.closed)
+        self.adapter.trace(leg, trial(n=4, dt=2.0 ** -11), self.values(4))
+        second = leg.trace_solver
+        leg.close()
+        self.assertTrue(second.closed and leg.solver is None and leg.trace_solver is None)
+        self.assertEqual(TRACE_SPAN_S, 1.0)
 
 
 class KeywordTests(unittest.TestCase):

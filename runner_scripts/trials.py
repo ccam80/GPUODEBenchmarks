@@ -1,4 +1,4 @@
-"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, cold, optimize, watchdog, timed; compile marks a line whose problem, algorithm and controller timed out compiling), written in difficulty order one JSON object per line."""
+"""Trial records: one line per point, its run spec merged over every declaration of the point into one contract (transfers, finals, traces, cold, optimize, watchdog, timed; compile marks a line whose problem, algorithm and controller timed out compiling), written in difficulty order one JSON object per line."""
 
 import functools
 import json
@@ -9,8 +9,8 @@ from algorithms import algorithm_facts
 from protocol import WATCHDOG_SECONDS
 from store import TRIAL_FIELDS, trial_id
 
-TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "cold", "optimize", "compile", "watchdog_s", "timed",
-                             "sets")
+TRIAL_KEYS = TRIAL_FIELDS + ("trial_id", "transfers", "finals", "traces", "cold", "optimize", "compile", "watchdog_s",
+                             "single_run_s", "timed", "sets")
 # A trial line's compile mark: "" or COMPILE_TIMED_OUT (the store holds a compile_timeout row of its compile_key).
 COMPILE_TIMED_OUT = "timeout"
 TRANSFERS_ORDER = ("both", "none")
@@ -123,17 +123,19 @@ def _budget(spec):
 
 
 def _entry(spec):
-    return {"spec": spec, "transfers": set(), "finals": False, "cold": False, "optimize": False,
-            "watchdog_s": 0.0, "timed": False, "sets": set()}
+    return {"spec": spec, "transfers": set(), "finals": False, "traces": False, "cold": False, "optimize": False,
+            "watchdog_s": 0.0, "single_run_s": math.inf, "timed": False, "sets": set()}
 
 
 def _fold(entry, spec):
-    """Fold one declaration of a point into its entry: transfers union, finals, cold, optimize and timed true over false, the larger watchdog budget, the set's name."""
+    """Fold one declaration of a point into its entry: transfers union, finals, traces, cold, optimize and timed true over false, the larger watchdog budget, the smaller single-run threshold, the set's name."""
     entry["transfers"] |= set(spec["transfers"])
     entry["finals"] = entry["finals"] or bool(spec["finals"])
+    entry["traces"] = entry["traces"] or bool(spec.get("traces", False))
     entry["cold"] = entry["cold"] or spec["build"] == "cold"
     entry["optimize"] = entry["optimize"] or bool(spec["optimize"])
     entry["watchdog_s"] = max(entry["watchdog_s"], _budget(spec))
+    entry["single_run_s"] = min(entry["single_run_s"], float(spec.get("single_run_s", math.inf)))
     entry["timed"] = entry["timed"] or bool(spec.get("timed", True))
     if spec.get("set"):
         entry["sets"].add(spec["set"])
@@ -145,10 +147,12 @@ def _record(entry):
     record["trial_id"] = trial_id(spec)
     record["transfers"] = [t for t in TRANSFERS_ORDER if t in entry["transfers"]]
     record["finals"] = bool(entry["finals"])
+    record["traces"] = bool(entry["traces"])
     record["cold"] = bool(entry["cold"])
     record["optimize"] = bool(entry["optimize"])
     record["compile"] = ""
     record["watchdog_s"] = float(entry["watchdog_s"])
+    record["single_run_s"] = float(entry["single_run_s"])
     record["timed"] = bool(entry["timed"])
     record["sets"] = sorted(entry["sets"])
     return record
@@ -196,13 +200,13 @@ def builds_of(trials):
 
 
 def _json_value(value):
-    if isinstance(value, float) and math.isnan(value):
+    if isinstance(value, float) and not math.isfinite(value):
         return None
     return value
 
 
 def write_jsonl(path, trials):
-    """One JSON object per line in TRIAL_KEYS order; NaN is written as null."""
+    """One JSON object per line in TRIAL_KEYS order; NaN and inf are written as null."""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         for trial in trials:
@@ -231,6 +235,9 @@ def read_jsonl(path):
             record["optimize"] = bool(record.get("optimize"))
             record["compile"] = record.get("compile") or ""
             record.setdefault("cold", False)
+            record.setdefault("traces", False)
+            if record.get("single_run_s") is None:
+                record["single_run_s"] = math.inf
             record.setdefault("timed", True)
             trials.append(record)
     return trials

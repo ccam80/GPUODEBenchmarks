@@ -47,6 +47,8 @@ const RING_REF = [-0.2339057358486745e-1, -0.7367485485540825e-2, 0.258295670929
 
 const RHS_TRIALS = 20
 const RHS_SEED = 7
+# The generated Fabbri-Linder system is checked by tests/test_julia_systems.jl against fabbri_export.py's derivative values instead.
+const SKIPPED = ("fabbri_linder",)
 
 "Golden-ordered final state of one Float64 solve of a problem at the swept value p; the catalogue's golden algorithm and tolerance unless given."
 function golden_final(name, p; algorithm = nothing, tol = nothing)
@@ -122,6 +124,7 @@ function reference_checks()
     ]
     for row in load_problems()
         name = row["problem"]
+        name in SKIPPED && continue
         push!(checks, ("$(name) Float32 rhs vs Float64 rhs (relative)", () -> rhs_twin_deviation(name), 1e-5))
         for T in (Float32, Float64)
             push!(checks, ("$(name) $(T) rhs! bytes allocated", () -> rhs_allocation(name, T), 0))

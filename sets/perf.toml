@@ -1,8 +1,8 @@
-# Timing sweep over trajectory counts: every GPU package, every problem it implements, the algorithms at least two package families run, at one fixed step and one tolerance.
+# Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two package families run, at one fixed step and one tolerance.
 
 [set]
 packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
-problems   = "all"
+problems   = ["lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modulator", "ring_modulator_index2", "nand_gate"]
 algorithms = "all"
 precision  = "float32"
 finals     = false

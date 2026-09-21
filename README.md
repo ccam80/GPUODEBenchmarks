@@ -87,7 +87,22 @@ the push the box deletes this key's clock logs a day old that no row names
 | `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm |
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
 | `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
-| `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance |
+| `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
+| `fabbri_linder` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns and every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s |
+| `fabbri_golden` | `julia_cpu` | the fabbri_linder float64 reference: finals and traces of the 1024-point head lattice |
+
+`fabbri_linder` (35 states, `runner_scripts/models/fabbri_linder.cellml`,
+cAMP cascade on) sweeps an index: the first 1024 form a 32 x 32
+acetylcholine (0..100 nM) by isoprenaline (0..1000 nM) lattice, the rest
+fill the plane by bit reversal (`runner_scripts/fabbri.py`, `fabbri.jl`).
+cubie loads the CellML, myokit_cuda carries the inputs as zero-derivative
+states, julia_cpu integrates `runner_scripts/generated/fabbri_linder_rhs.jl`
+(written by `fabbri_export.py` under the cubie venv). A set with
+`traces = true` also solves the first 1024 points of every run untimed and
+keeps every state at the `[traces]` sample times of `protocol.toml` in
+`traces/<trial_id>.parquet`; the error is the RMS over every sample and
+state against the golden's traces. A set with `single_run = <seconds>`
+takes a first run past that long as the timing, with no warm-up or repeats.
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
 refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
@@ -114,7 +129,7 @@ A cubie row's `compile` column is `optimized`, `unoptimized` or
 ## Data and analyses
 
 Rows live in `data/key=<key>/package=<pkg>/results/<problem>__<algorithm>.parquet`,
-finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), and the whole tree reads
+finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), traces in `traces/<trial_id>.parquet` (the first 1024 trajectories at every sample time, one row per trajectory and sample), and the whole tree reads
 as one DuckDB table:
 
 ```
@@ -157,7 +172,7 @@ the same figures with every key's series together, a marker set per key and
 the legend sectioned by key.
 
 A column a file lacks reads as null, and two rows of one run_id are refused. The golden of a system is its julia_cpu float64
-finals row running the problem's golden algorithm. A CSV leaves out the
+row with finals or traces running the problem's golden algorithm; a run with traces is compared over its traces when the golden has them, otherwise over its finals. A CSV leaves out the
 columns no row captured.
 
 ## Using the store

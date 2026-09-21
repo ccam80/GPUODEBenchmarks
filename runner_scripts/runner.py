@@ -1,8 +1,9 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)` and `finals(build, result)`, plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first. A cold line that optimizes runs its optimize on a warm build first, so its timed cold build compiles the optimized kernel once in a fresh cache. `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)`, `finals(build, result)` and, for a package that traces, `trace(build, trial, values)` (states[n, TRACE_SAMPLES, k] over the given grid points), plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt after the first. A cold line that optimizes runs its optimize on a warm build first, so its timed cold build compiles the optimized kernel once in a fresh cache. `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
 import json
+import math
 import os
 import sys
 import timeit
@@ -14,7 +15,7 @@ import trials as trials_mod
 from abandon import History
 from cubie_adapter import PACKAGES as CUBIE_PACKAGES
 from bench_key import dataset_key
-from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, WATCHDOG_SECONDS
+from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, TRACE_ROWS, WATCHDOG_SECONDS
 from wp_common import run_watchdogged, timed_min_ms
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +49,11 @@ def failure_reason(outcome, exc=None, elapsed_s=None, cap_s=None):
 def budget_of(trial):
     """The trial's watchdog soft cap in seconds."""
     return float(trial.get("watchdog_s", WATCHDOG_SECONDS))
+
+
+def single_run_of(trial):
+    """Seconds past which the trial's first run is its timing; inf when the trial sets none."""
+    return float(trial.get("single_run_s", math.inf))
 
 
 def write_progress(path, trial, stage):
@@ -145,7 +151,7 @@ class Runner:
         setup = None if reset is None else (lambda: reset(build, trial, values, transfers))
         try:
             best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach, setup=setup,
-                                                 cap_s=budget_of(trial))
+                                                 cap_s=budget_of(trial), single_run_s=single_run_of(trial))
         except Exception as exc:  # noqa: BLE001 - every failure is a row
             return classify(exc), NAN, [], None, exc, NAN
         if best is None:
@@ -174,9 +180,20 @@ class Runner:
             path = self.store.record_finals(dict(spec, key=self.key), states, t_final, retcode)
         return pct, path
 
+    def traces(self, build, trial, values):
+        """The traces path of a trial that keeps traces: an untimed solve of the first TRACE_ROWS grid points under the watchdog, written to the store; "" when the trial keeps none."""
+        if not trial.get("traces"):
+            return ""
+        write_progress(self.progress_path, trial, "trace")
+        points = values[:TRACE_ROWS]
+        states = watchdogged(lambda: self.adapter.trace(build, trial, points), "trace " + label(trial),
+                             budget_of(trial) + 30.0)
+        spec = {field: trial[field] for field in store_mod.TRIAL_FIELDS}
+        return self.store.record_traces(dict(spec, key=self.key), states)
+
     def run_solve(self, build, trial, history, build_s):
         values = grid_mod.grid(trial)
-        pct, finals_path = NAN, ""
+        pct, finals_path, traces_path = NAN, "", ""
         finals_read = False
         for transfers in trial["transfers"]:
             reason = history.reason(trial, transfers)
@@ -194,9 +211,14 @@ class Runner:
                     print("FINALS {0}: {1}: {2}".format(label(trial), type(finals_exc).__name__,
                                                         finals_exc), flush=True)
             result = None
+            if outcome == "ok" and not traces_path:
+                try:
+                    traces_path = self.traces(build, trial, values)
+                except Exception as trace_exc:  # noqa: BLE001 - the timing row still stands
+                    print("TRACES {0}: {1}: {2}".format(label(trial), type(trace_exc).__name__, trace_exc), flush=True)
             reason = "" if outcome == "ok" else failure_reason(outcome, exc, elapsed, budget_of(trial))
             self.record(trial, transfers, build.states, min_ms=best, samples_ms=samples,
-                        errored_pct=pct, build_s=build_s, finals=finals_path, reason=reason,
+                        errored_pct=pct, build_s=build_s, finals=finals_path, traces=traces_path, reason=reason,
                         timed_start_utc=window[0], timed_end_utc=window[1])
             if outcome == "ok":
                 print("{0}: {1:.3f} ms over {2} attempts, errored {3:.1f}%".format(
@@ -246,6 +268,7 @@ class Runner:
 
     def run_trial(self, trial, history, progress_path, failed_builds):
         self.optimized = False
+        self.progress_path = progress_path
         if trial["controller"] not in self.adapter.controllers:
             self.record_failed(trial, "error: unknown controller " + trial["controller"])
             return

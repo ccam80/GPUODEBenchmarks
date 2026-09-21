@@ -1,7 +1,8 @@
-"""Cubie system definitions, one builder per problem, shared by every cubie suite."""
+"""Cubie system definitions, one builder per problem, shared by every cubie suite; ensemble_parameters() turns a grid into each problem's parameter arrays."""
 
 import numpy as np
 
+import fabbri
 from problems import as_problem
 
 # Ring modulator constants (Test Set for IVP Solvers, problem II-3).
@@ -352,6 +353,21 @@ def _nand_gate(problem, precision, name):
     return system, initial
 
 
+def _fabbri_linder(problem, precision, name):
+    """The Fabbri-Linder human SAN model from its CellML file (cubie's loader, the GHK singularity rewritten at the membrane voltage) with the cAMP cascade switched on and the two analogue inputs as parameters; the grid maps onto them through fabbri.parameters."""
+    from cubie import load_cellml_model
+    system = load_cellml_model(fabbri.MODEL_PATH, precision=precision, name=name,
+                               parameters=[fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER],
+                               voltage_variable=fabbri.VOLTAGE_RAW)
+    system.set_constants({fabbri.ANS_CONSTANT: 1.0})
+    initial = {name: float(value) for name, value in zip(system.initial_values.names,
+                                                          system.initial_values.values_array)}
+    if sorted(initial) != sorted(fabbri.STATE_ORDER):
+        raise SystemExit("the Fabbri-Linder CellML loaded states {0}, not fabbri.STATE_ORDER".format(
+            sorted(initial)))
+    return system, initial
+
+
 # The problem's own variables, in the order the golden reference stores them.
 _ORDER = {
     "lorenz": ("x", "y", "z"),
@@ -364,6 +380,7 @@ _ORDER = {
     "ring_modulator": RING_ORDER,
     "ring_modulator_index2": RING_ORDER,
     "nand_gate": tuple("y{0}".format(i) for i in range(1, 15)),
+    "fabbri_linder": fabbri.STATE_ORDER,
 }
 
 _BUILDERS = {
@@ -375,6 +392,7 @@ _BUILDERS = {
     "ring_modulator": _ring_modulator,
     "ring_modulator_index2": _ring_modulator_index2,
     "nand_gate": _nand_gate,
+    "fabbri_linder": _fabbri_linder,
 }
 
 
@@ -439,7 +457,31 @@ def final_states(system, solution, problem):
     return np.stack(columns, axis=1)
 
 
-def sweep_parameters(problem, n, precision=np.float32):
-    """The ensemble parameter dict: the swept scalar over the problem range."""
+def trace_states(system, solution, problem):
+    """Every saved state of the problem's variables after the initial one, as (runs, samples, variables) in reference order."""
+    order = variable_order(problem)
+    state_names = _names(system.indices.states.index_map)
+    saved = np.asarray(solution.state)[1:]
+    if len(state_names) == len(order) and list(state_names) == list(order):
+        return np.ascontiguousarray(saved.transpose(2, 0, 1))
+    columns = []
+    observable_names, observables = [], None
+    for name in order:
+        if name in state_names:
+            columns.append(saved[:, state_names.index(name), :])
+            continue
+        if observables is None:
+            observable_names = _names(system.indices.observables.index_map)
+            observables = np.asarray(solution.observables)[1:]
+        if name not in observable_names:
+            raise SystemExit("variable '{0}' is neither a state nor an observable".format(name))
+        columns.append(observables[:, observable_names.index(name), :])
+    return np.ascontiguousarray(np.stack(columns, axis=-1).transpose(1, 0, 2))
+
+
+def ensemble_parameters(problem, values, precision=np.float32):
+    """The parameter arrays of a grid, one entry per trajectory: the swept scalar itself, or for the Fabbri-Linder model the two cascade inputs its lattice index names."""
     row = as_problem(problem)
-    return {row["sweep_parameter"]: row.sweep(n, dtype=precision)}
+    if row["problem"] == fabbri.PROBLEM:
+        return fabbri.parameters(values, precision)
+    return {row["sweep_parameter"]: np.asarray(values, dtype=precision)}

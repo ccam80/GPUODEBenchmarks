@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, build mode and optimize flag; declarations() expands every set file so a point's specs from all of them can merge. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -18,8 +18,8 @@ JULIA_CONTROLLERS_CSV = os.path.join(REPO_ROOT, "runner_scripts", "julia_control
 NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
-SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "transfers", "build",
-            "optimize", "watchdog", "untimed")
+SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces", "transfers", "build",
+            "optimize", "watchdog", "single_run", "untimed")
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
@@ -32,7 +32,8 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "build", "optimize", "watchdog_s", "timed", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "traces", "build", "optimize", "watchdog_s", "single_run_s", "timed", "set",
+              "stepping")
 
 
 class SetError(ValueError):
@@ -90,6 +91,7 @@ def load_set(name, sets_dir=SETS_DIR):
     head.setdefault("algorithms", "all")
     head.setdefault("precision", "float32")
     head.setdefault("finals", False)
+    head.setdefault("traces", False)
     head.setdefault("transfers", ["both", "none"])
     head.setdefault("build", "warm")
     head["packages"] = _name_list(head["packages"], PACKAGES, path + " packages")
@@ -102,6 +104,8 @@ def load_set(name, sets_dir=SETS_DIR):
         raise SetError(path + ": precision must be float32 or float64")
     if not isinstance(head["finals"], bool):
         raise SetError(path + ": finals must be true or false")
+    if not isinstance(head["traces"], bool):
+        raise SetError(path + ": traces must be true or false")
     if head["transfers"] not in (["both"], ["none"], ["both", "none"], ["none", "both"]):
         raise SetError(path + ": transfers must list both and/or none")
     if head["build"] not in ("warm", "cold"):
@@ -111,6 +115,11 @@ def load_set(name, sets_dir=SETS_DIR):
     if isinstance(watchdog, bool) or not isinstance(watchdog, (int, float)) or not watchdog > 0:
         raise SetError(path + ": watchdog must be a positive number of seconds")
     head["watchdog"] = float(watchdog)
+    head.setdefault("single_run", math.inf)
+    single_run = head["single_run"]
+    if isinstance(single_run, bool) or not isinstance(single_run, (int, float)) or not single_run > 0:
+        raise SetError(path + ": single_run must be a positive number of seconds")
+    head["single_run"] = float(single_run)
     optimize = head.get("optimize")
     if optimize is not None:
         where = path + " [set.optimize]"
@@ -128,6 +137,8 @@ def load_set(name, sets_dir=SETS_DIR):
         _check_keys(untimed, UNTIMED_KEYS, where)
         untimed.setdefault("packages", "all")
         untimed["packages"] = _name_list(untimed["packages"], PACKAGES, where + " packages")
+        if untimed["packages"] == "all":
+            untimed["packages"] = list(PACKAGES)
     head["untimed"] = untimed
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
@@ -408,9 +419,11 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                                         spec["package"] = package
                                         spec["transfers"] = list(head["transfers"])
                                         spec["finals"] = bool(head["finals"])
+                                        spec["traces"] = bool(head["traces"])
                                         spec["build"] = head["build"]
                                         spec["optimize"] = _optimize_for(head["optimize"], package)
                                         spec["watchdog_s"] = head["watchdog"]
+                                        spec["single_run_s"] = head["single_run"]
                                         spec["timed"] = head["untimed"] is None \
                                             or package not in head["untimed"]["packages"]
                                         spec["set"] = loaded["name"]

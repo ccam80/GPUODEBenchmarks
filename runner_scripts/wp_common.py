@@ -1,5 +1,6 @@
 """Timing and watchdog helpers shared by the Python runners; the repeat schedule and the watchdog come from protocol.toml."""
 
+import math
 import os
 import sys
 import threading
@@ -50,8 +51,8 @@ def repeats_done(timed_s, floor, ceiling):
     return statistics.median(timed_s) / min(timed_s) - 1.0 <= REPEAT_SPREAD
 
 
-def timed_min_ms(run, repeats, on_breach=None, setup=None, cap_s=None):
-    """(best_ms, result, samples) after one warm-up; best_ms None on a breach of cap_s (default WATCHDOG_SECONDS). samples holds every attempt in ms, warm-up first. Each attempt's result is released before the next runs. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged at the cap plus 30 s. setup() runs untimed before every attempt after the first."""
+def timed_min_ms(run, repeats, on_breach=None, setup=None, cap_s=None, single_run_s=math.inf):
+    """(best_ms, result, samples) after one warm-up, or of the first run alone when it passes single_run_s; best_ms None on a breach of cap_s (default WATCHDOG_SECONDS). samples holds every attempt in ms, warm-up first. Each attempt's result is released before the next runs. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged at the cap plus 30 s. setup() runs untimed before every attempt after the first."""
     import timeit
     cap = WATCHDOG_SECONDS if cap_s is None else float(cap_s)
     samples = []
@@ -70,6 +71,8 @@ def timed_min_ms(run, repeats, on_breach=None, setup=None, cap_s=None):
         if elapsed > cap:
             return None, result, samples
         if len(samples) == 1:
+            if elapsed > single_run_s:
+                return elapsed * 1000.0, result, samples
             continue                     # the warm-up carries the compile
         timed.append(elapsed)
         if floor is None:

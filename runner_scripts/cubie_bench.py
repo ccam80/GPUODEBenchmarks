@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; compile builds the kernel under its record; a solve runs through host arrays (`both`) or on the resident device inputs (`none`). `--precompile` on the runner's argv runs cubie_precompile over the trial file instead."""
+"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; compile builds the kernel under its record; a solve runs through host arrays (`both`) or on the resident device inputs (`none`); a trace runs a second Solver of the same stepping that saves every state at the protocol's sample times. `--precompile` on the runner's argv runs cubie_precompile over the trial file instead."""
 
 import gc
 import importlib.metadata
@@ -19,7 +19,8 @@ import cubie_adapter as adapter  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import runner  # noqa: E402
 import store  # noqa: E402
-from cubie_systems import final_states, output_types, variable_order  # noqa: E402
+from cubie_systems import ensemble_parameters, final_states, output_types, trace_states, variable_order  # noqa: E402
+from protocol import TRACE_EVERY_S, TRACE_SPAN_S  # noqa: E402
 from problems import as_problem  # noqa: E402
 
 PRECISIONS = {"float32": np.float32, "float64": np.float64}
@@ -64,13 +65,15 @@ def gains_of(trial):
     return json.loads(trial["gains"]) if trial["gains"] else {}
 
 
-def make_solver(system, trial, solver_class=None):
-    """A Solver for a trial's algorithm and stepping; explicit gains are applied after construction."""
+def make_solver(system, trial, solver_class=None, save_every=None):
+    """A Solver for a trial's algorithm and stepping; explicit gains are applied after construction; with save_every it saves every state that often."""
     if solver_class is None:
         import cubie
         solver_class = cubie.Solver
     # Without save_every cubie saves the final state alone, at any duration.
     kwargs = dict(algorithm=trial["algorithm"], output_types=output_types(system), time_logging_level=None)
+    if save_every is not None:
+        kwargs["save_every"] = float(save_every)
     kwargs.update(stepping_kwargs(trial))
     solver = solver_class(system, **kwargs)
     gains = gains_of(trial)
@@ -92,6 +95,7 @@ class Build:
         self.cache_dir = None
         self.saved_cache_root = None
         self.solver = None
+        self.trace_solver = None
         self.grid_n = None
         self.grid_arrays = None
         self.resident_n = None
@@ -121,6 +125,7 @@ class Build:
         self.grid_arrays = None
         self.grid_n = None
         self.resident_n = None
+        self.close_trace_solver()
         if stepping["controller"] != self.applied["controller"] \
                 or stepping["gains"] != self.applied["gains"]:
             self.solver.close()
@@ -132,11 +137,11 @@ class Build:
         self.applied = stepping
 
     def grid(self, values):
-        """(initial_values, parameters) arrays for a grid of the swept parameter; rebuilt only when n changes."""
+        """(initial_values, parameters) arrays for a grid of the swept parameter (the problem's parameter arrays of it, cubie_systems.ensemble_parameters); rebuilt only when n changes."""
         n = int(values.shape[0])
         if self.grid_n != n:
             self.grid_arrays = None
-            parameters = {self.row["sweep_parameter"]: np.asarray(values, dtype=self.precision)}
+            parameters = ensemble_parameters(self.row, values, self.precision)
             self.grid_arrays = self.solver.build_grid(initial_values=self.initial_conditions,
                                                       parameters=parameters)
             self.grid_n = n
@@ -158,9 +163,30 @@ class Build:
                       self.solver.device_parameters, self.duration, on_device=True)
         return self.host_result
 
+    def trace(self, trial, values):
+        """States of the given grid points at every protocol sample time, (runs, samples, variables), from a solve of the trace Solver built for the trial's stepping on first use."""
+        if self.trace_solver is None:
+            self.trace_solver = make_solver(self.system, trial, self.solver_class, save_every=TRACE_EVERY_S)
+            gains = gains_of(trial)
+            if gains:
+                self.trace_solver.update(gains)
+        initials, parameters = self.trace_solver.build_grid(
+            initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
+        result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
+        states = trace_states(self.system, result, self.row)
+        del result
+        return states
+
+    def close_trace_solver(self):
+        if self.trace_solver is not None:
+            self.trace_solver.close()
+            self.trace_solver = None
+            gc.collect()
+
     def close(self):
         self.host_result = None
         self.grid_arrays = None
+        self.close_trace_solver()
         if self.solver is not None:
             self.solver.close()
             self.solver = None
@@ -229,6 +255,10 @@ class CubieAdapter:
         if transfers == "both":
             return build.host_solve(values)
         return build.device_solve(values)
+
+    def trace(self, build, trial, values):
+        build.apply(trial)
+        return build.trace(trial, values)
 
     def finals(self, build, result):
         """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
