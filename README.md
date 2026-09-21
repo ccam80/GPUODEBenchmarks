@@ -87,23 +87,22 @@ the push the box deletes this key's clock logs a day old that no row names
 | `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm |
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
 | `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
-| `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, every problem but fabbri_linder |
-| `fabbri_linder` | `cubie_mlir`, `myokit_cuda` | the Fabbri-Linder work-precision dataset over the 131072-point ACh x Iso grid: Euler at 100 us, 20 us, 5 us, 1 us and 250 ns, every other cubie algorithm at tolerances 1e-2 to 1e-8, each run traced on the head lattice; a first run past 30 s is the timing |
-| `fabbri_golden` | `julia_cpu` | the float64 reference of fabbri_linder: finals and traces of its 1024-point head lattice |
+| `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
+| `fabbri_linder` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns and every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s |
+| `fabbri_golden` | `julia_cpu` | the fabbri_linder float64 reference: finals and traces of the 1024-point head lattice |
 
 `fabbri_linder` (35 states, `runner_scripts/models/fabbri_linder.cellml`,
-cAMP cascade on) sweeps two inputs at once: the grid value is an index whose
-first 1024 values form a 32 x 32 acetylcholine (0..100 nM) by isoprenaline
-(0..1000 nM) lattice with both range ends, the rest filling the plane by
-bit reversal (`runner_scripts/fabbri.py`, `fabbri.jl`). cubie loads the
-CellML with its own loader, myokit_cuda carries the inputs as zero-derivative
+cAMP cascade on) sweeps an index: the first 1024 form a 32 x 32
+acetylcholine (0..100 nM) by isoprenaline (0..1000 nM) lattice, the rest
+fill the plane by bit reversal (`runner_scripts/fabbri.py`, `fabbri.jl`).
+cubie loads the CellML, myokit_cuda carries the inputs as zero-derivative
 states, julia_cpu integrates `runner_scripts/generated/fabbri_linder_rhs.jl`
-(`fabbri_export.py` under the cubie venv rewrites it from the CellML). A set
-with `traces = true` also solves the first 1024 points of every run untimed
-and keeps every state at the `protocol.toml` `[traces]` sample times in
-`traces/<trial_id>.parquet`; its error is the RMS over every sample and
-state against the golden's traces. A set with `single_run = <seconds>` takes
-a first run past that many seconds as the timing, with no warm-up or repeats.
+(written by `fabbri_export.py` under the cubie venv). A set with
+`traces = true` also solves the first 1024 points of every run untimed and
+keeps every state at the `[traces]` sample times of `protocol.toml` in
+`traces/<trial_id>.parquet`; the error is the RMS over every sample and
+state against the golden's traces. A set with `single_run = <seconds>`
+takes a first run past that long as the timing, with no warm-up or repeats.
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
 refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
