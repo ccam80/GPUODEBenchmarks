@@ -238,11 +238,11 @@ class OutcomeTests(RunnerCase):
         self.assertNotIn(("solve", 128, "none"), adapter.calls)
         self.assertIn(("solve", 128, "both"), adapter.calls)
 
-    def test_reset_runs_before_every_attempt_after_the_first(self):
+    def test_reset_runs_before_every_attempt(self):
         adapter = FakeAdapter()
         status, rows, _ = self.run_specs([spec(8, transfers=("none",))], adapter)
         calls = [c for c in adapter.calls if c[0] in ("solve", "reset")]
-        self.assertEqual(calls, [("solve", 8, "none")] + [("reset", 8, "none"), ("solve", 8, "none")] * 3)
+        self.assertEqual(calls, [("reset", 8, "none"), ("solve", 8, "none")] * 4)
 
     def test_the_trials_own_budget_sets_the_cap(self):
         adapter = FakeAdapter({(32, "none"): "slow"})

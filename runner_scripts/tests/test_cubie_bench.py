@@ -241,7 +241,14 @@ class TraceTests(AdapterCase):
         # The initial save is dropped; sample s of run r, variable v is v * n + r + s.
         self.assertEqual(states[1, 0, 2], 2 * 4 + 1 + 1)
         self.assertEqual(states[3, -1, 0], 3 + TRACE_SAMPLES)
+        self.assertTrue(np.isfinite(states).all())
         self.assertEqual(len(FakeSolver.made), 2)
+        # A run with a failure status is NaN at every sample; the others keep their states.
+        tracer.codes = [0, 8, 0, 3]
+        states = self.adapter.trace(leg, record, self.values(4))
+        self.assertTrue(np.isnan(states[[1, 3]]).all())
+        self.assertTrue(np.isfinite(states[[0, 2]]).all())
+        tracer.codes = None
         # A changed stepping drops the trace solver with the kernel; close closes both.
         self.adapter.solve(leg, trial(n=4, dt=2.0 ** -11), self.values(4), "both")
         self.assertIsNone(leg.trace_solver)

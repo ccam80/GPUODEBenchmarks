@@ -349,7 +349,7 @@ class MyokitAdapter:
         return build.trace(trial, values)
 
     def reset(self, build, trial, values, transfers):
-        """Before a repeated resident solve, put the initial states back; a host solve uploads its own."""
+        """Before a resident solve, put the initial states back; a host solve uploads its own."""
         if transfers == "none":
             build.restore(int(values.shape[0]))
 

@@ -52,14 +52,14 @@ def repeats_done(timed_s, floor, ceiling):
 
 
 def timed_min_ms(run, repeats, on_breach=None, setup=None, cap_s=None, single_run_s=math.inf):
-    """(best_ms, result, samples) after one warm-up, or of the first run alone when it passes single_run_s; best_ms None on a breach of cap_s (default WATCHDOG_SECONDS). samples holds every attempt in ms, warm-up first. Each attempt's result is released before the next runs. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged at the cap plus 30 s. setup() runs untimed before every attempt after the first."""
+    """(best_ms, result, samples) after one warm-up, or of the first run alone when it passes single_run_s; best_ms None on a breach of cap_s (default WATCHDOG_SECONDS). samples holds every attempt in ms, warm-up first. Each attempt's result is released before the next runs. The repeat count follows the first timed run's duration, capped at `repeats`. With on_breach, a run that never returns hard-exits through run_watchdogged at the cap plus 30 s. setup() runs untimed before every attempt."""
     import timeit
     cap = WATCHDOG_SECONDS if cap_s is None else float(cap_s)
     samples = []
     timed = []
     floor = ceiling = None
     while True:
-        if setup is not None and samples:
+        if setup is not None:
             setup()
         # Release the last attempt's result: only the final one is returned, and a solve's host buffers are large.
         result = None

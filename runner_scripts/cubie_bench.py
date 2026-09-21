@@ -164,7 +164,7 @@ class Build:
         return self.host_result
 
     def trace(self, trial, values):
-        """States of the given grid points at every protocol sample time, (runs, samples, variables), from a solve of the trace Solver built for the trial's stepping on first use."""
+        """States of the given grid points at every protocol sample time, (runs, samples, variables), from a solve of the trace Solver built for the trial's stepping on first use; a run whose status is not clean is NaN throughout."""
         if self.trace_solver is None:
             self.trace_solver = make_solver(self.system, trial, self.solver_class, save_every=TRACE_EVERY_S)
             gains = gains_of(trial)
@@ -174,6 +174,9 @@ class Build:
             initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
         result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
         states = trace_states(self.system, result, self.row)
+        # A run with a failure status keeps finite states; NaN marks it errored in the traces file.
+        failed = np.asarray(result.status_codes).reshape(-1) != 0
+        states[failed] = np.nan
         del result
         return states
 
