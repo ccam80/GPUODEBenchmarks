@@ -162,9 +162,10 @@ def merged(figures):
 
 
 def series_label(kind, key, points):
-    """'Cubie (MLIR), Fixed-step dt=0.000977 + transfer' from a series key and its first row; ' + transfer' for the both transfers, no dt on the dt axis."""
+    """'Cubie (MLIR), 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
     _, package, controller, transfers = key
-    parts = [shared.package_name(package), shared.controller_text(controller, None if kind.x == "dt" else points[0][2])]
+    parts = [shared.package_name(package),
+             shared.controller_text(controller, None if "dt" in kind.varying else points[0][2])]
     return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
 
 
