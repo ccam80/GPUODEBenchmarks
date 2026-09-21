@@ -735,10 +735,11 @@ class RunContextTests(StoreCase):
         log = os.path.join(self.tmp, "clocks.csv")
         with open(log, "w") as handle:
             handle.write(clocks.HEADER + "\n")
-            for offset, sm, reasons in ((-0.1, 2400, 0), (0.05, 2500, 0), (0.15, 2600, 4), (0.25, 210, 1)):
+            for offset, sm, util, reasons in ((-0.1, 2400, 100, 0), (0.05, 2500, 100, 0), (0.15, 2600, 100, 4),
+                                              (0.25, 210, 0, 1)):
                 stamp = start + timedelta(seconds=offset)
-                handle.write("{0},{1},10251,60,170,100,0x{2:016x}\n".format(
-                    stamp.strftime(clocks.UTC_STAMP), sm, reasons))
+                handle.write("{0},{1},10251,60,170,{2},0x{3:016x}\n".format(
+                    stamp.strftime(clocks.UTC_STAMP), sm, util, reasons))
         proc = subprocess.run([sys.executable, STORE_PY, "--root", self.tmp, "annotate", run, log],
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)

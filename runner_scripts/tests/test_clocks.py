@@ -18,11 +18,13 @@ T0 = datetime(2026, 9, 16, 3, 0, 0, tzinfo=timezone.utc)
 
 
 def log_lines(samples):
-    """The relayed CSV of (seconds after T0, sm, reasons) samples."""
+    """The relayed CSV of (seconds after T0, sm, reasons[, util_pct]) samples; util_pct defaults to 100."""
     lines = [clocks.HEADER]
-    for offset, sm, reasons in samples:
+    for sample in samples:
+        offset, sm, reasons = sample[:3]
+        util = sample[3] if len(sample) > 3 else 100
         stamp = (T0 + timedelta(seconds=offset)).strftime(clocks.UTC_STAMP)
-        lines.append("{0},{1},10251,60,170,100,0x{2:016x}".format(stamp, sm, reasons))
+        lines.append("{0},{1},10251,60,170,{2},0x{3:016x}".format(stamp, sm, util, reasons))
     return "\n".join(lines) + "\n"
 
 
@@ -76,11 +78,18 @@ class Windows(unittest.TestCase):
         return (T0 + timedelta(seconds=seconds)).timestamp()
 
     def test_the_window_holds_its_samples_and_the_sm_statistics_are_over_busy_ones(self):
-        samples = self.log([(0.0, 210, 1), (0.1, 2445, 0), (0.2, 2430, 0), (0.3, 2445, 4),
-                            (0.4, 2460, 0), (0.5, 210, 1)])
+        samples = self.log([(0.0, 210, 1, 0), (0.1, 2445, 0), (0.2, 2430, 0), (0.3, 2445, 4),
+                            (0.4, 2460, 0), (0.5, 210, 1, 0)])
         stats = clocks.window_stats(samples, self.at(0.1), self.at(0.4))
         self.assertEqual(stats, {"clock_sm_mhz": 2445.0, "clock_sm_min_mhz": 2430.0,
                                  "clock_throttled": 1})
+
+    def test_a_sample_with_utilisation_is_busy_whatever_the_idle_bit_says(self):
+        samples = self.log([(0.0, 2280, 1, 96), (0.04, 2280, 1, 96), (0.08, 2260, 1, 90), (0.12, 210, 1, 0)])
+        stats = clocks.window_stats(samples, self.at(0.0), self.at(0.12))
+        self.assertEqual((stats["clock_sm_mhz"], stats["clock_sm_min_mhz"], stats["clock_throttled"]),
+                         (2280.0, 2260.0, 0))
+        self.assertEqual(samples["util"], [96.0, 96.0, 90.0, 0.0])
 
     def test_a_window_between_samples_extends_to_the_nearest_on_each_side(self):
         samples = self.log([(0.0, 2400, 0), (0.1, 2500, 0), (0.2, 2600, 0)])
@@ -136,7 +145,7 @@ class Windows(unittest.TestCase):
         self.assertEqual(clocks.window_stats(samples, self.at(0.0), self.at(2.0))["clock_sm_mhz"], 2500.0)
 
     def test_idle_samples_alone_give_nan_clocks_and_an_empty_log_gives_none(self):
-        samples = self.log([(0.0, 210, 1), (0.1, 210, 1)])
+        samples = self.log([(0.0, 210, 1, 0), (0.1, 210, 1, 0)])
         stats = clocks.window_stats(samples, self.at(0.0), self.at(0.1))
         self.assertNotEqual(stats["clock_sm_mhz"], stats["clock_sm_mhz"])
         self.assertNotEqual(stats["clock_sm_min_mhz"], stats["clock_sm_min_mhz"])

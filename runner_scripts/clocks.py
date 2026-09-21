@@ -290,10 +290,10 @@ def _relay(stream, csv_path):
 
 
 def load_samples(csv_path):
-    """The clock log as parallel lists sorted by time: {"t": epoch seconds, "sm", "mem", "temp", "reasons"}; empty when the file is absent."""
-    times, sms, mems, temps, reasons = [], [], [], [], []
+    """The clock log as parallel lists sorted by time: {"t": epoch seconds, "sm", "mem", "temp", "util", "reasons"}; empty when the file is absent."""
+    times, sms, mems, temps, utils, reasons = [], [], [], [], [], []
     if not os.path.isfile(csv_path):
-        return {"t": times, "sm": sms, "mem": mems, "temp": temps, "reasons": reasons}
+        return {"t": times, "sm": sms, "mem": mems, "temp": temps, "util": utils, "reasons": reasons}
     with open(csv_path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             f = [c.strip() for c in line.split(",")]
@@ -309,15 +309,16 @@ def load_samples(csv_path):
             sms.append(sm)
             mems.append(mem)
             temps.append(_number(f[3]))
+            utils.append(_number(f[5]))
             reasons.append(mask)
     order = sorted(range(len(times)), key=times.__getitem__)
     return {"t": [times[i] for i in order], "sm": [sms[i] for i in order],
             "mem": [mems[i] for i in order], "temp": [temps[i] for i in order],
-            "reasons": [reasons[i] for i in order]}
+            "util": [utils[i] for i in order], "reasons": [reasons[i] for i in order]}
 
 
 def window_stats(samples, start, end, max_gap_s=COVERAGE_GAP_S):
-    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side when that sample lies within max_gap_s of the edge; the SM statistics are over busy samples alone (NaN with none); None when the selected samples do not cover the window, that is when either edge is more than max_gap_s from its nearest selected sample or two consecutive selected samples are more than max_gap_s apart, so an interval the sampler never observed, stopped observing or skipped stays unannotated."""
+    """{clock_sm_mhz, clock_sm_min_mhz, clock_throttled} over the samples between two epoch seconds, the window extended outward to the nearest sample on each side when that sample lies within max_gap_s of the edge; the SM statistics are over busy samples alone, those with utilisation above zero or the idle reason bit clear (NaN with none); None when the selected samples do not cover the window, that is when either edge is more than max_gap_s from its nearest selected sample or two consecutive selected samples are more than max_gap_s apart, so an interval the sampler never observed, stopped observing or skipped stays unannotated."""
     times = samples["t"]
     if not times:
         return None
@@ -333,8 +334,9 @@ def window_stats(samples, start, end, max_gap_s=COVERAGE_GAP_S):
     edges = [start] + times[first:last + 1] + [end]
     if any(later - earlier > max_gap_s for earlier, later in zip(edges, edges[1:])):
         return None
+    # A sample is busy when it shows utilisation or the idle reason bit is clear.
     busy = [samples["sm"][i] for i in range(first, last + 1)
-            if not samples["reasons"][i] & IDLE_BIT]
+            if samples["util"][i] > 0 or not samples["reasons"][i] & IDLE_BIT]
     throttled = sum(1 for i in range(first, last + 1) if samples["reasons"][i] & BAD_BITS)
     nan = float("nan")
     return {"clock_sm_mhz": float(statistics.median(busy)) if busy else nan,
