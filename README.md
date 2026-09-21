@@ -90,6 +90,7 @@ the push the box deletes this key's clock logs a day old that no row names
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
 | `fabbri_linder` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns and every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s |
 | `fabbri_golden` | `julia_cpu` | the fabbri_linder float64 reference: finals and traces of the 1024-point head lattice |
+| `fabbri_perf` | `cubie_mlir`, `myokit_cuda` | fabbri_linder trajectory sweep, 8 to 2^20: Kvaerno3, Rosenbrock23 and Tsit5 at 1e-5, Euler at 5 us |
 
 `fabbri_linder` (35 states, `runner_scripts/models/fabbri_linder.cellml`,
 cAMP cascade on) sweeps an index: the first 1024 form a 32 x 32

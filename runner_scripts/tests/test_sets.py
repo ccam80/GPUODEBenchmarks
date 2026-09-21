@@ -102,7 +102,8 @@ class ShippedSetTests(unittest.TestCase):
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
     def test_the_six_sets_ship(self):
-        self.assertEqual(sets.set_names(), ["fabbri_golden", "fabbri_linder", "golden", "golden_grid", "perf", "states"])
+        self.assertEqual(sets.set_names(), ["fabbri_golden", "fabbri_linder", "fabbri_perf", "golden", "golden_grid",
+                                            "perf", "states"])
 
     def test_perf_counts(self):
         specs = self.expanded["perf"]
@@ -325,8 +326,28 @@ class ShippedSetTests(unittest.TestCase):
         # No other set sets a single-run threshold.
         for name in ("fabbri_golden", "golden", "golden_grid", "perf", "states"):
             self.assertEqual({t["single_run_s"] for t in self.trials[name]}, {math.inf}, name)
-        # No other set declares the problem, so the contract is this set's alone.
-        self.assertEqual({tuple(t["sets"]) for t in built}, {("fabbri_linder",)})
+
+    def test_fabbri_perf_counts(self):
+        specs = self.expanded["fabbri_perf"]
+        counts = [8, 32, 128, 512, 2048, 8192, 32768, 131072, 524288, 1048576]
+        self.assertEqual({s["problem"] for s in specs}, {"fabbri_linder"})
+        self.assertEqual(sets.declared_counts(["fabbri_perf"]), counts)
+        self.assertEqual({(s["finals"], s["traces"], s["single_run_s"], s["watchdog_s"]) for s in specs},
+                         {(False, False, 30.0, 1800.0)})
+        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 30, "myokit_cuda": 10})
+        self.assertEqual({(s["algorithm"], s["atol"]) for s in specs if s["package"] == "cubie_mlir"},
+                         {("kvaerno3", 1e-5), ("rosenbrock23_sciml", 1e-5), ("tsit5", 1e-5)})
+        self.assertEqual({(s["algorithm"], s["dt"]) for s in specs if s["package"] == "myokit_cuda"}, {("euler", 5e-6)})
+        self.assertEqual(sorted({s["n"] for s in specs}), counts)
+        built = self.trials["fabbri_perf"]
+        self.assertEqual(line_counts(built, "cubie_mlir"), (30, 3, 0, 3))
+        self.assertEqual(line_counts(built, "myokit_cuda"), (10, 0, 0, 1))
+        # The n = 131072 points are the fabbri_linder set's too: one contract, traces on.
+        merged = trials.build_trials(specs, sets.declarations(problems=["fabbri_linder"]))
+        shared = [t for t in merged if t["n"] == 131072]
+        self.assertEqual({tuple(t["sets"]) for t in shared}, {("fabbri_linder", "fabbri_perf")})
+        self.assertEqual({t["traces"] for t in shared}, {True})
+        self.assertEqual({t["traces"] for t in merged if t["n"] != 131072}, {False})
 
     def test_julia_cpu_golden_grid_is_the_1024_prefix_of_the_131072_grid(self):
         julia = [s for s in self.expanded["golden_grid"] if s["package"] == "julia_cpu"]
@@ -363,7 +384,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(sets.declared_counts(["perf", "golden_grid"]), sorted(set(PERF_N) | {1024}))
         self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
         self.assertEqual({s["set"] for s in sets.declarations(problems=["fabbri_linder"])},
-                         {"fabbri_linder", "fabbri_golden"})
+                         {"fabbri_linder", "fabbri_golden", "fabbri_perf"})
         self.assertEqual(sets.declared_counts(["fabbri_linder"]), [FABBRI_N])
         self.assertEqual(sets.declared_counts(["fabbri_golden"]), [FABBRI_GOLDEN_N])
 

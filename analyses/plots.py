@@ -26,7 +26,7 @@ ALL_CARDS = "all_cards"
 LIMITED_DIR = "limited_data"
 LIMITED_POINTS = 3
 GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "states")
-ERROR_LABEL = "RMS error (final state)"
+ERROR_LABEL = "RMS error against the golden"
 
 
 class Kind:
