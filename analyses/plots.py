@@ -1,6 +1,6 @@
-"""plots.py (--set NAME)* | --where "<sql>" [--root data] [--out plots]
+"""plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem). With --set, what the store lacks of the sets goes to plots/<key>/incomplete.csv and the exit code is 1.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. runtime_vs_n, error_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem).
 """
 
 import math
@@ -329,16 +329,17 @@ def write_tree(out, card, figures, tables):
     return written
 
 
-def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
-    """Write every figure and CSV of the selected rows under <out>/<key>/<kind>/ and, with several keys, <out>/all_cards/<kind>/; returns the paths written."""
-    rows = with_errors(shared.select_rows(store, set_names, where), errors_mod.Errors(store))
+def run(store, where="", kinds=KIND_NAMES, out=shared.PLOTS_DIR):
+    """Write every figure and CSV of the named kinds from the rows a predicate matches (every row without one) under <out>/<key>/<kind>/ and, with several keys, <out>/all_cards/<kind>/; returns the paths written."""
+    chosen = [k for k in KINDS if k.name in kinds]
+    rows = with_errors(shared.select_rows(store, where), errors_mod.Errors(store))
     by_figure = {}
     for row in rows:
         by_figure.setdefault((row["key"], row["problem"], row["algorithm"]), []).append(row)
     figures, tables = {}, {}
     for (key, problem, algorithm), members in sorted(by_figure.items()):
         per_trial = one_per_trial(members)
-        for kind in KINDS:
+        for kind in chosen:
             series = series_of(kind, members if kind.by_transfers else per_trial)
             builds = series_of(BUILDS, per_trial) if kind.name == "states" else None
             table = csv_rows(kind, algorithm, series) + (csv_rows(BUILDS, algorithm, builds) if builds else [])
@@ -367,17 +368,15 @@ def run(store, set_names=(), where="", out=shared.PLOTS_DIR):
 
 
 def main(argv=None):
-    args = shared.parser(__doc__).parse_args(argv)
-    shared.check_selection(args)
+    args = shared.parser(__doc__, KIND_NAMES).parse_args(argv)
     shared.pull_store(args)
     store = shared.AnalysisStore(args.root)
-    lacking = shared.report_incomplete(store, args.set, args.out) if args.set else 0
-    written = run(store, args.set, args.where, args.out)
+    written = run(store, args.where, args.kind or KIND_NAMES, args.out)
     for path in written:
         print(path)
     if not written:
         print("no rows selected form a curve")
-    return 1 if lacking else 0
+    return 0
 
 
 if __name__ == "__main__":
