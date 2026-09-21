@@ -1,5 +1,4 @@
-# Writes runner_scripts/julia_controllers.csv: the step controller OrdinaryDiffEq resolves for every adaptive julia_cpu algorithm of julia_algorithms.csv at its defaults, in Float64, on a scalar test problem. The constants depend on the algorithm alone, so the table is checked in and sets.py reads it for the cubie packages.
-#   julia --project=. runner_scripts/julia_controllers.jl
+# Writes runner_scripts/julia_controllers.csv: OrdinaryDiffEq's default controller constants per adaptive julia_cpu algorithm, in Float64; sets.py reads it for the cubie packages. Run: julia --project=. runner_scripts/julia_controllers.jl
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK, OrdinaryDiffEqExplicitRK
