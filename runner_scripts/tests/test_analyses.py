@@ -1,4 +1,4 @@
-"""The analysis script: the store read with two rows of one run_id refused, selection by set or predicate with the ensemble fields ignored, the errored and untimed filters, the completeness report with the store's compile timeouts marked, CSVs without the columns no row captured, and the base figures of a (key, problem, algorithm): runtime against n, error against runtime, error against dt, error against tolerance, and runtime with cold build time against the state count."""
+"""The analysis script: the store read with two rows of one run_id refused, selection by predicate over the rows (every row without one) and by figure kind, the errored and untimed filters, CSVs without the columns no row captured, and the base figures of a (key, problem, algorithm): runtime against n, error against runtime, error against dt, error against tolerance, and runtime with cold build time against the state count."""
 
 import csv
 import math
@@ -15,7 +15,6 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "analyses"))
 
-import abandon  # noqa: E402
 import grid  # noqa: E402
 import store  # noqa: E402
 import errors  # noqa: E402
@@ -96,22 +95,19 @@ class AnalysesCase(unittest.TestCase):
 
 
 class SelectionTests(AnalysesCase):
-    def test_rows_are_selected_by_set_with_the_ensemble_fields_ignored_under_every_key(self):
+    def test_rows_are_selected_by_predicate_over_the_rows_or_every_row(self):
         perf = [self.row(n=n) for n in (8, 32)]
         other_key = self.row(n=8, key=OTHER_KEY)
         golden_only = self.row(n=131072, dt=2.0 ** -3, transfers="none")
         alien = self.row(algorithm="euler", dt=2.0 ** -20)
         ids = lambda rows: sorted(r["run_id"] for r in rows)  # noqa: E731
-        self.assertEqual(ids(shared.select_rows(self.store, ["perf"])), ids(perf + [other_key]))
-        self.assertEqual(ids(shared.select_rows(self.store, ["golden_grid"])),
-                         ids(perf + [other_key, golden_only]))
-        self.assertEqual(ids(shared.select_rows(self.store, ["perf", "golden_grid"])),
-                         ids(perf + [other_key, golden_only]))
-        self.assertNotIn(alien["run_id"], ids(shared.select_rows(self.store, ["perf", "golden_grid"])))
-        # A predicate names rows; every row sharing their (group_id, package) comes along.
-        self.assertEqual(ids(shared.select_rows(self.store, where="n = 32")), ids(perf + [other_key]))
+        self.assertEqual(ids(shared.select_rows(self.store)), ids(perf + [other_key, golden_only, alien]))
+        # A predicate names rows and nothing else comes along: not the other n of a sweep, not the other key.
+        self.assertEqual(ids(shared.select_rows(self.store, where="n = 32")), ids(perf[1:]))
         self.assertEqual(ids(shared.select_rows(self.store, where="algorithm = 'euler'")), ids([alien]))
-        self.assertEqual(shared.store_keys(self.store), [OTHER_KEY, KEY])
+        self.assertEqual(ids(shared.select_rows(self.store, where="key = '{0}'".format(OTHER_KEY))), ids([other_key]))
+        self.assertEqual(ids(shared.select_rows(self.store, where="problem = 'lorenz' AND algorithm = 'tsit5' AND n = 8")),
+                         ids([perf[0], other_key]))
 
     def test_errored_and_untimed_filters(self):
         self.assertTrue(shared.within_errored_limit({"errored_pct": NAN}))
@@ -130,91 +126,16 @@ class SelectionTests(AnalysesCase):
         path = shared.write_csv(os.path.join(self.tmp, "t.csv"), ("a", "b", "c", "d", "e", "f", "g"), rows)
         self.assertEqual(read_csv(path), [{"a": "1.0", "e": "", "f": "x"}, {"a": "nan", "e": "1.0", "f": ""}])
 
-    def test_flags_need_a_set_or_a_predicate(self):
+    def test_the_flags_take_a_predicate_and_kinds_and_refuse_an_unknown_kind(self):
+        args = shared.parser("", plots.KIND_NAMES).parse_args(["--no-sync"])
+        self.assertEqual((args.where, args.kind), ("", []))
+        args = shared.parser("", plots.KIND_NAMES).parse_args(
+            ["--where", "n = 8", "--kind", "error_vs_runtime", "--kind", "states"])
+        self.assertEqual((args.where, args.kind), ("n = 8", ["error_vs_runtime", "states"]))
         with self.assertRaises(SystemExit):
-            plots.main(["--no-sync", "--root", self.root, "--out", self.out])
-        with self.assertRaises(SystemExit):
-            plots.main(["--no-sync", "--set", "perf", "--where", "n = 8", "--root", self.root, "--out", self.out])
-
-
-class CompletenessTests(AnalysesCase):
-    """A named set is expanded and canonicalized under every key and what the store lacks of it is reported before anything is compared."""
-
-    SET = ('[set]\npackages = ["cpp"]\nproblems = ["lorenz"]\nalgorithms = ["classical-rk4"]\nfinals = {finals}\n'
-           'transfers = ["none"]\n[[grid]]\nn = [8, 32]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n')
-
-    def setUp(self):
-        super().setUp()
-        self.sets_dir = os.path.join(self.tmp, "sets")
-        os.makedirs(self.sets_dir)
-        with open(os.path.join(self.sets_dir, "tiny.toml"), "w", encoding="utf-8") as handle:
-            handle.write(self.SET.format(finals="false"))
-        with open(os.path.join(self.sets_dir, "keep.toml"), "w", encoding="utf-8") as handle:
-            handle.write(self.SET.format(finals="true").replace("n = [8, 32]", "n = [32]"))
-
-    def point(self, n, **overrides):
-        return spec(package="cpp", algorithm="classical-rk4", dt=0.5, transfers="none", n=n, **overrides)
-
-    def test_the_report_names_every_lacking_row_and_artifact_under_each_key(self):
-        trial_list = shared.canonical_trials(self.store, ["tiny"], KEY, self.sets_dir)
-        self.assertEqual([(t["n"], t["finals"], t["sets"]) for t in trial_list],
-                         [(8, False, ["tiny"]), (32, True, ["keep", "tiny"])])
-        self.store.record(dict(self.point(8), states=3, min_ms=1.0))
-        self.store.record(dict(self.point(32), states=3, min_ms=1.0))
-        self.store.record(dict(self.point(8, key=OTHER_KEY), states=3, min_ms=NAN))
-        lacking = shared.incomplete(self.store, ["tiny"], self.sets_dir)
-        self.assertEqual([(key, m.trial["n"], m.reasons()) for key, m in lacking],
-                         [(OTHER_KEY, 32, ["row:none", "finals"]), (KEY, 32, ["finals"])])
-        count = shared.report_incomplete(self.store, ["tiny"], self.out, self.sets_dir)
-        self.assertEqual(count, 2)
-        for key in (KEY, OTHER_KEY):
-            table = read_csv(os.path.join(self.out, key, "incomplete.csv"))
-            # A fixed stepping captures no atol.
-            self.assertEqual(list(table[0]), [c for c in shared.INCOMPLETE_COLUMNS if c != "atol"])
-            self.assertEqual([(r["key"], r["package"], r["n"], r["sets"], r["missing"]) for r in table],
-                             [(key, "cpp", "32", "keep tiny", "row:none finals" if key == OTHER_KEY else "finals")])
-        # The 32-point's finals file completes this key; the other key still lacks its row.
-        fields = self.point(32)
-        relative = self.store.record_finals(fields, np.zeros((32, 3)), np.full(32, 1.0))
-        self.store.record(dict(fields, states=3, min_ms=1.0, finals=relative))
-        self.assertEqual([(key, m.trial["n"]) for key, m in shared.incomplete(self.store, ["tiny"], self.sets_dir)],
-                         [(OTHER_KEY, 32)])
-        other = self.point(32, key=OTHER_KEY)
-        self.store.record(dict(other, states=3, min_ms=NAN, finals=relative))
-        self.assertEqual([(key, m.reasons()) for key, m in shared.incomplete(self.store, ["tiny"], self.sets_dir)],
-                         [(OTHER_KEY, ["finals"])])
-        self.store.record_finals(other, np.zeros((32, 3)), np.full(32, 1.0))
-        self.assertEqual(shared.incomplete(self.store, ["tiny"], self.sets_dir), [])
-        self.assertEqual(shared.report_incomplete(self.store, ["tiny"], self.out, self.sets_dir), 0)
-
-    def test_a_compile_timeout_the_store_records_marks_its_lines_as_a_plan_does(self):
-        def lines():
-            return [t for t in shared.canonical_trials(self.store, ["perf"], KEY)
-                    if (t["package"], t["problem"], t["algorithm"], t["controller"]) ==
-                    ("cubie", "lorenz", "tsit5", "fixed")]
-        perf = lines()
-        self.assertTrue(perf)
-        self.assertEqual({(t["optimize"], t["compile"]) for t in perf}, {(True, "")})
-        abandon.abandon_compile(self.store, KEY, perf, perf[0])
-        marked = lines()
-        self.assertEqual({(t["optimize"], t["compile"]) for t in marked}, {(False, "timeout")})
-        # The rows abandon_compile wrote are no rows, and no line of the group wants an optimize record.
-        ids = {t["trial_id"] for t in marked}
-        lacking = {m.trial["trial_id"]: m.reasons() for _, m in shared.incomplete(self.store, ["perf"])
-                   if m.trial["trial_id"] in ids}
-        self.assertEqual(set(lacking), ids)
-        self.assertEqual({tuple(v[:2]) for v in lacking.values()}, {("row:both", "row:none")})
-        self.assertEqual({tuple(v[2:]) for v in lacking.values()}, {(), ("finals",)})
-
-    def test_the_script_reports_a_shipped_set_the_store_lacks_and_exits_1(self):
-        self.row(n=8)
-        self.assertEqual(plots.main(["--no-sync", "--set", "perf", "--root", self.root, "--out", self.out]), 1)
-        self.assertTrue(os.path.isfile(os.path.join(self.out, KEY, "incomplete.csv")))
-        self.assertEqual(plots.main(["--no-sync", "--set", "golden", "--root", self.root, "--out", self.out]), 1)
-        table = read_csv(os.path.join(self.out, KEY, "incomplete.csv"))
-        self.assertEqual({r["package"] for r in table}, {"julia_cpu"})
-        self.assertEqual(len(table), 8)
-        self.assertEqual(plots.main(["--no-sync", "--where", "n = 8", "--root", self.root, "--out", self.out]), 0)
+            shared.parser("", plots.KIND_NAMES).parse_args(["--kind", "work_precision"])
+        for gone in ("check_selection", "report_incomplete", "incomplete", "canonical_trials", "selection_pairs"):
+            self.assertFalse(hasattr(shared, gone), gone)
 
 
 class PlotTests(AnalysesCase):
@@ -295,7 +216,7 @@ class PlotTests(AnalysesCase):
         # A build without a time stays on the build panel.
         self.store.record(dict(spec(package="julia_gpu", problem="lorenz96", system_params={"states": 64}, n=131072,
                                     transfers="none", **adaptive(1e-5)), states=64, min_ms=NAN, build_s=80.0))
-        written = plots.run(self.analysis_store(), set_names=["states"], out=self.out)
+        written = plots.run(self.analysis_store(), where="problem = 'lorenz96'", out=self.out)
         # Three timed points per package, but the builds panel has four: not limited data.
         self.assertEqual(self.written(), ["states/lorenz96.csv", "states/lorenz96_algorithms.png",
                                           "states/lorenz96_tsit5.png", "states/tsit5_problems.png"])
@@ -404,6 +325,28 @@ class PlotTests(AnalysesCase):
                           (KEY, "cubie fixed +"), (KEY, "jax adaptive +")])
         series = plots.series_of(plots.KINDS[0], plots.with_errors(self.analysis_store().rows(), errors.Errors(self.store)))
         self.assertEqual(plots.cards_of(series), [OTHER_KEY, KEY])
+
+    def test_the_kinds_named_are_written_and_every_kind_without_a_name(self):
+        self.error_sweep()
+        for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0), (512, 8.0)):
+            self.row(n=n, min_ms=ms, transfers="none")
+            self.row(n=n, min_ms=3.0 * ms, package="jax", transfers="none", **adaptive(1e-5))
+        written = plots.run(self.analysis_store(), kinds=["error_vs_runtime"], out=self.out)
+        self.assertEqual(self.written(), ["error_vs_runtime/limited_data/lorenz_tsit5.png",
+                                          "error_vs_runtime/lorenz.csv", "error_vs_runtime/lorenz_algorithms.png",
+                                          "error_vs_runtime/tsit5_problems.png"])
+        self.assertEqual(len(written), 4)
+        plots.run(self.analysis_store(), where="problem = 'lorenz' AND algorithm = 'tsit5'",
+                  kinds=["runtime_vs_n", "error_vs_dt"], out=self.out)
+        self.assertEqual({n.partition("/")[0] for n in self.written()},
+                         {"error_vs_runtime", "runtime_vs_n", "error_vs_dt"})
+        shutil.rmtree(self.out)
+        self.assertEqual(plots.main(["--no-sync", "--root", self.root, "--out", self.out]), 0)
+        self.assertEqual({n.partition("/")[0] for n in self.written()},
+                         {"error_vs_runtime", "runtime_vs_n", "error_vs_dt", "error_vs_tol"})
+        shutil.rmtree(self.out)
+        self.assertEqual(plots.main(["--no-sync", "--kind", "error_vs_tol", "--root", self.root, "--out", self.out]), 0)
+        self.assertEqual({n.partition("/")[0] for n in self.written()}, {"error_vs_tol"})
 
     def test_no_curve_writes_nothing(self):
         self.row(n=8)

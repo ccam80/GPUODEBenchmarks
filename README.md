@@ -119,15 +119,19 @@ as one DuckDB table:
 
 ```
 python runner_scripts/store.py query "SELECT package, n, min_ms FROM results WHERE problem = 'lorenz'"
-python analyses/plots.py --set perf --set golden_grid --set states
+python analyses/plots.py                                        # every kind from every row
+python analyses/plots.py --kind error_vs_runtime --where "problem = 'lorenz' AND algorithm = 'tsit5'"
 ```
 
 `data/` is an untracked mirror of the store; the analysis pulls it before reading.
 
-`analyses/plots.py` takes `--set` (repeatable) or `--where "<sql>"`, reads
-every key, and writes the base figures of every (key, problem, algorithm) as
+`analyses/plots.py` reads every row of the store, or the rows
+`--where "<sql>"` (a predicate over the columns of the results view, key and
+n included) matches, and writes every kind, or the kinds `--kind` names
+(repeatable), as the base figures of every (key, problem, algorithm) in
 `plots/<key>/<kind>/<problem>_<algorithm>.png`, with the points of a problem
-in `plots/<key>/<kind>/<problem>.csv`:
+in `plots/<key>/<kind>/<problem>.csv`. What a key's store lacks of a set is
+`bench.py plan --set <name> --resume`.
 
 | kind | x | y | rows |
 |---|---|---|---|
@@ -150,11 +154,7 @@ one) or no series past three points goes under `<kind>/limited_data/`. The
 `<problem>_algorithms.png`, a subplot per algorithm, and
 `<algorithm>_problems.png`, a subplot per problem. `plots/all_cards/` holds
 the same figures with every key's series together, a marker set per key and
-the legend sectioned by key. With
-`--set`, what each key's store lacks of the set (rows, cold build times,
-finals files, optimize records) is printed per package, written to
-`plots/<key>/incomplete.csv`, and exits the script 1 after its outputs; a
-group the store records a compile timeout of wants no optimize record.
+the legend sectioned by key.
 
 A column a file lacks reads as null, and two rows of one run_id are refused. The golden of a system is its julia_cpu float64
 finals row running the problem's golden algorithm. A CSV leaves out the

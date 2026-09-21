@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --set/--where flags, the store read with two rows of one run_id refused, the completeness report of a named set's canonical trials under every key with the compile timeouts the store records marked as a plan marks them, row selection by set or SQL predicate with the ensemble fields ignored under every key, the errored filter, the figure encoding (a colour per package, a marker per stepping kind (fixed or adaptive) and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --where/--kind flags, the store read with two rows of one run_id refused, row selection by SQL predicate (every row without one), the errored filter, the figure encoding (a colour per package, a marker per stepping kind (fixed or adaptive) and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -54,23 +54,18 @@ def under_suite_python():
 
 # ------------------------------------------------------------------- flags
 
-def parser(description):
-    """The argument parser: --set (repeatable) or --where, --root and --out."""
+def parser(description, kinds=()):
+    """The argument parser: --where (every row without it), --kind (repeatable, every kind without it), --root, --out and --no-sync."""
     p = argparse.ArgumentParser(description=description,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--set", action="append", default=[], metavar="NAME",
-                   help="a set under sets/; repeatable")
     p.add_argument("--where", default="", metavar="SQL",
-                   help="a SQL predicate over the spec columns of the results view")
+                   help="a SQL predicate over the columns of the results view; every row without it")
+    p.add_argument("--kind", action="append", default=[], choices=kinds, metavar="KIND",
+                   help="a figure kind to write, one of {0}; repeatable, every kind without it".format(", ".join(kinds)))
     p.add_argument("--root", default=DATA_DIR, help="the store root (default data/)")
     p.add_argument("--out", default=PLOTS_DIR, help="the output root (default plots/)")
     p.add_argument("--no-sync", action="store_true", help="read --root as it is, without pulling the store")
     return p
-
-
-def check_selection(args):
-    if bool(args.set) == bool(args.where):
-        raise SystemExit("give --set NAME (repeatable) or --where \"<sql>\", not both")
 
 
 def pull_store(args):
@@ -122,96 +117,9 @@ def unique(rows):
 
 # --------------------------------------------------------------- selection
 
-def store_keys(store):
-    """The dataset keys with results files under the store."""
-    keys = set()
-    for path in store.results_files():
-        parts = os.path.normpath(path).split(os.sep)
-        keys.update(p[len("key="):] for p in parts if p.startswith("key="))
-    return sorted(keys)
-
-
-def canonical_trials(store, set_names, key, sets_dir=None):
-    """The canonical trials the named sets expand to under a key: every point merged with its declarations in every set file, the lines of a problem, algorithm and controller the store records a compile timeout of marked as a plan marks them (no optimize record wanted)."""
-    import abandon
-    import sets
-    import trials
-    sets_dir = sets_dir or sets.SETS_DIR
-    trial_list = trials.build_trials(sets.expand(list(set_names), sets_dir=sets_dir),
-                                     sets.declarations(sets_dir=sets_dir))
-    return trials.mark_compile_timeouts(trial_list, abandon.compile_timeouts(store, key))
-
-
-INCOMPLETE_COLUMNS = ("key", "package", "trial_id", "problem", "system_params", "precision",
-                      "algorithm", "controller", "n", "dt", "atol", "sets", "missing")
-
-
-def incomplete(store, set_names, sets_dir=None):
-    """[(key, Missing)] of every canonical trial of the sets whose rows or artifacts the store lacks under that key, in key and file order."""
-    import completeness
-    out = []
-    records = getattr(store, "optimize_rows", None)
-    for key in store_keys(store):
-        trial_list = canonical_trials(store, set_names, key, sets_dir)
-        audits = completeness.audit(trial_list, key, store, optimize_rows=records)
-        out.extend((key, missing) for missing in audits.values() if not missing.complete())
-    return out
-
-
-def incomplete_rows(lacking):
-    """INCOMPLETE_COLUMNS rows of incomplete()'s result."""
-    rows = []
-    for key, missing in lacking:
-        trial = missing.trial
-        row = {c: trial.get(c) for c in INCOMPLETE_COLUMNS if c in trial}
-        row.update(key=key, sets=" ".join(trial.get("sets", [])), missing=" ".join(missing.reasons()))
-        rows.append(row)
-    return rows
-
-
-def report_incomplete(store, set_names, out, sets_dir=None):
-    """Print what the store lacks of the named sets under every key and write the trials to <out>/<key>/incomplete.csv; returns the count of incomplete trials."""
-    import completeness
-    lacking = incomplete(store, set_names, sets_dir)
-    by_key = {}
-    for key, missing in lacking:
-        by_key.setdefault(key, {}).setdefault(missing.trial["package"], []).append(missing)
-    for key in store_keys(store):
-        packages = by_key.get(key, {})
-        if not packages:
-            print("{0}: complete for {1}".format(key, ", ".join(set_names)))
-            continue
-        directory = os.path.join(out, key)
-        os.makedirs(directory, exist_ok=True)
-        path = write_csv(os.path.join(directory, "incomplete.csv"), INCOMPLETE_COLUMNS,
-                         incomplete_rows([(k, m) for k, m in lacking if k == key]))
-        print("{0}: {1} incomplete trial(s) of {2}; see {3}".format(
-            key, sum(len(m) for m in packages.values()), ", ".join(set_names), path))
-        for package, missing in sorted(packages.items()):
-            counts = completeness.summary({m.trial["trial_id"]: m for m in missing})
-            print("  {0}: {1} trial(s) lacking {2}".format(
-                package, len(missing), ", ".join("{0} x{1}".format(k, v) for k, v in counts.items())))
-    return len(lacking)
-
-
-def selection_pairs(store, set_names=(), where=""):
-    """The (group_id, package) pairs the sets expand to, or the pairs of the rows a SQL predicate matches."""
-    import sets
-    import store as store_mod
-    pairs = set()
-    if set_names:
-        for spec in sets.expand(list(set_names)):
-            pairs.add((store_mod.group_id(spec), spec["package"]))
-    else:
-        for row in store.rows(sql_where=where):
-            pairs.add((row["group_id"], row["package"]))
-    return pairs
-
-
-def select_rows(store, set_names=(), where=""):
-    """Every row of the store whose (group_id, package) a set or predicate names: the trial identity with the ensemble fields ignored, under every key."""
-    pairs = selection_pairs(store, set_names, where)
-    return [row for row in store.rows() if (row["group_id"], row["package"]) in pairs]
+def select_rows(store, where=""):
+    """Every row of the store, one per run_id, that a SQL predicate over the results view matches; every row without one."""
+    return store.rows(sql_where=where)
 
 
 def number(value):
