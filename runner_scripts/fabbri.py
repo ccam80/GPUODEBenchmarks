@@ -16,7 +16,7 @@ ISO_PARAMETER = "Rate_modulation_experiments_Iso_cas"
 ANS_QNAME = "Rate_modulation_experiments.ANS"
 ACH_QNAME = "Rate_modulation_experiments.ACh_cas"
 ISO_QNAME = "Rate_modulation_experiments.Iso_cas"
-# cellmlmanip's spelling of the membrane voltage, for cubie's GHK singularity rewrite.
+# The loader's raw spelling of the membrane voltage, for cubie's GHK singularity rewrite.
 VOLTAGE_RAW = "Membrane$V_ode"
 
 INDEX_BITS = 17

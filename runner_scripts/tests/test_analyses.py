@@ -213,7 +213,7 @@ class CompletenessTests(AnalysesCase):
         self.assertEqual(plots.main(["--no-sync", "--set", "golden", "--root", self.root, "--out", self.out]), 1)
         table = read_csv(os.path.join(self.out, KEY, "incomplete.csv"))
         self.assertEqual({r["package"] for r in table}, {"julia_cpu"})
-        self.assertEqual(len(table), 9)
+        self.assertEqual(len(table), 8)
         self.assertEqual(plots.main(["--no-sync", "--where", "n = 8", "--root", self.root, "--out", self.out]), 0)
 
 

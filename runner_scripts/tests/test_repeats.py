@@ -8,8 +8,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import wp_common  # noqa: E402
-from wp_common import repeat_bounds, repeats_done, timed_min_ms  # noqa: E402
+from wp_common import WATCHDOG_SECONDS, repeat_bounds, repeats_done, timed_min_ms  # noqa: E402
 
 
 class FakeRun:
@@ -32,24 +31,26 @@ class FakeRun:
 class TimerCase(unittest.TestCase):
     """timeit.default_timer is patched to the fake run's clock."""
 
-    def run_timed(self, durations_s, repeats=20):
+    def run_timed(self, durations_s, repeats=20, **kwargs):
         run = FakeRun(durations_s)
         original = timeit.default_timer
         timeit.default_timer = run.timer
         try:
-            return timed_min_ms(run, repeats)
+            return timed_min_ms(run, repeats, **kwargs)
         finally:
             timeit.default_timer = original
 
 
 class TestSingleRun(TimerCase):
-    def test_a_first_run_past_the_single_run_seconds_is_the_timing(self):
-        saved = wp_common.SINGLE_RUN_SECONDS
-        wp_common.SINGLE_RUN_SECONDS = 2.0
-        self.addCleanup(setattr, wp_common, "SINGLE_RUN_SECONDS", saved)
-        best, result, samples = self.run_timed([2.5, 0.1, 0.1])
+    def test_a_first_run_past_single_run_s_is_the_timing(self):
+        best, result, samples = self.run_timed([2.5, 0.1, 0.1], single_run_s=2.0)
         self.assertEqual((best, result, samples), (2500.0, 1, [2500.0]))
-        best, result, samples = self.run_timed([1.9] + [1.0] * 12)
+        best, result, samples = self.run_timed([1.9] + [1.0] * 12, single_run_s=2.0)
+        self.assertEqual(len(samples), 11)
+        self.assertEqual(best, 1000.0)
+
+    def test_without_a_threshold_a_long_first_run_is_the_warm_up(self):
+        best, result, samples = self.run_timed([50.0] + [1.0] * 12)
         self.assertEqual(len(samples), 11)
         self.assertEqual(best, 1000.0)
 
@@ -116,7 +117,7 @@ class TestTimedMinMs(TimerCase):
         self.assertAlmostEqual(best, 10.0)
 
     def test_breach_returns_none_with_samples(self):
-        cap = wp_common.WATCHDOG_SECONDS
+        cap = WATCHDOG_SECONDS
         best, _, samples = self.run_timed([cap + 1.0])
         self.assertIsNone(best)
         self.assertEqual(len(samples), 1)

@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode and optimize flag; declarations() expands every set file so a point's specs from all of them can merge. A grid's [grid.problems] table overrides its parameter, scale, min, max or n list for one problem. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -19,7 +19,7 @@ NAN = float("nan")
 CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces", "transfers", "build",
-            "optimize", "watchdog", "untimed")
+            "optimize", "watchdog", "single_run", "untimed")
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
@@ -32,7 +32,8 @@ SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
              "dt_min", "dt_max", "atol", "rtol", "gains", "newton_atol", "newton_rtol",
              "package")
-EXTRA_KEYS = ("transfers", "finals", "traces", "build", "optimize", "watchdog_s", "timed", "set", "stepping")
+EXTRA_KEYS = ("transfers", "finals", "traces", "build", "optimize", "watchdog_s", "single_run_s", "timed", "set",
+              "stepping")
 
 
 class SetError(ValueError):
@@ -90,7 +91,7 @@ def load_set(name, sets_dir=SETS_DIR):
     head.setdefault("algorithms", "all")
     head.setdefault("precision", "float32")
     head.setdefault("finals", False)
-    head.setdefault("traces", [])
+    head.setdefault("traces", False)
     head.setdefault("transfers", ["both", "none"])
     head.setdefault("build", "warm")
     head["packages"] = _name_list(head["packages"], PACKAGES, path + " packages")
@@ -103,10 +104,8 @@ def load_set(name, sets_dir=SETS_DIR):
         raise SetError(path + ": precision must be float32 or float64")
     if not isinstance(head["finals"], bool):
         raise SetError(path + ": finals must be true or false")
-    if head["traces"] != []:
-        head["traces"] = _name_list(head["traces"], problems, path + " traces")
-        if head["traces"] == "all":
-            head["traces"] = list(problems)
+    if not isinstance(head["traces"], bool):
+        raise SetError(path + ": traces must be true or false")
     if head["transfers"] not in (["both"], ["none"], ["both", "none"], ["none", "both"]):
         raise SetError(path + ": transfers must list both and/or none")
     if head["build"] not in ("warm", "cold"):
@@ -116,6 +115,11 @@ def load_set(name, sets_dir=SETS_DIR):
     if isinstance(watchdog, bool) or not isinstance(watchdog, (int, float)) or not watchdog > 0:
         raise SetError(path + ": watchdog must be a positive number of seconds")
     head["watchdog"] = float(watchdog)
+    head.setdefault("single_run", math.inf)
+    single_run = head["single_run"]
+    if isinstance(single_run, bool) or not isinstance(single_run, (int, float)) or not single_run > 0:
+        raise SetError(path + ": single_run must be a positive number of seconds")
+    head["single_run"] = float(single_run)
     optimize = head.get("optimize")
     if optimize is not None:
         where = path + " [set.optimize]"
@@ -133,6 +137,8 @@ def load_set(name, sets_dir=SETS_DIR):
         _check_keys(untimed, UNTIMED_KEYS, where)
         untimed.setdefault("packages", "all")
         untimed["packages"] = _name_list(untimed["packages"], PACKAGES, where + " packages")
+        if untimed["packages"] == "all":
+            untimed["packages"] = list(PACKAGES)
     head["untimed"] = untimed
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
@@ -152,10 +158,7 @@ def load_set(name, sets_dir=SETS_DIR):
         for problem, overrides in grid["problems"].items():
             if problem not in problems:
                 raise SetError("{0}: unknown problem '{1}' in overrides".format(where, problem))
-            _check_keys(overrides, GRID_FIELDS + ("n",), where + " problems." + problem)
-            if "n" in overrides and (not isinstance(overrides["n"], list)
-                                     or not all(isinstance(v, int) and v >= 2 for v in overrides["n"])):
-                raise SetError("{0} problems.{1}: n must be a list of integers >= 2".format(where, problem))
+            _check_keys(overrides, GRID_FIELDS, where + " problems." + problem)
     for index, stepping in enumerate(steppings):
         where = "{0} [[stepping]] {1}".format(path, index + 1)
         _check_keys(stepping, STEPPING_KEYS, where)
@@ -231,14 +234,9 @@ def _grid_fields(grid, problem):
     for key in GRID_FIELDS:
         if grid[key] != "default":
             fields[key] = grid[key]
-    fields.update({k: v for k, v in grid["problems"].get(problem.name, {}).items() if k in GRID_FIELDS})
+    fields.update(grid["problems"].get(problem.name, {}))
     return (str(fields["parameter"]), str(fields["scale"]), float(fields["min"]),
             float(fields["max"]))
-
-
-def _grid_counts(grid, problem):
-    """The trajectory counts of a grid for a problem: its n list, or the per-problem override."""
-    return list(grid["problems"].get(problem.name, {}).get("n", grid["n"]))
 
 
 def _system_params(grid, problem, where):
@@ -384,6 +382,7 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
         head = loaded["set"]
         for gi, grid in enumerate(loaded["grid"]):
             gwhere = "{0} [[grid]] {1}".format(loaded["path"], gi + 1)
+            n_list = [count for count in grid["n"] if n is None or count in n]
             for si, stepping in enumerate(loaded["stepping"]):
                 swhere = "{0} [[stepping]] {1}".format(loaded["path"], si + 1)
                 kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
@@ -399,7 +398,6 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                         if problems is not None and problem.name not in problems:
                             continue
                         parameter, scale, lo, hi = _grid_fields(grid, problem)
-                        n_list = [count for count in _grid_counts(grid, problem) if n is None or count in n]
                         rows = _algorithms(package, kind, head, stepping, problem, catalogue)
                         if algorithms is not None:
                             rows = [row for row in rows if row.name in algorithms]
@@ -421,10 +419,11 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                                         spec["package"] = package
                                         spec["transfers"] = list(head["transfers"])
                                         spec["finals"] = bool(head["finals"])
-                                        spec["traces"] = problem.name in head["traces"]
+                                        spec["traces"] = bool(head["traces"])
                                         spec["build"] = head["build"]
                                         spec["optimize"] = _optimize_for(head["optimize"], package)
                                         spec["watchdog_s"] = head["watchdog"]
+                                        spec["single_run_s"] = head["single_run"]
                                         spec["timed"] = head["untimed"] is None \
                                             or package not in head["untimed"]["packages"]
                                         spec["set"] = loaded["name"]
@@ -440,13 +439,11 @@ def declarations(packages=None, problems=None, algorithms=None, n=None, sets_dir
 
 
 def declared_counts(names, sets_dir=SETS_DIR):
-    """The trajectory counts the grids of the named sets list, per-problem overrides included, sorted."""
+    """The trajectory counts the grids of the named sets list, sorted."""
     counts = set()
     for name in names:
         for grid in load_set(name, sets_dir)["grid"]:
             counts.update(grid["n"])
-            for overrides in grid["problems"].values():
-                counts.update(overrides.get("n", []))
     return sorted(counts)
 
 

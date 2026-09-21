@@ -7,7 +7,6 @@ using Random
 using StaticArrays
 using OrdinaryDiffEq
 using OrdinaryDiffEqBDF, OrdinaryDiffEqFIRK, OrdinaryDiffEqRosenbrock, OrdinaryDiffEqVerner
-using OrdinaryDiffEqAdamsBashforthMoulton
 
 include(joinpath(dirname(@__DIR__), "problems.jl"))
 include(joinpath(dirname(@__DIR__), "algorithms.jl"))
@@ -48,9 +47,8 @@ const RING_REF = [-0.2339057358486745e-1, -0.7367485485540825e-2, 0.258295670929
 
 const RHS_TRIALS = 20
 const RHS_SEED = 7
-# The Float32 twin's relative deviation limit; the Fabbri-Linder rates (1/(a + b/x), exponentials of large arguments) lose more digits in single precision than the polynomial systems.
-const TWIN_LIMIT = 1e-5
-const TWIN_LIMITS = Dict("fabbri_linder" => 1e-4)
+# The generated Fabbri-Linder system is checked by tests/test_julia_systems.jl against fabbri_export.py's derivative values instead.
+const SKIPPED = ("fabbri_linder",)
 
 "Golden-ordered final state of one Float64 solve of a problem at the swept value p; the catalogue's golden algorithm and tolerance unless given."
 function golden_final(name, p; algorithm = nothing, tol = nothing)
@@ -72,11 +70,11 @@ lorenz96_cross_check() = maximum(abs.(golden_final("lorenz96", 8.0) .-
 
 "Unknown positions of the Float64 system in the Float32 system's order."
 function _unknown_permutation(system64, system32)
-    names32 = unknown_names(system32)
-    return [findfirst(==(name), names32) for name in unknown_names(system64)]
+    names32 = string.(unknowns(system32.sys))
+    return [findfirst(==(name), names32) for name in string.(unknowns(system64.sys))]
 end
 
-"Worst relative deviation of the Float32 right-hand side from the Float64 one at RHS_TRIALS Float32-representable states around the consistent u0 (5% of each state, 0.05 where it is zero, so a concentration or gate stays in its own range), 30% into the window, scaled by max(|du|, 1)."
+"Worst relative deviation of the Float32 right-hand side from the Float64 one at RHS_TRIALS Float32-representable states around the consistent u0, 30% into the window, scaled by max(|du|, 1)."
 function rhs_twin_deviation(name)
     row = get_problem(name)
     system64 = julia_system(name, Float64)
@@ -90,8 +88,7 @@ function rhs_twin_deviation(name)
     worst = 0.0
     for _ in 1:RHS_TRIALS
         u32 = zeros(Float32, system32.n)
-        noise = randn(rng, system64.n)
-        u32[perm] .= Float32.(base .* (1.0 .+ 0.05 .* noise) .+ 0.05 .* noise .* (base .== 0.0))
+        u32[perm] .= Float32.(base .+ 0.05 .* randn(rng, system64.n))
         u64 = Float64.(u32[perm])
         du64 = Vector(system64.rhs(SVector{system64.n, Float64}(u64), SVector{1, Float64}(Float64(p32)),
             Float64(t32)))
@@ -127,8 +124,8 @@ function reference_checks()
     ]
     for row in load_problems()
         name = row["problem"]
-        push!(checks, ("$(name) Float32 rhs vs Float64 rhs (relative)", () -> rhs_twin_deviation(name),
-            get(TWIN_LIMITS, name, TWIN_LIMIT)))
+        name in SKIPPED && continue
+        push!(checks, ("$(name) Float32 rhs vs Float64 rhs (relative)", () -> rhs_twin_deviation(name), 1e-5))
         for T in (Float32, Float64)
             push!(checks, ("$(name) $(T) rhs! bytes allocated", () -> rhs_allocation(name, T), 0))
         end

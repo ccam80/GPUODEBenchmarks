@@ -354,7 +354,7 @@ def _nand_gate(problem, precision, name):
 
 
 def _fabbri_linder(problem, precision, name):
-    """The Fabbri-Linder human SAN model from its CellML file (cellmlmanip through cubie's loader, the GHK singularity rewritten at the membrane voltage) with the cAMP cascade switched on and the two analogue inputs as parameters; the grid maps onto them through fabbri.parameters."""
+    """The Fabbri-Linder human SAN model from its CellML file (cubie's loader, the GHK singularity rewritten at the membrane voltage) with the cAMP cascade switched on and the two analogue inputs as parameters; the grid maps onto them through fabbri.parameters."""
     from cubie import load_cellml_model
     system = load_cellml_model(fabbri.MODEL_PATH, precision=precision, name=name,
                                parameters=[fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER],

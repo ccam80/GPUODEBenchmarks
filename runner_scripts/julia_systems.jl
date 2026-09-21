@@ -10,9 +10,6 @@ using SciMLBase: ODEFunction, ODEProblem
 include(joinpath(@__DIR__, "fabbri.jl"))
 include(joinpath(@__DIR__, "generated", "fabbri_linder_rhs.jl"))
 
-"The unknown names of an entry in its own order: the ModelingToolkit unknowns, or the generated system's state list."
-unknown_names(system) = system.sys === nothing ? system.names : string.(unknowns(system.sys))
-
 "Unknown-order values for a symbolic->value map in T; absent unknowns get zero."
 function _ordered_values(sys, valmap, ::Type{T}) where {T}
     entries = collect(valmap)

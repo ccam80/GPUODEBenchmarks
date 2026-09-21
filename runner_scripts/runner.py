@@ -3,6 +3,7 @@
 import argparse
 import gc
 import json
+import math
 import os
 import sys
 import timeit
@@ -48,6 +49,11 @@ def failure_reason(outcome, exc=None, elapsed_s=None, cap_s=None):
 def budget_of(trial):
     """The trial's watchdog soft cap in seconds."""
     return float(trial.get("watchdog_s", WATCHDOG_SECONDS))
+
+
+def single_run_of(trial):
+    """Seconds past which the trial's first run is its timing; inf when the trial sets none."""
+    return float(trial.get("single_run_s", math.inf))
 
 
 def write_progress(path, trial, stage):
@@ -145,7 +151,7 @@ class Runner:
         setup = None if reset is None else (lambda: reset(build, trial, values, transfers))
         try:
             best, result, samples = timed_min_ms(run, self.repeats, on_breach=breach, setup=setup,
-                                                 cap_s=budget_of(trial))
+                                                 cap_s=budget_of(trial), single_run_s=single_run_of(trial))
         except Exception as exc:  # noqa: BLE001 - every failure is a row
             return classify(exc), NAN, [], None, exc, NAN
         if best is None:

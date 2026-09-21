@@ -9,7 +9,6 @@ if !isdefined(@__MODULE__, :PROTOCOL)
     const REPEAT_SCHEDULE = Tuple((Float64(row[1]), Int(row[2]), Int(row[3]))
                                   for row in PROTOCOL["repeats"]["schedule"])
     const REPEAT_SPREAD = Float64(PROTOCOL["repeats"]["spread"])
-    const SINGLE_RUN_SECONDS = Float64(PROTOCOL["repeats"]["single_run_seconds"])
 
     const WATCHDOG_SECONDS = Float64(PROTOCOL["watchdog"]["seconds"])
     const WATCHDOG_EXIT_CODE = Cint(PROTOCOL["watchdog"]["exit_code"])
