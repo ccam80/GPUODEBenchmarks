@@ -144,12 +144,10 @@ class Windows(unittest.TestCase):
         samples = self.log([(0.0, 2400, 0), (1.0, 2500, 0), (2.0, 2600, 0)])
         self.assertEqual(clocks.window_stats(samples, self.at(0.0), self.at(2.0))["clock_sm_mhz"], 2500.0)
 
-    def test_idle_samples_alone_give_nan_clocks_and_an_empty_log_gives_none(self):
-        samples = self.log([(0.0, 210, 1, 0), (0.1, 210, 1, 0)])
+    def test_idle_samples_alone_give_their_own_clocks_and_an_empty_log_gives_none(self):
+        samples = self.log([(0.0, 2280, 1, 0), (0.1, 2260, 1, 0)])
         stats = clocks.window_stats(samples, self.at(0.0), self.at(0.1))
-        self.assertNotEqual(stats["clock_sm_mhz"], stats["clock_sm_mhz"])
-        self.assertNotEqual(stats["clock_sm_min_mhz"], stats["clock_sm_min_mhz"])
-        self.assertEqual(stats["clock_throttled"], 0)
+        self.assertEqual(stats, {"clock_sm_mhz": 2270.0, "clock_sm_min_mhz": 2260.0, "clock_throttled": 0})
         self.assertIsNone(clocks.window_stats(self.log([]), self.at(0.0), self.at(1.0)))
         self.assertEqual(clocks.load_samples(os.path.join(self.tmp, "absent.csv"))["t"], [])
 
