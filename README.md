@@ -103,7 +103,8 @@ states, julia_cpu integrates `runner_scripts/generated/fabbri_linder_rhs.jl`
 `traces = true` also solves the first 1024 points of every run untimed and
 keeps every state at the `[traces]` sample times of `protocol.toml` in
 `traces/<trial_id>.parquet`; the error is the RMS over every sample and
-state against the golden's traces. A set with `single_run = <seconds>`
+state against the golden's traces, over the trajectories that neither side
+flags with a failure code or a non-finite sample. A set with `single_run = <seconds>`
 takes a first run past that long as the timing, with no warm-up or repeats.
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
@@ -131,7 +132,7 @@ A cubie row's `compile` column is `optimized`, `unoptimized` or
 ## Data and analyses
 
 Rows live in `data/key=<key>/package=<pkg>/results/<problem>__<algorithm>.parquet`,
-finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), traces in `traces/<trial_id>.parquet` (the first 1024 trajectories at every sample time, one row per trajectory and sample), and the whole tree reads
+finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), traces in `traces/<trial_id>.parquet` (the first 1024 trajectories at every sample time, one row per trajectory and sample, each carrying its trajectory's failure code), and the whole tree reads
 as one DuckDB table:
 
 ```

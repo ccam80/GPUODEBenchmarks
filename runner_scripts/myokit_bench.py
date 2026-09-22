@@ -284,12 +284,12 @@ class Build:
                                           *self.resident)
 
     def trace(self, trial, values):
-        """States of the given grid points at every sample time, (cells, samples, states) in reference order."""
+        """(states, retcode) of the given grid points: every sample time as (cells, samples, states) in reference order, and an empty code per cell since the kernel reports no failure code."""
         initial, diffusion = self.inputs(values)
         samples = self.model.trace(float(trial["dt"]), steps_per_sample(trial["dt"]), TRACE_SAMPLES, initial, diffusion)
         if self.columns is not None:
             samples = np.ascontiguousarray(samples[:, :, self.columns])
-        return samples
+        return samples, [""] * samples.shape[0]
 
     def restore(self, n):
         """Put the initial states back into the resident buffer of this n, on the device."""

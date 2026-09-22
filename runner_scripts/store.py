@@ -493,8 +493,8 @@ class Store:
 
     traces_readable = finals_readable
 
-    def record_traces(self, spec, states):
-        """Write traces/<trial_id>.parquet of a trial from states[n, TRACE_SAMPLES, k] over the first n <= TRACE_ROWS grid points, in the run precision, one row per (traj, sample) with the sample time; returns the path relative to the package dir."""
+    def record_traces(self, spec, states, retcode=None):
+        """Write traces/<trial_id>.parquet of a trial from states[n, TRACE_SAMPLES, k] over the first n <= TRACE_ROWS grid points, in the run precision, one row per (traj, sample) with the sample time and the trajectory's failure code text (empty on success or when the package reports none); returns the path relative to the package dir."""
         ident = spec_of(spec, FINALS_FIELDS)
         dtype = np.float64 if ident["precision"] == "float64" else np.float32
         states = np.asarray(states, dtype=dtype)
@@ -503,6 +503,11 @@ class Store:
         if not 1 <= states.shape[0] <= min(TRACE_ROWS, ident["n"]):
             raise ValueError("traces has {0} trajectories for n = {1}".format(states.shape[0], ident["n"]))
         n, m, k = states.shape
+        if retcode is None:
+            retcode = [""] * n
+        retcode = [_text(code) for code in retcode]
+        if len(retcode) != n:
+            raise ValueError("retcode has one code per traced trajectory")
         columns = {"traj": pa.array(np.repeat(np.arange(n, dtype=np.int32), m), pa.int32()),
                    "sample": pa.array(np.tile(np.arange(1, m + 1, dtype=np.int32), n), pa.int32()),
                    "t": pa.array(np.tile(trace_times(), n), pa.float64())}
@@ -510,13 +515,14 @@ class Store:
         flat = states.reshape(n * m, k)
         for j in range(k):
             columns["s{0}".format(j + 1)] = pa.array(flat[:, j], arrow_type)
+        columns["retcode"] = pa.array(np.repeat(np.asarray(retcode, dtype=object), m), pa.string())
         relative = traces_name(ident)
         _write_parquet(os.path.join(self.package_dir(ident["package"], ident["key"]), *relative.split("/")),
                        pa.table(columns))
         return relative
 
     def load_traces(self, package, key, relative):
-        """(traj int32[n], times float64[m], states [n, m, k] in the stored precision) of a traces file by its package-relative path."""
+        """(traj int32[n], times float64[m], states [n, m, k] in the stored precision, retcode str[n]) of a traces file by its package-relative path; a file written before the retcode column reads every code empty."""
         table = pq.read_table(os.path.join(self.package_dir(package, key), *relative.split("/")))
         names = [c for c in table.column_names if c[0] == "s" and c[1:].isdigit()]
         names.sort(key=lambda c: int(c[1:]))
@@ -530,7 +536,12 @@ class Store:
             else np.zeros((table.num_rows, 0), dtype)
         states = flat[order].reshape(ids.shape[0], m, len(names)).astype(dtype)
         times = table.column("t").to_numpy()[order][:m]
-        return ids.astype(np.int32), times.astype(np.float64), states
+        if "retcode" in table.column_names:
+            codes = np.asarray(table.column("retcode").to_pylist(), dtype=object)[order][::m] if m \
+                else np.zeros(0, dtype=object)
+        else:
+            codes = np.full(ids.shape[0], "", dtype=object)
+        return ids.astype(np.int32), times.astype(np.float64), states, codes
 
     def load_finals(self, package, key, relative):
         """(traj int32[m], states [m, k] in the stored precision, t_final float64[m], retcode str[m]) of a finals file by its package-relative path."""
@@ -718,6 +729,7 @@ def _cli(argv):
     traces.add_argument("--samples", type=int, required=True)
     traces.add_argument("--states", dest="state_count", type=int, required=True)
     traces.add_argument("--dtype", choices=("f32", "f64"), required=True)
+    traces.add_argument("--retcode", default=None, help="a UTF-8 file of one failure code per traced trajectory")
     status = commands.add_parser("status")
     status.add_argument("run_id")
     query = commands.add_parser("query")
@@ -747,7 +759,11 @@ def _cli(argv):
     if args.command == "traces":
         dtype = np.float64 if args.dtype == "f64" else np.float32
         states = np.fromfile(args.states, dtype=dtype).reshape(-1, args.samples, args.state_count)
-        print(store.record_traces(_read_json(args.spec), states))
+        retcode = None
+        if args.retcode is not None:
+            with open(args.retcode, encoding="utf-8") as handle:
+                retcode = handle.read().split("\n")[:states.shape[0]]
+        print(store.record_traces(_read_json(args.spec), states, retcode))
         return 0
     if args.command == "status":
         print(store.status(args.run_id))

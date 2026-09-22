@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_nan_vs_runtime (percent of traced trajectories with a NaN, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is drawn with a black cross over its marker. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_nan_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is drawn with a black cross over its marker. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
 """
 
 import math
@@ -25,9 +25,9 @@ CONTEXT_FIELDS = tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package",
 ALL_CARDS = "all_cards"
 LIMITED_DIR = "limited_data"
 LIMITED_POINTS = 3
-GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_nan_vs_runtime", "states")
+GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime", "states")
 # The kinds that also draw every algorithm of a problem on one axis, <problem>.png.
-COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_nan_vs_runtime")
+COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime")
 ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
                      "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
                      "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
@@ -55,8 +55,8 @@ KINDS = (
          "Time (s)", ERROR_LABEL, "Work-precision"),
     Kind("interval_error_vs_runtime", "min_ms", "interval_error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed interval",
          "Time (s)", "Inter-beat interval error (ms)", "Interval work-precision"),
-    Kind("trace_nan_vs_runtime", "min_ms", "trace_nan_pct", STEPPING_FIELDS, GPU_PACKAGES, True, "timed nan",
-         "Time (s)", "Traced trajectories with NaN (%)", "Trace failures", log_y=False),
+    Kind("trace_errored_vs_runtime", "min_ms", "trace_errored_pct", STEPPING_FIELDS, GPU_PACKAGES, True, "timed traced",
+         "Time (s)", "Traced trajectories errored (%)", "Trace failures", log_y=False),
     Kind("error_vs_dt", "dt", "error", ("dt",), store_mod.PACKAGES, False, "fixed error",
          "dt", ERROR_LABEL, "Error against step size", invert_x=True),
     Kind("error_vs_tol", "atol", "error", STEPPING_FIELDS, store_mod.PACKAGES, False, "adaptive error",
@@ -68,7 +68,7 @@ BUILDS = Kind("builds", "states", "build_s", ("system_params",), GPU_PACKAGES, F
               "States", "Compile time (s)", "State size")
 KIND_NAMES = tuple(k.name for k in KINDS)
 CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfers", "x", "y",
-               "min_ms", "build_s", "error", "interval_error", "trace_nan_pct", "errored_pct", "key") + \
+               "min_ms", "build_s", "error", "interval_error", "trace_errored_pct", "errored_pct", "key") + \
     tuple(f for f in store_mod.TRIAL_FIELDS if f not in ("package", "algorithm", "controller")) + \
     ("run_id", "trial_id", "group_id", "states", "reason", "finals", "traces")
 
@@ -76,9 +76,9 @@ CSV_COLUMNS = ("kind", "algorithm", "series", "package", "controller", "transfer
 # ------------------------------------------------------------------ rows
 
 def with_errors(rows, errs):
-    """Every row, with its `error`, `interval_error` and `trace_nan_pct` against the golden (NaN without finals or traces, or without a golden) and `controller_kind`; a row over the errored limit stays and is drawn crossed out."""
+    """Every row, with its `error`, `interval_error` and `trace_errored_pct` against the golden (NaN without finals or traces, or without a golden) and `controller_kind`; a row over the errored limit stays and is drawn crossed out."""
     return [dict(row, error=errs.error(row), interval_error=errs.interval_error(row),
-                 trace_nan_pct=errs.trace_nan_pct(row), controller_kind=shared.controller_kind(row)) for row in rows]
+                 trace_errored_pct=errs.trace_errored_pct(row), controller_kind=shared.controller_kind(row)) for row in rows]
 
 
 def one_per_trial(rows):
@@ -108,7 +108,7 @@ def takes(kind, row):
         return False
     if "interval" in kind.needs and not errors_mod.is_finite_positive(row["interval_error"]):
         return False
-    if "nan" in kind.needs and not math.isfinite(shared.number(row["trace_nan_pct"])):
+    if "traced" in kind.needs and not math.isfinite(shared.number(row["trace_errored_pct"])):
         return False
     if "timed" in kind.needs and not shared.timed(row):
         return False

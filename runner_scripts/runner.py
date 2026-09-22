@@ -1,4 +1,4 @@
-"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)`, `finals(build, result)` and, for a package that traces, `trace(build, trial, values)` (states[n, TRACE_SAMPLES, k] over the given grid points), plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt. A cold line that optimizes runs its optimize on a warm build first, so its timed cold build compiles the optimized kernel once in a fresh cache. `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
+"""The runner loop shared by the Python packages: a trial file in, one store row per trial and transfers out. A package supplies an adapter with `version()`, `states(trial)`, `build(trial, cold)`, `compile(build, trial, values)`, `optimize(build, trial)` (returns a text for the log), `solve(build, trial, values, transfers)`, `finals(build, result)` and, for a package that traces, `trace(build, trial, values)` ((states[n, TRACE_SAMPLES, k], retcode[n]) over the given grid points, each code the failure text of its trajectory and empty on success), plus a `controllers` tuple and an optional `reset(build, trial, values, transfers)` that runs untimed before every attempt. A cold line that optimizes runs its optimize on a warm build first, so its timed cold build compiles the optimized kernel once in a fresh cache. `main(argv, make_adapter)` is the `--trials <path> [--floor]` entry."""
 
 import argparse
 import gc
@@ -186,10 +186,10 @@ class Runner:
             return ""
         write_progress(self.progress_path, trial, "trace")
         points = values[:TRACE_ROWS]
-        states = watchdogged(lambda: self.adapter.trace(build, trial, points), "trace " + label(trial),
-                             budget_of(trial) + 30.0)
+        states, retcode = watchdogged(lambda: self.adapter.trace(build, trial, points), "trace " + label(trial),
+                                      budget_of(trial) + 30.0)
         spec = {field: trial[field] for field in store_mod.TRIAL_FIELDS}
-        return self.store.record_traces(dict(spec, key=self.key), states)
+        return self.store.record_traces(dict(spec, key=self.key), states, retcode)
 
     def run_solve(self, build, trial, history, build_s):
         values = grid_mod.grid(trial)

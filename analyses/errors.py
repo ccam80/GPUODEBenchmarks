@@ -1,4 +1,4 @@
-"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored, over the finals, or over every sample of the traces when both rows carry them (a trajectory with a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; interval_error() is the mean absolute inter-beat interval error of the traced first state against the golden's in ms, trace_nan_pct() the percent of traced trajectories with a NaN."""
+"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored, over the finals, or over every sample of the traces when both rows carry them (a trajectory with a failure code or a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; interval_error() is the mean absolute inter-beat interval error of the traced first state against the golden's in ms, trace_errored_pct() the percent of traced trajectories errored."""
 
 import math
 import os
@@ -66,14 +66,14 @@ class Errors:
         return self._finals[ident]
 
     def traces(self, row):
-        """(grid values float32[m], states [m, samples, k] in the stored precision, errored bool[m]) of a row's traces, loaded afresh on every call and never kept; a trajectory with a non-finite sample is errored."""
+        """(grid values float32[m], states [m, samples, k] in the stored precision, errored bool[m]) of a row's traces, loaded afresh on every call and never kept; a trajectory with a failure code or a non-finite sample is errored."""
         relative = row.get("traces") or ""
         if not relative:
             raise ValueError("no traces on " + _name(row))
-        traj, _, states = self.store.load_traces(row["package"], row["key"], relative)
+        traj, _, states, retcode = self.store.load_traces(row["package"], row["key"], relative)
         values = grid.grid_values(row["grid_scale"], row["grid_min"], row["grid_max"],
                                   row["n"], row.get("grid_dtype", "float32"))
-        errored = ~np.isfinite(states).all(axis=(1, 2))
+        errored = ~np.isfinite(states).all(axis=(1, 2)) | np.array([bool(code) for code in retcode], dtype=bool)
         return values[traj], states, errored
 
     def paired(self, a, b, traced=False):
@@ -117,7 +117,7 @@ class Errors:
         return _peak_times(self.traces(row))
 
     def trace_metrics(self, row):
-        """(rms, interval_error_ms, nan_pct) of a traced row against its golden, computed once with the row's and the golden's traces loaded together and dropped after; raises when the golden has no traces."""
+        """(rms, interval_error_ms, errored_pct) of a traced row against its golden, computed once with the row's and the golden's traces loaded together and dropped after; raises when the golden has no traces."""
         ident = (row["package"], row["key"], row["traces"])
         if ident not in self._metrics:
             golden = self.golden_of(row)
@@ -125,12 +125,12 @@ class Errors:
                 raise ValueError("no traced golden for " + _name(row))
             loaded = self.traces(row)
             loaded_golden = self.traces(golden)
-            nan_pct = 100.0 * float(loaded[2].mean()) if loaded[2].shape[0] else NAN
-            self._metrics[ident] = (_rms(loaded, loaded_golden), _interval_error(loaded, loaded_golden), nan_pct)
+            errored_pct = 100.0 * float(loaded[2].mean()) if loaded[2].shape[0] else NAN
+            self._metrics[ident] = (_rms(loaded, loaded_golden), _interval_error(loaded, loaded_golden), errored_pct)
         return self._metrics[ident]
 
-    def trace_nan_pct(self, row):
-        """Percent of a row's traced trajectories with a non-finite sample; NaN without traces."""
+    def trace_errored_pct(self, row):
+        """Percent of a row's traced trajectories with a failure code or a non-finite sample; NaN without traces."""
         return self.trace_metrics(row)[2] if _has_traces(row) else NAN
 
     def interval_error(self, row):

@@ -231,8 +231,9 @@ class TraceTests(AdapterCase):
         leg = self.adapter.build(trial(n=4))
         record = trial(n=4)
         self.adapter.solve(leg, record, self.values(4), "both")
-        states = self.adapter.trace(leg, record, self.values(4))
+        states, retcode = self.adapter.trace(leg, record, self.values(4))
         self.assertEqual(states.shape, (4, TRACE_SAMPLES, 3))
+        self.assertEqual(retcode, [""] * 4)
         tracer = leg.trace_solver
         self.assertIsNot(tracer, leg.solver)
         self.assertEqual(tracer.kwargs["save_every"], TRACE_EVERY_S)
@@ -241,13 +242,12 @@ class TraceTests(AdapterCase):
         # The initial save is dropped; sample s of run r, variable v is v * n + r + s.
         self.assertEqual(states[1, 0, 2], 2 * 4 + 1 + 1)
         self.assertEqual(states[3, -1, 0], 3 + TRACE_SAMPLES)
-        self.assertTrue(np.isfinite(states).all())
         self.assertEqual(len(FakeSolver.made), 2)
-        # A run with a failure status is NaN at every sample; the others keep their states.
-        tracer.codes = [0, 8, 0, 3]
-        states = self.adapter.trace(leg, record, self.values(4))
-        self.assertTrue(np.isnan(states[[1, 3]]).all())
-        self.assertTrue(np.isfinite(states[[0, 2]]).all())
+        # A run with a failure status carries its flags beside states left as the solve wrote them.
+        tracer.codes = [0, 8, 0, 2 | 256]
+        failed, retcode = self.adapter.trace(leg, record, self.values(4))
+        self.assertEqual(retcode, ["", "STEP_TOO_SMALL", "", "MAX_NEWTON_ITERATIONS_EXCEEDED|NEWTON_DIVERGENCE"])
+        np.testing.assert_array_equal(failed, states)
         tracer.codes = None
         # A changed stepping drops the trace solver with the kernel; close closes both.
         self.adapter.solve(leg, trial(n=4, dt=2.0 ** -11), self.values(4), "both")

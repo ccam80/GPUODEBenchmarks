@@ -129,20 +129,26 @@ function store_finals(spec, finals::AbstractMatrix, t_final; retcode = nothing, 
     end
 end
 
-"Write the traces file of a trial from states[k, m, n] (state, sample, trajectory) in T; returns traces/<trial_id>.parquet relative to the package dir."
-function store_traces(spec, states::AbstractArray{T, 3}; root = nothing) where {T}
+"Write the traces file of a trial from states[k, m, n] (state, sample, trajectory) in T and retcode, each trajectory's failure code text, empty on success; returns traces/<trial_id>.parquet relative to the package dir."
+function store_traces(spec, states::AbstractArray{T, 3}; retcode = nothing, root = nothing) where {T}
+    codes = retcode === nothing ? fill("", size(states, 3)) : string.(retcode)
+    length(codes) == size(states, 3) ||
+        throw(ArgumentError("retcode has one code per traced trajectory"))
     bin_path = tempname() * ".bin"
+    codes_path = tempname() * ".txt"
     open(bin_path, "w") do io
         write(io, states)
     end
+    write(codes_path, join(codes, "\n"))
     dtype = T === Float64 ? "f64" : "f32"
     try
         return _with_spec_file(spec, STORE_FINALS_FIELDS) do spec_path
             String(strip(read(_store_cmd(["traces", spec_path, bin_path, "--samples", string(size(states, 2)),
-                "--states", string(size(states, 1)), "--dtype", dtype]; root = root), String)))
+                "--states", string(size(states, 1)), "--dtype", dtype, "--retcode", codes_path]; root = root), String)))
         end
     finally
         rm(bin_path; force = true)
+        rm(codes_path; force = true)
     end
 end
 

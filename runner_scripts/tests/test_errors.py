@@ -195,8 +195,8 @@ class GoldenLookupTests(ErrorsCase):
         self.assertEqual(len(errs.goldens()), 2)
         self.assertEqual(errs.golden_of(self.sweep())["run_id"], current["run_id"])
 
-    def traced(self, fields, stretch, drop_peak=(), errored=()):
-        """Record a row whose traced first state is sin(4 pi t stretch) over the first 8 grid points: peaks at t = 0.125 and 0.625 for stretch 1; a listed trajectory loses its second peak, another is NaN throughout."""
+    def traced(self, fields, stretch, drop_peak=(), errored=(), blown=()):
+        """Record a row whose traced first state is sin(4 pi t stretch) over the first 8 grid points: peaks at t = 0.125 and 0.625 for stretch 1; a drop_peak trajectory loses its second peak, an errored one carries a failure code over finite states, a blown one is NaN throughout."""
         times = store.trace_times()
         n = 8
         states = np.zeros((n, times.shape[0], 3))
@@ -204,15 +204,16 @@ class GoldenLookupTests(ErrorsCase):
         states[:, :, 1] = times
         for traj in drop_peak:
             states[traj, times > 0.5, 0] = -1.0
-        for traj in errored:
+        for traj in blown:
             states[traj] = np.nan
-        relative = self.store.record_traces(fields, states)
+        retcode = ["STEP_TOO_SMALL" if traj in errored else "" for traj in range(n)]
+        relative = self.store.record_traces(fields, states, retcode)
         return self.store.record(dict(fields, states=3, traces=relative, errored_pct=0.0))
 
     def test_interval_error_is_the_mean_absolute_interval_error_over_the_goldens_intervals(self):
         golden = self.traced(golden_spec(), 1.0)
         run = self.traced(spec(grid_max=grid.grid_point("linear", 0.0, 21.0, N_GOLDEN, N_SWEEP - 1)),
-                          1.0 / 1.02, drop_peak=(3,), errored=(4,))
+                          1.0 / 1.02, drop_peak=(3,), errored=(4,), blown=(5,))
         errs = errors.Errors(self.store)
         self.assertEqual(errs.golden_of(run)["run_id"], golden["run_id"])
         _, peaks, errored = errs.peak_times(golden)
@@ -220,14 +221,15 @@ class GoldenLookupTests(ErrorsCase):
         self.assertEqual([len(p) for p in peaks], [2] * 8)
         _, peaks, errored = errs.peak_times(run)
         np.testing.assert_allclose(peaks[0], [0.1275, 0.6375], atol=2e-4)
-        self.assertEqual((len(peaks[3]), len(peaks[4]), bool(errored[4])), (1, 0, True))
+        self.assertEqual((len(peaks[3]), len(peaks[4]), len(peaks[5])), (1, 0, 0))
+        self.assertEqual(list(errored), [False] * 4 + [True, True] + [False] * 2)
         # Golden intervals [125, 500, 375] ms against [127.5, 510, 362.5]: 25 ms over three intervals per trajectory;
-        # trajectory 3 has [127.5, 872.5], so 2.5 + 372.5 + the unmatched 375; trajectory 4 is errored and left out.
-        self.assertAlmostEqual(errs.interval_error(run), (6 * 25.0 + 750.0) / (7 * 3), delta=0.2)
-        self.assertAlmostEqual(errs.trace_nan_pct(run), 12.5)
-        self.assertEqual(errs.trace_nan_pct(golden), 0.0)
+        # trajectory 3 has [127.5, 872.5], so 2.5 + 372.5 + the unmatched 375; the coded 4 and the NaN 5 are left out.
+        self.assertAlmostEqual(errs.interval_error(run), (5 * 25.0 + 750.0) / (6 * 3), delta=0.2)
+        self.assertAlmostEqual(errs.trace_errored_pct(run), 25.0)
+        self.assertEqual(errs.trace_errored_pct(golden), 0.0)
         self.assertTrue(math.isnan(errs.interval_error(self.sweep())))
-        self.assertTrue(math.isnan(errs.trace_nan_pct(self.sweep())))
+        self.assertTrue(math.isnan(errs.trace_errored_pct(self.sweep())))
         self.assertTrue(math.isnan(errs.interval_error(dict(run, traces=""))))
 
     def test_a_traced_row_without_a_traced_golden_raises(self):
