@@ -223,8 +223,7 @@ class GoldenLookupTests(ErrorsCase):
         np.testing.assert_allclose(peaks[0], [0.1275, 0.6375], atol=2e-4)
         self.assertEqual((len(peaks[3]), len(peaks[4]), len(peaks[5])), (1, 0, 0))
         self.assertEqual(list(errored), [False] * 4 + [True, True] + [False] * 2)
-        # Golden intervals [125, 500, 375] ms against [127.5, 510, 362.5]: 25 ms over three intervals per trajectory;
-        # trajectory 3 has [127.5, 872.5], so 2.5 + 372.5 + the unmatched 375; the coded 4 and the NaN 5 are left out.
+        # 25 ms per good trajectory, 750 ms for trajectory 3; the coded 4 and the NaN 5 are left out.
         self.assertAlmostEqual(errs.interval_error(run), (5 * 25.0 + 750.0) / (6 * 3), delta=0.2)
         self.assertAlmostEqual(errs.trace_errored_pct(run), 25.0)
         self.assertEqual(errs.trace_errored_pct(golden), 0.0)
