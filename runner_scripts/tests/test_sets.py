@@ -176,10 +176,15 @@ class ShippedSetTests(unittest.TestCase):
             self.assertEqual(np.isnan(spec["newton_atol"]), not row["newton"], (spec["package"], spec["algorithm"]))
             self.assertEqual(np.isnan(spec["newton_rtol"]), not row["newton"], (spec["package"], spec["algorithm"]))
 
-    def test_no_shipped_set_pins_dt_min_or_dt_max(self):
+    def test_only_the_fabbri_sets_pin_dt_min_and_dt_max(self):
         for name, specs in self.expanded.items():
-            for field in ("dt_min", "dt_max"):
-                self.assertTrue(all(np.isnan(s[field]) for s in specs), (name, field))
+            adaptive = [s for s in specs if s["controller"] != "fixed"]
+            fixed = [s for s in specs if s["controller"] == "fixed"]
+            if name in ("fabbri_linder", "fabbri_perf"):
+                self.assertEqual({(s["dt_min"], s["dt_max"]) for s in adaptive}, {(1e-14, 0.1)}, name)
+            else:
+                self.assertTrue(all(np.isnan(s["dt_min"]) and np.isnan(s["dt_max"]) for s in adaptive), name)
+            self.assertTrue(all(np.isnan(s["dt_min"]) and np.isnan(s["dt_max"]) for s in fixed), name)
 
     def test_states_counts(self):
         specs = self.expanded["states"]

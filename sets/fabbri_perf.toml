@@ -36,7 +36,7 @@ algorithms = ["kvaerno3", "rosenbrock23_sciml", "tsit5"]
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
-dt_min = "none"
-dt_max = "none"
+dt_min = 1.0e-14
+dt_max = 1.0e-1
 newton = "tol"
 gains = {}
