@@ -102,8 +102,8 @@ class ShippedSetTests(unittest.TestCase):
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
     def test_the_six_sets_ship(self):
-        self.assertEqual(sets.set_names(), ["fabbri_golden", "fabbri_linder", "fabbri_perf", "golden", "golden_grid",
-                                            "perf", "states"])
+        self.assertEqual(sets.set_names(), ["fabbri_euler", "fabbri_golden", "fabbri_linder", "fabbri_perf", "golden",
+                                            "golden_grid", "perf", "states"])
 
     def test_perf_counts(self):
         specs = self.expanded["perf"]
@@ -181,7 +181,7 @@ class ShippedSetTests(unittest.TestCase):
             adaptive = [s for s in specs if s["controller"] != "fixed"]
             fixed = [s for s in specs if s["controller"] == "fixed"]
             if name in ("fabbri_linder", "fabbri_perf"):
-                self.assertEqual({(s["dt_min"], s["dt_max"]) for s in adaptive}, {(1e-14, 0.1)}, name)
+                self.assertEqual({(s["dt_min"], s["dt_max"]) for s in adaptive}, {(1e-9, 0.1)}, name)
             else:
                 self.assertTrue(all(np.isnan(s["dt_min"]) and np.isnan(s["dt_max"]) for s in adaptive), name)
             self.assertTrue(all(np.isnan(s["dt_min"]) and np.isnan(s["dt_max"]) for s in fixed), name)
@@ -312,25 +312,33 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["n"] for s in specs}, {FABBRI_N})
         self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
         self.assertEqual({(s["finals"], s["traces"]) for s in specs}, {(False, True)})
-        self.assertEqual({s["watchdog_s"] for s in specs}, {1800.0})
+        self.assertEqual({s["watchdog_s"] for s in specs}, {200.0})
         self.assertEqual({s["single_run_s"] for s in specs}, {30.0})
-        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 124, "myokit_cuda": 5})
-        euler = sorted({s["dt"] for s in specs if s["algorithm"] == "euler"})
-        self.assertEqual(euler, [2.5e-7, 1e-6, 5e-6, 2e-5, 1e-4])
-        self.assertEqual({s["dt"] for s in specs if s["package"] == "myokit_cuda"}, set(euler))
-        self.assertEqual({s["algorithm"] for s in specs if s["controller"] == "fixed"}, {"euler"})
-        self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
-        self.assertEqual({s["dt"] for s in specs if s["controller"] != "fixed"}, {2.0 * 2.0 ** -10})
-        self.assertEqual(len({s["algorithm"] for s in specs if s["controller"] != "fixed"}), 17)
+        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 119})
+        self.assertEqual({s["controller"] == "fixed" for s in specs}, {False})
+        self.assertEqual(sorted({s["atol"] for s in specs}), sorted(TOLS))
+        self.assertEqual({s["dt"] for s in specs}, {2.0 * 2.0 ** -10})
+        self.assertEqual(len({s["algorithm"] for s in specs}), 17)
         built = self.trials["fabbri_linder"]
-        self.assertEqual(line_counts(built, "cubie_mlir"), (124, 120, 0, 18))
-        self.assertEqual(line_counts(built, "myokit_cuda"), (5, 0, 0, 1))
-        self.assertEqual({t["optimize"] for t in built if t["package"] == "cubie_mlir"}, {True})
+        self.assertEqual(line_counts(built, "cubie_mlir"), (119, 119, 0, 17))
+        self.assertEqual({t["optimize"] for t in built}, {True})
         self.assertEqual({t["traces"] for t in built}, {True})
         self.assertEqual({t["single_run_s"] for t in built}, {30.0})
-        # No other set sets a single-run threshold.
+        # No set outside the Fabbri ones sets a single-run threshold.
         for name in ("fabbri_golden", "golden", "golden_grid", "perf", "states"):
             self.assertEqual({t["single_run_s"] for t in self.trials[name]}, {math.inf}, name)
+
+    def test_fabbri_euler_counts(self):
+        specs = self.expanded["fabbri_euler"]
+        self.assertEqual({s["problem"] for s in specs}, {"fabbri_linder"})
+        self.assertEqual({(s["n"], s["algorithm"], s["controller"]) for s in specs}, {(FABBRI_N, "euler", "fixed")})
+        self.assertEqual({(s["finals"], s["traces"], s["single_run_s"], s["watchdog_s"]) for s in specs},
+                         {(False, True, 30.0, 1800.0)})
+        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 5, "myokit_cuda": 5})
+        self.assertEqual(sorted({s["dt"] for s in specs}), [2.5e-7, 1e-6, 5e-6, 2e-5, 1e-4])
+        built = self.trials["fabbri_euler"]
+        self.assertEqual(line_counts(built, "cubie_mlir"), (5, 1, 0, 1))
+        self.assertEqual(line_counts(built, "myokit_cuda"), (5, 0, 0, 1))
 
     def test_fabbri_perf_counts(self):
         specs = self.expanded["fabbri_perf"]
@@ -338,7 +346,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["problem"] for s in specs}, {"fabbri_linder"})
         self.assertEqual(sets.declared_counts(["fabbri_perf"]), counts)
         self.assertEqual({(s["finals"], s["traces"], s["single_run_s"], s["watchdog_s"]) for s in specs},
-                         {(False, False, 30.0, 1800.0)})
+                         {(False, False, 30.0, 400.0)})
         self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 30, "myokit_cuda": 10})
         self.assertEqual({(s["algorithm"], s["atol"]) for s in specs if s["package"] == "cubie_mlir"},
                          {("kvaerno3", 1e-5), ("rosenbrock23_sciml", 1e-5), ("tsit5", 1e-5)})
@@ -347,10 +355,10 @@ class ShippedSetTests(unittest.TestCase):
         built = self.trials["fabbri_perf"]
         self.assertEqual(line_counts(built, "cubie_mlir"), (30, 3, 0, 3))
         self.assertEqual(line_counts(built, "myokit_cuda"), (10, 0, 0, 1))
-        # The n = 131072 points are the fabbri_linder set's too: one contract, traces on.
+        # The n = 131072 points are the fabbri_linder (or fabbri_euler) set's too: one contract, traces on.
         merged = trials.build_trials(specs, sets.declarations(problems=["fabbri_linder"]))
         shared = [t for t in merged if t["n"] == 131072]
-        self.assertEqual({tuple(t["sets"]) for t in shared}, {("fabbri_linder", "fabbri_perf")})
+        self.assertEqual({tuple(t["sets"]) for t in shared}, {("fabbri_linder", "fabbri_perf"), ("fabbri_euler", "fabbri_perf")})
         self.assertEqual({t["traces"] for t in shared}, {True})
         self.assertEqual({t["traces"] for t in merged if t["n"] != 131072}, {False})
 
@@ -389,7 +397,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(sets.declared_counts(["perf", "golden_grid"]), sorted(set(PERF_N) | {1024}))
         self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
         self.assertEqual({s["set"] for s in sets.declarations(problems=["fabbri_linder"])},
-                         {"fabbri_linder", "fabbri_golden", "fabbri_perf"})
+                         {"fabbri_linder", "fabbri_golden", "fabbri_perf", "fabbri_euler"})
         self.assertEqual(sets.declared_counts(["fabbri_linder"]), [FABBRI_N])
         self.assertEqual(sets.declared_counts(["fabbri_golden"]), [FABBRI_GOLDEN_N])
 
@@ -744,7 +752,8 @@ class WatchdogBudgetTests(unittest.TestCase):
 
     def test_the_golden_set_allows_a_day_per_solve(self):
         self.assertEqual(sets.load_set("golden")["set"]["watchdog"], 86400.0)
-        self.assertEqual(sets.load_set("fabbri_linder")["set"]["watchdog"], 1800.0)
+        self.assertEqual(sets.load_set("fabbri_linder")["set"]["watchdog"], 200.0)
+        self.assertEqual(sets.load_set("fabbri_euler")["set"]["watchdog"], 1800.0)
         for name in ("perf", "states", "golden_grid"):
             self.assertEqual(sets.load_set(name)["set"]["watchdog"], protocol.WATCHDOG_SECONDS)
         specs = sets.expand(["golden"], problems=["lorenz"])
