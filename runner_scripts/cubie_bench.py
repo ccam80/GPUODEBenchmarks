@@ -270,11 +270,10 @@ class CubieAdapter:
         return build.trace(trial, values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
+        """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration, and the status flags joined by '|'."""
         finals = np.asarray(final_states(build.system, result, build.row))
         codes = np.asarray(result.status_codes).reshape(-1)
-        t_final = np.where(codes == 0, build.duration, np.nan)
-        return finals, t_final, status_text(codes)
+        return finals, np.full(codes.shape[0], float(build.duration)), status_text(codes)
 
 
 def run(argv, package):

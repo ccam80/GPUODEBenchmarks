@@ -1,6 +1,5 @@
 """The jax adapter's stepping plans, step bounds, memory check, finals and the pieces that need no jax; the leg itself runs on a GPU through bench.py."""
 
-import math
 import os
 import sys
 import unittest
@@ -94,15 +93,14 @@ class MemoryAndFinalsTests(unittest.TestCase):
                          (11 * 2 ** 30, limit))
         self.assertIsNone(jax_bench.memory_shortfall(Usage(9 * 2 ** 30, 2 ** 30, 2 ** 30, alias=2 ** 30), limit))
 
-    def test_finals_carry_diffrax_messages_and_the_duration_of_successful_runs(self):
+    def test_finals_carry_diffrax_messages_and_the_duration(self):
         ys = np.arange(12, dtype=np.float32).reshape(4, 3)
         ys[2] = np.inf
         messages = ["", "", "The maximum number of solver steps was reached.", ""]
         finals, t_final, retcode = jax_bench.finals_of(ys, messages, 60.0)
         self.assertEqual(finals.shape, (4, 3))
         self.assertEqual(finals.dtype, np.float32)
-        self.assertEqual(list(t_final[[0, 1, 3]]), [60.0] * 3)
-        self.assertTrue(math.isnan(t_final[2]))
+        self.assertEqual(list(t_final), [60.0] * 4)
         self.assertEqual(retcode, messages)
         self.assertEqual(store.errored_pct(finals, t_final, retcode, 60.0), 25.0)
 

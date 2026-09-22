@@ -1,7 +1,6 @@
 """The cubie adapter: Solver keywords from a trial, gains applied after construction, a build's stepping updates and resident inputs, finals with status codes, the optimize rows, a compile under the kernel's record, cold cache roots, the precompile worker, and the version string."""
 
 import json
-import math
 import os
 import shutil
 import sys
@@ -498,7 +497,7 @@ class BuildTests(AdapterCase):
         self.assertIs(leg.solver.nan_error_trajectories, False)
         leg.close()
 
-    def test_finals_carry_the_status_flags_and_the_duration_of_clean_runs(self):
+    def test_finals_carry_the_status_flags_and_the_duration(self):
         leg = self.adapter.build(trial(n=4))
         leg.solver.codes = [0, 8, 0, 2 | 256]
         result = self.adapter.solve(leg, trial(n=4), self.values(4), "both")
@@ -508,8 +507,7 @@ class BuildTests(AdapterCase):
         self.assertEqual(list(finals[:, 0]), [0.0, 1.0, 2.0, 3.0])
         self.assertEqual(list(finals[:, 2]), [8.0, 9.0, 10.0, 11.0])
         self.assertEqual(retcode, ["", "STEP_TOO_SMALL", "", "MAX_NEWTON_ITERATIONS_EXCEEDED|NEWTON_DIVERGENCE"])
-        self.assertEqual(t_final[0], 1.0)
-        self.assertTrue(math.isnan(t_final[1]))
+        self.assertEqual(list(t_final), [1.0] * 4)
         self.assertEqual(store.errored_pct(finals, t_final, retcode, 1.0), 50.0)
         # A device solve hands back the host result its inputs came from.
         device = self.adapter.solve(leg, trial(n=4), self.values(4), "none")
