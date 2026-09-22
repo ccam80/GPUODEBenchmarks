@@ -147,7 +147,7 @@ class PlotTests(AnalysesCase):
             self.row(n=n, min_ms=9.0 * ms, **adaptive(1e-5))
         self.row(n=8, min_ms=3.0, package="julia_gpu")
         self.row(n=32, min_ms=6.0, package="julia_gpu")
-        dropped = self.row(n=128, min_ms=9.0, package="julia_gpu", errored_pct=50.0)
+        crossed = self.row(n=128, min_ms=9.0, package="julia_gpu", errored_pct=50.0)
         untimed = self.row(n=512, min_ms=NAN, package="julia_gpu")
         cpu = self.row(n=8, min_ms=100.0, package="julia_cpu", transfers="none")
         self.row(n=32, min_ms=200.0, package="julia_cpu", transfers="none")
@@ -179,15 +179,18 @@ class PlotTests(AnalysesCase):
                           ("jax adaptive +", "8.0", "0.003"), ("jax adaptive +", "32.0", "0.006"),
                           ("jax adaptive +", "128.0", "0.012"), ("jax adaptive +", "512.0", "0.024"),
                           ("julia_gpu fixed +", "8.0", "0.003"),
-                          ("julia_gpu fixed +", "32.0", "0.006")])
+                          ("julia_gpu fixed +", "32.0", "0.006"),
+                          ("julia_gpu fixed +", "128.0", "0.009")])
         self.assertEqual([sid(r) for r in table if r["algorithm"] == "euler"],
                          ["cubie fixed +"] * 2)
         self.assertFalse(os.path.isdir(os.path.join(self.out, plots.ALL_CARDS)))
-        for absent in (dropped, untimed, cpu):
+        # The row over the errored limit stays (drawn crossed out); the untimed and CPU rows do not.
+        self.assertIn(crossed["run_id"], [r["run_id"] for r in table])
+        for absent in (untimed, cpu):
             self.assertNotIn(absent["run_id"], [r["run_id"] for r in table])
-        # No build time, error, errored share, finals or reason on these rows: their columns are left out.
+        # No build time, error, finals or reason on these rows: their columns are left out.
         self.assertEqual(list(table[0]), [c for c in plots.CSV_COLUMNS if c not in (
-            "build_s", "error", "peak_error", "errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason",
+            "build_s", "error", "interval_error", "trace_nan_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason",
             "finals", "traces")])
 
     def test_a_series_keeps_the_stepping_with_the_most_points(self):

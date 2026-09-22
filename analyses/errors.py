@@ -1,4 +1,4 @@
-"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored, over the finals, or over every sample of the traces when both rows carry them (a trajectory with a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; peak_error() is the mean absolute percent error of the traced first state's peak times against the golden's."""
+"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored, over the finals, or over every sample of the traces when both rows carry them (a trajectory with a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; interval_error() is the mean absolute inter-beat interval error of the traced first state against the golden's in ms, trace_nan_pct() the percent of traced trajectories with a NaN."""
 
 import math
 import os
@@ -14,11 +14,14 @@ if RUNNER_SCRIPTS not in sys.path:
 import grid  # noqa: E402
 import store as store_mod  # noqa: E402
 from problems import load_problems  # noqa: E402
+from protocol import TRACE_SPAN_S  # noqa: E402
 
 NAN = float("nan")
 GOLDEN_PACKAGE = "julia_cpu"
 GOLDEN_PRECISION = "float64"
 SYSTEM_FIELDS = ("problem", "system_params", "duration")
+# A peak of the traced first state must rise above this (0 mV for a membrane voltage).
+PEAK_THRESHOLD = 0.0
 GOLDEN_WHERE = "package = '{0}' AND precision = '{1}' AND (finals <> '' OR traces <> '')".format(
     GOLDEN_PACKAGE, GOLDEN_PRECISION)
 
@@ -122,36 +125,37 @@ class Errors:
         return matches[0]
 
     def peak_times(self, row):
-        """(grid values float32[m], [peak times float64 per trajectory], errored bool[m]) of a row's traces: the strict local maxima of the first state above the midpoint of the golden trajectory's range, each refined by a parabola through its three samples; a sample at either end of a trace is never a peak."""
+        """(grid values float32[m], [peak times float64 per trajectory], errored bool[m]) of a row's traces: the strict local maxima of the first state above PEAK_THRESHOLD, each refined by a parabola through its three samples; a sample at either end of a trace is never a peak; an errored trajectory has none."""
         values, states, errored = self.traces(row)
-        golden_values, golden_states, _ = self.traces(self.golden_of(row))
-        _, gi, ri = np.intersect1d(golden_values, values, return_indices=True)
-        threshold = np.full(values.shape[0], np.nan)
-        threshold[ri] = 0.5 * (np.nanmin(golden_states[gi, :, 0], axis=1) + np.nanmax(golden_states[gi, :, 0], axis=1))
         times = store_mod.trace_times()
-        peaks = []
-        for traj in range(values.shape[0]):
-            peaks.append(_peaks(times, states[traj, :, 0], threshold[traj]) if not errored[traj] else np.zeros(0))
+        peaks = [_peaks(times, states[traj, :, 0]) if not errored[traj] else np.zeros(0)
+                 for traj in range(values.shape[0])]
         return values, peaks, errored
 
-    def peak_error(self, row):
-        """Mean absolute percent error of the run's peak times against the golden's over the trajectories paired by grid value that neither flags, each trajectory over as many peaks as the golden holds and paired in order; a trajectory with fewer peaks than the golden is left out; NaN without traces on both, or with nothing to compare."""
+    def trace_nan_pct(self, row):
+        """Percent of a row's traced trajectories with a non-finite sample; NaN without traces."""
+        if not _has_traces(row):
+            return NAN
+        _, _, errored = self.traces(row)
+        return 100.0 * float(errored.mean()) if errored.shape[0] else NAN
+
+    def interval_error(self, row):
+        """Mean absolute inter-beat interval error in ms: over the trajectories paired by grid value that neither the row nor its golden flags, the intervals between the trace start, each peak and the trace end are paired in order and their differences summed, an interval without a partner counting in full; the total is divided by the golden's interval count. NaN without traces on the row or with no pair; raises when the row has traces and its golden has none."""
         if not _has_traces(row):
             return NAN
         golden = self.golden_of(row)
         if golden is None or not _has_traces(golden):
-            return NAN
+            raise ValueError("no traced golden for " + _name(row))
         index_a, index_b = self.paired(row, golden, traced=True)
         _, peaks_a, _ = self.peak_times(row)
         _, peaks_b, _ = self.peak_times(golden)
-        percent = []
+        total, count = 0.0, 0
         for a, b in zip(index_a, index_b):
-            wanted = peaks_b[b]
-            if wanted.shape[0] == 0 or peaks_a[a].shape[0] < wanted.shape[0]:
-                continue
-            got = peaks_a[a][:wanted.shape[0]]
-            percent.extend(100.0 * np.abs(got - wanted) / wanted)
-        return float(np.mean(percent)) if percent else NAN
+            run, wanted = _intervals(peaks_a[a]), _intervals(peaks_b[b])
+            shared = min(run.shape[0], wanted.shape[0])
+            total += float(np.abs(run[:shared] - wanted[:shared]).sum() + run[shared:].sum() + wanted[shared:].sum())
+            count += wanted.shape[0]
+        return 1000.0 * total / count if count else NAN
 
     def error(self, row):
         """compare(row, golden_of(row)); NaN when the row has neither finals nor traces, or no golden exists, or the two hold nothing in common."""
@@ -166,10 +170,10 @@ class Errors:
         return self.compare(row, golden)
 
 
-def _peaks(times, signal, threshold):
-    """Times of the strict local maxima of a sampled signal above a threshold, each refined by the parabola through its three samples."""
+def _peaks(times, signal):
+    """Times of the strict local maxima of a sampled signal above PEAK_THRESHOLD, each refined by the parabola through its three samples."""
     inner = signal[1:-1]
-    where = np.where((inner > signal[:-2]) & (inner >= signal[2:]) & (inner > threshold))[0] + 1
+    where = np.where((inner > signal[:-2]) & (inner >= signal[2:]) & (inner > PEAK_THRESHOLD))[0] + 1
     out = []
     for i in where:
         left, mid, right = float(signal[i - 1]), float(signal[i]), float(signal[i + 1])
@@ -177,6 +181,11 @@ def _peaks(times, signal, threshold):
         shift = 0.5 * (left - right) / curve if curve != 0.0 else 0.0
         out.append(times[i] + shift * (times[1] - times[0]))
     return np.asarray(out, dtype=np.float64)
+
+
+def _intervals(peaks):
+    """The intervals between the trace start, each peak and the trace end, in seconds."""
+    return np.diff(np.concatenate(([0.0], peaks, [TRACE_SPAN_S])))
 
 
 def golden_algorithm(problem):
