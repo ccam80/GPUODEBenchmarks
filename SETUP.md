@@ -109,9 +109,7 @@ workload warms the DiffEqGPU kernels (`GPU_ODE_JuliaKernels/README.md`).
 Every launcher passes `--project=$JULIA_PROJECT`, or this checkout when
 the variable is unset; `worktree_setup.py` sets it to the main checkout
 so a worktree shares its pkgimage instead of precompiling its own. A
-julia_gpu run stops when the shared project's kernel-package sources differ
-from the checkout's, line endings aside; unset the variable to run the
-checkout's own files.
+julia_gpu run stops when the shared kernel-package sources differ (line endings ignored); unset the variable to use the checkout's own.
 `runner_scripts/gpu/julia_driver.py` runs `Pkg.instantiate()` and
 `Pkg.precompile()` once before its builds. `bench_ode_cpu.jl` and
 `bench_ode_gpu.jl` record through `runner_scripts/results.jl`, which calls
