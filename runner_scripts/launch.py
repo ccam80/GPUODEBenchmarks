@@ -19,7 +19,7 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "cubie_mlir": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 # Kernels a cubie process, runner or precompile worker, compiles before it exits.
-RESTART_KERNELS = {"cubie": 8, "cubie_mlir": 8}
+RESTART_KERNELS = {"cubie": 1, "cubie_mlir": 1}
 # Private memory past which a precompile worker hands the rest of its chunk to a new one.
 PRECOMPILE_MEMORY_GB = 6
 
