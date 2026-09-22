@@ -522,19 +522,21 @@ class LaunchTests(unittest.TestCase):
             if saved is not None:
                 os.environ["JULIA_PROJECT"] = saved
 
-    def test_a_shared_project_whose_julia_sources_differ_stops_the_julia_runners(self):
+    def test_a_shared_project_whose_julia_sources_differ_stops_the_julia_gpu_runner(self):
         other = tempfile.mkdtemp(prefix="julia_project_")
         self.addCleanup(shutil.rmtree, other, True)
         for name in launch._julia_source_files(ROOT):
             target = os.path.join(other, name)
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            shutil.copy2(os.path.join(ROOT, name), target)
+            with open(os.path.join(ROOT, name), "rb") as source, open(target, "wb") as copy:
+                # The other checkout keeps CRLF line endings.
+                copy.write(source.read().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
         saved = os.environ.pop("JULIA_PROJECT", None)
         os.environ["JULIA_PROJECT"] = other
         try:
             self.assertEqual(launch.julia_sources_differing(other), [])
             self.assertEqual(launch.check_julia_project(), other)
-            self.assertIn("--project=" + other, launch.runner_command("julia_cpu", "x.jsonl").argv)
+            launch.runner_command("julia_gpu", "x.jsonl")
             with open(os.path.join(other, "runner_scripts", "julia_systems.jl"), "a") as handle:
                 handle.write("# edited\n")
             self.assertEqual(launch.julia_sources_differing(other), ["runner_scripts/julia_systems.jl"])
@@ -542,6 +544,7 @@ class LaunchTests(unittest.TestCase):
                 launch.runner_command("julia_gpu", "x.jsonl")
             self.assertIn("julia_systems.jl", str(caught.exception))
             self.assertIn("Unset JULIA_PROJECT", str(caught.exception))
+            self.assertIn("--project=" + other, launch.runner_command("julia_cpu", "x.jsonl").argv)
             launch.runner_command("cubie", "x.jsonl")
         finally:
             os.environ.pop("JULIA_PROJECT", None)
