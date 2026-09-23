@@ -102,7 +102,7 @@ class AbandonTests(unittest.TestCase):
                          {("compile_timeout", "compile timeout at " + trial_list[0]["trial_id"], "rev")})
         self.assertTrue(all(math.isnan(r["min_ms"]) for r in rows))
         self.assertEqual(abandon.compile_timeouts(self.data, KEY), {trials.compile_key(trial_list[0])})
-        self.assertEqual(abandon.compile_timeouts(self.data, KEY, "cubie_mlir"), set())
+        self.assertEqual(abandon.compile_timeouts(self.data, KEY, "jax"), set())
         # The n = 32 line runs on the hung kernel, so its optimize goes with it; both lines are marked.
         self.assertEqual([(t["n"], t["optimize"], t["compile"]) for t in remaining],
                          [(8, False, "timeout"), (32, False, "timeout")])
@@ -133,12 +133,12 @@ class AbandonTests(unittest.TestCase):
     def test_a_compile_timeout_is_recorded_for_the_lines_of_its_group_that_have_no_row(self):
         trial_list = trials.build_trials([spec(8, True), spec(32, True), spec(8, True, controller="default", atol=1e-5,
                                                                               rtol=1e-5, dt=NAN),
-                                          spec(8, True, algorithm="euler"), spec(8, True, package="cubie_mlir")])
+                                          spec(8, True, algorithm="euler"), spec(8, True, package="jax")])
         fixed = [t for t in trial_list if t["controller"] == "fixed" and t["algorithm"] == "tsit5"
                  and t["package"] == "cubie"]
         self.record_ok(fixed[1])
         written = abandon.abandon_compile(self.data, KEY, trial_list, fixed[0], "rev")
-        # The adaptive tsit5 line, euler and cubie_mlir are other groups; the n = 32 line's rows stand.
+        # The adaptive tsit5 line, euler and jax are other groups; the n = 32 line's rows stand.
         self.assertEqual(trials.COMPILE_FIELDS, ("package", "problem", "system_params", "precision", "algorithm",
                                                  "controller"))
         self.assertEqual(sorted((r["n"], r["transfers"]) for r in written), [(8, "both"), (8, "none")])
@@ -152,7 +152,7 @@ class AbandonTests(unittest.TestCase):
         self.assertEqual([(t["package"], t["algorithm"], t["controller"], t["optimize"], t["compile"]) for t in marked],
                          [("cubie", "euler", "fixed", True, ""), ("cubie", "tsit5", "default", True, ""),
                           ("cubie", "tsit5", "fixed", False, "timeout"), ("cubie", "tsit5", "fixed", False, "timeout"),
-                          ("cubie_mlir", "tsit5", "fixed", True, "")])
+                          ("jax", "tsit5", "fixed", True, "")])
         self.assertIs(trials.mark_compile_timeouts(marked, abandon.compile_timeouts(self.data, KEY)), marked)
         self.assertIs(trials.mark_compile_timeouts(trial_list, set()), trial_list)
         self.assertEqual(trials.compile_timeouts_of(marked), {trials.compile_key(fixed[0])})

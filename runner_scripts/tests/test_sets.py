@@ -56,10 +56,9 @@ def capable(package, kind):
     return [row for row in ROWS if row.supports(package, kind)]
 
 
-def families(algorithm, kind):
-    """The package families, cubie and cubie_mlir counted once and julia_cpu untimed, running an algorithm in a stepping kind."""
-    return {"cubie" if r.package in ("cubie", "cubie_mlir") else r.package
-            for r in ROWS if r.name == algorithm and r[kind] and r.package != "julia_cpu"}
+def timed_packages(algorithm, kind):
+    """The packages, julia_cpu untimed, running an algorithm in a stepping kind."""
+    return {r.package for r in ROWS if r.name == algorithm and r[kind] and r.package != "julia_cpu"}
 
 
 def stepping_values(stepping):
@@ -111,13 +110,13 @@ class ShippedSetTests(unittest.TestCase):
         expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package, loaded)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 1248, "cubie_mlir": 1248, "jax": 360, "pytorch": 180,
+        self.assertEqual(expected, {"cubie": 1248, "jax": 360, "pytorch": 180,
                                     "myokit_cuda": 36, "cpp": 120, "julia_gpu": 960})
-        # The timed algorithms are exactly those two package families run in the stepping kind.
+        # The timed algorithms are exactly those two packages run in the stepping kind.
         timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
                  "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]}
         for kind, names in timed.items():
-            self.assertEqual(sorted(names), sorted(n for n in FACTS if len(families(n, kind)) >= 2), kind)
+            self.assertEqual(sorted(names), sorted(n for n in FACTS if len(timed_packages(n, kind)) >= 2), kind)
             self.assertEqual(sorted({s["algorithm"] for s in specs
                                      if (s["controller"] == "fixed") == (kind == "fixed")}), sorted(names))
         built = self.trials["perf"]
@@ -250,8 +249,7 @@ class ShippedSetTests(unittest.TestCase):
         states = [t for t in self.trials["states"] if t["package"] == "cubie"]
         self.assertEqual({t["optimize"] for t in states}, {True})
         self.assertEqual(trials.optimizes_of(states), len(states))
-        self.assertEqual({t["optimize"] for t in self.trials["golden_grid"] if t["package"] != "cubie"
-                          and t["package"] != "cubie_mlir"}, {False})
+        self.assertEqual({t["optimize"] for t in self.trials["golden_grid"] if t["package"] != "cubie"}, {False})
 
     def test_golden_counts_and_values(self):
         specs = self.expanded["golden"]
@@ -283,7 +281,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual((golden["algorithm"], golden["atol"], golden["rtol"], golden["n"]),
                          ("VCABM", 1e-12, 1e-12, FABBRI_GOLDEN_N))
         self.assertEqual((golden["finals"], golden["timed"], golden["watchdog_s"]), (True, False, 86400.0))
-        full = [s for s in self.expanded["fabbri_linder"] if s["package"] == "cubie_mlir"][0]
+        full = [s for s in self.expanded["fabbri_linder"] if s["package"] == "cubie"][0]
         self.assertEqual((full["n"], full["grid_min"], full["grid_max"]), (FABBRI_N, 0.0, 131071.0))
         np.testing.assert_array_equal(grid.grid(golden), grid.grid(full)[:FABBRI_GOLDEN_N])
         self.assertEqual(golden["grid_max"], grid.grid_point("linear", 0.0, 131071.0, FABBRI_N, FABBRI_GOLDEN_N - 1))

@@ -93,7 +93,7 @@ def audit(trial_list, key, store, mode=None, optimize_rows=None):
         if missing.wants_traces and not any(store.traces_readable(trial["package"], key, relative)
                                             for relative in traced):
             missing.traces = True
-        if trial["optimize"] and trial["package"] in cubie_adapter.PACKAGES:
+        if trial["optimize"] and trial["package"] == "cubie":
             package = trial["package"]
             if package not in records:
                 records[package] = optimize_rows(package, key, store.root)

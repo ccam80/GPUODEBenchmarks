@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Cubie runner on the numba-cuda backend: bench_cubie.py --trials <path> [--floor]"""
+"""Cubie runner: bench_cubie.py --trials <path> [--floor]"""
 
 import os
 import sys

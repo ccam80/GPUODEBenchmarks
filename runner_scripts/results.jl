@@ -5,7 +5,7 @@ using JSON
 
 const STORE_CLI = joinpath(@__DIR__, "store.py")
 const STORE_REPO_ROOT = dirname(@__DIR__)
-const STORE_PACKAGES = ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp",
+const STORE_PACKAGES = ("cubie", "jax", "pytorch", "myokit_cuda", "cpp",
     "julia_gpu", "julia_cpu")
 
 # The run spec in table order; trial_id hashes every field but transfers and key, group_id the system and stepping fields only.

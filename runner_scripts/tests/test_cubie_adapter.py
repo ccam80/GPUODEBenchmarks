@@ -1,9 +1,10 @@
-"""Cubie adapter: backend selection, controller mappings and the optimize store."""
+"""Cubie adapter: system naming, controller mappings and the optimize store."""
 
 import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,40 +30,25 @@ class FakeResult:
         self.duration = duration
 
 
-class BackendTests(unittest.TestCase):
+class SystemNamingTests(unittest.TestCase):
     def setUp(self):
-        self.saved = os.environ.get("CUBIE_CUDA_BACKEND")
-        self.loaded = sys.modules.pop("cubie.cuda_backend", None)
+        self.built = []
+        fake = types.ModuleType("cubie_systems")
+        fake.build_system = lambda row, precision, name_suffix="": self.built.append(
+            (row["states"], name_suffix)) or (None, {})
+        self.saved = sys.modules.get("cubie_systems")
+        sys.modules["cubie_systems"] = fake
 
     def tearDown(self):
         if self.saved is None:
-            os.environ.pop("CUBIE_CUDA_BACKEND", None)
+            sys.modules.pop("cubie_systems", None)
         else:
-            os.environ["CUBIE_CUDA_BACKEND"] = self.saved
-        sys.modules.pop("cubie.cuda_backend", None)
-        if self.loaded is not None:
-            sys.modules["cubie.cuda_backend"] = self.loaded
+            sys.modules["cubie_systems"] = self.saved
 
-    def test_each_package_sets_its_backend_unconditionally(self):
-        os.environ["CUBIE_CUDA_BACKEND"] = "mlir"
-        self.assertEqual(adapter.select_backend("cubie"), "numba-cuda")
-        self.assertEqual(os.environ["CUBIE_CUDA_BACKEND"], "numba-cuda")
-        self.assertEqual(adapter.select_backend("cubie_mlir"), "mlir")
-        self.assertEqual(os.environ["CUBIE_CUDA_BACKEND"], "mlir")
-
-    def test_an_imported_backend_cannot_be_switched(self):
-        import types
-        loaded = types.ModuleType("cubie.cuda_backend")
-        loaded.CUDA_BACKEND = "mlir"
-        sys.modules["cubie.cuda_backend"] = loaded
-        with self.assertRaises(RuntimeError):
-            adapter.select_backend("cubie")
-        self.assertEqual(adapter.select_backend("cubie_mlir"), "mlir")
-
-    def test_system_suffix_per_package(self):
-        self.assertEqual(adapter.SYSTEM_SUFFIX["cubie"], "")
-        self.assertEqual(adapter.SYSTEM_SUFFIX["cubie_mlir"], "_mlir")
-        self.assertEqual(adapter.package_for_backend("mlir"), "cubie_mlir")
+    def test_a_system_carries_a_suffix_only_when_resized(self):
+        adapter.build_system("lorenz96")
+        adapter.build_system("lorenz96", states=8)
+        self.assertEqual(self.built, [(32, ""), (8, "_s8")])
 
 
 class ControllerMappingTests(unittest.TestCase):
@@ -114,9 +100,9 @@ class OptimizeStoreTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_the_store_lives_under_the_package_partition(self):
-        path = adapter.optimize_path("cubie_mlir", "k")
+        path = adapter.optimize_path("cubie", "k")
         self.assertEqual(os.path.relpath(path, self.tmp),
-                         os.path.join("data", "key=k", "package=cubie_mlir", "optimize.csv"))
+                         os.path.join("data", "key=k", "package=cubie", "optimize.csv"))
 
     def test_the_identity_is_the_kernel(self):
         ident = adapter.kernel_ident(line(), "k")
@@ -151,7 +137,7 @@ class OptimizeStoreTests(unittest.TestCase):
         rows = adapter.optimize_rows("cubie", "k")
         self.assertEqual([r["n"] for r in rows], ["1024"])
         self.assertNotIn("per", rows[0])
-        self.assertEqual(adapter.optimize_rows("cubie_mlir", "k"), [])
+        self.assertEqual(adapter.optimize_rows("cubie", "other"), [])
 
     def test_rows_with_a_per_column_of_solve_are_dropped(self):
         path = adapter.optimize_path("cubie", "k")
@@ -176,7 +162,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 3)
         self.assertNotIn("solve", text)
 
-    def test_every_stepping_value_precision_and_package_separate_kernels(self):
+    def test_every_stepping_value_and_precision_separate_kernels(self):
         result = FakeResult(FakeLaunch(64, None), {"blocksize": 64})
         base = line(algorithm="kvaerno3", controller="default", dt=NAN, atol=1e-3, rtol=1e-3,
                     newton_atol=1e-6, newton_rtol=1e-6)
@@ -184,7 +170,7 @@ class OptimizeStoreTests(unittest.TestCase):
         self.assertIsNotNone(adapter.load_optimized(base, "k"))
         self.assertIsNotNone(adapter.load_optimized(dict(base, n=131072, duration=7.0), "k"))
         for other in (dict(atol=1e-4), dict(rtol=1e-4), dict(newton_atol=1e-7), dict(dt_min=1e-9),
-                      dict(dt=2.0 ** -10), dict(precision="float64"), dict(package="cubie_mlir"),
+                      dict(dt=2.0 ** -10), dict(precision="float64"),
                       dict(controller="pi"), dict(gains='{"integral_gain":0.3}'), dict(algorithm="kvaerno5"),
                       dict(problem="lorenz96", system_params='{"states":4}')):
             self.assertIsNone(adapter.load_optimized(dict(base, **other), "k"), other)

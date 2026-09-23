@@ -1,7 +1,7 @@
-# The Fabbri-Linder timing sweep over trajectory counts, 8 to 1048576, timed on the resident inputs: cubie_mlir at Kvaerno3, Rosenbrock23 and Tsit5 at tolerance 1e-5, myokit_cuda at Euler 5 us. A first run past 30 s is the timing; a solve past 400 s is abandoned.
+# The Fabbri-Linder timing sweep over trajectory counts, 8 to 1048576, timed on the resident inputs: cubie at Kvaerno3, Rosenbrock23 and Tsit5 at tolerance 1e-5, myokit_cuda at Euler 5 us. A first run past 30 s is the timing; a solve past 400 s is abandoned.
 
 [set]
-packages   = ["cubie_mlir", "myokit_cuda"]
+packages   = ["cubie", "myokit_cuda"]
 problems   = ["fabbri_linder"]
 algorithms = ["kvaerno3", "rosenbrock23_sciml", "tsit5", "euler"]
 precision  = "float32"
@@ -12,7 +12,7 @@ watchdog   = 400
 single_run = 30
 
 [set.optimize]
-packages = ["cubie_mlir"]
+packages = ["cubie"]
 
 [[grid]]
 packages = "all"
@@ -31,7 +31,7 @@ dt = [5.0e-6]
 newton = "none"
 
 [[stepping]]
-packages = ["cubie_mlir"]
+packages = ["cubie"]
 algorithms = ["kvaerno3", "rosenbrock23_sciml", "tsit5"]
 controller = "default"
 tol = [1.0e-5]

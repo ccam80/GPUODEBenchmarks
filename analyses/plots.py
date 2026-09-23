@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package family (the cubie backends are one) or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is drawn with a black cross over its marker. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is drawn with a black cross over its marker. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
 """
 
 import math
@@ -31,7 +31,7 @@ COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime
 ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
                      "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
                      "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
-PACKAGE_MARKERS = {"cubie": "o", "cubie_mlir": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
+PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
                    "julia_gpu": "P", "julia_cpu": "X"}
 ERROR_LABEL = "RMS error against the golden"
 CROSSED_LABEL = "over 10% of trajectories errored"
@@ -176,23 +176,18 @@ def merged(figures):
 
 
 def series_label(kind, key, points):
-    """'Cubie (MLIR), 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
+    """'Cubie, 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
     _, package, controller, transfers = key
     parts = [shared.package_name(package),
              shared.controller_text(controller, None if "dt" in kind.varying else points[0][2])]
     return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
 
 
-def family(package):
-    """The package family a comparison counts: the two cubie backends are one."""
-    return "cubie" if package in ("cubie", "cubie_mlir") else package
-
-
 def limited(series, builds=None):
-    """True when a figure compares nothing: one package family, or no series past LIMITED_POINTS points."""
+    """True when a figure compares nothing: one package, or no series past LIMITED_POINTS points."""
     everything = dict(series)
     everything.update(builds or {})
-    if len({family(key[1]) for key in everything}) <= 1:
+    if len({key[1] for key in everything}) <= 1:
         return True
     return max((len(points) for points in everything.values()), default=0) <= LIMITED_POINTS
 

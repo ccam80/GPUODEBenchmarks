@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. A cubie package's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -16,7 +16,6 @@ SETS_DIR = os.path.join(REPO_ROOT, "sets")
 JULIA_CONTROLLERS_CSV = os.path.join(REPO_ROOT, "runner_scripts", "julia_controllers.csv")
 
 NAN = float("nan")
-CUBIE_PACKAGES = ("cubie", "cubie_mlir")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces", "transfers", "build",
             "optimize", "watchdog", "single_run", "untimed")
@@ -303,13 +302,13 @@ def julia_controllers():
 
 
 def _controller(stepping, package, algorithm, where):
-    """(controller, gains) of an adaptive stepping for one algorithm: the stepping's own, or for a cubie package's default Julia's controller when the algorithm has one that maps."""
+    """(controller, gains) of an adaptive stepping for one algorithm: the stepping's own, or for cubie's default Julia's controller when the algorithm has one that maps."""
     import cubie_adapter
     token = stepping["controller"]
     gains = stepping["gains"]
     if not isinstance(gains, dict):
         raise SetError(where + ": gains must be a table")
-    if token == "default" and package in CUBIE_PACKAGES and algorithm["order"] is not None:
+    if token == "default" and package == "cubie" and algorithm["order"] is not None:
         settings = cubie_adapter.julia_controller(julia_controllers().get(algorithm.name),
                                                   algorithm["order"])
         if settings is not None:

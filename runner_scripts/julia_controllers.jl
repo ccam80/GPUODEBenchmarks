@@ -1,4 +1,4 @@
-# Writes runner_scripts/julia_controllers.csv: OrdinaryDiffEq's default controller constants per adaptive julia_cpu algorithm, in Float64; sets.py reads it for the cubie packages. Run: julia --project=. runner_scripts/julia_controllers.jl
+# Writes runner_scripts/julia_controllers.csv: OrdinaryDiffEq's default controller constants per adaptive julia_cpu algorithm, in Float64; sets.py reads it for cubie. Run: julia --project=. runner_scripts/julia_controllers.jl
 
 using OrdinaryDiffEq
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqHighOrderRK, OrdinaryDiffEqExplicitRK

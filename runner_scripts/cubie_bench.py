@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""The cubie adapter for runner.py, shared by the CUBIE and CUBIE_MLIR suites: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; compile builds the kernel under its record; a solve runs through host arrays (`both`) or on the resident device inputs (`none`); a trace runs a second Solver of the same stepping that saves every state at the protocol's sample times. `--precompile` on the runner's argv runs cubie_precompile over the trial file instead."""
+"""The cubie adapter for runner.py: a build is one system and one Solver whose stepping follows each trial (in a fresh cache directory when cold); optimize applies the kernel's recorded settings or runs Solver.optimize once per kernel and records the winner; compile builds the kernel under its record; a solve runs through host arrays (`both`) or on the resident device inputs (`none`); a trace runs a second Solver of the same stepping that saves every state at the protocol's sample times. `--precompile` on the runner's argv runs cubie_precompile over the trial file instead."""
 
 import gc
 import importlib.metadata
@@ -109,7 +109,7 @@ class Build:
             # A resized system keeps its own generated-code cache under a states suffix.
             params = json.loads(trial["system_params"]) if trial["system_params"] else {}
             self.system, self.initial_conditions = adapter.build_system(
-                self.row, package, self.precision, states=params.get("states"))
+                self.row, self.precision, states=params.get("states"))
             self.solver = make_solver(self.system, trial, solver_class)
         except BaseException:
             self.close()
@@ -214,7 +214,7 @@ def _same(a, b):
 
 
 class CubieAdapter:
-    """The runner adapter of one cubie package on one machine."""
+    """The cubie runner adapter on one machine."""
 
     controllers = CONTROLLERS
 
@@ -223,7 +223,7 @@ class CubieAdapter:
         self.solver_class = solver_class
 
     def version(self):
-        return importlib.metadata.version("cubie") + "+" + adapter.BACKENDS[self.package]
+        return importlib.metadata.version("cubie")
 
     def states(self, trial):
         return len(variable_order(problem_row(trial)))
@@ -277,8 +277,7 @@ class CubieAdapter:
 
 
 def run(argv, package):
-    """Entry point of a cubie suite: select the backend, then run the trial file through runner.main, or through cubie_precompile.main under --precompile."""
-    adapter.select_backend(package)
+    """Entry point of the cubie suite: run the trial file through runner.main, or through cubie_precompile.main under --precompile."""
     from cubie.time_logger import default_timelogger
     default_timelogger.set_verbosity(None)
     if "--precompile" in argv:

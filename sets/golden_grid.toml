@@ -1,7 +1,7 @@
 # Finals of every package at every fixed step and tolerance on the 131072-point grid, every problem but the Fabbri-Linder model; julia_cpu runs the 1024-point prefix, whose endpoint is the float64 v[1023] of the full grid written with 17 digits. Every step-size pin is left to the package.
 
 [set]
-packages   = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu"]
+packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu"]
 problems   = ["lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modulator", "ring_modulator_index2", "nand_gate"]
 algorithms = "all"
 precision  = "float32"
@@ -10,13 +10,13 @@ transfers  = ["none"]
 build      = "warm"
 
 [set.optimize]
-packages = ["cubie", "cubie_mlir"]
+packages = ["cubie"]
 
 [set.untimed]
 packages = ["julia_cpu"]
 
 [[grid]]
-packages = ["cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
+packages = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
 parameter = "default"
 scale = "default"
 min = "default"
