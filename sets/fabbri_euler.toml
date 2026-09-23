@@ -1,7 +1,7 @@
-# The Fabbri-Linder Euler runs: cubie_mlir and myokit_cuda over the 131072-point ACh x Iso grid at 100 us, 20 us, 5 us, 1 us and 250 ns, timed on the resident inputs, each run tracing the first 1024 points at the protocol's 1 ms samples over the first second. A first run past 30 s is the timing; a solve past 1800 s is abandoned.
+# The Fabbri-Linder Euler runs: cubie and myokit_cuda over the 131072-point ACh x Iso grid at 100 us, 20 us, 5 us, 1 us and 250 ns, timed on the resident inputs, each run tracing the first 1024 points at the protocol's 1 ms samples over the first second. A first run past 30 s is the timing; a solve past 1800 s is abandoned.
 
 [set]
-packages   = ["cubie_mlir", "myokit_cuda"]
+packages   = ["cubie", "myokit_cuda"]
 problems   = ["fabbri_linder"]
 algorithms = ["euler"]
 precision  = "float32"
@@ -13,7 +13,7 @@ watchdog   = 1800
 single_run = 30
 
 [set.optimize]
-packages = ["cubie_mlir"]
+packages = ["cubie"]
 
 [[grid]]
 packages = "all"

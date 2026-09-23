@@ -7,7 +7,7 @@ per package from `runner_scripts/launch.py`. One command builds them all:
 python setup_all_environments.py
 ```
 
-It runs, in order, the cubie, cubie-MLIR, JAX, PyTorch and Myokit-CUDA
+It runs, in order, the cubie, JAX, PyTorch and Myokit-CUDA
 setup scripts under `GPU_ODE_*/` and then `setup_julia.py`, and reports which
 failed. Each script can be run on its own and reuses an existing venv.
 
@@ -40,22 +40,18 @@ curl -fsSL https://install.julialang.org | sh -s -- --yes
 
 ## Packages
 
-### cubie and cubie_mlir
+### cubie
 
 ```
 python GPU_ODE_CUBIE/setup_environment.py
-python GPU_ODE_CUBIE_MLIR/setup_environment.py
 ```
 
-The first builds `GPU_ODE_CUBIE/venv` with `uv`: `cubie` from PyPI with both
-backends (`cuda13` and `mlir-cuda13` extras) and its test extra, plus
-`pyarrow`, `duckdb` and `matplotlib`. That venv is also the suite
-interpreter: `bench.py`, the store CLI, the Julia and C++ runners' store
-writes and the analyses all run under it. The second script only links
-`GPU_ODE_CUBIE_MLIR/venv` to it (a symlink, or a junction on Windows) and
-checks the MLIR backend imports. `runner_scripts/cubie_adapter.py` sets
-`CUBIE_CUDA_BACKEND` from the package name (`numba-cuda` or `mlir`) before
-cubie is imported.
+Builds `GPU_ODE_CUBIE/venv` with `uv`: `cubie` from PyPI with its
+`mlir-cuda13` extra (cubie-numba-cuda-mlir) and its test extra, plus
+`pyarrow`, `duckdb` and `matplotlib`, and uninstalls numba-cuda from a venv
+that still holds it. That venv is also the suite interpreter: `bench.py`,
+the store CLI, the Julia and C++ runners' store writes and the analyses all
+run under it.
 
 ### jax
 
@@ -147,13 +143,11 @@ GPU work but refuses to run when `nvidia-smi` cannot name the GPU.
 ## Troubleshooting
 
 To rebuild a Python environment, remove its venv and re-run the setup
-script. `GPU_ODE_CUBIE_MLIR/venv` is a link to `GPU_ODE_CUBIE/venv`: remove
-the link itself, not its contents.
+script.
 
 ```
-rm GPU_ODE_CUBIE_MLIR/venv && rm -rf GPU_ODE_CUBIE/venv         # Linux, macOS
-cmd /c rmdir GPU_ODE_CUBIE_MLIR\venv                             # Windows: drops the junction only
-Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv                   # then the venv itself
+rm -rf GPU_ODE_CUBIE/venv                          # Linux, macOS
+Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv     # Windows
 ```
 
 If the Julia project fails to instantiate, `setup_julia.py --update`

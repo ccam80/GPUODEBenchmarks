@@ -1,7 +1,7 @@
-# The Fabbri-Linder adaptive work-precision dataset: cubie_mlir over the 131072-point ACh x Iso grid, timed on the resident inputs, every adaptive algorithm at tolerances 1e-2 to 1e-8, each run tracing the first 1024 points (the 32 x 32 lattice) at the protocol's 1 ms samples over the first second; the golden is the fabbri_golden set's 1024-point julia_cpu run, the Euler runs the fabbri_euler set's. A first run past 30 s is the timing; a solve past 200 s is abandoned.
+# The Fabbri-Linder adaptive work-precision dataset: cubie over the 131072-point ACh x Iso grid, timed on the resident inputs, every adaptive algorithm at tolerances 1e-2 to 1e-8, each run tracing the first 1024 points (the 32 x 32 lattice) at the protocol's 1 ms samples over the first second; the golden is the fabbri_golden set's 1024-point julia_cpu run, the Euler runs the fabbri_euler set's. A first run past 30 s is the timing; a solve past 200 s is abandoned.
 
 [set]
-packages   = ["cubie_mlir"]
+packages   = ["cubie"]
 problems   = ["fabbri_linder"]
 algorithms = "all"
 precision  = "float32"
@@ -13,7 +13,7 @@ watchdog   = 200
 single_run = 30
 
 [set.optimize]
-packages = ["cubie_mlir"]
+packages = ["cubie"]
 
 [[grid]]
 packages = "all"

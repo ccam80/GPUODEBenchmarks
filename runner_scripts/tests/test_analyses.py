@@ -306,8 +306,8 @@ class PlotTests(AnalysesCase):
                 for package in ("cubie", "jax")}
         self.assertFalse(plots.limited(four))
         self.assertTrue(plots.limited({k: v[:3] for k, v in four.items()}))
-        cubies = {(KEY, package, "fixed", "both"): four[(KEY, "cubie", "fixed", "both")]
-                  for package in ("cubie", "cubie_mlir")}
+        cubies = {(KEY, "cubie", "fixed", transfers): four[(KEY, "cubie", "fixed", "both")]
+                  for transfers in ("both", "none")}
         self.assertTrue(plots.limited(cubies))
         self.assertTrue(plots.limited({}))
         # The builds panel counts.

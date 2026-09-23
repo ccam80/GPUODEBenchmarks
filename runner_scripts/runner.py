@@ -13,7 +13,6 @@ import grid as grid_mod
 import store as store_mod
 import trials as trials_mod
 from abandon import History
-from cubie_adapter import PACKAGES as CUBIE_PACKAGES
 from bench_key import dataset_key
 from protocol import OPTIMIZE_SECONDS, REPEAT_CAP, TRACE_ROWS, WATCHDOG_SECONDS
 from wp_common import run_watchdogged, timed_min_ms
@@ -104,7 +103,7 @@ class Runner:
     # -------------------------------------------------------------- rows
     def compile_status(self, trial):
         """The compile column of a cubie trial's rows: compile_timeout on a line marked COMPILE_TIMED_OUT, optimized once the line's optimize ran (a record applied or Solver.optimize done), else unoptimized; "" for another package."""
-        if trial["package"] not in CUBIE_PACKAGES:
+        if trial["package"] != "cubie":
             return ""
         if trial.get("compile") == trials_mod.COMPILE_TIMED_OUT:
             return store_mod.COMPILE_TIMEOUT

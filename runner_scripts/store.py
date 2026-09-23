@@ -20,7 +20,7 @@ from protocol import TRACE_EVERY_S, TRACE_ROWS, TRACE_SAMPLES
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PACKAGES = ("cubie", "cubie_mlir", "jax", "pytorch", "myokit_cuda", "cpp",
+PACKAGES = ("cubie", "jax", "pytorch", "myokit_cuda", "cpp",
             "julia_gpu", "julia_cpu")
 PRECISIONS = ("float32", "float64")
 GRID_SCALES = ("linear", "log")

@@ -36,7 +36,7 @@ class CatalogueTests(unittest.TestCase):
 
     def test_rows_are_typed_and_name_known_packages(self):
         rows = load_algorithms()
-        self.assertEqual(len(rows), 82)
+        self.assertEqual(len(rows), 59)
         self.assertEqual(len(algorithm_names()), 23)
         pairs = [(row.package, row.name) for row in rows]
         self.assertEqual(len(pairs), len(set(pairs)))
@@ -61,7 +61,7 @@ class CatalogueTests(unittest.TestCase):
         for row in load_algorithms():
             if row.package == "julia_gpu":
                 self.assertFalse(row["newton"], row.name)
-            elif row.package in ("cubie", "cubie_mlir", "jax", "julia_cpu"):
+            elif row.package in ("cubie", "jax", "julia_cpu"):
                 self.assertEqual(row["newton"], row.implicit, (row.package, row.name))
             else:
                 self.assertFalse(row["newton"], (row.package, row.name))

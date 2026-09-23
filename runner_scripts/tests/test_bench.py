@@ -474,13 +474,11 @@ class LaunchTests(unittest.TestCase):
             command = launch.runner_command(package, "trials/k/x.jsonl")
             self.assertEqual(command.argv[-2:], ["--trials", "trials/k/x.jsonl"], package)
             self.assertEqual(command.ok, (0,))
-        for package in launch.CUBIE_PACKAGES:
-            precompile = launch.precompile_command(package, "trials/k/x.jsonl")
-            self.assertEqual(precompile.argv[:2], launch.runner_command(package, "x.jsonl").argv[:2])
-            self.assertEqual(precompile.argv[2:], ["--trials", "trials/k/x.jsonl", "--precompile", "--jobs", "4",
-                                                   "--per-worker", "8", "--memory-gb", "6"])
-            self.assertEqual(precompile.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
-            self.assertEqual(precompile.label, package + " precompile")
+        precompile = launch.precompile_command("cubie", "trials/k/x.jsonl")
+        self.assertEqual(precompile.argv[:2], launch.runner_command("cubie", "x.jsonl").argv[:2])
+        self.assertEqual(precompile.argv[2:5], ["--trials", "trials/k/x.jsonl", "--precompile"])
+        self.assertEqual(precompile.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
+        self.assertEqual(precompile.label, "cubie precompile")
         floored = launch.runner_command("cubie", "x.jsonl", floor=True)
         self.assertEqual(floored.argv[-3:], ["--trials", "x.jsonl", "--floor"])
         self.assertEqual(floored.env, {"CUBIE_MAX_CACHE_ENTRIES": "0"})
@@ -496,7 +494,7 @@ class LaunchTests(unittest.TestCase):
             launch.runner_command("fortran", "x.jsonl")
 
     def test_ordering_and_the_julia_channel(self):
-        self.assertEqual(launch.ordered(["jax", "cubie_mlir", "cubie"]), ["cubie", "cubie_mlir", "jax"])
+        self.assertEqual(launch.ordered(["jax", "cubie", "cpp"]), ["cubie", "jax", "cpp"])
         saved = os.environ.pop("JULIA", None)
         try:
             self.assertEqual(launch.julia_command(), ["julia", "+1.13"])
@@ -829,7 +827,7 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual([(t["algorithm"], t["n"]) for t in retry],
                          [("classical-rk4", 8), ("classical-rk4", 32), ("classical-rk4", 128)])
 
-    def test_a_cubie_package_precompiles_its_kernels_then_runs_a_fresh_runner_per_part_of_whole_families(self):
+    def test_cubie_precompiles_its_kernels_then_runs_a_fresh_runner_per_part_of_whole_families(self):
         two = ("-g", "cash-karp-54,classical-rk4")
         cubie_lines = self.planned("cubie", *two)
         families = {trials.family_key(t) for t in cubie_lines}
@@ -846,9 +844,8 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(len({trials.family_key(t) for t in tols}), 1)
         self.assertGreater(len({trials.kernel_key(t) for t in tols}), 1)
         self.assertEqual(trials.family_parts(tols, 1), [tols])
-        # Only the cubie packages restart.
-        self.assertEqual(sorted(launch.RESTART_KERNELS), ["cubie", "cubie_mlir"])
-        self.assertEqual(set(launch.RESTART_KERNELS.values()), {8})
+        # Only cubie restarts.
+        self.assertEqual(sorted(launch.RESTART_KERNELS), ["cubie"])
         self.assertIsNone(launch.RESTART_KERNELS.get("cpp"))
         saved = launch.RUNNERS["cubie"]
         launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]
@@ -889,7 +886,8 @@ class HardExitTests(unittest.TestCase):
         hung = [t for t in cubie_lines if t["algorithm"] == "cash-karp-54" and t["n"] == 8][0]
         group = trials.compile_key(hung)
         # One part: the runner reads the plan file itself, rewritten with the group marked.
-        status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie", compile_timeout=hung["trial_id"])
+        with mock.patch.dict(launch.RESTART_KERNELS, {"cubie": None}):
+            status, run, calls, summary = self.run_bench(None, 3, *two, package="cubie", compile_timeout=hung["trial_id"])
         self.assertEqual(status, 0)
         self.assertEqual([c["path"] for c in calls], ["cubie.jsonl", "cubie.jsonl"])
         self.assertEqual([tuple(m) for m in calls[0]["marks"]], [(True, "")] * len(cubie_lines))

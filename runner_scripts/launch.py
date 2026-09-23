@@ -10,16 +10,12 @@ from store import PACKAGES
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CUBIE_PACKAGES = ("cubie", "cubie_mlir")
-
-VENV = {"cubie": "GPU_ODE_CUBIE/venv", "cubie_mlir": "GPU_ODE_CUBIE_MLIR/venv",
-        "pytorch": "GPU_ODE_PyTorch/venv", "jax": "GPU_ODE_JAX/venv",
+VENV = {"cubie": "GPU_ODE_CUBIE/venv", "pytorch": "GPU_ODE_PyTorch/venv", "jax": "GPU_ODE_JAX/venv",
         "myokit_cuda": "GPU_ODE_MYOKIT_CUDA/venv"}
 ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
-       "cubie_mlir": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 # Kernels a cubie process, runner or precompile worker, compiles before it exits.
-RESTART_KERNELS = {"cubie": 1, "cubie_mlir": 1}
+RESTART_KERNELS = {"cubie": 1}
 # Private memory past which a precompile worker hands the rest of its chunk to a new one.
 PRECOMPILE_MEMORY_GB = 6
 
@@ -32,10 +28,9 @@ class Command:
 
 
 def ordered(packages):
-    """cubie, then cubie_mlir, then the rest in the given order."""
+    """cubie, then the rest in the given order."""
     return ([p for p in packages if p == "cubie"]
-            + [p for p in packages if p == "cubie_mlir"]
-            + [p for p in packages if p not in CUBIE_PACKAGES])
+            + [p for p in packages if p != "cubie"])
 
 
 def venv_python(package):
@@ -127,7 +122,6 @@ def _cpp_runner():
 # package -> callable giving the argv a trial file is appended to.
 RUNNERS = {
     "cubie": lambda: _python_runner("cubie", "GPU_ODE_CUBIE/bench_cubie.py"),
-    "cubie_mlir": lambda: _python_runner("cubie_mlir", "GPU_ODE_CUBIE_MLIR/bench_cubie_mlir.py"),
     "jax": lambda: _python_runner("jax", "GPU_ODE_JAX/bench_diffrax.py"),
     "pytorch": lambda: _python_runner("pytorch", "GPU_ODE_PyTorch/bench_torchdiffeq.py"),
     "myokit_cuda": lambda: _python_runner("myokit_cuda", "GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py"),

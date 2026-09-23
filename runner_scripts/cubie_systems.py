@@ -1,4 +1,4 @@
-"""Cubie system definitions, one builder per problem, shared by every cubie suite; ensemble_parameters() turns a grid into each problem's parameter arrays."""
+"""Cubie system definitions, one builder per problem; ensemble_parameters() turns a grid into each problem's parameter arrays."""
 
 import numpy as np
 

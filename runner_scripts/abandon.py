@@ -115,7 +115,7 @@ def abandon_after_hard_exit(data, key, trial_list, progress_path, suite_rev):
     if current is None:
         return None
     if progress.get("stage") == "optimize":
-        if current["package"] in cubie_adapter.PACKAGES:
+        if current["package"] == "cubie":
             cubie_adapter.record_optimize_timeout(current, key, data.root)
         abandon_compile(data, key, trial_list, current, suite_rev)
         return trials_mod.mark_compile_timeouts(remaining(trial_list, current), {trials_mod.compile_key(current)})

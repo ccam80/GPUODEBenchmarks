@@ -1,8 +1,7 @@
 # GPUODEBenchmarks
 
 Ensemble ODE solvers on the GPU, timed and checked against one another on
-the same problems, grids and stepping: `cubie` (numba-cuda) and `cubie_mlir`
-(the MLIR backend of the same install), `jax` (Diffrax), `pytorch`
+the same problems, grids and stepping: `cubie`, `jax` (Diffrax), `pytorch`
 (torchdiffeq, vmap fork), `myokit_cuda`, `cpp` (MPGOS) and `julia_gpu`
 (DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
 `EnsembleThreads`) runs the same trials and supplies the float64 reference
@@ -19,7 +18,7 @@ specs as one JSONL trial file per package and hands each file to that
 package's runner, which keeps one build while consecutive lines share a
 system, algorithm and controller, times every trial after one untimed
 warm-up, and records one row per (spec, transfers) in the parquet
-store under `data/`. A cubie package's default adaptive controller is
+store under `data/`. cubie's default adaptive controller is
 Julia's for the algorithm (`runner_scripts/julia_controllers.csv`, written
 by `julia_controllers.jl` from OrdinaryDiffEq's defaults and mapped to
 cubie's gains by `cubie_adapter.julia_controller`) and cubie's own where
@@ -51,8 +50,8 @@ are named: it builds cold, keeps finals, optimizes and times each
 transfers mode when any declaration asks; a package every declaration
 lists under `[set.untimed]` runs each line once with no warm-up. A cubie
 optimize runs once per build and stepping (once per build across dt for
-an explicit fixed-step algorithm) for the packages a set's
-`[set.optimize]` names, timing the batch and duration cubie's own
+an explicit fixed-step algorithm) when a set's `[set.optimize]` names
+cubie, timing the batch and duration cubie's own
 `optimize` sizes.
 Lines run
 easiest first (states, then n, then step and tolerance loose to tight); a
@@ -88,10 +87,10 @@ the push the box deletes this key's clock logs a day old that no row names
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
 | `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
-| `fabbri_linder` | `cubie_mlir` | every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s, 200 s watchdog |
-| `fabbri_euler` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns on the same grid, traced on the head lattice, single run past 30 s |
+| `fabbri_linder` | `cubie` | every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s, 200 s watchdog |
+| `fabbri_euler` | `cubie`, `myokit_cuda` | Euler at 100 us to 250 ns on the same grid, traced on the head lattice, single run past 30 s |
 | `fabbri_golden` | `julia_cpu` | the fabbri_linder float64 reference: finals and traces of the 1024-point head lattice |
-| `fabbri_perf` | `cubie_mlir`, `myokit_cuda` | fabbri_linder trajectory sweep, 8 to 2^20: Kvaerno3, Rosenbrock23 and Tsit5 at 1e-5, Euler at 5 us |
+| `fabbri_perf` | `cubie`, `myokit_cuda` | fabbri_linder trajectory sweep, 8 to 2^20: Kvaerno3, Rosenbrock23 and Tsit5 at 1e-5, Euler at 5 us |
 
 `fabbri_linder` (35 states, `runner_scripts/models/fabbri_linder.cellml`,
 cAMP cascade on) sweeps an index: the first 1024 form a 32 x 32
@@ -111,7 +110,7 @@ Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
 refuses to start when `nvidia-smi` cannot name the GPU. A solve past the
 trial's watchdog is recorded NaN with a reason and every harder run of its
 family is abandoned; a runner that never returns hard-exits and the driver re-invokes
-it with the trials still missing. A cubie package first precompiles the
+it with the trials still missing. cubie first precompiles the
 kernels of its trial file into the package cache, with the optimize
 candidates of the kernels whose lines optimize (`bench_cubie.py --trials
 <file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one), then runs a fresh runner every 8 kernels at the next family
@@ -166,8 +165,7 @@ rows of one key, package, stepping kind and
 transfers along the axis and is drawn when it has two or more x values. julia_cpu,
 whose timing is not of interest, appears on the error-against-dt and
 error-against-tolerance figures only. Rows with `errored_pct` above 10 are
-dropped. A figure with one package family (the two cubie backends count as
-one) or no series past three points goes under `<kind>/limited_data/`. The
+dropped. A figure with one package or no series past three points goes under `<kind>/limited_data/`. The
 `runtime_vs_n`, `error_vs_runtime` and `states` kinds also get
 `<problem>_algorithms.png`, a subplot per algorithm, and
 `<algorithm>_problems.png`, a subplot per problem. `plots/all_cards/` holds

@@ -35,7 +35,7 @@ class LatticeTests(unittest.TestCase):
         self.assertEqual((row["sweep_parameter"], row["sweep_scale"], row["sweep_min"], row["sweep_max"]),
                          (fabbri.PARAMETER, "linear", 0.0, float(fabbri.LATTICE_POINTS - 1)))
         self.assertEqual((row["states"], row["duration"], row["golden_algorithm"]), (35, 2.0, "VCABM"))
-        self.assertEqual(row["frameworks"], ("cubie", "cubie_mlir", "julia_cpu", "myokit_cuda"))
+        self.assertEqual(row["frameworks"], ("cubie", "julia_cpu", "myokit_cuda"))
         values = grid.grid_values("linear", 0.0, 131071.0, fabbri.LATTICE_POINTS)
         np.testing.assert_array_equal(values, np.arange(fabbri.LATTICE_POINTS, dtype=np.float32))
         np.testing.assert_array_equal(fabbri.lattice_index(values), np.arange(fabbri.LATTICE_POINTS))

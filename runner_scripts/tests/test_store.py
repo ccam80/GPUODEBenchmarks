@@ -199,7 +199,7 @@ class HashTests(unittest.TestCase):
             other = spec(**change)
             self.assertEqual(store.trial_id(other), store.trial_id(base))
             self.assertNotEqual(store.run_id(other), store.run_id(base))
-        self.assertNotEqual(store.trial_id(spec(package="cubie_mlir")), store.trial_id(base))
+        self.assertNotEqual(store.trial_id(spec(package="jax")), store.trial_id(base))
 
     def test_group_id_ignores_the_ensemble_transfers_package_and_key(self):
         base = spec()
@@ -261,7 +261,7 @@ class HashTests(unittest.TestCase):
 class SchemaTests(StoreCase):
     def test_a_results_file_carries_every_column_with_its_arrow_type(self):
         self.store.record(row(min_ms=1.5, samples_ms=[9.0, 2.0, 1.5], errored_pct=0.0,
-                              build_s=2.5, package_version="cubie 0.12.0+numba-cuda",
+                              build_s=2.5, package_version="cubie 0.14.1",
                               suite_rev="abc1234"))
         table = pq.read_table(self.results_file())
         self.assertEqual(table.schema.names, list(store.COLUMNS))

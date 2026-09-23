@@ -2,18 +2,8 @@
 """
 Cross-platform setup script for the CUBIE ODE benchmarking environment.
 
-This builds the single shared cubie venv used by *both* benchmark suites
-(GPU_ODE_CUBIE and GPU_ODE_CUBIE_MLIR). cubie is installed from PyPI (not a
-git checkout), with both CUDA backends present in the one environment:
-
-  * numba-cuda              (via the ``cuda13`` extra)
-  * cubie-numba-cuda-mlir   (via the ``mlir-cuda13`` extra)
-
-Since ccam80/cubie#617 the active backend is chosen at *import time* by the
-``CUBIE_CUDA_BACKEND`` environment variable (``numba-cuda`` | ``mlir``), so a
-single install serves both suites; the benchmark launchers export the value
-they need. GPU_ODE_CUBIE_MLIR/setup_environment.py links its ``venv`` path at
-this one rather than building a second copy.
+Builds GPU_ODE_CUBIE/venv: cubie from PyPI with its ``mlir-cuda13`` and test
+extras, the store and analysis dependencies, and no numba-cuda.
 
 Works on Linux, Windows, and macOS.
 """
@@ -23,7 +13,7 @@ import subprocess
 import platform
 from pathlib import Path
 
-# CUDA major version to match. The extras pull the matching numba-cuda /
+# CUDA major version to match. The extra pulls the matching
 # cubie-numba-cuda-mlir / cupy builds; override with CUBIE_CUDA_MAJOR=12.
 CUDA_MAJOR = os.environ.get("CUBIE_CUDA_MAJOR", "13")
 
@@ -52,7 +42,7 @@ def main():
     script_dir = Path(__file__).parent.resolve()
     os.chdir(script_dir)
 
-    print("Setting up CUBIE environment (shared by CUBIE and CUBIE-MLIR)...")
+    print("Setting up CUBIE environment...")
 
     # Check if Python is available
     try:
@@ -99,16 +89,20 @@ def main():
     else:
         venv_uv = venv_path / "bin" / "uv"
 
-    # Install cubie from PyPI with BOTH backends plus the test dependency set.
-    # cuda<N>      -> numba-cuda[cuN] + cupy-cudaNx
+    # Install cubie from PyPI plus the test dependency set.
     # mlir-cuda<N> -> cubie-numba-cuda-mlir[cuN] + cupy-cudaNx
-    # Both live side by side; CUBIE_CUDA_BACKEND picks between them at import.
     # cubie_precompile.py calls Solver.compile(optimize_candidates=..., max_parallel=...), which needs 0.14.0.
-    spec = f"cubie[cuda{CUDA_MAJOR},mlir-cuda{CUDA_MAJOR},test]>=0.14.0"
+    spec = f"cubie[mlir-cuda{CUDA_MAJOR},test]>=0.14.0"
     print(f"Installing {spec} from PyPI...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         "--upgrade", spec]):
         print("Failed to install cubie")
+        return 1
+
+    # Keep numba-cuda out so cubie compiles through MLIR.
+    print("Removing numba-cuda if present...")
+    if not run_command([str(venv_uv), "pip", "uninstall", "-p", str(venv_python), "numba-cuda"]):
+        print("Failed to uninstall numba-cuda")
         return 1
 
     # The suite interpreter: the result store needs pyarrow and DuckDB, the analyses matplotlib.
@@ -118,24 +112,14 @@ def main():
         print("Failed to install pyarrow, duckdb and matplotlib")
         return 1
 
-    # Verify each backend resolves under its env var. The backend is read once
-    # at import time, so each check runs in a fresh interpreter.
-    for backend, expect_mlir in (("numba-cuda", False), ("mlir", True)):
-        print(f"Verifying installation (backend: {backend})...")
-        verify_env = os.environ.copy()
-        verify_env["CUBIE_CUDA_BACKEND"] = backend
-        verify_code = (
-            "import cubie; "
-            "from cubie.cuda_backend import CUDA_BACKEND, IS_MLIR; "
-            f"assert IS_MLIR is {expect_mlir}, 'resolved backend: ' + CUDA_BACKEND; "
-            "print('Cubie', cubie.__version__, 'installed; backend =', CUDA_BACKEND)"
-        )
-        if not run_command([str(venv_python), "-c", verify_code], env=verify_env):
-            print(f"Failed to import cubie under CUBIE_CUDA_BACKEND={backend}")
-            return 1
+    print("Verifying installation...")
+    if not run_command([str(venv_python), "-c",
+                        "import cubie; print('Cubie', cubie.__version__, 'installed')"]):
+        print("Failed to import cubie")
+        return 1
 
     if not run_command([str(venv_python), "-c",
-                        "import numba.cuda; print('CUDA available:', numba.cuda.is_available())"]):
+                        "from cubie.cuda_simsafe import cuda; print('CUDA available:', cuda.is_available())"]):
         print("Warning: CUDA verification failed")
 
     if not run_command([str(venv_python), "-c",
@@ -145,8 +129,6 @@ def main():
         return 1
 
     print("\nCUBIE environment setup complete!")
-    print("Both backends live in this one venv; select with "
-          "CUBIE_CUDA_BACKEND=numba-cuda|mlir (the benchmark launchers set it).")
     if is_windows:
         print(f"To activate: {venv_path / 'Scripts' / 'activate.bat'}")
         print(f"Or in PowerShell: {venv_path / 'Scripts' / 'Activate.ps1'}")

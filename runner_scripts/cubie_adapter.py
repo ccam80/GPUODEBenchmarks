@@ -1,4 +1,4 @@
-"""Cubie backend, system naming, controller mappings and optimize store for every cubie suite; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows. A kernel's record serves every line of the kernel, and names the run that recorded it; nothing here compares sources or dates."""
+"""Cubie system naming, controller mappings and optimize store; `cubie_adapter.py clear <package> <key> [algorithm] [problem]` drops optimize rows. A kernel's record serves every line of the kernel, and names the run that recorded it; nothing here compares sources or dates."""
 
 import csv
 import json
@@ -9,10 +9,6 @@ from datetime import datetime, timezone
 from problems import as_problem
 from store import RUN_ENV, _Lock
 from trials import shares_dt_optimize
-
-BACKENDS = {"cubie": "numba-cuda", "cubie_mlir": "mlir"}
-SYSTEM_SUFFIX = {"cubie": "", "cubie_mlir": "_mlir"}
-PACKAGES = tuple(BACKENDS)
 
 OPTIMIZE_FIELDS = ("package", "key", "problem", "states", "precision", "algorithm", "controller",
                    "gains", "stepping", "n", "duration", "label", "best_ms", "blocksize",
@@ -26,36 +22,15 @@ CONTROLLER_KEYS = ("step_controller", "integral_gain", "proportional_gain",
                    "max_step_growth")
 
 
-# ------------------------------------------------------------------ backend
-
-def select_backend(package):
-    """Set CUBIE_CUDA_BACKEND for the package; cubie must not already be imported on another backend."""
-    backend = BACKENDS[package]
-    loaded = sys.modules.get("cubie.cuda_backend")
-    if loaded is not None and loaded.CUDA_BACKEND != backend:
-        raise RuntimeError("cubie is already imported on backend {0}; {1} "
-                           "needs {2}".format(loaded.CUDA_BACKEND, package,
-                                              backend))
-    os.environ["CUBIE_CUDA_BACKEND"] = backend
-    return backend
-
-
-def package_for_backend(backend):
-    for package, name in BACKENDS.items():
-        if name == backend:
-            return package
-    raise KeyError(backend)
-
-
-def build_system(problem, package, precision=None, states=None):
-    """(system, initial_values) named for the package so both suites share one generated-code cache per backend."""
+def build_system(problem, precision=None, states=None):
+    """(system, initial_values) of a problem, resized to `states` and named for the size when given."""
     import numpy as np
     from cubie_systems import build_system as build
     row = as_problem(problem)
-    suffix = SYSTEM_SUFFIX[package]
+    suffix = ""
     if states is not None:
         row = row.resized(states)
-        suffix = "{0}_s{1}".format(suffix, states)
+        suffix = "_s{0}".format(states)
     return build(row, np.float32 if precision is None else precision,
                  name_suffix=suffix)
 

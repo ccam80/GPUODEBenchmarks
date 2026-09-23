@@ -8,7 +8,6 @@ from pathlib import Path
 
 SHARED = (
     Path("GPU_ODE_CUBIE") / "venv",
-    Path("GPU_ODE_CUBIE_MLIR") / "venv",
     Path("GPU_ODE_JAX") / "venv",
     Path("GPU_ODE_PyTorch") / "venv",
     Path("GPU_ODE_MYOKIT_CUDA") / "venv",

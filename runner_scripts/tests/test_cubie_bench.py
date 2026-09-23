@@ -190,8 +190,8 @@ class AdapterCase(unittest.TestCase):
         FakeSolver.made = []
         self.adapter = cubie_bench.CubieAdapter("cubie", KEY, self.root, solver_class=FakeSolver)
 
-    def fake_build_system(self, problem, package, precision=None, states=None):
-        self.built.append((problem.name, problem["states"], package, precision, states))
+    def fake_build_system(self, problem, precision=None, states=None):
+        self.built.append((problem.name, problem["states"], precision, states))
         return FakeSystem(), {name: 0.0 for name in NAMES}
 
     def values(self, n):
@@ -296,8 +296,7 @@ class KeywordTests(unittest.TestCase):
         import importlib.metadata
         self.assertEqual(cubie_bench.CONTROLLERS, ("fixed", "default", "i", "pi", "pid", "gustafsson"))
         version = importlib.metadata.version("cubie")
-        self.assertEqual(cubie_bench.CubieAdapter("cubie", KEY, "data").version(), version + "+numba-cuda")
-        self.assertEqual(cubie_bench.CubieAdapter("cubie_mlir", KEY, "data").version(), version + "+mlir")
+        self.assertEqual(cubie_bench.CubieAdapter("cubie", KEY, "data").version(), version)
         adapter = cubie_bench.CubieAdapter("cubie", KEY, "data")
         self.assertEqual(adapter.states(trial()), 3)
         self.assertEqual(adapter.states(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
@@ -342,7 +341,7 @@ class PrecompileWorkerTests(AdapterCase):
         # Warm builds: the cache root is untouched, and the resized system was built at its states.
         from cubie.cache_root import get_cache_root_override
         self.assertIsNone(get_cache_root_override())
-        self.assertIn(("lorenz96", 8, "cubie", np.float32, 8), self.built)
+        self.assertIn(("lorenz96", 8, np.float32, 8), self.built)
         with open(path) as handle:
             progress = json.load(handle)
         self.assertEqual(progress["compiled"], [0, 1, 2, 3, 4])
@@ -420,11 +419,11 @@ class BuildTests(AdapterCase):
     def test_build_sizes_the_system_from_system_params(self):
         leg = self.adapter.build(trial(problem="lorenz96", system_params='{"states":8}', parameter="F",
                                            grid_max=16.0))
-        self.assertEqual(self.built, [("lorenz96", 8, "cubie", np.float32, 8)])
+        self.assertEqual(self.built, [("lorenz96", 8, np.float32, 8)])
         self.assertEqual(leg.states, 8)
         leg.close()
         leg = self.adapter.build(trial(precision="float64"))
-        self.assertEqual(self.built[-1], ("lorenz", 3, "cubie", np.float64, None))
+        self.assertEqual(self.built[-1], ("lorenz", 3, np.float64, None))
         self.assertEqual(leg.states, 3)
         self.assertEqual(leg.precision, np.float64)
         leg.close()
