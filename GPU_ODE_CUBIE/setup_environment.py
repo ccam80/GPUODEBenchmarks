@@ -2,10 +2,8 @@
 """
 Cross-platform setup script for the CUBIE ODE benchmarking environment.
 
-This builds GPU_ODE_CUBIE/venv: cubie from PyPI (not a git clone) with its
-``mlir-cuda13`` extra (cubie-numba-cuda-mlir and CuPy) and its test extra, plus
-the result-store and analysis dependencies. An older venv's numba-cuda is
-uninstalled, so cubie compiles through cubie-numba-cuda-mlir only.
+Builds GPU_ODE_CUBIE/venv: cubie from PyPI with its ``mlir-cuda13`` and test
+extras, the store and analysis dependencies, and no numba-cuda.
 
 Works on Linux, Windows, and macOS.
 """
@@ -101,7 +99,7 @@ def main():
         print("Failed to install cubie")
         return 1
 
-    # A venv built before cubie went MLIR-only still holds numba-cuda; without it cubie has one compiler to pick.
+    # Keep numba-cuda out so cubie compiles through MLIR.
     print("Removing numba-cuda if present...")
     if not run_command([str(venv_uv), "pip", "uninstall", "-p", str(venv_python), "numba-cuda"]):
         print("Failed to uninstall numba-cuda")
