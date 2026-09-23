@@ -105,7 +105,10 @@ class FakeAdapter:
         from protocol import TRACE_SAMPLES
         states = np.zeros((int(values.shape[0]), TRACE_SAMPLES, 3), np.float32)
         states[:, :, 0] = np.asarray(values)[:, None]
-        return states
+        retcode = [""] * states.shape[0]
+        if self.bad_row is not None and self.bad_row < states.shape[0]:
+            retcode[self.bad_row] = "STEP_TOO_SMALL"
+        return states, retcode
 
     def finals(self, leg, result):
         n = result["n"]
@@ -154,11 +157,19 @@ class TraceTests(RunnerCase):
                 relative = rows[(n, transfers)]["traces"]
                 self.assertTrue(relative.startswith("traces/"))
                 self.assertTrue(data.traces_readable("cubie", KEY, relative))
-            traj, times, states = data.load_traces("cubie", KEY, rows[(n, "both")]["traces"])
+            traj, times, states, retcode = data.load_traces("cubie", KEY, rows[(n, "both")]["traces"])
             self.assertEqual(states.shape, (min(n, TRACE_ROWS), TRACE_SAMPLES, 3))
             self.assertEqual(times[0], 0.001)
+            self.assertEqual(list(retcode), [""] * min(n, TRACE_ROWS))
         self.assertEqual(rows[(32, "both")]["traces"], "")
         self.assertEqual(rows[(8, "both")]["traces"], rows[(8, "none")]["traces"])
+
+    def test_a_traced_trajectorys_failure_code_reaches_the_file(self):
+        status, rows, _ = self.run_specs([spec(8, traces=True)], FakeAdapter(bad_row=2))
+        self.assertEqual(status, 0)
+        _, _, states, retcode = store.Store(self.root).load_traces("cubie", KEY, rows[(8, "both")]["traces"])
+        self.assertEqual(list(retcode), ["", "", "STEP_TOO_SMALL", "", "", "", "", ""])
+        self.assertTrue(np.isfinite(states).all())
 
     def test_a_failed_trace_leaves_the_timing_row_without_a_file(self):
         adapter = FakeAdapter({("trace", 8): "error", (32, "both"): "error", (32, "none"): "error"})
@@ -238,11 +249,11 @@ class OutcomeTests(RunnerCase):
         self.assertNotIn(("solve", 128, "none"), adapter.calls)
         self.assertIn(("solve", 128, "both"), adapter.calls)
 
-    def test_reset_runs_before_every_attempt_after_the_first(self):
+    def test_reset_runs_before_every_attempt(self):
         adapter = FakeAdapter()
         status, rows, _ = self.run_specs([spec(8, transfers=("none",))], adapter)
         calls = [c for c in adapter.calls if c[0] in ("solve", "reset")]
-        self.assertEqual(calls, [("solve", 8, "none")] + [("reset", 8, "none"), ("solve", 8, "none")] * 3)
+        self.assertEqual(calls, [("reset", 8, "none"), ("solve", 8, "none")] * 4)
 
     def test_the_trials_own_budget_sets_the_cap(self):
         adapter = FakeAdapter({(32, "none"): "slow"})

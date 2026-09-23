@@ -1,7 +1,7 @@
-# The Fabbri-Linder work-precision dataset: cubie_mlir and myokit_cuda over the 131072-point ACh x Iso grid, timed on the resident inputs, Euler at five fixed steps and every other cubie algorithm at tolerances 1e-2 to 1e-8, each run tracing the first 1024 points (the 32 x 32 lattice) at the protocol's 1 ms samples over the first second; the golden is the fabbri_golden set's 1024-point julia_cpu run. A first run past 30 s is the timing.
+# The Fabbri-Linder adaptive work-precision dataset: cubie_mlir over the 131072-point ACh x Iso grid, timed on the resident inputs, every adaptive algorithm at tolerances 1e-2 to 1e-8, each run tracing the first 1024 points (the 32 x 32 lattice) at the protocol's 1 ms samples over the first second; the golden is the fabbri_golden set's 1024-point julia_cpu run, the Euler runs the fabbri_euler set's. A first run past 30 s is the timing; a solve past 200 s is abandoned.
 
 [set]
-packages   = ["cubie_mlir", "myokit_cuda"]
+packages   = ["cubie_mlir"]
 problems   = ["fabbri_linder"]
 algorithms = "all"
 precision  = "float32"
@@ -9,7 +9,7 @@ finals     = false
 traces     = true
 transfers  = ["none"]
 build      = "warm"
-watchdog   = 1800
+watchdog   = 200
 single_run = 30
 
 [set.optimize]
@@ -24,22 +24,14 @@ max = "default"
 n = [131072]
 system_params = {}
 
-# Euler at 100 us, 20 us, 5 us, 1 us and 250 ns: every step divides the 1 ms sample interval.
-[[stepping]]
-packages = "all"
-algorithms = ["euler"]
-controller = "fixed"
-dt = [1.0e-4, 2.0e-5, 5.0e-6, 1.0e-6, 2.5e-7]
-newton = "none"
-
-# Every adaptive algorithm at 1e-2 to 1e-8.
+# Every adaptive algorithm at 1e-2 to 1e-8, the step held between 1 ns and 100 ms.
 [[stepping]]
 packages = "all"
 algorithms = "all"
 controller = "default"
 tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
 dt0 = {duration_times_2_pow = -10}
-dt_min = "none"
-dt_max = "none"
+dt_min = 1.0e-9
+dt_max = 1.0e-1
 newton = "tol"
 gains = {}

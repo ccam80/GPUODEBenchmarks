@@ -147,7 +147,7 @@ class PlotTests(AnalysesCase):
             self.row(n=n, min_ms=9.0 * ms, **adaptive(1e-5))
         self.row(n=8, min_ms=3.0, package="julia_gpu")
         self.row(n=32, min_ms=6.0, package="julia_gpu")
-        dropped = self.row(n=128, min_ms=9.0, package="julia_gpu", errored_pct=50.0)
+        crossed = self.row(n=128, min_ms=9.0, package="julia_gpu", errored_pct=50.0)
         untimed = self.row(n=512, min_ms=NAN, package="julia_gpu")
         cpu = self.row(n=8, min_ms=100.0, package="julia_cpu", transfers="none")
         self.row(n=32, min_ms=200.0, package="julia_cpu", transfers="none")
@@ -158,8 +158,9 @@ class PlotTests(AnalysesCase):
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         # euler has one package: limited data. The grids hold every algorithm and every problem.
         self.assertEqual(self.written(), ["runtime_vs_n/euler_problems.png", "runtime_vs_n/limited_data/lorenz_euler.png",
-                                          "runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_algorithms.png",
-                                          "runtime_vs_n/lorenz_tsit5.png", "runtime_vs_n/tsit5_problems.png"])
+                                          "runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz.png",
+                                          "runtime_vs_n/lorenz_algorithms.png", "runtime_vs_n/lorenz_tsit5.png",
+                                          "runtime_vs_n/tsit5_problems.png"])
         self.assertEqual(sorted(os.path.relpath(p, os.path.join(self.out, KEY)).replace(os.sep, "/") for p in written),
                          self.written())
         table = self.table("runtime_vs_n")
@@ -178,15 +179,19 @@ class PlotTests(AnalysesCase):
                           ("jax adaptive +", "8.0", "0.003"), ("jax adaptive +", "32.0", "0.006"),
                           ("jax adaptive +", "128.0", "0.012"), ("jax adaptive +", "512.0", "0.024"),
                           ("julia_gpu fixed +", "8.0", "0.003"),
-                          ("julia_gpu fixed +", "32.0", "0.006")])
+                          ("julia_gpu fixed +", "32.0", "0.006"),
+                          ("julia_gpu fixed +", "128.0", "0.009")])
         self.assertEqual([sid(r) for r in table if r["algorithm"] == "euler"],
                          ["cubie fixed +"] * 2)
         self.assertFalse(os.path.isdir(os.path.join(self.out, plots.ALL_CARDS)))
-        for absent in (dropped, untimed, cpu):
+        # The row over the errored limit stays (drawn crossed out); the untimed and CPU rows do not.
+        self.assertIn(crossed["run_id"], [r["run_id"] for r in table])
+        for absent in (untimed, cpu):
             self.assertNotIn(absent["run_id"], [r["run_id"] for r in table])
-        # No build time, error, errored share, finals or reason on these rows: their columns are left out.
+        # No build time, error, finals or reason on these rows: their columns are left out.
         self.assertEqual(list(table[0]), [c for c in plots.CSV_COLUMNS if c not in (
-            "build_s", "error", "errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason", "finals", "traces")])
+            "build_s", "error", "interval_error", "trace_errored_pct", "dt_min", "dt_max", "newton_atol", "newton_rtol", "reason",
+            "finals", "traces")])
 
     def test_a_series_keeps_the_stepping_with_the_most_points(self):
         for n in (8, 32, 128):
@@ -255,8 +260,8 @@ class PlotTests(AnalysesCase):
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         self.assertEqual([n for n in self.written() if n.endswith(".png")],
                          ["error_vs_dt/limited_data/lorenz_tsit5.png", "error_vs_runtime/limited_data/lorenz_tsit5.png",
-                          "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png",
-                          "error_vs_tol/limited_data/lorenz_tsit5.png"])
+                          "error_vs_runtime/lorenz.png", "error_vs_runtime/lorenz_algorithms.png",
+                          "error_vs_runtime/tsit5_problems.png", "error_vs_tol/limited_data/lorenz_tsit5.png"])
         by_dt = self.table("error_vs_dt")
         self.assertEqual([(sid(r), r["x"], r["min_ms"]) for r in by_dt],
                          [("cubie fixed", "0.03125", "5.0"), ("cubie fixed", "0.0625", "4.0"),
@@ -314,11 +319,12 @@ class PlotTests(AnalysesCase):
                 self.row(n=n, min_ms=ms, key=key)
                 self.row(n=n, min_ms=3.0 * ms, key=key, package="jax", **adaptive(1e-5))
         written = plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
-        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz_algorithms.png",
-                                          "runtime_vs_n/lorenz_tsit5.png", "runtime_vs_n/tsit5_problems.png"])
+        self.assertEqual(self.written(), ["runtime_vs_n/lorenz.csv", "runtime_vs_n/lorenz.png",
+                                          "runtime_vs_n/lorenz_algorithms.png", "runtime_vs_n/lorenz_tsit5.png",
+                                          "runtime_vs_n/tsit5_problems.png"])
         self.assertEqual(self.written(OTHER_KEY), self.written())
         self.assertEqual(self.written(plots.ALL_CARDS), self.written())
-        self.assertEqual(len(written), 12)
+        self.assertEqual(len(written), 15)
         table = self.table("runtime_vs_n", key=plots.ALL_CARDS)
         self.assertEqual([(r["key"], sid(r)) for r in table][::4],
                          [(OTHER_KEY, "cubie fixed +"), (OTHER_KEY, "jax adaptive +"),
@@ -333,9 +339,9 @@ class PlotTests(AnalysesCase):
             self.row(n=n, min_ms=3.0 * ms, package="jax", transfers="none", **adaptive(1e-5))
         written = plots.run(self.analysis_store(), kinds=["error_vs_runtime"], out=self.out)
         self.assertEqual(self.written(), ["error_vs_runtime/limited_data/lorenz_tsit5.png",
-                                          "error_vs_runtime/lorenz.csv", "error_vs_runtime/lorenz_algorithms.png",
-                                          "error_vs_runtime/tsit5_problems.png"])
-        self.assertEqual(len(written), 4)
+                                          "error_vs_runtime/lorenz.csv", "error_vs_runtime/lorenz.png",
+                                          "error_vs_runtime/lorenz_algorithms.png", "error_vs_runtime/tsit5_problems.png"])
+        self.assertEqual(len(written), 5)
         plots.run(self.analysis_store(), where="problem = 'lorenz' AND algorithm = 'tsit5'",
                   kinds=["runtime_vs_n", "error_vs_dt"], out=self.out)
         self.assertEqual({n.partition("/")[0] for n in self.written()},

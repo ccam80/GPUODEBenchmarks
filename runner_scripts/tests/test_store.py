@@ -103,8 +103,9 @@ class TraceTests(unittest.TestCase):
         relative = self.store.record_traces(self.spec(), states)
         self.assertEqual(relative, "traces/" + store.trial_id(self.spec()) + ".parquet")
         self.assertTrue(self.store.traces_readable("cubie", KEY, relative))
-        traj, times, back = self.store.load_traces("cubie", KEY, relative)
+        traj, times, back, codes = self.store.load_traces("cubie", KEY, relative)
         self.assertEqual(list(traj), [0, 1, 2, 3, 4])
+        self.assertEqual(list(codes), [""] * 5)
         np.testing.assert_array_equal(times, store.trace_times())
         self.assertEqual((times[0], times[-1], len(times)), (0.001, 1.0, TRACE_SAMPLES))
         self.assertEqual(back.dtype, np.float32)
@@ -116,7 +117,21 @@ class TraceTests(unittest.TestCase):
                 self.store.record_traces(self.spec(), bad)
         with self.assertRaises(ValueError):
             self.store.record_traces(self.spec(n=4), states)
+        with self.assertRaises(ValueError):
+            self.store.record_traces(self.spec(), states, ["", "x"])
         self.assertFalse(self.store.traces_readable("cubie", KEY, ""))
+
+    def test_traces_keep_each_trajectorys_failure_code(self):
+        from protocol import TRACE_SAMPLES
+        states = np.zeros((4, TRACE_SAMPLES, 2))
+        relative = self.store.record_traces(self.spec(), states, ["", "MaxIters", None, "STEP_TOO_SMALL|NAN"])
+        _, _, back, codes = self.store.load_traces("cubie", KEY, relative)
+        self.assertEqual(list(codes), ["", "MaxIters", "", "STEP_TOO_SMALL|NAN"])
+        np.testing.assert_array_equal(back, states)
+        # A file written before the column reads every code empty.
+        path = os.path.join(self.store.package_dir("cubie", KEY), *relative.split("/"))
+        pq.write_table(pq.read_table(path).drop(["retcode"]), path)
+        self.assertEqual(list(self.store.load_traces("cubie", KEY, relative)[3]), [""] * 4)
 
     def test_the_traces_cli_takes_a_raw_array(self):
         from protocol import TRACE_SAMPLES
@@ -126,13 +141,18 @@ class TraceTests(unittest.TestCase):
         spec_path = os.path.join(self.tmp, "spec.json")
         with open(spec_path, "w", encoding="utf-8") as handle:
             json.dump({k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in self.spec().items()}, handle)
+        codes_path = os.path.join(self.tmp, "codes.txt")
+        with open(codes_path, "w", encoding="utf-8", newline="") as handle:
+            handle.write("\nUnstable\n")
         out = subprocess.run([sys.executable, store.__file__, "--root", self.tmp, "traces", spec_path, raw,
-                              "--samples", str(TRACE_SAMPLES), "--states", "2", "--dtype", "f32"],
+                              "--samples", str(TRACE_SAMPLES), "--states", "2", "--dtype", "f32",
+                              "--retcode", codes_path],
                              capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stderr)
         relative = out.stdout.strip()
-        traj, times, back = self.store.load_traces("cubie", KEY, relative)
+        traj, times, back, codes = self.store.load_traces("cubie", KEY, relative)
         np.testing.assert_array_equal(back, states)
+        self.assertEqual(list(codes), ["", "Unstable", ""])
 
 
 class HashTests(unittest.TestCase):

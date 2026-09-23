@@ -86,12 +86,10 @@ def memory_shortfall(usage, limit):
 
 
 def finals_of(ys, retcode, duration):
-    """(finals, t_final, retcode) from the last saved states and the per-trajectory result messages: the duration where the message is empty and NaN otherwise."""
+    """(finals, t_final, retcode) from the last saved states and the per-trajectory result messages; t_final is the duration, Diffrax reports no end time."""
     finals = np.asarray(ys)
     retcode = [str(text) for text in retcode]
-    ok = np.array([text == "" for text in retcode], dtype=bool)
-    t_final = np.where(ok, float(duration), np.nan)
-    return finals, t_final, retcode
+    return finals, np.full(finals.shape[0], float(duration)), retcode
 
 
 # ------------------------------------------------------------------ diffrax
@@ -302,7 +300,7 @@ class JaxAdapter:
         return build.device_solve(trial, values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a Solution: the last saved state of every trajectory, the duration where Diffrax reports success and NaN otherwise, and Diffrax's message on failure."""
+        """(finals, t_final, retcode) of a Solution: the last saved state of every trajectory, the duration, and Diffrax's message on failure."""
         ys = np.asarray(result.ys)[:, -1, :]
         return finals_of(ys, retcodes(result.result), build.duration)
 

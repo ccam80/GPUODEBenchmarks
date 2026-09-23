@@ -225,7 +225,7 @@ function ensemble_solve(system, prob, alg, points, kwargs)
     return finals, t_final, retcode
 end
 
-"States of `points` at every protocol sample time, as (state, sample, trajectory) in T; a trajectory that ends early holds NaN past its last sample."
+"(states, retcode) of `points`: every protocol sample time as (state, sample, trajectory) in T, a trajectory that ends early holding NaN past its last sample, and each trajectory's retcode text, empty on Success."
 function trace_solve(system, prob, alg, points, kwargs)
     T = eltype(prob.u0)
     index = system.golden_index
@@ -234,7 +234,7 @@ function trace_solve(system, prob, alg, points, kwargs)
         prob_func = (pr, ctx) -> remake(pr,
             u0 = Vector{T}(system.u0_for(points[ctx.sim_id])),
             p = T[points[ctx.sim_id]], tspan = (zero(T), T(TRACE_SPAN_S))),
-        output_func = (sol, ctx) -> ((sol.t, sol.u), false),
+        output_func = (sol, ctx) -> ((sol.t, sol.u, sol.retcode), false),
         safetycopy = false)
     kw = Dict{Symbol, Any}(kwargs)
     kw[:saveat] = saveat
@@ -242,15 +242,17 @@ function trace_solve(system, prob, alg, points, kwargs)
     kw[:save_start] = false
     sim = solve(eprob, alg, EnsembleThreads(); trajectories = length(points), kw...)
     out = fill(T(NaN), length(index), TRACE_SAMPLES, length(points))
+    retcode = Vector{String}(undef, length(points))
     for i in 1:length(points)
-        ts, us = sim.u[i]
+        ts, us, code = sim.u[i]
+        retcode[i] = code == ReturnCode.Success ? "" : string(code)
         for (j, t) in enumerate(ts)
             sample = round(Int, Float64(t) / TRACE_EVERY_S)
             1 <= sample <= TRACE_SAMPLES || continue
             out[:, sample, i] .= us[j][index]
         end
     end
-    return out
+    return out, retcode
 end
 
 # ---------------------------------------------------------------- outcomes
@@ -393,9 +395,9 @@ function run_build(ctx, lines, failures)
                 if get(trial, "traces", false) == true && isempty(traces_path) && outcome == "ok"
                     write_progress(ctx, trial, "trace")
                     spec = merge(trial, Dict{String, Any}("key" => ctx.key))
-                    traced = run_watchdogged(() -> trace_solve(system, prob, alg, points[1:min(end, TRACE_ROWS)], kwargs),
+                    traced, codes = run_watchdogged(() -> trace_solve(system, prob, alg, points[1:min(end, TRACE_ROWS)], kwargs),
                         () -> println("WATCHDOG $(label): trace never returned"); budget_s = trial["watchdog_s"] + 30.0)
-                    traces_path = store_traces(spec, traced; root = ctx.root)
+                    traces_path = store_traces(spec, traced; retcode = codes, root = ctx.root)
                 end
             end
             push!(rows, trial_row(ctx, trial, transfers; states, min_ms = ms, samples_ms = samples,

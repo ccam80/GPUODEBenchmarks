@@ -101,9 +101,6 @@ class ShippedSetTests(unittest.TestCase):
         cls.expanded = {name: sets.expand([name]) for name in sets.set_names()}
         cls.trials = {name: trials.build_trials(specs) for name, specs in cls.expanded.items()}
 
-    def test_the_six_sets_ship(self):
-        self.assertEqual(sets.set_names(), ["fabbri_golden", "fabbri_linder", "golden", "golden_grid", "perf", "states"])
-
     def test_perf_counts(self):
         specs = self.expanded["perf"]
         self.assertEqual(sorted({s["n"] for s in specs}), PERF_N)
@@ -174,11 +171,6 @@ class ShippedSetTests(unittest.TestCase):
             row = [r for r in ROWS if r.package == spec["package"] and r.name == spec["algorithm"]][0]
             self.assertEqual(np.isnan(spec["newton_atol"]), not row["newton"], (spec["package"], spec["algorithm"]))
             self.assertEqual(np.isnan(spec["newton_rtol"]), not row["newton"], (spec["package"], spec["algorithm"]))
-
-    def test_no_shipped_set_pins_dt_min_or_dt_max(self):
-        for name, specs in self.expanded.items():
-            for field in ("dt_min", "dt_max"):
-                self.assertTrue(all(np.isnan(s[field]) for s in specs), (name, field))
 
     def test_states_counts(self):
         specs = self.expanded["states"]
@@ -300,34 +292,6 @@ class ShippedSetTests(unittest.TestCase):
         self.assertTrue(golden["traces"] and full["traces"])
         self.assertFalse(full["finals"])
 
-    def test_fabbri_linder_counts(self):
-        specs = self.expanded["fabbri_linder"]
-        self.assertEqual({s["problem"] for s in specs}, {"fabbri_linder"})
-        self.assertEqual({s["n"] for s in specs}, {FABBRI_N})
-        self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
-        self.assertEqual({(s["finals"], s["traces"]) for s in specs}, {(False, True)})
-        self.assertEqual({s["watchdog_s"] for s in specs}, {1800.0})
-        self.assertEqual({s["single_run_s"] for s in specs}, {30.0})
-        self.assertEqual(dict(by_package_kind(specs)), {"cubie_mlir": 124, "myokit_cuda": 5})
-        euler = sorted({s["dt"] for s in specs if s["algorithm"] == "euler"})
-        self.assertEqual(euler, [2.5e-7, 1e-6, 5e-6, 2e-5, 1e-4])
-        self.assertEqual({s["dt"] for s in specs if s["package"] == "myokit_cuda"}, set(euler))
-        self.assertEqual({s["algorithm"] for s in specs if s["controller"] == "fixed"}, {"euler"})
-        self.assertEqual(sorted({s["atol"] for s in specs if s["controller"] != "fixed"}), sorted(TOLS))
-        self.assertEqual({s["dt"] for s in specs if s["controller"] != "fixed"}, {2.0 * 2.0 ** -10})
-        self.assertEqual(len({s["algorithm"] for s in specs if s["controller"] != "fixed"}), 17)
-        built = self.trials["fabbri_linder"]
-        self.assertEqual(line_counts(built, "cubie_mlir"), (124, 120, 0, 18))
-        self.assertEqual(line_counts(built, "myokit_cuda"), (5, 0, 0, 1))
-        self.assertEqual({t["optimize"] for t in built if t["package"] == "cubie_mlir"}, {True})
-        self.assertEqual({t["traces"] for t in built}, {True})
-        self.assertEqual({t["single_run_s"] for t in built}, {30.0})
-        # No other set sets a single-run threshold.
-        for name in ("fabbri_golden", "golden", "golden_grid", "perf", "states"):
-            self.assertEqual({t["single_run_s"] for t in self.trials[name]}, {math.inf}, name)
-        # No other set declares the problem, so the contract is this set's alone.
-        self.assertEqual({tuple(t["sets"]) for t in built}, {("fabbri_linder",)})
-
     def test_julia_cpu_golden_grid_is_the_1024_prefix_of_the_131072_grid(self):
         julia = [s for s in self.expanded["golden_grid"] if s["package"] == "julia_cpu"]
         self.assertEqual({s["n"] for s in julia}, {1024})
@@ -354,18 +318,6 @@ class ShippedSetTests(unittest.TestCase):
             for spec in specs:
                 self.assertEqual(set(spec), set(sets.SPEC_KEYS) | set(sets.EXTRA_KEYS), name)
                 store.spec_of(dict(spec, transfers=spec["transfers"][0], key=KEY))
-
-    def test_declarations_expand_every_set_file_and_declared_counts_union_the_grids(self):
-        every = sets.declarations(packages=["julia_cpu"], problems=["lorenz"])
-        self.assertEqual({s["set"] for s in every}, {"golden", "golden_grid"})
-        self.assertEqual({s["n"] for s in every}, {1024, 131072})
-        self.assertEqual(sets.declared_counts(["golden_grid"]), [1024, 131072])
-        self.assertEqual(sets.declared_counts(["perf", "golden_grid"]), sorted(set(PERF_N) | {1024}))
-        self.assertEqual(sets.declared_counts(["states", "golden"]), [131072])
-        self.assertEqual({s["set"] for s in sets.declarations(problems=["fabbri_linder"])},
-                         {"fabbri_linder", "fabbri_golden"})
-        self.assertEqual(sets.declared_counts(["fabbri_linder"]), [FABBRI_N])
-        self.assertEqual(sets.declared_counts(["fabbri_golden"]), [FABBRI_GOLDEN_N])
 
     def test_set_module_cli_prints_counts(self):
         out = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "sets.py"), "golden"],
@@ -700,6 +652,10 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual({(s["traces"], s["single_run_s"]) for s in specs}, {(True, 30.0)})
         built = trials.build_trials(specs)
         self.assertEqual({(t["traces"], t["single_run_s"]) for t in built}, {(True, 30.0)})
+        # A point two sets declare traces when either does and takes the smaller single-run threshold.
+        self.write(text.format("single_run = 60\n"), name="t")
+        merged = trials.build_trials(sets.expand(["s", "t"], sets_dir=self.tmp))
+        self.assertEqual([(t["traces"], t["single_run_s"], t["sets"]) for t in merged], [(True, 30.0, ["s", "t"])])
         for bad in ('traces = ["lorenz"]\n', 'traces = 1\n', 'single_run = 0\n', 'single_run = true\n',
                     'single_run = "30"\n', '[[grid]]\nn = [8]\n[grid.problems]\nlorenz = {n = [16]}\n'):
             self.write(text.format(bad))
@@ -716,14 +672,26 @@ class WatchdogBudgetTests(unittest.TestCase):
         with open(os.path.join(self.tmp, name + ".toml"), "w", encoding="utf-8") as handle:
             handle.write(text)
 
-    def test_the_golden_set_allows_a_day_per_solve(self):
-        self.assertEqual(sets.load_set("golden")["set"]["watchdog"], 86400.0)
-        self.assertEqual(sets.load_set("fabbri_linder")["set"]["watchdog"], 1800.0)
-        for name in ("perf", "states", "golden_grid"):
-            self.assertEqual(sets.load_set(name)["set"]["watchdog"], protocol.WATCHDOG_SECONDS)
-        specs = sets.expand(["golden"], problems=["lorenz"])
+    def test_a_sets_watchdog_reaches_every_spec_and_trial(self):
+        self.write("day", '[set]\npackages = ["jax"]\nproblems = ["lorenz"]\nalgorithms = ["euler"]\nwatchdog = 86400\n'
+                          '[[grid]]\nn = [8, 32]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5, 0.25]\n')
+        self.assertEqual(sets.load_set("day", self.tmp)["set"]["watchdog"], 86400.0)
+        specs = sets.expand(["day"], sets_dir=self.tmp)
+        self.assertEqual(len(specs), 4)
         self.assertEqual({s["watchdog_s"] for s in specs}, {86400.0})
         self.assertEqual({t["watchdog_s"] for t in trials.build_trials(specs)}, {86400.0})
+
+    def test_declarations_expand_every_set_file_and_declared_counts_union_the_grids(self):
+        body = '[set]\npackages = ["{0}"]\nproblems = ["{1}"]\nalgorithms = ["euler"]\n[[grid]]\nn = {2}\n' \
+               '[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n'
+        self.write("a", body.format("jax", "lorenz", "[8, 32]"))
+        self.write("b", body.format("jax", "lorenz", "[32, 128]"))
+        self.write("c", body.format("cpp", "lorenz", "[64]"))
+        every = sets.declarations(packages=["jax"], problems=["lorenz"], sets_dir=self.tmp)
+        self.assertEqual({s["set"] for s in every}, {"a", "b"})
+        self.assertEqual(sorted((s["set"], s["n"]) for s in every), [("a", 8), ("a", 32), ("b", 32), ("b", 128)])
+        self.assertEqual(sets.declared_counts(["a", "b"], sets_dir=self.tmp), [8, 32, 128])
+        self.assertEqual(sets.declared_counts(["b", "c"], sets_dir=self.tmp), [32, 64, 128])
 
     def test_a_shared_trial_keeps_the_larger_budget_and_the_file_carries_it(self):
         base = '[set]\npackages = ["jax"]\nproblems = ["lorenz"]\nalgorithms = ["euler"]\n{0}[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n'

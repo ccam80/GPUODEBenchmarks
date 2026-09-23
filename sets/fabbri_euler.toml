@@ -1,0 +1,33 @@
+# The Fabbri-Linder Euler runs: cubie_mlir and myokit_cuda over the 131072-point ACh x Iso grid at 100 us, 20 us, 5 us, 1 us and 250 ns, timed on the resident inputs, each run tracing the first 1024 points at the protocol's 1 ms samples over the first second. A first run past 30 s is the timing; a solve past 1800 s is abandoned.
+
+[set]
+packages   = ["cubie_mlir", "myokit_cuda"]
+problems   = ["fabbri_linder"]
+algorithms = ["euler"]
+precision  = "float32"
+finals     = false
+traces     = true
+transfers  = ["none"]
+build      = "warm"
+watchdog   = 1800
+single_run = 30
+
+[set.optimize]
+packages = ["cubie_mlir"]
+
+[[grid]]
+packages = "all"
+parameter = "default"
+scale = "default"
+min = "default"
+max = "default"
+n = [131072]
+system_params = {}
+
+# Every step divides the 1 ms sample interval.
+[[stepping]]
+packages = "all"
+algorithms = ["euler"]
+controller = "fixed"
+dt = [1.0e-4, 2.0e-5, 5.0e-6, 1.0e-6, 2.5e-7]
+newton = "none"

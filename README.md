@@ -88,8 +88,10 @@ the push the box deletes this key's clock logs a day old that no row names
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
 | `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
-| `fabbri_linder` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns and every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s |
+| `fabbri_linder` | `cubie_mlir` | every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s, 200 s watchdog |
+| `fabbri_euler` | `cubie_mlir`, `myokit_cuda` | Euler at 100 us to 250 ns on the same grid, traced on the head lattice, single run past 30 s |
 | `fabbri_golden` | `julia_cpu` | the fabbri_linder float64 reference: finals and traces of the 1024-point head lattice |
+| `fabbri_perf` | `cubie_mlir`, `myokit_cuda` | fabbri_linder trajectory sweep, 8 to 2^20: Kvaerno3, Rosenbrock23 and Tsit5 at 1e-5, Euler at 5 us |
 
 `fabbri_linder` (35 states, `runner_scripts/models/fabbri_linder.cellml`,
 cAMP cascade on) sweeps an index: the first 1024 form a 32 x 32
@@ -101,7 +103,8 @@ states, julia_cpu integrates `runner_scripts/generated/fabbri_linder_rhs.jl`
 `traces = true` also solves the first 1024 points of every run untimed and
 keeps every state at the `[traces]` sample times of `protocol.toml` in
 `traces/<trial_id>.parquet`; the error is the RMS over every sample and
-state against the golden's traces. A set with `single_run = <seconds>`
+state against the golden's traces, over the trajectories that neither side
+flags with a failure code or a non-finite sample. A set with `single_run = <seconds>`
 takes a first run past that long as the timing, with no warm-up or repeats.
 
 Every run is keyed by `<os>_<gpu>` (`runner_scripts/bench_key.py`); a run
@@ -129,7 +132,7 @@ A cubie row's `compile` column is `optimized`, `unoptimized` or
 ## Data and analyses
 
 Rows live in `data/key=<key>/package=<pkg>/results/<problem>__<algorithm>.parquet`,
-finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), traces in `traces/<trial_id>.parquet` (the first 1024 trajectories at every sample time, one row per trajectory and sample), and the whole tree reads
+finals in `finals/<trial_id>.parquet` beside them (the first 8192 trajectories of the grid, `store.FINALS_ROWS`; the solve and its timing cover all n), traces in `traces/<trial_id>.parquet` (the first 1024 trajectories at every sample time, one row per trajectory and sample, each carrying its trajectory's failure code), and the whole tree reads
 as one DuckDB table:
 
 ```

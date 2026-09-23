@@ -164,7 +164,7 @@ class Build:
         return self.host_result
 
     def trace(self, trial, values):
-        """States of the given grid points at every protocol sample time, (runs, samples, variables), from a solve of the trace Solver built for the trial's stepping on first use."""
+        """(states, retcode) of the given grid points: every protocol sample time as (runs, samples, variables) and each run's status flags joined by '|', from a solve of the trace Solver built for the trial's stepping on first use."""
         if self.trace_solver is None:
             self.trace_solver = make_solver(self.system, trial, self.solver_class, save_every=TRACE_EVERY_S)
             gains = gains_of(trial)
@@ -174,8 +174,9 @@ class Build:
             initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
         result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
         states = trace_states(self.system, result, self.row)
+        retcode = status_text(result.status_codes)
         del result
-        return states
+        return states, retcode
 
     def close_trace_solver(self):
         if self.trace_solver is not None:
@@ -196,6 +197,14 @@ class Build:
             set_cache_root(self.saved_cache_root)
             shutil.rmtree(self.cache_dir, ignore_errors=True)
             self.cache_dir = None
+
+
+def status_text(status_codes):
+    """Each run's cubie status flags joined by '|', empty for a clean run."""
+    from cubie.result_codes import decode_status_codes
+    codes = np.asarray(status_codes).reshape(-1)
+    names = decode_status_codes(codes)
+    return ["|".join(names[index]) if index in names else "" for index in range(codes.shape[0])]
 
 
 def _same(a, b):
@@ -261,14 +270,10 @@ class CubieAdapter:
         return build.trace(trial, values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration where the run's status is clean and NaN otherwise, and the status flags joined by '|'."""
-        from cubie.result_codes import decode_status_codes
+        """(finals, t_final, retcode) of a host result, the finals a view on its buffer where the states are the problem's variables: the problem's variables in reference order, the duration, and the status flags joined by '|'."""
         finals = np.asarray(final_states(build.system, result, build.row))
         codes = np.asarray(result.status_codes).reshape(-1)
-        names = decode_status_codes(codes)
-        retcode = ["|".join(names[index]) if index in names else "" for index in range(codes.shape[0])]
-        t_final = np.where(codes == 0, build.duration, np.nan)
-        return finals, t_final, retcode
+        return finals, np.full(codes.shape[0], float(build.duration)), status_text(codes)
 
 
 def run(argv, package):
