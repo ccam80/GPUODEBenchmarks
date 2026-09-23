@@ -83,18 +83,19 @@ def _digest(path):
     if not os.path.isfile(path):
         return None
     with open(path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
+        # Line endings follow each checkout's git settings, so CRLF and LF compare equal.
+        return hashlib.sha256(handle.read().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def julia_sources_differing(project, root=REPO_ROOT):
-    """The Julia source files whose bytes differ between a project checkout and this one."""
+    """The Julia source files whose contents, line endings aside, differ between a project checkout and this one."""
     names = sorted(set(_julia_source_files(root)) | set(_julia_source_files(project)))
     return [name for name in names
             if _digest(os.path.join(root, name)) != _digest(os.path.join(project, name))]
 
 
 def check_julia_project(root=REPO_ROOT):
-    """Exit when JULIA_PROJECT names another checkout whose precompiled Julia sources differ from this one's."""
+    """Exit when JULIA_PROJECT names another checkout whose precompiled Julia sources differ from this one's; julia_gpu loads that checkout's kernel package."""
     project = julia_project()
     if os.path.normcase(os.path.abspath(project)) == os.path.normcase(os.path.abspath(root)) \
             or not os.path.isdir(project):
@@ -142,7 +143,7 @@ def runner_command(package, trials_path, floor=False):
     if package not in RUNNERS:
         raise ValueError("no runner registered for '{0}' (known: {1})".format(
             package, ", ".join(PACKAGES)))
-    if package in ("julia_gpu", "julia_cpu"):
+    if package == "julia_gpu":
         check_julia_project()
     argv = list(RUNNERS[package]()) + ["--trials", trials_path]
     if floor:
