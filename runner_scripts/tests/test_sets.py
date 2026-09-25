@@ -85,8 +85,6 @@ def stepping_algorithms(loaded, index, package, problem):
         names = [n for n in names if n in stepping["algorithms"]]
     if stepping["packages"] != "all" and package not in stepping["packages"]:
         return []
-    if stepping["problems"] != "all" and problem not in stepping["problems"]:
-        return []
     return [r for r in capable(package, kind) if r.name in names]
 
 
@@ -641,17 +639,12 @@ class SchemaTests(unittest.TestCase):
                          (15.0, 0.25, 30.0))
         self.assertEqual(len(sets.expand(["s"], sets_dir=self.tmp)), 4)
 
-    def test_a_stepping_applies_to_the_problems_it_names(self):
-        text = ('[set]\npackages = ["cpp"]\nproblems = ["pollu", "lorenz"]\nalgorithms = ["classical-rk4"]\n'
-                '[[grid]]\nn = [8]\n'
-                '[[stepping]]\nproblems = ["lorenz"]\ncontroller = "fixed"\ndt = {duration_times_2_pow = [-10]}\n'
-                '[[stepping]]\nproblems = ["pollu"]\ncontroller = "fixed"\ndt = [1.0e-3]\n')
-        self.write(text)
+    def test_default_dt_is_the_duration_times_two_to_the_problems_default_dt_pow(self):
+        self.write('[set]\npackages = ["cpp"]\nproblems = ["pollu", "ring_modulator"]\nalgorithms = ["classical-rk4"]\n'
+                   '[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = "default_dt"\n')
         specs = sets.expand(["s"], sets_dir=self.tmp)
-        self.assertEqual(sorted((s["problem"], s["dt"]) for s in specs), [("lorenz", 2.0 ** -10), ("pollu", 1.0e-3)])
-        self.write(text.replace('problems = ["pollu"]\ncontroller', 'problems = ["pollu1000"]\ncontroller'))
-        with self.assertRaises(sets.SetError):
-            sets.expand(["s"], sets_dir=self.tmp)
+        self.assertEqual(sorted((s["problem"], s["dt"]) for s in specs),
+                         [("pollu", 60.0 * 2.0 ** -10), ("ring_modulator", 1.0e-3 * 2.0 ** -17)])
 
     def test_traces_and_single_run_are_set_keys(self):
         text = ('[set]\npackages = ["cubie"]\nproblems = ["lorenz"]\nalgorithms = ["tsit5"]\n{0}'

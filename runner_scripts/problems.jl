@@ -3,7 +3,7 @@
 const PROBLEMS_CSV = joinpath(@__DIR__, "problems.csv")
 const DEFAULT_PROBLEM = "lorenz"
 
-const _INT_FIELDS = ("states",)
+const _INT_FIELDS = ("states", "default_dt_pow")
 const _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
 "Every problem in declaration order, as a vector of Dict{String,Any}."

@@ -1,4 +1,4 @@
-"""The problem catalogue: one row per benchmark ODE/DAE in problems.csv with its default state count, duration, sweep range, golden algorithm and the packages that implement it."""
+"""The problem catalogue: one row per benchmark ODE/DAE in problems.csv with its default state count, duration, sweep range, default fixed step (duration x 2^default_dt_pow), golden algorithm and the packages that implement it."""
 
 import csv
 import os
@@ -11,7 +11,7 @@ DEFAULT_PROBLEM = "lorenz"
 # The one problem whose state count is a construction parameter.
 RESIZABLE_PROBLEM = "lorenz96"
 
-_INT_FIELDS = ("states",)
+_INT_FIELDS = ("states", "default_dt_pow")
 _FLOAT_FIELDS = ("duration", "sweep_min", "sweep_max", "golden_tol")
 
 

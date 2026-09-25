@@ -20,7 +20,8 @@ class RegistryTests(unittest.TestCase):
         with open(PROBLEMS_CSV, newline="", encoding="utf-8") as handle:
             header = next(csv.reader(handle))
         self.assertEqual(header, ["problem", "display", "states", "duration", "sweep_parameter", "sweep_min",
-                                  "sweep_max", "sweep_scale", "golden_algorithm", "golden_tol", "frameworks"])
+                                  "sweep_max", "sweep_scale", "golden_algorithm", "golden_tol", "default_dt_pow",
+                                  "frameworks"])
 
     def test_default_problem_is_registered(self):
         self.assertIn(DEFAULT_PROBLEM, problem_names())
@@ -31,6 +32,7 @@ class RegistryTests(unittest.TestCase):
             self.assertIsInstance(row["states"], int)
             self.assertIsInstance(row["duration"], float)
             self.assertIsInstance(row["golden_tol"], float)
+            self.assertIsInstance(row["default_dt_pow"], int)
             self.assertIsInstance(row["frameworks"], tuple)
             self.assertGreater(row["states"], 0)
             self.assertGreater(row["duration"], 0.0)
