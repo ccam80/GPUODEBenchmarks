@@ -198,8 +198,8 @@ def cards_of(series):
     return sorted({key[0] for key in series})
 
 
-def draw(panel, kind, series, cards):
-    """Plot every series on a panel; returns [(card, label, handle)] with a heading per card, for a legend."""
+def draw(panel, kind, series, cards, label=series_label):
+    """Plot every series on a panel, named by label(kind, key, points); returns [(card, label, handle)] with a heading per card, for a legend."""
     entries = []
     by_card = {}
     for key, points in series.items():
@@ -210,23 +210,39 @@ def draw(panel, kind, series, cards):
         entries.append((card, shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
         for key, points in by_card[card]:
             _, package, controller, transfers = key
-            line = panel.plot([p[0] for p in points], [p[1] for p in points], label=series_label(kind, key, points),
+            text = label(kind, key, points)
+            line = panel.plot([p[0] for p in points], [p[1] for p in points], label=text,
                               color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
                               linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
                               markeredgecolor="black", markeredgewidth=0.5)[0]
-            entries.append((card, series_label(kind, key, points), line))
+            entries.append((card, text, line))
             crossed = cross_out(panel, points)
             if crossed is not None:
                 entries.append((card, CROSSED_LABEL, crossed))
     panel.set_xscale("log")
     if kind.log_y:
         panel.set_yscale("log")
+    fit_unflagged(panel, series, kind.log_y)
     if kind.invert_x:
         panel.invert_xaxis()
     panel.set_xlabel(kind.x_label)
     panel.set_ylabel(kind.y_label)
     panel.grid(True, which="both", alpha=0.3)
     return entries
+
+
+def fit_unflagged(panel, series, log_y):
+    """Fit the y range to the points within the errored limit; crossed points beyond it fall off the panel."""
+    ys = [y for points in series.values() for _, y, row in points
+          if shared.within_errored_limit(row) and math.isfinite(y) and (y > 0 or not log_y)]
+    if not ys:
+        return
+    low, high = min(ys), max(ys)
+    if log_y:
+        panel.set_ylim(low / 2.0, high * 2.0)
+    else:
+        pad = 0.05 * (high - low) or 1.0
+        panel.set_ylim(low - pad, high + pad)
 
 
 def cross_out(panel, points):
@@ -282,25 +298,40 @@ def render(path, kind, series, algorithm, builds=None):
     return path
 
 
-def render_grid(path, kind, panels, title):
-    """One figure with a subplot per (name, series), one legend for the whole figure."""
+def render_grid(path, kind, panels, title, columns=None, label=series_label, panel_legends=False):
+    """One figure with a subplot per (name, series), row-major over `columns` (a near-square grid without), a None series left blank; one legend for the whole figure, or one per panel."""
     plt = shared.pyplot()
     count = len(panels)
-    columns = min(4, math.ceil(math.sqrt(count)))
+    columns = columns or min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
     width = 5.0 * columns
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, 3.8 * rows), squeeze=False)
-    cards = cards_of(merged(series for _, series in panels))
+    cards = cards_of(merged(series for _, series in panels if series))
     headings = {shared.key_label(c) for c in cards}
     entries = {}
     for index, (name, series) in enumerate(panels):
         panel = axes[index // columns][index % columns]
-        for card, label, handle in draw(panel, kind, series, cards):
-            entries.setdefault((card, label), handle)
+        if not series:
+            panel.set_axis_off()
+            continue
+        drawn = draw(panel, kind, series, cards, label)
+        if panel_legends:
+            shown = {}
+            for entry in drawn:
+                if entry[1] not in headings:
+                    shown.setdefault(entry[1], entry)
+            legend(panel, list(shown.values()), headings)
+        for card, text, handle in drawn:
+            entries.setdefault((card, text), handle)
         panel.set_title(name, fontsize=9)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
     fig.suptitle(title, fontsize=12)
+    if panel_legends:
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        return path
     fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
     listed = sorted(entries.items(), key=lambda item: (cards.index(item[0][0]), 0 if item[0][1] in headings else 1))
     legend(fig, [(card, label, handle) for (card, label), handle in listed], headings, loc="center left",
