@@ -28,10 +28,7 @@ LIMITED_POINTS = 3
 GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime", "states")
 # The kinds that also draw every algorithm of a problem on one axis, <problem>.png.
 COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime")
-PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
-                   "julia_gpu": "P", "julia_cpu": "X"}
-ERROR_LABEL = "RMS error against the golden"
-CROSSED_LABEL = "over 10% of trajectories errored"
+ERROR_LABEL = "Mean absolute error at the final time"
 
 
 class Kind:
@@ -195,38 +192,6 @@ def cards_of(series):
     return sorted({key[0] for key in series})
 
 
-def draw(panel, kind, series, cards, label=series_label):
-    """Plot every series on a panel, named by label(kind, key, points); returns [(card, label, handle)] with a heading per card, for a legend."""
-    entries = []
-    by_card = {}
-    for key, points in series.items():
-        by_card.setdefault(key[0], []).append((key, points))
-    for card in cards:
-        if card not in by_card:
-            continue
-        entries.append((card, shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
-        for key, points in by_card[card]:
-            _, package, controller, transfers = key[:4]
-            text = label(kind, key, points)
-            line = panel.plot([p[0] for p in points], [p[1] for p in points], label=text,
-                              color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
-                              linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)[0]
-            entries.append((card, text, line))
-            crossed = cross_out(panel, points)
-            if crossed is not None:
-                entries.append((card, CROSSED_LABEL, crossed))
-    panel.set_xscale("log")
-    if kind.log_y:
-        panel.set_yscale("log")
-    fit_unflagged(panel, kind, series)
-    if kind.invert_x:
-        panel.invert_xaxis()
-    panel.set_xlabel(kind.x_label)
-    panel.set_ylabel(kind.y_label)
-    panel.grid(True, which="both")
-    return entries
-
-
 ERROR_COLUMNS = ("error", "interval_error")
 
 
@@ -242,21 +207,68 @@ def fit_unflagged(panel, kind, series):
 
 
 def cross_out(panel, points):
-    """A black cross over every point of a series whose row is over the errored limit; the handle, or None when no point is."""
+    """A black cross over every point of a series whose row is over the errored limit; True when any point is."""
     flagged = [(x, y) for x, y, row in points if not shared.within_errored_limit(row)]
-    if not flagged:
-        return None
-    return panel.plot([x for x, _ in flagged], [y for _, y in flagged], **shared.CROSS_STYLE)[0]
+    if flagged:
+        panel.plot([x for x, _ in flagged], [y for _, y in flagged], **shared.CROSS_STYLE)
+    return bool(flagged)
 
 
-def legend(target, entries, headings, **kwargs):
-    """A legend of the entries with the heading labels in bold."""
-    if not entries:
-        return
-    box = target.legend([h for _, _, h in entries], [text for _, text, _ in entries], **kwargs)
+def plot_panel(panel, kind, series, encoding):
+    """Every series on one panel in the figure's encoding; True when any point is crossed."""
+    crossed = False
+    for key, points in series.items():
+        panel.plot([p[0] for p in points], [p[1] for p in points], **encoding.style(key, points))
+        crossed = cross_out(panel, points) or crossed
+    panel.set_xscale("log")
+    if kind.log_y:
+        panel.set_yscale("log")
+    fit_unflagged(panel, kind, series)
+    if kind.invert_x:
+        panel.invert_xaxis()
+    panel.set_xlabel(kind.x_label)
+    panel.set_ylabel(kind.y_label)
+    panel.grid(True, which="both")
+    return crossed
+
+
+def tagged(series):
+    """The series with each key's algorithm appended, so several algorithms share one panel."""
+    return {key[:4] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
+
+
+def render_panels(path, kind, panels, title, colour_by="package", columns=None):
+    """The one renderer: a subplot per (name, series[, kind]) row-major over `columns` (near-square without), an empty series left blank, one encoding legend at the right."""
+    plt = shared.pyplot()
+    count = len(panels)
+    columns = columns or min(4, math.ceil(math.sqrt(count)))
+    rows = math.ceil(count / columns)
+    encoding = shared.Encoding(merged(p[1] for p in panels if p[1]), colour_by)
+    probe, labels, _ = encoding.legend(plt, True)
+    width = 5.0 * columns
+    fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, max(3.8 * rows, 0.17 * len(labels) + 0.8)),
+                             squeeze=False)
+    crossed = False
+    for index, spec in enumerate(panels):
+        name, series = spec[:2]
+        panel = axes[index // columns][index % columns]
+        if not series:
+            panel.set_axis_off()
+            continue
+        crossed = plot_panel(panel, spec[2] if len(spec) > 2 else kind, series, encoding) or crossed
+        panel.set_title(name)
+    for index in range(count, rows * columns):
+        axes[index // columns][index % columns].set_axis_off()
+    fig.suptitle(title)
+    fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
+    handles, labels, headings = encoding.legend(plt, crossed)
+    box = fig.legend(handles, labels, loc="center left", bbox_to_anchor=(width / (width + 2.6), 0.5))
     for text in box.get_texts():
         if text.get_text() in headings:
             text.set_fontweight("bold")
+    fig.savefig(path)
+    plt.close(fig)
+    return path
 
 
 def problem_title(series):
@@ -278,184 +290,24 @@ def title_of(series, algorithm):
 
 def render(path, kind, series, algorithm, builds=None):
     """One figure of a kind, with the compile panel beside it on the states kind."""
-    plt = shared.pyplot()
-    panels = 2 if builds is not None else 1
-    fig, axes = plt.subplots(1, panels, figsize=(7.5 * panels, 5.0), squeeze=False)
-    cards = cards_of(merged([series, builds or {}]))
-    headings = {shared.key_label(c) for c in cards}
-    legend(axes[0][0], draw(axes[0][0], kind, series, cards), headings)
-    if builds is not None:
-        legend(axes[0][1], draw(axes[0][1], BUILDS, builds, cards), headings)
-    fig.suptitle(title_of(series or builds, algorithm))
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    return path
+    panels = [("", series)] + ([("", builds, BUILDS)] if builds is not None else [])
+    return render_panels(path, kind, panels, title_of(series or builds, algorithm), columns=len(panels))
 
 
-def render_grid(path, kind, panels, title, columns=None, label=series_label, panel_legends=False):
-    """One figure with a subplot per (name, series[, kind]), row-major over `columns` (a near-square grid without), a None series left blank; one legend for the whole figure, or one per panel."""
-    plt = shared.pyplot()
-    count = len(panels)
-    columns = columns or min(4, math.ceil(math.sqrt(count)))
-    rows = math.ceil(count / columns)
-    width = 5.0 * columns
-    fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, 3.8 * rows), squeeze=False)
-    cards = cards_of(merged(p[1] for p in panels if p[1]))
-    headings = {shared.key_label(c) for c in cards}
-    entries = {}
-    for index, spec in enumerate(panels):
-        name, series = spec[:2]
-        panel = axes[index // columns][index % columns]
-        if not series:
-            panel.set_axis_off()
-            continue
-        drawn = draw(panel, spec[2] if len(spec) > 2 else kind, series, cards, label)
-        if panel_legends:
-            shown = {}
-            for entry in drawn:
-                if entry[1] not in headings:
-                    shown.setdefault(entry[1], entry)
-            legend(panel, list(shown.values()), headings)
-        for card, text, handle in drawn:
-            entries.setdefault((card, text), handle)
-        panel.set_title(name)
-    for index in range(count, rows * columns):
-        axes[index // columns][index % columns].set_axis_off()
-    fig.suptitle(title)
-    if panel_legends:
-        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-        fig.savefig(path)
-        plt.close(fig)
-        return path
-    fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
-    listed = sorted(entries.items(), key=lambda item: (cards.index(item[0][0]), 0 if item[0][1] in headings else 1))
-    legend(fig, [(card, label, handle) for (card, label), handle in listed], headings, loc="center left",
-           bbox_to_anchor=(width / (width + 2.6), 0.5), ncol=1)
-    fig.savefig(path)
-    plt.close(fig)
-    return path
+def render_grid(path, kind, panels, title, columns=None):
+    """A subplot per (name, series[, kind]), a colour per package."""
+    return render_panels(path, kind, panels, title, "package", columns)
 
 
 def render_combined(path, kind, panels, title):
-    """One figure with every (algorithm, series) on one axis: a colour per algorithm, a marker per package (filled for adaptive steps, hollow for fixed), a line style per transfers; the legend lists one entry per line."""
-    plt = shared.pyplot()
-    fig, axis = plt.subplots(1, 1, figsize=(10.0, 6.0))
-    entries = []
-    for index, (name, series) in enumerate(panels):
-        colour = shared.ALGORITHM_COLOURS[index % len(shared.ALGORITHM_COLOURS)]
-        for key, points in series.items():
-            _, package, controller, transfers = key
-            label = "{0}, {1}".format(name, series_label(kind, key, points))
-            if len(cards_of(series)) > 1:
-                label = "{0} [{1}]".format(label, shared.key_label(key[0]))
-            line = axis.plot([p[0] for p in points], [p[1] for p in points], label=label, color=colour,
-                             marker=PACKAGE_MARKERS.get(package, "x"),
-                             markerfacecolor=colour if controller == "adaptive" else "white",
-                             linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)[0]
-            entries.append((label, line))
-            crossed = cross_out(axis, points)
-            if crossed is not None and CROSSED_LABEL not in [e[0] for e in entries]:
-                entries.append((CROSSED_LABEL, crossed))
-    axis.set_xscale("log")
-    if kind.log_y:
-        axis.set_yscale("log")
-    if kind.invert_x:
-        axis.invert_xaxis()
-    axis.set_xlabel(kind.x_label)
-    axis.set_ylabel(kind.y_label)
-    axis.grid(True, which="both")
-    axis.set_title(title)
-    fig.legend([h for _, h in entries], [text for text, _ in entries], loc="center left",
-               bbox_to_anchor=(0.72, 0.5))
-    fig.tight_layout(rect=(0.0, 0.0, 0.72, 1.0))
-    fig.savefig(path)
-    plt.close(fig)
-    return path
-
-
-def catalogue_order():
-    """Every algorithm name in algorithms.csv order."""
-    import csv
-    with open(os.path.join(shared.RUNNER_SCRIPTS, "algorithms.csv"), encoding="utf-8") as handle:
-        return list(dict.fromkeys(r["algorithm"] for r in csv.DictReader(handle)))
+    """Every (algorithm name, series) on one axis, a colour per algorithm."""
+    return render_panels(path, kind, [("", merged(tagged(s) for _, s in panels))], title, "algorithm", 1)
 
 
 def render_combined_grid(path, kind, panels, title, columns=None):
-    """A subplot per (name, {algorithm: series}): a colour per algorithm across the figure, a marker per package (per card when several cards), filled for adaptive steps, a line style per transfers; one legend of the encodings."""
-    plt = shared.pyplot()
-    count = len(panels)
-    columns = columns or min(4, math.ceil(math.sqrt(count)))
-    rows = math.ceil(count / columns)
-    width = 5.0 * columns
-    order = catalogue_order()
-    algorithms = sorted({a for _, by in panels for a in by}, key=lambda a: order.index(a) if a in order else len(order))
-    # Fit the legend height.
-    height = max(3.8 * rows, 0.17 * (len(algorithms) + 14) + 0.8)
-    fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, height), squeeze=False)
-    colours = {a: shared.ALGORITHM_COLOURS[i % len(shared.ALGORITHM_COLOURS)] for i, a in enumerate(algorithms)}
-    cards = cards_of(merged(s for _, by in panels for s in by.values()))
-    packages, transfers_seen, crossed = set(), set(), None
-    for index, (name, by) in enumerate(panels):
-        axis = axes[index // columns][index % columns]
-        for algorithm, series in by.items():
-            for key, points in series.items():
-                card, package, controller, transfers = key[:4]
-                packages.add(package)
-                transfers_seen.add(transfers)
-                marker = (PACKAGE_MARKERS.get(package, "x") if len(cards) == 1
-                          else shared.marker("adaptive", cards.index(card)))
-                colour = colours[algorithm]
-                axis.plot([p[0] for p in points], [p[1] for p in points], color=colour, marker=marker,
-                          markerfacecolor=colour if controller == "adaptive" else "white",
-                          linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)
-                crossed = cross_out(axis, points) or crossed
-        axis.set_xscale("log")
-        if kind.log_y:
-            axis.set_yscale("log")
-        fit_unflagged(axis, kind, merged(by.values()))
-        axis.set_xlabel(kind.x_label)
-        axis.set_ylabel(kind.y_label)
-        axis.grid(True, which="both")
-        axis.set_title(name)
-    for index in range(count, rows * columns):
-        axes[index // columns][index % columns].set_axis_off()
-    blank = plt.Line2D([], [], linestyle="none")
-    handles, labels = [blank], ["Algorithm"]
-    for a in algorithms:
-        handles.append(plt.Line2D([], [], color=colours[a], linewidth=shared.SERIES_STYLE["linewidth"]))
-        labels.append(shared.algorithm_name(a))
-    if len(cards) == 1:
-        handles.append(blank)
-        labels.append("Package")
-        for package in (p for p in store_mod.PACKAGES if p in packages):
-            handles.append(plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker=PACKAGE_MARKERS.get(package, "x"), linestyle="none"))
-            labels.append(shared.package_name(package))
-    else:
-        handles.append(blank)
-        labels.append("Card")
-        for card in cards:
-            handles.append(plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker=shared.marker("adaptive", cards.index(card)),
-                                      linestyle="none"))
-            labels.append(shared.key_label(card))
-    handles += [blank, plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker="o", linestyle="none"),
-                plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker="o", markerfacecolor="white", linestyle="none")]
-    labels += ["Steps", "Adaptive", "Fixed"]
-    if "both" in transfers_seen:
-        handles.append(plt.Line2D([], [], color="gray", linestyle=shared.line("both")))
-        labels.append("+ transfer")
-    if crossed is not None:
-        handles.append(crossed)
-        labels.append(CROSSED_LABEL)
-    fig.suptitle(title)
-    fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
-    box = fig.legend(handles, labels, loc="center left", bbox_to_anchor=(width / (width + 2.6), 0.5))
-    for text in box.get_texts():
-        if text.get_text() in ("Algorithm", "Package", "Card", "Steps"):
-            text.set_fontweight("bold")
-    fig.savefig(path)
-    plt.close(fig)
-    return path
+    """A subplot per (name, {algorithm: series}), a colour per algorithm."""
+    return render_panels(path, kind, [(name, merged(tagged(s) for s in by.values())) for name, by in panels],
+                         title, "algorithm", columns)
 
 
 def csv_rows(kind, algorithm, series):
@@ -465,6 +317,143 @@ def csv_rows(kind, algorithm, series):
             out.append(dict(row, kind=kind.name, algorithm=algorithm, series=series_label(kind, key, points), x=x, y=y,
                             controller=key[2], transfers=key[3] or row["transfers"]))
     return out
+
+
+# ------------------------------------------------------ figure definitions
+
+TRANSFER = Kind("transfer_vs_n", "n", "transfer_s", ("n",), GPU_PACKAGES, False, "timed",
+                "Trajectories", "Transfer time (s)", "Transfer time")
+
+
+class Pane:
+    """One panel: the rows it takes ({column: value or tuple of values}), a note after its title, a transform of its series, a kind in place of the figure's."""
+
+    def __init__(self, where, note="", transform=None, kind=None):
+        self.where, self.note, self.transform, self.kind = where, note, transform, kind
+
+    def title(self, card_in_title):
+        parts = []
+        if card_in_title and isinstance(self.where.get("key"), str):
+            parts.append(shared.key_label(self.where["key"]))
+        if isinstance(self.where.get("problem"), str):
+            parts.append(shared.problem_label(self.where["problem"]))
+        return ", ".join(parts) + (": " + self.note if self.note else "")
+
+
+class Figure:
+    """A figure as an inclusion list: its file stem, kind, panes, the rows every pane takes, the colour channel, the grid columns, a figure per key or one over every key, and a title."""
+
+    def __init__(self, name, kind, panes, where=None, colour_by="algorithm", columns=None, per_key=True, title=""):
+        self.name, self.kind, self.panes, self.where = name, kind, panes, where or {}
+        self.colour_by, self.columns, self.per_key, self.title = colour_by, columns, per_key, title
+
+
+def problem_panes(problems, **pane):
+    """A pane per problem."""
+    return [Pane(dict(problem=p), **pane) for p in problems]
+
+
+def matches(row, where):
+    return all(row.get(k) in v if isinstance(v, tuple) else row.get(k) == v for k, v in where.items())
+
+
+def pane_series(kind, rows):
+    """Every algorithm's series of the rows, algorithm-tagged, merged."""
+    groups = {}
+    for row in rows:
+        groups.setdefault((row["problem"], row["algorithm"]), []).append(row)
+    return merged(tagged(series_of(kind, members)) for members in groups.values())
+
+
+def transfer_time(series):
+    """With transfers minus without, at each trajectory count both have; non-positive differences dropped."""
+    out = {}
+    for key, points in series.items():
+        if key[3] != "both":
+            continue
+        without = {x: y for x, y, _ in series.get(key[:3] + ("none",) + key[4:], [])}
+        diff = [(x, y - without[x], row) for x, y, row in points if x in without and y > without[x]]
+        if len(diff) >= 2:
+            out[key[:3] + ("",) + key[4:]] = diff
+    return out
+
+
+def best_per_package(series, levels=9, span=100.0):
+    """Per package, the curve cheapest at the most of `levels` error levels from its least error to `span` times that; ties to the lowest summed log time."""
+    out = {}
+    for package in {k[1] for k in series}:
+        curves = {k: pts for k, pts in series.items()
+                  if k[1] == package and sum(shared.within_errored_limit(r) for _, _, r in pts) >= 3}
+        errors = [x for pts in curves.values() for x, _, r in pts if shared.within_errored_limit(r)]
+        if not errors:
+            continue
+        low = min(errors)
+        wins, cost = dict.fromkeys(curves, 0), dict.fromkeys(curves, 0.0)
+        for i in range(levels):
+            level = low * span ** (i / (levels - 1))
+            times = {k: min((y for x, y, r in pts if x <= level and shared.within_errored_limit(r)), default=math.nan)
+                     for k, pts in curves.items()}
+            reached = {k: t for k, t in times.items() if math.isfinite(t)}
+            if reached:
+                wins[min(reached, key=reached.get)] += 1
+            for k, t in times.items():
+                cost[k] += math.log(t) if math.isfinite(t) else 50.0
+        chosen = max(curves, key=lambda k: (wins[k], -cost[k]))
+        out[chosen] = curves[chosen]
+    return ordered(out)
+
+
+def draw_figure(figure, rows, keys, out):
+    """Every file of one figure: one per key, or one over every key; a figure with no series is skipped. Returns the paths written."""
+    written = []
+    for key in (keys if figure.per_key else [None]):
+        panels, tables = [], []
+        for pane in figure.panes:
+            where = dict(figure.where, **pane.where)
+            if key is not None:
+                where["key"] = key
+            elif "key" not in where:
+                where["key"] = tuple(keys)
+            kind = pane.kind or figure.kind
+            series = pane_series(figure.kind, [r for r in rows if matches(r, where)])
+            if pane.transform:
+                series = pane.transform(series)
+            if series:
+                panels.append((pane.title(key is None), series, kind))
+                tables += csv_rows(kind, "", series)
+        if not panels:
+            continue
+        stem = figure.name + ("_" + shared.slug(key) if key else "")
+        title = (shared.key_label(key) + ": " if key else "") + figure.title
+        path = os.path.join(out, stem + ".png")
+        render_panels(path, figure.kind, panels, title, figure.colour_by, figure.columns)
+        shared.write_csv(os.path.join(out, stem + ".csv"), CSV_COLUMNS, tables)
+        written.append(path)
+    return written
+
+
+def load_rows(store, cache=""):
+    """Every row with its error, controller kind and NaN trace metrics, samples dropped; kept in and read from a pickle at `cache` when given."""
+    import pickle
+    if cache and os.path.isfile(cache):
+        with open(cache, "rb") as handle:
+            rows = pickle.load(handle)
+    else:
+        errs = errors_mod.Errors(store)
+        rows = []
+        for row in store.rows():
+            row = {k: v for k, v in row.items() if k != "samples_ms"}
+            try:
+                row["error"] = errs.error(row)
+            except ValueError:
+                row["error"] = math.nan
+            errs._finals.clear()
+            rows.append(row)
+        if cache:
+            with open(cache, "wb") as handle:
+                pickle.dump(rows, handle)
+    return [dict(r, interval_error=math.nan, trace_errored_pct=math.nan, controller_kind=shared.controller_kind(r))
+            for r in rows]
 
 
 def kind_named(name):

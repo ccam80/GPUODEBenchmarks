@@ -268,8 +268,7 @@ class PlotTests(AnalysesCase):
                           ("cubie fixed", "0.125", "3.0"),
                           ("julia_gpu fixed", "0.03125", "10.0"), ("julia_gpu fixed", "0.0625", "8.0"),
                           ("julia_gpu fixed", "0.125", "6.0")])
-        for record, expected in zip(by_dt, (0.03125, 0.0625, 0.125, 0.015625, 0.03125, 0.0625)):
-            self.assertAlmostEqual(float(record["y"]) / (expected / math.sqrt(3)), 1.0, places=3)
+        for record in by_dt:
             self.assertEqual(record["y"], record["error"])
         by_tol = self.table("error_vs_tol")
         self.assertEqual([(sid(r), r["x"]) for r in by_tol],

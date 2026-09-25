@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --where/--kind flags, the store read with two rows of one run_id refused, row selection by SQL predicate (every row without one), the errored filter, the figure encoding (a colour per package, a marker per stepping kind (fixed or adaptive) and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --where/--kind flags, the store read with two rows of one run_id refused, row selection by SQL predicate (every row without one), the errored filter, the figure style and encoding (Encoding) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -21,7 +21,6 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# The figure encoding: a colour per package, a marker per controller kind (one set per card), a line style per transfers.
 COLOURS = {
     "cubie": "tab:blue", "jax": "tab:red", "pytorch": "darkred",
     "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
@@ -31,14 +30,17 @@ PACKAGE_NAMES = {
     "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
 }
 CONTROLLER_KINDS = ("fixed", "adaptive")
-MARKER_SETS = (("s", "o"), ("P", "v"), ("*", "p"))
 LINES = {"both": "--", "none": "-"}
-# The one figure style: series lines and markers, the errored cross, a colour per algorithm, and matplotlib's defaults.
+PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
+                   "julia_gpu": "P", "julia_cpu": "X"}
+MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">")
 SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
 CROSS_STYLE = {"linestyle": "none", "marker": "x", "color": "black", "markersize": 10, "markeredgewidth": 1.5}
 ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
-                     "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
-                     "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
+                     "tab:gray", "tab:olive", "tab:cyan", "navy", "gold", "lime", "magenta", "teal", "maroon",
+                     "indigo", "darkkhaki", "black", "sienna", "turquoise", "deepskyblue", "orchid", "darkslategray",
+                     "yellowgreen", "rosybrown")
+CROSSED_LABEL = "over 10% of trajectories errored"
 RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
       "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
 
@@ -187,6 +189,15 @@ def problem_name(problem, states=None):
     return name
 
 
+def problem_label(problem):
+    """'Lorenz 96 (20 states)', 'Ring modulator, index 2 (15 states)' from the catalogue."""
+    from problems import load_problems
+    entry = next(e for e in load_problems() if e["problem"] == problem)
+    name = re.sub(r"\s*\((\d+)\)$", "", entry["display"])
+    name = re.sub(r"\s*\((.+)\)$", r", \1", name)
+    return "{0} ({1} states)".format(name, entry["states"])
+
+
 def algorithm_name(algorithm):
     """The catalogue's display name of an algorithm."""
     from algorithms import algorithm_facts
@@ -208,14 +219,106 @@ def colour(package):
     return COLOURS.get(package, "gray")
 
 
-def marker(name, card=0):
-    """The marker of a stepping kind on a card; cards past the sets share the last set."""
-    markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
-    return markers[CONTROLLER_KINDS.index(name)] if name in CONTROLLER_KINDS else "x"
-
-
 def line(transfers):
     return LINES.get(transfers, ":")
+
+
+def catalogue_order():
+    """Every algorithm name in algorithms.csv order."""
+    with open(os.path.join(RUNNER_SCRIPTS, "algorithms.csv"), encoding="utf-8") as handle:
+        return list(dict.fromkeys(r["algorithm"] for r in csv.DictReader(handle)))
+
+
+class Encoding:
+    """The visual language of every figure, from its series {key: [(x, y, row)]} with key (card, package, controller kind, transfers[, algorithm]).
+
+    Colour is the package, or the algorithm with colour_by="algorithm" (a fixed colour per catalogue algorithm).
+    Marker shape is whichever of card and package varies and colour does not show; a circle when neither does.
+    Filled markers are adaptive steps, hollow fixed; a dashed line carries transfers; a black cross marks a point over the errored limit.
+    """
+
+    def __init__(self, series, colour_by="package"):
+        self.colour_by = colour_by
+        self.order = catalogue_order()
+        self.cards = sorted({k[0] for k in series})
+        self.packages = [p for p in COLOURS if any(k[1] == p for k in series)]
+        self.algorithms = sorted({self.algorithm(k, pts) for k, pts in series.items()}, key=self._rank)
+        self.steps = [c for c in ("adaptive", "fixed") if any(k[2] == c for k in series)]
+        self.transfers = {k[3] for k in series}
+        many_cards, many_packages = len(self.cards) > 1, len(self.packages) > 1
+        if colour_by == "algorithm" and many_packages:
+            self.marker_by = "package and card" if many_cards else "package"
+        else:
+            self.marker_by = "card" if many_cards else None
+        self.pairs = sorted({(k[1], k[0]) for k in series})
+
+    def _rank(self, algorithm):
+        return self.order.index(algorithm) if algorithm in self.order else len(self.order)
+
+    @staticmethod
+    def algorithm(key, points):
+        return key[4] if len(key) > 4 else points[0][2]["algorithm"]
+
+    def colour_of(self, key, points):
+        if self.colour_by == "algorithm":
+            return ALGORITHM_COLOURS[self._rank(self.algorithm(key, points)) % len(ALGORITHM_COLOURS)]
+        return colour(key[1])
+
+    def marker_of(self, key):
+        if self.marker_by == "package":
+            return PACKAGE_MARKERS.get(key[1], "x")
+        if self.marker_by == "card":
+            return MARKERS[self.cards.index(key[0]) % len(MARKERS)]
+        if self.marker_by == "package and card":
+            return MARKERS[self.pairs.index((key[1], key[0])) % len(MARKERS)]
+        return "o"
+
+    def style(self, key, points):
+        """matplotlib plot() keywords for one series."""
+        colour_value = self.colour_of(key, points)
+        return dict(SERIES_STYLE, color=colour_value, marker=self.marker_of(key),
+                    markerfacecolor=colour_value if key[2] == "adaptive" else "white",
+                    linestyle=line(key[3]) if key[3] else "-")
+
+    def legend(self, plt, crossed):
+        """(handles, labels, headings): each channel under its heading, only what the figure shows."""
+        handles, labels, headings = [], [], []
+
+        def section(heading, entries):
+            headings.append(heading)
+            handles.append(plt.Line2D([], [], linestyle="none"))
+            labels.append(heading)
+            for handle, text in entries:
+                handles.append(handle)
+                labels.append(text)
+
+        def swatch(**kw):
+            return plt.Line2D([], [], **dict(SERIES_STYLE, **kw))
+
+        if self.colour_by == "algorithm":
+            section("Algorithm", [(swatch(color=ALGORITHM_COLOURS[self._rank(a) % len(ALGORITHM_COLOURS)]),
+                                   algorithm_name(a)) for a in self.algorithms])
+        else:
+            section("Package", [(swatch(color=colour(p)), package_name(p)) for p in self.packages])
+        grey = dict(color="gray", linestyle="none")
+        if self.marker_by == "package":
+            section("Package", [(swatch(marker=PACKAGE_MARKERS.get(p, "x"), **grey), package_name(p))
+                                for p in self.packages])
+        elif self.marker_by == "card":
+            section("Card", [(swatch(marker=self.marker_of((c,)), **grey), key_label(c)) for c in self.cards])
+        elif self.marker_by == "package and card":
+            section("Package, card", [(swatch(marker=MARKERS[i % len(MARKERS)], **grey),
+                                       "{0}, {1}".format(package_name(p), key_label(c)))
+                                      for i, (p, c) in enumerate(self.pairs)])
+        section("Steps", [(swatch(marker="o", markerfacecolor="gray" if s == "adaptive" else "white", **grey),
+                           s.capitalize()) for s in self.steps])
+        if "both" in self.transfers:
+            section("Timing", [(swatch(color="gray", linestyle=line("none")), "Kernel only"),
+                               (swatch(color="gray", linestyle=line("both")), "With transfers")])
+        if crossed:
+            handles.append(plt.Line2D([], [], **CROSS_STYLE))
+            labels.append(CROSSED_LABEL)
+        return handles, labels, headings
 
 
 def dyadic(value):

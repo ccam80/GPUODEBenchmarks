@@ -1,4 +1,4 @@
-"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the RMS difference over every state of the pairs neither side flags as errored, over the finals, or over every sample of the traces when both rows carry them (a trajectory with a failure code or a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; interval_error() is the mean absolute inter-beat interval error of the traced first state against the golden's in ms, trace_errored_pct() the percent of traced trajectories errored."""
+"""The one comparison of a run with its golden: compare() rebuilds both grids, pairs trajectories by exact float32 parameter value and takes the mean absolute difference over every state of the pairs neither side flags as errored, at the final time from the finals, or at the last traced sample when both rows carry traces (a trajectory with a failure code or a non-finite sample is errored); golden_of() finds the julia_cpu float64 row with finals or traces of the same system under any key, the one running the catalogue's golden algorithm when rows of other algorithms stand beside it; error() compares a row with it; interval_error() is the mean absolute inter-beat interval error of the traced first state against the golden's in ms, trace_errored_pct() the percent of traced trajectories errored."""
 
 import math
 import os
@@ -83,14 +83,14 @@ class Errors:
         return _pair(loaded_a, loaded_b)
 
     def compare(self, a, b):
-        """RMS over every state, in float64, of the difference between the finals of two rows (every sample of their traces when both carry them) over the trajectories paired by exact float32 grid value that neither row flags; NaN when none pair."""
+        """Mean absolute difference over every state, in float64, between the finals of two rows (the last traced sample when both carry traces) over the trajectories paired by exact float32 grid value that neither row flags; NaN when none pair."""
         traced = _has_traces(a) and _has_traces(b)
         loaded_a = self.traces(a) if traced else self.finals(a)
         loaded_b = self.traces(b) if traced else self.finals(b)
         if loaded_a[1].shape[1:] != loaded_b[1].shape[1:]:
             raise ValueError("{0} has states {1}, {2} has {3}".format(
                 _name(a), loaded_a[1].shape[1:], _name(b), loaded_b[1].shape[1:]))
-        return _rms(loaded_a, loaded_b)
+        return _mae(loaded_a, loaded_b)
 
     def goldens(self):
         """Every julia_cpu float64 row with finals or traces, under any key."""
@@ -117,7 +117,7 @@ class Errors:
         return _peak_times(self.traces(row))
 
     def trace_metrics(self, row):
-        """(rms, interval_error_ms, errored_pct) of a traced row against its golden, computed once with the row's and the golden's traces loaded together and dropped after; raises when the golden has no traces."""
+        """(mae, interval_error_ms, errored_pct) of a traced row against its golden, computed once with the row's and the golden's traces loaded together and dropped after; raises when the golden has no traces."""
         ident = (row["package"], row["key"], row["traces"])
         if ident not in self._metrics:
             golden = self.golden_of(row)
@@ -126,7 +126,7 @@ class Errors:
             loaded = self.traces(row)
             loaded_golden = self.traces(golden)
             errored_pct = 100.0 * float(loaded[2].mean()) if loaded[2].shape[0] else NAN
-            self._metrics[ident] = (_rms(loaded, loaded_golden), _interval_error(loaded, loaded_golden), errored_pct)
+            self._metrics[ident] = (_mae(loaded, loaded_golden), _interval_error(loaded, loaded_golden), errored_pct)
         return self._metrics[ident]
 
     def trace_errored_pct(self, row):
@@ -158,13 +158,15 @@ def _pair(loaded_a, loaded_b):
     return index_a[keep], index_b[keep]
 
 
-def _rms(loaded_a, loaded_b):
-    """RMS in float64 over every state of the paired trajectories' difference; NaN when none pair."""
+def _mae(loaded_a, loaded_b):
+    """Mean absolute difference in float64 over every state of the paired trajectories at the final time (the last sample of traces); NaN when none pair."""
     index_a, index_b = _pair(loaded_a, loaded_b)
     if index_a.shape[0] == 0:
         return NAN
-    diff = loaded_a[1][index_a].astype(np.float64) - loaded_b[1][index_b].astype(np.float64)
-    return float(np.sqrt(np.mean(diff * diff)))
+    a, b = loaded_a[1][index_a], loaded_b[1][index_b]
+    if a.ndim == 3:
+        a, b = a[:, -1, :], b[:, -1, :]
+    return float(np.mean(np.abs(a.astype(np.float64) - b.astype(np.float64))))
 
 
 def _peak_times(loaded):
