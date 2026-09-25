@@ -51,10 +51,10 @@ class Kind:
 KINDS = (
     Kind("runtime_vs_n", "n", "min_ms", ("n",), GPU_PACKAGES, True, "timed", "Trajectories", "Time (s)",
          "Batch time"),
-    Kind("error_vs_runtime", "min_ms", "error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed error",
-         "Time (s)", ERROR_LABEL, "Work-precision"),
-    Kind("interval_error_vs_runtime", "min_ms", "interval_error", STEPPING_FIELDS, GPU_PACKAGES, True, "timed interval",
-         "Time (s)", "Inter-beat interval error (ms)", "Interval work-precision"),
+    Kind("error_vs_runtime", "error", "min_ms", STEPPING_FIELDS, GPU_PACKAGES, True, "timed error",
+         ERROR_LABEL, "Time (s)", "Work-precision"),
+    Kind("interval_error_vs_runtime", "interval_error", "min_ms", STEPPING_FIELDS, GPU_PACKAGES, True, "timed interval",
+         "Inter-beat interval error (ms)", "Time (s)", "Interval work-precision"),
     Kind("trace_errored_vs_runtime", "min_ms", "trace_errored_pct", STEPPING_FIELDS, GPU_PACKAGES, True, "timed traced",
          "Time (s)", "Traced trajectories errored (%)", "Trace failures", log_y=False),
     Kind("error_vs_dt", "dt", "error", ("dt",), store_mod.PACKAGES, False, "fixed error",
@@ -154,7 +154,7 @@ def series_of(kind, rows):
         points = max(contexts.values(), key=lambda pts: len({x for x, _, _ in pts}))
         if len({x for x, _, _ in points}) < 2:
             continue
-        if kind.x == "min_ms":
+        if "min_ms" in (kind.x, kind.y) and kind.varying == STEPPING_FIELDS:
             points.sort(key=lambda p: loose_first(p[2]))
         else:
             points.sort(key=lambda p: p[0])
@@ -177,7 +177,7 @@ def merged(figures):
 
 def series_label(kind, key, points):
     """'Cubie, 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
-    _, package, controller, transfers = key
+    _, package, controller, transfers = key[:4]
     parts = [shared.package_name(package),
              shared.controller_text(controller, None if "dt" in kind.varying else points[0][2])]
     return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
@@ -209,7 +209,7 @@ def draw(panel, kind, series, cards, label=series_label):
             continue
         entries.append((card, shared.key_label(card), panel.plot([], [], linestyle="none")[0]))
         for key, points in by_card[card]:
-            _, package, controller, transfers = key
+            _, package, controller, transfers = key[:4]
             text = label(kind, key, points)
             line = panel.plot([p[0] for p in points], [p[1] for p in points], label=text,
                               color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
@@ -222,7 +222,7 @@ def draw(panel, kind, series, cards, label=series_label):
     panel.set_xscale("log")
     if kind.log_y:
         panel.set_yscale("log")
-    fit_unflagged(panel, series, kind.log_y)
+    fit_unflagged(panel, kind, series)
     if kind.invert_x:
         panel.invert_xaxis()
     panel.set_xlabel(kind.x_label)
@@ -231,18 +231,18 @@ def draw(panel, kind, series, cards, label=series_label):
     return entries
 
 
-def fit_unflagged(panel, series, log_y):
-    """Fit the y range to the points within the errored limit; crossed points beyond it fall off the panel."""
-    ys = [y for points in series.values() for _, y, row in points
-          if shared.within_errored_limit(row) and math.isfinite(y) and (y > 0 or not log_y)]
-    if not ys:
-        return
-    low, high = min(ys), max(ys)
-    if log_y:
-        panel.set_ylim(low / 2.0, high * 2.0)
-    else:
-        pad = 0.05 * (high - low) or 1.0
-        panel.set_ylim(low - pad, high + pad)
+ERROR_COLUMNS = ("error", "interval_error")
+
+
+def fit_unflagged(panel, kind, series):
+    """Fit an error axis to the points within the errored limit; crossed points beyond it fall off the panel."""
+    for column, index, limits in ((kind.x, 0, panel.set_xlim), (kind.y, 1, panel.set_ylim)):
+        if column not in ERROR_COLUMNS:
+            continue
+        values = [p[index] for points in series.values() for p in points
+                  if shared.within_errored_limit(p[2]) and math.isfinite(p[index]) and p[index] > 0]
+        if values:
+            limits(min(values) / 2.0, max(values) * 2.0)
 
 
 def cross_out(panel, points):
@@ -299,22 +299,23 @@ def render(path, kind, series, algorithm, builds=None):
 
 
 def render_grid(path, kind, panels, title, columns=None, label=series_label, panel_legends=False):
-    """One figure with a subplot per (name, series), row-major over `columns` (a near-square grid without), a None series left blank; one legend for the whole figure, or one per panel."""
+    """One figure with a subplot per (name, series[, kind]), row-major over `columns` (a near-square grid without), a None series left blank; one legend for the whole figure, or one per panel."""
     plt = shared.pyplot()
     count = len(panels)
     columns = columns or min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
     width = 5.0 * columns
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, 3.8 * rows), squeeze=False)
-    cards = cards_of(merged(series for _, series in panels if series))
+    cards = cards_of(merged(p[1] for p in panels if p[1]))
     headings = {shared.key_label(c) for c in cards}
     entries = {}
-    for index, (name, series) in enumerate(panels):
+    for index, spec in enumerate(panels):
+        name, series = spec[:2]
         panel = axes[index // columns][index % columns]
         if not series:
             panel.set_axis_off()
             continue
-        drawn = draw(panel, kind, series, cards, label)
+        drawn = draw(panel, spec[2] if len(spec) > 2 else kind, series, cards, label)
         if panel_legends:
             shown = {}
             for entry in drawn:
@@ -374,6 +375,91 @@ def render_combined(path, kind, panels, title):
     fig.legend([h for _, h in entries], [text for text, _ in entries], fontsize=7, loc="center left",
                bbox_to_anchor=(0.72, 0.5))
     fig.tight_layout(rect=(0.0, 0.0, 0.72, 1.0))
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def catalogue_order():
+    """Every algorithm name in algorithms.csv order."""
+    import csv
+    with open(os.path.join(shared.RUNNER_SCRIPTS, "algorithms.csv"), encoding="utf-8") as handle:
+        return list(dict.fromkeys(r["algorithm"] for r in csv.DictReader(handle)))
+
+
+def render_combined_grid(path, kind, panels, title, columns=None):
+    """A subplot per (name, {algorithm: series}): a colour per algorithm across the figure, a marker per package (per card when several cards), filled for adaptive steps, a line style per transfers; one legend of the encodings."""
+    plt = shared.pyplot()
+    count = len(panels)
+    columns = columns or min(4, math.ceil(math.sqrt(count)))
+    rows = math.ceil(count / columns)
+    width = 5.0 * columns
+    order = catalogue_order()
+    algorithms = sorted({a for _, by in panels for a in by}, key=lambda a: order.index(a) if a in order else len(order))
+    # Tall enough for the legend: one line per algorithm plus about a dozen encoding lines.
+    height = max(3.8 * rows, 0.17 * (len(algorithms) + 14) + 0.8)
+    fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, height), squeeze=False)
+    colours = {a: ALGORITHM_COLOURS[i % len(ALGORITHM_COLOURS)] for i, a in enumerate(algorithms)}
+    cards = cards_of(merged(s for _, by in panels for s in by.values()))
+    packages, transfers_seen, crossed = set(), set(), None
+    for index, (name, by) in enumerate(panels):
+        axis = axes[index // columns][index % columns]
+        for algorithm, series in by.items():
+            for key, points in series.items():
+                card, package, controller, transfers = key[:4]
+                packages.add(package)
+                transfers_seen.add(transfers)
+                marker = (PACKAGE_MARKERS.get(package, "x") if len(cards) == 1
+                          else shared.marker("adaptive", cards.index(card)))
+                colour = colours[algorithm]
+                axis.plot([p[0] for p in points], [p[1] for p in points], color=colour, marker=marker,
+                          markerfacecolor=colour if controller == "adaptive" else "white",
+                          linestyle=shared.line(transfers) if transfers else "-", linewidth=1.2, markersize=5,
+                          markeredgecolor=colour, markeredgewidth=1.0)
+                crossed = cross_out(axis, points) or crossed
+        axis.set_xscale("log")
+        if kind.log_y:
+            axis.set_yscale("log")
+        fit_unflagged(axis, kind, merged(by.values()))
+        axis.set_xlabel(kind.x_label)
+        axis.set_ylabel(kind.y_label)
+        axis.grid(True, which="both", alpha=0.3)
+        axis.set_title(name, fontsize=9)
+    for index in range(count, rows * columns):
+        axes[index // columns][index % columns].set_axis_off()
+    blank = plt.Line2D([], [], linestyle="none")
+    handles, labels = [blank], ["Algorithm"]
+    for a in algorithms:
+        handles.append(plt.Line2D([], [], color=colours[a], linewidth=2))
+        labels.append(shared.algorithm_name(a))
+    if len(cards) == 1:
+        handles.append(blank)
+        labels.append("Package")
+        for package in (p for p in store_mod.PACKAGES if p in packages):
+            handles.append(plt.Line2D([], [], color="gray", marker=PACKAGE_MARKERS.get(package, "x"), linestyle="none"))
+            labels.append(shared.package_name(package))
+    else:
+        handles.append(blank)
+        labels.append("Card")
+        for card in cards:
+            handles.append(plt.Line2D([], [], color="gray", marker=shared.marker("adaptive", cards.index(card)),
+                                      linestyle="none"))
+            labels.append(shared.key_label(card))
+    handles += [blank, plt.Line2D([], [], color="gray", marker="o", linestyle="none"),
+                plt.Line2D([], [], color="gray", marker="o", markerfacecolor="white", linestyle="none")]
+    labels += ["Steps", "Adaptive", "Fixed"]
+    if "both" in transfers_seen:
+        handles.append(plt.Line2D([], [], color="gray", linestyle=shared.line("both")))
+        labels.append("+ transfer")
+    if crossed is not None:
+        handles.append(crossed)
+        labels.append(CROSSED_LABEL)
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
+    box = fig.legend(handles, labels, fontsize=7, loc="center left", bbox_to_anchor=(width / (width + 2.6), 0.5))
+    for text in box.get_texts():
+        if text.get_text() in ("Algorithm", "Package", "Card", "Steps"):
+            text.set_fontweight("bold")
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
