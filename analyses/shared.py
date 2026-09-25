@@ -230,12 +230,7 @@ def catalogue_order():
 
 
 class Encoding:
-    """The visual language of every figure, from its series {key: [(x, y, row)]} with key (card, package, controller kind, transfers[, algorithm]).
-
-    Colour is the package, or the algorithm with colour_by="algorithm" (a fixed colour per catalogue algorithm).
-    Marker shape is whichever of card and package varies and colour does not show; a circle when neither does.
-    Filled markers are adaptive steps, hollow fixed; a dashed line carries transfers; a black cross marks a point over the errored limit.
-    """
+    """Every figure's visual language: colour is package or algorithm, marker is card or package, fill is steps, dashes are transfers."""
 
     def __init__(self, series, colour_by="package"):
         self.colour_by = colour_by
