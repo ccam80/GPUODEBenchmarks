@@ -1,4 +1,4 @@
-"""What the analysis shares with its tests: the suite interpreter, the --where/--kind flags, the store read with two rows of one run_id refused, row selection by SQL predicate (every row without one), the errored filter, the figure encoding (a colour per package, a marker per stepping kind (fixed or adaptive) and card, a line style per transfers: none solid, both dashed) and the display names and CSVs that leave out the columns no row captured."""
+"""What the analysis shares with its tests: the suite interpreter, the --where/--kind flags, the store read with two rows of one run_id refused, row selection by SQL predicate (every row without one), the errored filter, the figure style and encoding (Encoding) and the display names and CSVs that leave out the columns no row captured."""
 
 import argparse
 import csv
@@ -21,7 +21,6 @@ SUITE_VENV = os.path.join(ROOT, "GPU_ODE_CUBIE", "venv")
 ERRORED_PCT_LIMIT = 10.0
 NAN = float("nan")
 
-# The figure encoding: a colour per package, a marker per controller kind (one set per card), a line style per transfers.
 COLOURS = {
     "cubie": "tab:blue", "jax": "tab:red", "pytorch": "darkred",
     "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
@@ -31,8 +30,16 @@ PACKAGE_NAMES = {
     "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
 }
 CONTROLLER_KINDS = ("fixed", "adaptive")
-MARKER_SETS = (("s", "o"), ("P", "v"), ("*", "p"))
-LINES = {"both": "--", "none": "-"}
+# Line style per (steps, transfers); marker shapes in the order algorithms take them.
+LINE_STYLES = {("adaptive", "none"): "-", ("fixed", "none"): "--", ("adaptive", "both"): ":", ("fixed", "both"): "-."}
+LINE_LABELS = {("adaptive", "none"): "Adaptive", ("fixed", "none"): "Fixed",
+               ("adaptive", "both"): "Adaptive, with transfers", ("fixed", "both"): "Fixed, with transfers"}
+SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">", "8", "H", "d")
+SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
+CROSS_STYLE = {"linestyle": "none", "marker": "x", "color": "black", "markersize": 10, "markeredgewidth": 1.5}
+CROSSED_LABEL = "over 10% of trajectories errored"
+RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
+      "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
 
 
 def under_suite_python():
@@ -179,6 +186,15 @@ def problem_name(problem, states=None):
     return name
 
 
+def problem_label(problem):
+    """'Lorenz 96 (20 states)', 'Ring modulator, index 2 (15 states)' from the catalogue."""
+    from problems import load_problems
+    entry = next(e for e in load_problems() if e["problem"] == problem)
+    name = re.sub(r"\s*\((\d+)\)$", "", entry["display"])
+    name = re.sub(r"\s*\((.+)\)$", r", \1", name)
+    return "{0} ({1} states)".format(name, entry["states"])
+
+
 def algorithm_name(algorithm):
     """The catalogue's display name of an algorithm."""
     from algorithms import algorithm_facts
@@ -200,14 +216,68 @@ def colour(package):
     return COLOURS.get(package, "gray")
 
 
-def marker(name, card=0):
-    """The marker of a stepping kind on a card; cards past the sets share the last set."""
-    markers = MARKER_SETS[min(card, len(MARKER_SETS) - 1)]
-    return markers[CONTROLLER_KINDS.index(name)] if name in CONTROLLER_KINDS else "x"
+def catalogue_order():
+    """Every algorithm name in algorithms.csv order."""
+    with open(os.path.join(RUNNER_SCRIPTS, "algorithms.csv"), encoding="utf-8") as handle:
+        return list(dict.fromkeys(r["algorithm"] for r in csv.DictReader(handle)))
 
 
-def line(transfers):
-    return LINES.get(transfers, ":")
+class Encoding:
+    """Every figure's visual language: colour is the package, marker shape and fill the algorithm, line style the steps (dashed fixed) and transfers."""
+
+    def __init__(self, series):
+        self.order = catalogue_order()
+        self.packages = [p for p in COLOURS if any(k[1] == p for k in series)]
+        self.algorithms = sorted({self.algorithm(k, pts) for k, pts in series.items()}, key=self._rank)
+        self.lines = [s for s in LINE_STYLES if any((k[2], k[3] or "none") == s for k in series)]
+
+    def _rank(self, algorithm):
+        return self.order.index(algorithm) if algorithm in self.order else len(self.order)
+
+    @staticmethod
+    def algorithm(key, points):
+        return key[4] if len(key) > 4 else points[0][2]["algorithm"]
+
+    def marker_of(self, algorithm):
+        """(shape, filled): the catalogue's first len(SHAPES) algorithms filled, the rest hollow."""
+        rank = self._rank(algorithm) % (2 * len(SHAPES))
+        return SHAPES[rank % len(SHAPES)], rank < len(SHAPES)
+
+    def style(self, key, points):
+        """matplotlib plot() keywords for one series."""
+        shape, filled = self.marker_of(self.algorithm(key, points))
+        colour_value = colour(key[1])
+        return dict(SERIES_STYLE, color=colour_value, marker=shape,
+                    markerfacecolor=colour_value if filled else "white",
+                    linestyle=LINE_STYLES[(key[2], key[3] or "none")])
+
+    def legend(self, plt, crossed):
+        """(handles, labels, headings): each channel under its heading, only what the figure shows."""
+        handles, labels, headings = [], [], []
+
+        def section(heading, entries):
+            headings.append(heading)
+            handles.append(plt.Line2D([], [], linestyle="none"))
+            labels.append(heading)
+            for handle, text in entries:
+                handles.append(handle)
+                labels.append(text)
+
+        def swatch(**kw):
+            return plt.Line2D([], [], **dict(SERIES_STYLE, **kw))
+
+        section("Package", [(swatch(color=colour(p)), package_name(p)) for p in self.packages])
+        markers = []
+        for a in self.algorithms:
+            shape, filled = self.marker_of(a)
+            markers.append((swatch(color="gray", linestyle="none", marker=shape,
+                                   markerfacecolor="gray" if filled else "white"), algorithm_name(a)))
+        section("Algorithm", markers)
+        section("Steps", [(swatch(color="gray", linestyle=LINE_STYLES[s]), LINE_LABELS[s]) for s in self.lines])
+        if crossed:
+            handles.append(plt.Line2D([], [], **CROSS_STYLE))
+            labels.append(CROSSED_LABEL)
+        return handles, labels, headings
 
 
 def dyadic(value):
@@ -267,8 +337,9 @@ def write_csv(path, columns, rows):
 
 
 def pyplot():
-    """matplotlib.pyplot on the Agg backend."""
+    """matplotlib.pyplot on the Agg backend with the RC defaults."""
     import matplotlib
     matplotlib.use("Agg")
+    matplotlib.rcParams.update(RC)
     import matplotlib.pyplot as plt
     return plt
