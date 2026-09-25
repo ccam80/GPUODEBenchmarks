@@ -644,7 +644,8 @@ class SchemaTests(unittest.TestCase):
                    '[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = "default_dt"\n')
         specs = sets.expand(["s"], sets_dir=self.tmp)
         self.assertEqual(sorted((s["problem"], s["dt"]) for s in specs),
-                         [("pollu", 60.0 * 2.0 ** -10), ("ring_modulator", 1.0e-3 * 2.0 ** -17)])
+                         [(name, PROBLEMS[name]["duration"] * 2.0 ** PROBLEMS[name]["default_dt_pow"])
+                          for name in ("pollu", "ring_modulator")])
 
     def test_traces_and_single_run_are_set_keys(self):
         text = ('[set]\npackages = ["cubie"]\nproblems = ["lorenz"]\nalgorithms = ["tsit5"]\n{0}'
