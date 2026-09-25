@@ -1,14 +1,14 @@
 """paper_figures.py [--key KEY]* [--cache rows.pkl] [--root data] [--out plots/paper] [--no-sync]
 
-The paper figures, drawn with plots.py's encoding, each with a CSV of its points:
+Paper figures in plots.py's encoding, each with a CSV:
 
-1_transfers: per card, each package's least and most costly algorithm on Lorenz, with and without transfers.
-2_batch_size_<key>: kernel time against trajectories, a row per algorithm, a column per problem, adaptive steps.
-3_fixed_vs_adaptive_<key>: work-precision, same grid, fixed and adaptive steps.
-4_work_precision_<key>: a pane per problem, each package's best algorithm (see best_series).
-5_cards_batch, 5_cards_wp: Cubie Tsit5 adaptive on both cards, a pane per problem.
+1_transfers: per card, each package's cheapest and costliest algorithm on Lorenz, with and without transfers.
+2_batch_size_<key>: kernel time against trajectories; rows are algorithms, columns problems.
+3_fixed_vs_adaptive_<key>: work-precision on the same grid.
+4_work_precision_<key>: each package's best algorithm per problem (see best_series).
+5_cards_batch, 5_cards_wp: Cubie Tsit5 on both cards.
 
-`--cache` pickles the rows with their errors so a rerun skips the error pass.
+`--cache` pickles rows with errors to skip the error pass.
 """
 
 import math
