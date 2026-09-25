@@ -1,6 +1,6 @@
 """paper_figures.py [--key KEY]* [--cache rows.pkl] [--root data] [--out plots/paper] [--no-sync]
 
-The paper's figures as inclusion lists; plots.draw_figure does the rest. Each figure writes a PNG and a CSV of its points.
+Paper figures as inclusion lists for plots.draw_figure; each writes a PNG and a CSV.
 """
 
 import os
