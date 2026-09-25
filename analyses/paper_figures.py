@@ -29,7 +29,7 @@ FIGURES = (
     Figure("1_transfers", BATCH, [pane for key in KEYS for problem in TRANSFER_PROBLEMS for pane in (
         Pane(dict(key=key, problem=problem, **KERNEL), note="kernel time"),
         Pane(dict(key=key, problem=problem), note="transfer time", transform=plots.transfer_time,
-             kind=plots.TRANSFER))], colour_by="package", columns=2, per_key=False,
+             kind=plots.TRANSFER))], columns=2, per_key=False,
            title="Kernel time and transfer time, every algorithm"),
     Figure("2_batch_size", BATCH, problem_panes(PROBLEMS), where=KERNEL, title="kernel time, every algorithm"),
     Figure("3_fixed_vs_adaptive", WP, problem_panes(PROBLEMS), where=KERNEL,

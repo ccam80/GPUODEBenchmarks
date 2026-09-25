@@ -237,13 +237,31 @@ def tagged(series):
     return {key[:4] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
 
 
-def render_panels(path, kind, panels, title, colour_by="package", columns=None):
-    """The one renderer: a subplot per (name, series[, kind]) row-major over `columns` (near-square without), an empty series left blank, one encoding legend at the right."""
+def by_card(panels, columns):
+    """Panels with a pane of several cards split into one pane per card, side by side; the columns scaled to match."""
+    out, most = [], 1
+    for spec in panels:
+        name, series = spec[:2]
+        cards = cards_of(series) if series else []
+        most = max(most, len(cards))
+        if len(cards) < 2:
+            out.append(spec)
+            continue
+        for card in cards:
+            label = shared.key_label(card)
+            out.append(((name + ", " + label) if name else label, {k: v for k, v in series.items() if k[0] == card})
+                       + tuple(spec[2:]))
+    return out, (columns * most if columns else None)
+
+
+def render_panels(path, kind, panels, title, columns=None):
+    """The one renderer: a subplot per (name, series[, kind]) row-major over `columns` (near-square without), a pane per card, an empty series left blank, one encoding legend at the right."""
     plt = shared.pyplot()
+    panels, columns = by_card(panels, columns)
     count = len(panels)
     columns = columns or min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
-    encoding = shared.Encoding(merged(p[1] for p in panels if p[1]), colour_by)
+    encoding = shared.Encoding(merged(p[1] for p in panels if p[1]))
     probe, labels, _ = encoding.legend(plt, True)
     width = 5.0 * columns
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, max(3.8 * rows, 0.17 * len(labels) + 0.8)),
@@ -295,19 +313,19 @@ def render(path, kind, series, algorithm, builds=None):
 
 
 def render_grid(path, kind, panels, title, columns=None):
-    """A subplot per (name, series[, kind]), a colour per package."""
-    return render_panels(path, kind, panels, title, "package", columns)
+    """A subplot per (name, series[, kind])."""
+    return render_panels(path, kind, panels, title, columns)
 
 
 def render_combined(path, kind, panels, title):
-    """Every (algorithm name, series) on one axis, a colour per algorithm."""
-    return render_panels(path, kind, [("", merged(tagged(s) for _, s in panels))], title, "algorithm", 1)
+    """Every (algorithm name, series) on one axis."""
+    return render_panels(path, kind, [("", merged(tagged(s) for _, s in panels))], title, 1)
 
 
 def render_combined_grid(path, kind, panels, title, columns=None):
-    """A subplot per (name, {algorithm: series}), a colour per algorithm."""
+    """A subplot per (name, {algorithm: series})."""
     return render_panels(path, kind, [(name, merged(tagged(s) for s in by.values())) for name, by in panels],
-                         title, "algorithm", columns)
+                         title, columns)
 
 
 def csv_rows(kind, algorithm, series):
@@ -341,11 +359,11 @@ class Pane:
 
 
 class Figure:
-    """A figure as an inclusion list: its file stem, kind, panes, the rows every pane takes, the colour channel, the grid columns, a figure per key or one over every key, and a title."""
+    """A figure as an inclusion list: its file stem, kind, panes, the rows every pane takes, the grid columns, a figure per key or one over every key, and a title."""
 
-    def __init__(self, name, kind, panes, where=None, colour_by="algorithm", columns=None, per_key=True, title=""):
+    def __init__(self, name, kind, panes, where=None, columns=None, per_key=True, title=""):
         self.name, self.kind, self.panes, self.where = name, kind, panes, where or {}
-        self.colour_by, self.columns, self.per_key, self.title = colour_by, columns, per_key, title
+        self.columns, self.per_key, self.title = columns, per_key, title
 
 
 def problem_panes(problems, **pane):
@@ -426,7 +444,7 @@ def draw_figure(figure, rows, keys, out):
         stem = figure.name + ("_" + shared.slug(key) if key else "")
         title = (shared.key_label(key) + ": " if key else "") + figure.title
         path = os.path.join(out, stem + ".png")
-        render_panels(path, figure.kind, panels, title, figure.colour_by, figure.columns)
+        render_panels(path, figure.kind, panels, title, figure.columns)
         shared.write_csv(os.path.join(out, stem + ".csv"), CSV_COLUMNS, tables)
         written.append(path)
     return written
