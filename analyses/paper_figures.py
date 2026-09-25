@@ -2,12 +2,12 @@
 
 Paper figures in plots.py's encoding, each with a CSV:
 
-1_transfers: kernel time and transfer time (with transfers minus without) against trajectories, smallest and largest system, every algorithm, per card.
-2_batch_size_<key>: kernel time against trajectories, a pane per problem, every algorithm.
-3_fixed_vs_adaptive_<key>: work-precision, a row per algorithm, a column per problem.
+1_transfers: kernel and transfer time against trajectories, smallest and largest system, per card.
+2_batch_size_<key>: kernel time, every algorithm, a pane per problem.
+3_fixed_vs_adaptive_<key>: work-precision, algorithms by row, problems by column.
 4_work_precision_<key>: each package's best algorithm per problem (see best_series).
-5_cards_batch: Cubie kernel time on both cards, every algorithm, a pane per problem.
-6_fabbri_wp, 6_fabbri_batch: Fabbri-Linder, every Cubie algorithm against Myokit Euler.
+5_cards_batch: Cubie kernel time on both cards.
+6_fabbri_wp, 6_fabbri_batch: Fabbri-Linder, Cubie against Myokit.
 
 `--cache` pickles rows with errors to skip the error pass.
 """
