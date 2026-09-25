@@ -639,6 +639,14 @@ class SchemaTests(unittest.TestCase):
                          (15.0, 0.25, 30.0))
         self.assertEqual(len(sets.expand(["s"], sets_dir=self.tmp)), 4)
 
+    def test_default_dt_is_the_duration_times_two_to_the_problems_default_dt_pow(self):
+        self.write('[set]\npackages = ["cpp"]\nproblems = ["pollu", "ring_modulator"]\nalgorithms = ["classical-rk4"]\n'
+                   '[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = "default_dt"\n')
+        specs = sets.expand(["s"], sets_dir=self.tmp)
+        self.assertEqual(sorted((s["problem"], s["dt"]) for s in specs),
+                         [(name, PROBLEMS[name]["duration"] * 2.0 ** PROBLEMS[name]["default_dt_pow"])
+                          for name in ("pollu", "ring_modulator")])
+
     def test_traces_and_single_run_are_set_keys(self):
         text = ('[set]\npackages = ["cubie"]\nproblems = ["lorenz"]\nalgorithms = ["tsit5"]\n{0}'
                 '[[grid]]\nn = [8]\n[[stepping]]\ncontroller = "fixed"\ndt = [0.5]\n')

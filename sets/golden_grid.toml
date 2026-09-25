@@ -39,7 +39,7 @@ lorenz96 = {max = 0.12487888243776274}
 lorenz96_20 = {max = 0.12487888243776274}
 pleiades = {max = 0.51170739522854025}
 pollu = {max = 0.036280887705686042}
-ring_modulator = {max = 2.1490658166736339e-13}
+ring_modulator = {max = 2.1490658166736337e-12}
 ring_modulator_index2 = {max = 0.0039024650761800856}
 nand_gate = {max = 2.5585369761427013e-05}
 

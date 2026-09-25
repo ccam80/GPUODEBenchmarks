@@ -26,6 +26,7 @@ STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", 
                  "dt_min", "dt_max", "gains")
 GOLDEN_ALGORITHM = "golden_algorithm"
 GOLDEN_TOL = "golden_tol"
+DEFAULT_DT = "default_dt"
 # The spec columns a trial carries, in table order, followed by the expansion's own fields.
 SPEC_KEYS = ("problem", "system_params", "duration", "precision", "parameter", "grid_scale",
              "grid_min", "grid_max", "n", "grid_dtype", "algorithm", "controller", "dt",
@@ -340,7 +341,11 @@ def _steppings(stepping, package, algorithm, problem, where):
     duration = problem["duration"]
     out = []
     if stepping["controller"] == "fixed":
-        for dt in _scaled_list(stepping["dt"], duration, where + " dt"):
+        if stepping["dt"] == DEFAULT_DT:
+            dts = [duration * 2.0 ** problem["default_dt_pow"]]
+        else:
+            dts = _scaled_list(stepping["dt"], duration, where + " dt")
+        for dt in dts:
             atol, rtol = _newton(stepping, algorithm, None, where)
             out.append({"controller": "fixed", "dt": dt, "dt_min": NAN, "dt_max": NAN,
                         "atol": NAN, "rtol": NAN, "gains": canonical_json({}),
