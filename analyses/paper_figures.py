@@ -1,13 +1,13 @@
 """paper_figures.py [--key KEY]* [--cache rows.pkl] [--root data] [--out plots/paper] [--no-sync]
 
-The paper's four figures per key, each with the CSV of the points it draws:
+Four figures per key, each with a CSV of its points:
 
-1. overhead_transfers: one problem and one fixed-step algorithm; batch time against trajectories with and without the host-device transfers (left), and the share of the total the transfers take (right).
-2. batch_size: kernel-only batch time against trajectories, a pane per problem, one adaptive algorithm per pane.
-3. fixed_vs_adaptive: for every package, problem and algorithm run both ways, the ratio of the cheapest fixed-step time to the cheapest adaptive time reaching the same error, the median over five error levels both reach.
-4. work_precision: a pane per problem, one curve per package: the algorithm and stepping kind with the most points on that package's time-error Pareto front.
+1. overhead_transfers: batch time against trajectories with and without transfers, and the transfer share.
+2. batch_size: kernel time against trajectories, one adaptive algorithm per problem pane.
+3. fixed_vs_adaptive: fixed-step over adaptive time at equal error, median of five error levels.
+4. work_precision: per problem pane, each package's best algorithm (see best_curves).
 
-Rows over 10% errored trajectories are left out. Where the store holds several rows of one point the latest stands. `--cache` keeps the rows with their errors in a pickle, so a second call skips the error pass.
+Rows over 10% errored are dropped; duplicates keep the latest. `--cache` pickles rows with errors.
 """
 
 import math
@@ -311,7 +311,7 @@ def fig_wp(wp, out, stem):
             table += [dict(r, figure="work_precision") for r in pts]
         style(axis, "Kernel time (s)" if index // columns == rows_n - 1 else "",
               "RMS error" if index % columns == 0 else "")
-        # A diverged loose step would stretch the axis over decades nobody reads; it runs off the top instead.
+        # Clip diverged loose steps off the top.
         axis.set_ylim(top=min(axis.get_ylim()[1], 10.0 * max(medians)))
         axis.set_title(problem_label(problem, wp), fontsize=9, color=INK)
         axis.legend(fontsize=6, frameon=False)
