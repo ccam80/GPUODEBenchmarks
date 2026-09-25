@@ -396,7 +396,7 @@ def render_combined_grid(path, kind, panels, title, columns=None):
     width = 5.0 * columns
     order = catalogue_order()
     algorithms = sorted({a for _, by in panels for a in by}, key=lambda a: order.index(a) if a in order else len(order))
-    # Tall enough for the legend: one line per algorithm plus about a dozen encoding lines.
+    # Fit the legend height.
     height = max(3.8 * rows, 0.17 * (len(algorithms) + 14) + 0.8)
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, height), squeeze=False)
     colours = {a: ALGORITHM_COLOURS[i % len(ALGORITHM_COLOURS)] for i, a in enumerate(algorithms)}
