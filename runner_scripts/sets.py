@@ -22,7 +22,7 @@ SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
-STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
+STEPPING_KEYS = ("packages", "problems", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
 GOLDEN_ALGORITHM = "golden_algorithm"
 GOLDEN_TOL = "golden_tol"
@@ -162,8 +162,10 @@ def load_set(name, sets_dir=SETS_DIR):
         where = "{0} [[stepping]] {1}".format(path, index + 1)
         _check_keys(stepping, STEPPING_KEYS, where)
         stepping.setdefault("packages", "all")
+        stepping.setdefault("problems", "all")
         stepping.setdefault("algorithms", "all")
         stepping["packages"] = _name_list(stepping["packages"], PACKAGES, where + " packages")
+        stepping["problems"] = _name_list(stepping["problems"], problems, where + " problems")
         stepping["algorithms"] = _name_list(stepping["algorithms"], algorithms,
                                             where + " algorithms", tokens=(GOLDEN_ALGORITHM,))
         if "controller" not in stepping:
@@ -393,6 +395,8 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                         if not problem.supports(package):
                             continue
                         if head["problems"] != "all" and problem.name not in head["problems"]:
+                            continue
+                        if stepping["problems"] != "all" and problem.name not in stepping["problems"]:
                             continue
                         if problems is not None and problem.name not in problems:
                             continue

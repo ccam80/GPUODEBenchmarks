@@ -1,4 +1,4 @@
-# Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run, at one fixed step and one tolerance.
+# Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run, at one fixed step (duration x 2^-10; ring_modulator 10 ns) and one tolerance.
 
 [set]
 packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
@@ -23,9 +23,18 @@ system_params = {}
 
 [[stepping]]
 packages = "all"
+problems = ["lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modulator_index2", "nand_gate"]
 algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-10]}
+newton = {atol = 1.0e-6, rtol = 1.0e-6}
+
+[[stepping]]
+packages = "all"
+problems = ["ring_modulator"]
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+controller = "fixed"
+dt = [1.0e-8]
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
