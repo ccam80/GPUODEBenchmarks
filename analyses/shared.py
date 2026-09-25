@@ -33,6 +33,14 @@ PACKAGE_NAMES = {
 CONTROLLER_KINDS = ("fixed", "adaptive")
 MARKER_SETS = (("s", "o"), ("P", "v"), ("*", "p"))
 LINES = {"both": "--", "none": "-"}
+# The one figure style: series lines and markers, the errored cross, a colour per algorithm, and matplotlib's defaults.
+SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
+CROSS_STYLE = {"linestyle": "none", "marker": "x", "color": "black", "markersize": 10, "markeredgewidth": 1.5}
+ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
+                     "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
+                     "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
+RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
+      "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
 
 
 def under_suite_python():
@@ -267,8 +275,9 @@ def write_csv(path, columns, rows):
 
 
 def pyplot():
-    """matplotlib.pyplot on the Agg backend."""
+    """matplotlib.pyplot on the Agg backend with the RC defaults."""
     import matplotlib
     matplotlib.use("Agg")
+    matplotlib.rcParams.update(RC)
     import matplotlib.pyplot as plt
     return plt

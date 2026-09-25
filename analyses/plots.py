@@ -28,9 +28,6 @@ LIMITED_POINTS = 3
 GRID_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime", "states")
 # The kinds that also draw every algorithm of a problem on one axis, <problem>.png.
 COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime", "trace_errored_vs_runtime")
-ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
-                     "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
-                     "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
 PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
                    "julia_gpu": "P", "julia_cpu": "X"}
 ERROR_LABEL = "RMS error against the golden"
@@ -213,8 +210,7 @@ def draw(panel, kind, series, cards, label=series_label):
             text = label(kind, key, points)
             line = panel.plot([p[0] for p in points], [p[1] for p in points], label=text,
                               color=shared.colour(package), marker=shared.marker(controller, cards.index(card)),
-                              linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
-                              markeredgecolor="black", markeredgewidth=0.5)[0]
+                              linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)[0]
             entries.append((card, text, line))
             crossed = cross_out(panel, points)
             if crossed is not None:
@@ -227,7 +223,7 @@ def draw(panel, kind, series, cards, label=series_label):
         panel.invert_xaxis()
     panel.set_xlabel(kind.x_label)
     panel.set_ylabel(kind.y_label)
-    panel.grid(True, which="both", alpha=0.3)
+    panel.grid(True, which="both")
     return entries
 
 
@@ -250,15 +246,14 @@ def cross_out(panel, points):
     flagged = [(x, y) for x, y, row in points if not shared.within_errored_limit(row)]
     if not flagged:
         return None
-    return panel.plot([x for x, _ in flagged], [y for _, y in flagged], linestyle="none", marker="x", color="black",
-                      markersize=10, markeredgewidth=1.5)[0]
+    return panel.plot([x for x, _ in flagged], [y for _, y in flagged], **shared.CROSS_STYLE)[0]
 
 
 def legend(target, entries, headings, **kwargs):
     """A legend of the entries with the heading labels in bold."""
     if not entries:
         return
-    box = target.legend([h for _, _, h in entries], [text for _, text, _ in entries], fontsize=7, **kwargs)
+    box = target.legend([h for _, _, h in entries], [text for _, text, _ in entries], **kwargs)
     for text in box.get_texts():
         if text.get_text() in headings:
             text.set_fontweight("bold")
@@ -291,9 +286,9 @@ def render(path, kind, series, algorithm, builds=None):
     legend(axes[0][0], draw(axes[0][0], kind, series, cards), headings)
     if builds is not None:
         legend(axes[0][1], draw(axes[0][1], BUILDS, builds, cards), headings)
-    fig.suptitle(title_of(series or builds, algorithm), fontsize=11)
+    fig.suptitle(title_of(series or builds, algorithm))
     fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    fig.savefig(path)
     plt.close(fig)
     return path
 
@@ -324,20 +319,20 @@ def render_grid(path, kind, panels, title, columns=None, label=series_label, pan
             legend(panel, list(shown.values()), headings)
         for card, text, handle in drawn:
             entries.setdefault((card, text), handle)
-        panel.set_title(name, fontsize=9)
+        panel.set_title(name)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
-    fig.suptitle(title, fontsize=12)
+    fig.suptitle(title)
     if panel_legends:
         fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-        fig.savefig(path, dpi=150)
+        fig.savefig(path)
         plt.close(fig)
         return path
     fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
     listed = sorted(entries.items(), key=lambda item: (cards.index(item[0][0]), 0 if item[0][1] in headings else 1))
     legend(fig, [(card, label, handle) for (card, label), handle in listed], headings, loc="center left",
            bbox_to_anchor=(width / (width + 2.6), 0.5), ncol=1)
-    fig.savefig(path, dpi=150)
+    fig.savefig(path)
     plt.close(fig)
     return path
 
@@ -348,7 +343,7 @@ def render_combined(path, kind, panels, title):
     fig, axis = plt.subplots(1, 1, figsize=(10.0, 6.0))
     entries = []
     for index, (name, series) in enumerate(panels):
-        colour = ALGORITHM_COLOURS[index % len(ALGORITHM_COLOURS)]
+        colour = shared.ALGORITHM_COLOURS[index % len(shared.ALGORITHM_COLOURS)]
         for key, points in series.items():
             _, package, controller, transfers = key
             label = "{0}, {1}".format(name, series_label(kind, key, points))
@@ -357,8 +352,7 @@ def render_combined(path, kind, panels, title):
             line = axis.plot([p[0] for p in points], [p[1] for p in points], label=label, color=colour,
                              marker=PACKAGE_MARKERS.get(package, "x"),
                              markerfacecolor=colour if controller == "adaptive" else "white",
-                             linestyle=shared.line(transfers) if transfers else "-", linewidth=1.5, markersize=6,
-                             markeredgecolor=colour, markeredgewidth=1.0)[0]
+                             linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)[0]
             entries.append((label, line))
             crossed = cross_out(axis, points)
             if crossed is not None and CROSSED_LABEL not in [e[0] for e in entries]:
@@ -370,12 +364,12 @@ def render_combined(path, kind, panels, title):
         axis.invert_xaxis()
     axis.set_xlabel(kind.x_label)
     axis.set_ylabel(kind.y_label)
-    axis.grid(True, which="both", alpha=0.3)
-    axis.set_title(title, fontsize=11)
-    fig.legend([h for _, h in entries], [text for text, _ in entries], fontsize=7, loc="center left",
+    axis.grid(True, which="both")
+    axis.set_title(title)
+    fig.legend([h for _, h in entries], [text for text, _ in entries], loc="center left",
                bbox_to_anchor=(0.72, 0.5))
     fig.tight_layout(rect=(0.0, 0.0, 0.72, 1.0))
-    fig.savefig(path, dpi=150)
+    fig.savefig(path)
     plt.close(fig)
     return path
 
@@ -399,7 +393,7 @@ def render_combined_grid(path, kind, panels, title, columns=None):
     # Fit the legend height.
     height = max(3.8 * rows, 0.17 * (len(algorithms) + 14) + 0.8)
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, height), squeeze=False)
-    colours = {a: ALGORITHM_COLOURS[i % len(ALGORITHM_COLOURS)] for i, a in enumerate(algorithms)}
+    colours = {a: shared.ALGORITHM_COLOURS[i % len(shared.ALGORITHM_COLOURS)] for i, a in enumerate(algorithms)}
     cards = cards_of(merged(s for _, by in panels for s in by.values()))
     packages, transfers_seen, crossed = set(), set(), None
     for index, (name, by) in enumerate(panels):
@@ -414,8 +408,7 @@ def render_combined_grid(path, kind, panels, title, columns=None):
                 colour = colours[algorithm]
                 axis.plot([p[0] for p in points], [p[1] for p in points], color=colour, marker=marker,
                           markerfacecolor=colour if controller == "adaptive" else "white",
-                          linestyle=shared.line(transfers) if transfers else "-", linewidth=1.2, markersize=5,
-                          markeredgecolor=colour, markeredgewidth=1.0)
+                          linestyle=shared.line(transfers) if transfers else "-", **shared.SERIES_STYLE)
                 crossed = cross_out(axis, points) or crossed
         axis.set_xscale("log")
         if kind.log_y:
@@ -423,30 +416,30 @@ def render_combined_grid(path, kind, panels, title, columns=None):
         fit_unflagged(axis, kind, merged(by.values()))
         axis.set_xlabel(kind.x_label)
         axis.set_ylabel(kind.y_label)
-        axis.grid(True, which="both", alpha=0.3)
-        axis.set_title(name, fontsize=9)
+        axis.grid(True, which="both")
+        axis.set_title(name)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
     blank = plt.Line2D([], [], linestyle="none")
     handles, labels = [blank], ["Algorithm"]
     for a in algorithms:
-        handles.append(plt.Line2D([], [], color=colours[a], linewidth=2))
+        handles.append(plt.Line2D([], [], color=colours[a], linewidth=shared.SERIES_STYLE["linewidth"]))
         labels.append(shared.algorithm_name(a))
     if len(cards) == 1:
         handles.append(blank)
         labels.append("Package")
         for package in (p for p in store_mod.PACKAGES if p in packages):
-            handles.append(plt.Line2D([], [], color="gray", marker=PACKAGE_MARKERS.get(package, "x"), linestyle="none"))
+            handles.append(plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker=PACKAGE_MARKERS.get(package, "x"), linestyle="none"))
             labels.append(shared.package_name(package))
     else:
         handles.append(blank)
         labels.append("Card")
         for card in cards:
-            handles.append(plt.Line2D([], [], color="gray", marker=shared.marker("adaptive", cards.index(card)),
+            handles.append(plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker=shared.marker("adaptive", cards.index(card)),
                                       linestyle="none"))
             labels.append(shared.key_label(card))
-    handles += [blank, plt.Line2D([], [], color="gray", marker="o", linestyle="none"),
-                plt.Line2D([], [], color="gray", marker="o", markerfacecolor="white", linestyle="none")]
+    handles += [blank, plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker="o", linestyle="none"),
+                plt.Line2D([], [], color="gray", markeredgecolor=shared.SERIES_STYLE["markeredgecolor"], marker="o", markerfacecolor="white", linestyle="none")]
     labels += ["Steps", "Adaptive", "Fixed"]
     if "both" in transfers_seen:
         handles.append(plt.Line2D([], [], color="gray", linestyle=shared.line("both")))
@@ -454,13 +447,13 @@ def render_combined_grid(path, kind, panels, title, columns=None):
     if crossed is not None:
         handles.append(crossed)
         labels.append(CROSSED_LABEL)
-    fig.suptitle(title, fontsize=12)
+    fig.suptitle(title)
     fig.tight_layout(rect=(0.0, 0.0, width / (width + 2.6), 0.96))
-    box = fig.legend(handles, labels, fontsize=7, loc="center left", bbox_to_anchor=(width / (width + 2.6), 0.5))
+    box = fig.legend(handles, labels, loc="center left", bbox_to_anchor=(width / (width + 2.6), 0.5))
     for text in box.get_texts():
         if text.get_text() in ("Algorithm", "Package", "Card", "Steps"):
             text.set_fontweight("bold")
-    fig.savefig(path, dpi=150)
+    fig.savefig(path)
     plt.close(fig)
     return path
 
