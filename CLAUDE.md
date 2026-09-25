@@ -6,3 +6,8 @@
 - Say "a solve of every trajectory at one step size", "an algorithm at one tolerance", "a result in the store", "the finals file".
 - Give step sizes in s, ms, us or ns and tolerances as powers of ten, never as `duration x 2^-k`.
 - When a count of runs matters, say what one unit of the count is.
+
+## Tests
+
+- Tests test machinery, not values. Default and fixed values exist to be changed; never pin them in a test.
+- When a changed value fails a test, remove the assertions on the old value, and the whole test if it only tests values. Never update the asserted value.
