@@ -5,6 +5,7 @@ version = "0.1.0"
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DiffEqGPU = "071ae1c0-96b5-11e9-1965-c90190d839ea"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"

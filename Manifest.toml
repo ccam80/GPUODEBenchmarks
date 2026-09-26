@@ -1162,7 +1162,7 @@ uuid = "096a3bc2-3ced-46d0-87f4-dd12716f4bfc"
 version = "3.0.0"
 
 [[deps.GPU_ODE_JuliaKernels]]
-deps = ["CUDA", "DiffEqGPU", "LinearAlgebra", "ModelingToolkit", "PrecompileTools", "SciMLBase", "StaticArrays", "TOML"]
+deps = ["CUDA", "DiffEqGPU", "ForwardDiff", "LinearAlgebra", "ModelingToolkit", "PrecompileTools", "SciMLBase", "StaticArrays", "TOML"]
 path = "GPU_ODE_JuliaKernels"
 uuid = "b3c4e5d6-8a91-4f27-9d3c-2e7a61c0f4b2"
 version = "0.1.0"
