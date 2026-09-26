@@ -63,6 +63,7 @@ def julia_project():
 JULIA_SOURCES = ("Project.toml", "Manifest.toml", "GPU_ODE_JuliaKernels/Project.toml",
                  "runner_scripts/problems.jl", "runner_scripts/algorithms.jl",
                  "runner_scripts/julia_systems.jl", "runner_scripts/julia_prob.jl",
+                 "runner_scripts/fabbri.jl", "runner_scripts/generated/fabbri_linder_rhs.jl",
                  "runner_scripts/problems.csv", "runner_scripts/julia_algorithms.csv")
 
 
