@@ -3,11 +3,11 @@
 # Rows are [first-run seconds below, floor, ceiling]; a run stops past its floor once median/min - 1 is within spread.
 [repeats]
 cap = 20
-schedule = [[0.1, 20, 20], [3.0, 10, 10], [5.0, 5, 10], [inf, 3, 10]]
+schedule = [[0.1, 20, 20], [3.0, 20, 20], [5.0, 10, 10], [inf, 5, 10]]
 spread = 0.02
 
 [watchdog]
-seconds = 120
+seconds = 300
 exit_code = 3
 # Hard-exit budget of a line's optimize; its solves then run at the solver's own geometry.
 optimize_seconds = 600

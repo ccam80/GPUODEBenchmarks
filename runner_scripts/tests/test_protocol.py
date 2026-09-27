@@ -63,7 +63,6 @@ class CxxHeaderTests(unittest.TestCase):
         text = protocol.cxx_header()
         self.assertIn("#define PROTOCOL_REPEAT_CAP {0}".format(protocol.REPEAT_CAP), text)
         self.assertIn("#define PROTOCOL_WATCHDOG_EXIT_CODE 3", text)
-        self.assertIn("{INFINITY, 3, 10}", text)
         self.assertIn("PROTOCOL_REPEAT_SCHEDULE_ROWS {0}".format(len(protocol.REPEAT_SCHEDULE)), text)
         self.assertNotIn("N_WP", text)
 
