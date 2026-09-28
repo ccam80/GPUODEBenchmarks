@@ -2,7 +2,7 @@
 """
 Cross-platform setup script for the CUBIE ODE benchmarking environment.
 
-Builds GPU_ODE_CUBIE/venv: cubie from PyPI with its ``mlir-cuda13`` and test
+Builds GPU_ODE_CUBIE/venv: cubie from PyPI with its ``cuda13`` and test
 extras, the store and analysis dependencies, and no numba-cuda.
 
 Works on Linux, Windows, and macOS.
@@ -14,7 +14,7 @@ import platform
 from pathlib import Path
 
 # CUDA major version to match. The extra pulls the matching
-# cubie-numba-cuda-mlir / cupy builds; override with CUBIE_CUDA_MAJOR=12.
+# cubie-numba-cuda-mlir build; override with CUBIE_CUDA_MAJOR=12.
 CUDA_MAJOR = os.environ.get("CUBIE_CUDA_MAJOR", "13")
 
 
@@ -90,9 +90,8 @@ def main():
         venv_uv = venv_path / "bin" / "uv"
 
     # Install cubie from PyPI plus the test dependency set.
-    # mlir-cuda<N> -> cubie-numba-cuda-mlir[cuN] + cupy-cudaNx
-    # cubie_precompile.py calls Solver.compile(optimize_candidates=..., max_parallel=...), which needs 0.14.0.
-    spec = f"cubie[mlir-cuda{CUDA_MAJOR},test]>=0.14.0"
+    # cuda<N> -> cubie-numba-cuda-mlir[cuN]; 0.15 renamed the extra from mlir-cuda<N>.
+    spec = f"cubie[cuda{CUDA_MAJOR},test]>=0.15.1"
     print(f"Installing {spec} from PyPI...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         "--upgrade", spec]):
@@ -119,7 +118,7 @@ def main():
         return 1
 
     if not run_command([str(venv_python), "-c",
-                        "from cubie.cuda_simsafe import cuda; print('CUDA available:', cuda.is_available())"]):
+                        "from cubie._cudasim_extensions import cuda; print('CUDA available:', cuda.is_available())"]):
         print("Warning: CUDA verification failed")
 
     if not run_command([str(venv_python), "-c",
