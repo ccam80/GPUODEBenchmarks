@@ -348,13 +348,15 @@ class PrecompileWorkerTests(AdapterCase):
         self.assertEqual(progress["failed"], [])
         self.assertIsNone(progress["under_way"])
 
-    def test_a_kernel_whose_record_the_run_applies_compiles_without_candidates(self):
+    def test_a_kernel_whose_record_the_run_applies_compiles_under_it_without_candidates(self):
         lines = self.lines()
         euler = lines[0]
         leg = self.adapter.build(euler)
         with mock.patch.dict(os.environ, {store.RUN_ENV: "old", store.OVERWRITE_ENV: "1"}):
             self.adapter.optimize(leg, euler)
         leg.close()
+        settings = cubie_adapter.load_optimized(euler, KEY, root=self.root)["settings"]
+        self.assertTrue(settings)
         path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
         for overwrite, candidates in (("1", True), ("", False)):
             FakeSolver.made = []
@@ -364,6 +366,8 @@ class PrecompileWorkerTests(AdapterCase):
             # euler's record from another run spares its candidates only where the run applies it; lorenz96 has none.
             self.assertEqual([s.compiled[0]["optimize_candidates"] for s in FakeSolver.made],
                              [candidates, False, False, False, True], overwrite)
+            # An applied record's settings are on the solver before its compile, so the runner's build hits the cache.
+            self.assertEqual(settings in FakeSolver.made[0].updates, not candidates, overwrite)
 
     def test_a_span_takes_its_slice_and_a_failed_compile_is_tallied(self):
         lines = self.lines()
