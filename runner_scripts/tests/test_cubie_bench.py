@@ -364,6 +364,9 @@ class PrecompileWorkerTests(AdapterCase):
             # euler's record from another run spares its candidates only where the run applies it; lorenz96 has none.
             self.assertEqual([s.compiled[0]["optimize_candidates"] for s in FakeSolver.made],
                              [candidates, False, False, False, True], overwrite)
+            # The applied record's settings reach the solver before it compiles, as in the runner's build.
+            applied = [u for u in FakeSolver.made[0].updates if "state_location" in u]
+            self.assertEqual(bool(applied), not candidates, overwrite)
 
     def test_a_span_takes_its_slice_and_a_failed_compile_is_tallied(self):
         lines = self.lines()

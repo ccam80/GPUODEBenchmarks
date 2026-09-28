@@ -67,7 +67,7 @@ def progress_path(trials_path, start):
 
 
 class Worker:
-    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes and the runner has no optimize record to apply) under the optimize watchdog; a kernel whose compile_key the store records a compile timeout of is skipped; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
+    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled under the optimize record the runner applies, else with its optimize candidates when the line optimizes, under the optimize watchdog; a kernel whose compile_key the store records a compile timeout of is skipped; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
 
     def __init__(self, package, key, root, lines, span, path, solver_class=None, memory_bytes=None):
         self.package, self.key, self.root = package, key, root
@@ -85,8 +85,11 @@ class Worker:
         import cubie_bench
         build = cubie_bench.Build(self.package, self.key, self.root, trial, cold=False, solver_class=self.solver_class)
         try:
-            # A kernel whose optimize record the runner will apply needs no candidates.
-            candidates = bool(trial["optimize"]) and cubie_bench.optimize_record(trial, self.key, self.root) is None
+            # Compile under the record the runner will apply, so its build hits the cache; no candidates then.
+            tuned = cubie_bench.optimize_record(trial, self.key, self.root)
+            if tuned is not None:
+                cubie_bench.adapter.apply_optimized(build.solver, tuned)
+            candidates = bool(trial["optimize"]) and tuned is None
             build.solver.compile(optimize_candidates=candidates, max_parallel=1)
         finally:
             build.close()
