@@ -81,7 +81,7 @@ COMPILE_TIMEOUT_REASON = "compile timeout at "
 RUN_ENV = "GPUODE_RUN"
 DRIVER_ENV = "GPUODE_DRIVER"
 CLOCK_LOCK_ENV = "GPUODE_CLOCK_LOCK_MHZ"
-# "1" in a run without --resume or --no-overwrite: a cubie kernel another run optimized optimizes again.
+# "1" in a run without --resume, --no-overwrite or --reuse-optimize: a cubie kernel another run optimized optimizes again.
 OVERWRITE_ENV = "GPUODE_OVERWRITE"
 CLOCK_COLUMNS = ("clock_sm_mhz", "clock_sm_min_mhz", "clock_throttled")
 # The host stamps a runner takes around one transfers' timing batch; null on a row it never timed.

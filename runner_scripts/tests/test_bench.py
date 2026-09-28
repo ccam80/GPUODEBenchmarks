@@ -112,6 +112,14 @@ class ResolveTests(unittest.TestCase):
             self.plan("-h")
         self.assertEqual(caught.exception.code, 0)
 
+    def test_only_a_run_without_resume_no_overwrite_or_reuse_optimize_optimizes_again(self):
+        for flags, again in (([], True), (["--resume"], False), (["--no-overwrite"], False),
+                             (["--reuse-optimize"], False), (["--resume", "--reuse-optimize"], False)):
+            self.assertEqual(bench.optimizes_again(bench.parse_args(["run", "--set", "perf"] + flags)), again, flags)
+        with self.assertRaises(SystemExit) as caught:
+            self.plan("-h")
+        self.assertEqual(caught.exception.code, 0)
+
 
 class PlanTests(unittest.TestCase):
     def setUp(self):

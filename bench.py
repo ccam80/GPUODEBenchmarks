@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
+"""bench.py plan|run --set <name>[,<name>] [-p pkgs] [-s problems] [-g algorithms] [--mode fixed|adaptive] [--controller names] [-n list] [--tol list] [--dt list] [--resume | --no-overwrite] [--reuse-optimize] [--floor] [--cooldown S] [--allow-unknown-gpu] [--lock-clocks SM[,MEM]] [--clock-tolerance MHZ] [--no-sync]
 
-plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: cubie precompiles its kernels into the package cache first, with the optimize candidates of the kernels that optimize (four workers of eight kernels, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning its problem, algorithm and controller, recorded as compile_timeout rows the plan marks in every run until `store.py clear` drops them), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
+plan writes trials/<key>/<package>.jsonl and prints counts; run writes them under logs/<key>_<stamp>/ and drives each package's runner: cubie precompiles its kernels into the package cache first, with the optimize candidates of the kernels that optimize and have no record the run applies (four workers of eight kernels, a worker past 6 GB handing the rest of its chunk to a new one, a kernel the watchdog takes abandoning its problem, algorithm and controller, recorded as compile_timeout rows the plan marks in every run until `store.py clear` drops them), then a fresh runner every 8 kernels at a family boundary (<package>.part<N>.jsonl); a cold line optimizes on a warm build, then times a cold build of the optimized kernel.
 -p -s -g -n --mode --controller --tol --dt narrow the expanded specs; -n names counts of the grids' n lists and exits for a count no grid of the named sets lists; --controller takes a spec controller or the stepping token that produced it.
 A trial is one line per point; a point declared by several set files runs under one contract whatever sets are named: cold, finals and transfers each true over its declarations, optimize true over its declarations (a cubie optimize runs once per build and stepping, once per build across dt for an explicit fixed-step algorithm, timing the batch and duration cubie sizes itself), the watchdog budget the largest.
-Without a flag every selected trial runs, its rows are overwritten and its cubie kernel is optimized again. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row and a timed-out optimize; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --floor lets runners keep the lower finite time.
+Without a flag every selected trial runs, its rows are overwritten and its cubie kernel is optimized again. --resume runs the trials the store lacks rows of, keeping a recorded NaN or error row and a timed-out optimize; --no-overwrite runs every trial without a finite time; under either a trial lacking a requested output (a cold build time, a readable finals file) or its kernel's optimize record (timed out, under --no-overwrite) runs whole, so its timing, build time and finals come from one execution. A recorded row is never rerun for its age or the source it was recorded from. --reuse-optimize applies a cubie kernel's optimize record whatever run wrote it, and the precompile skips that kernel's optimize candidates; --resume and --no-overwrite already apply any record. --floor lets runners keep the lower finite time.
 run pulls the store into data/ before planning and pushes this key after the runners (sync/sync.py); the pull keeps a local file newer than the box's; a run refuses to start while this key's local partition holds files the box lacks or differs from, until they are pushed or the partition deleted; a machine without the store refuses to run unless --no-sync.
 A run locks the GPU clocks to --lock-clocks or the card's row in runner_scripts/gpu_clocks.conf and refuses to start when it cannot (no row, no elevation, driver refusal, a sampler that dies at once); there is no unlocked run. It samples the clocks at 25 Hz into data/clocks/<run>.csv (pushed with the key), every row records the run, driver and lock (GPUODE_RUN, GPUODE_DRIVER, GPUODE_CLOCK_LOCK_MHZ in the runners' environment) and the host stamps around its timing batch (timed_start_utc, timed_end_utc), and after each package the timed rows it recorded get the clocks that window of the log showed (clock_sm_mhz, clock_sm_min_mhz, clock_throttled; a window the sampler did not cover stays NaN).
 The push has the box delete this key's clock logs a day or older that no row on the box names, and drops them and their logs/<run>/ dirs here.
@@ -85,6 +85,7 @@ def parse_args(argv):
     p.add_argument("--dt", default="")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--no-overwrite", action="store_true")
+    p.add_argument("--reuse-optimize", action="store_true")
     p.add_argument("--floor", action="store_true")
     p.add_argument("--cooldown", type=int, default=15)
     p.add_argument("--allow-unknown-gpu", action="store_true")
@@ -103,6 +104,11 @@ def parse_args(argv):
     if args.resume and args.no_overwrite:
         raise SystemExit("--resume and --no-overwrite exclude each other")
     return args
+
+
+def optimizes_again(args):
+    """True where a cubie kernel another run optimized optimizes again: a run without --resume, --no-overwrite or --reuse-optimize."""
+    return not (args.resume or args.no_overwrite or args.reuse_optimize)
 
 
 def resolve(args):
@@ -247,7 +253,7 @@ class Run:
         os.environ[store.RUN_ENV] = self.run
         os.environ[store.DRIVER_ENV] = self.driver
         os.environ[store.CLOCK_LOCK_ENV] = str(sm)
-        os.environ[store.OVERWRITE_ENV] = "" if args.resume or args.no_overwrite else "1"
+        os.environ[store.OVERWRITE_ENV] = "1" if optimizes_again(args) else ""
 
     # ------------------------------------------------------------- plumbing
     def record(self, stage, status, detail, code):
