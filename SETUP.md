@@ -46,8 +46,8 @@ curl -fsSL https://install.julialang.org | sh -s -- --yes
 python GPU_ODE_CUBIE/setup_environment.py
 ```
 
-Builds `GPU_ODE_CUBIE/venv` with `uv`: `cubie` from PyPI with its
-`mlir-cuda13` extra (cubie-numba-cuda-mlir) and its test extra, plus
+Builds `GPU_ODE_CUBIE/venv` with `uv`: `cubie` 0.15.1 or later from PyPI with its
+`cuda13` extra (cubie-numba-cuda-mlir) and its test extra, plus
 `pyarrow`, `duckdb` and `matplotlib`, and uninstalls numba-cuda from a venv
 that still holds it. That venv is also the suite interpreter: `bench.py`,
 the store CLI, the Julia and C++ runners' store writes and the analyses all
