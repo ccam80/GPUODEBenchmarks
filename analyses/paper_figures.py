@@ -23,6 +23,7 @@ PROBLEMS = ("lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modu
 TRANSFER_PROBLEMS = ("lorenz", "lorenz96")
 BATCH = plots.kind_named("runtime_vs_n")
 WP = plots.kind_named("error_vs_runtime")
+INTERVAL_WP = plots.kind_named("interval_error_vs_runtime")
 KERNEL = {"transfers": "none"}
 
 FIGURES = (
@@ -38,7 +39,7 @@ FIGURES = (
            columns=3, title="each package's best algorithm"),
     Figure("5_cards_batch", BATCH, problem_panes(PROBLEMS), where=dict(package="cubie", **KERNEL), per_key=False,
            title="Cubie on both cards: kernel time, every algorithm"),
-    Figure("6_fabbri_wp", WP, problem_panes(("fabbri_linder",)), columns=1,
+    Figure("6_fabbri_wp", INTERVAL_WP, problem_panes(("fabbri_linder",)), columns=1,
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),
     Figure("6_fabbri_batch", BATCH, problem_panes(("fabbri_linder",)), columns=1,
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),

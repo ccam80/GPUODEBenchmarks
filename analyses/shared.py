@@ -34,10 +34,8 @@ CONTROLLER_KINDS = ("fixed", "adaptive")
 LINE_STYLES = {("adaptive", "none"): "-", ("fixed", "none"): "--", ("adaptive", "both"): ":", ("fixed", "both"): "-."}
 LINE_LABELS = {("adaptive", "none"): "Adaptive", ("fixed", "none"): "Fixed",
                ("adaptive", "both"): "Adaptive, with transfers", ("fixed", "both"): "Fixed, with transfers"}
-SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">", "8", "H", "d")
+SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">")
 SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
-CROSS_STYLE = {"linestyle": "none", "marker": "x", "color": "black", "markersize": 10, "markeredgewidth": 1.5}
-CROSSED_LABEL = "over 10% of trajectories errored"
 RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
       "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
 
@@ -251,7 +249,7 @@ class Encoding:
                     markerfacecolor=colour_value if filled else "white",
                     linestyle=LINE_STYLES[(key[2], key[3] or "none")])
 
-    def legend(self, plt, crossed):
+    def legend(self, plt):
         """(handles, labels, headings): each channel under its heading, only what the figure shows."""
         handles, labels, headings = [], [], []
 
@@ -274,9 +272,6 @@ class Encoding:
                                    markerfacecolor="gray" if filled else "white"), algorithm_name(a)))
         section("Algorithm", markers)
         section("Steps", [(swatch(color="gray", linestyle=LINE_STYLES[s]), LINE_LABELS[s]) for s in self.lines])
-        if crossed:
-            handles.append(plt.Line2D([], [], **CROSS_STYLE))
-            labels.append(CROSSED_LABEL)
         return handles, labels, headings
 
 
