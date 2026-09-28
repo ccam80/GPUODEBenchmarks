@@ -1,4 +1,4 @@
-"""The cubie precompile pass: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K] [--memory-gb G]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk or once its private memory passes `--memory-gb` after a kernel; a worker that exits early hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build. A kernel the watchdog takes abandons its compile_key (abandon.abandon_compile): the store records a compile_timeout row for every line of the group, the workers skip the group's remaining kernels, and bench.py marks the group's lines so the runners never optimize them."""
+"""The cubie precompile pass: `bench_cubie.py --trials <path> --precompile [--jobs J] [--per-worker K] [--memory-gb G]` compiles every kernel of a trial file into the package cache before the runners run it, with its optimize candidates when a line of the kernel optimizes and the run has no optimize record of the kernel to apply. The kernels (one line per kernel_key, file order, optimize true when any line's is) go in chunks of K to J worker processes (`--worker START:END`), each exiting after its chunk or once its private memory passes `--memory-gb` after a kernel; a worker that exits early hands the rest of its chunk to a new one. A kernel that fails to compile is left to the runner's build. A kernel the watchdog takes abandons its compile_key (abandon.abandon_compile): the store records a compile_timeout row for every line of the group, the workers skip the group's remaining kernels, and bench.py marks the group's lines so the runners never optimize them."""
 
 import argparse
 import json
@@ -67,7 +67,7 @@ def progress_path(trials_path, start):
 
 
 class Worker:
-    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes) under the optimize watchdog; a kernel whose compile_key the store records a compile timeout of is skipped; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
+    """One process over kernels[start:end]: each kernel's warm build in the package cache, compiled (with its optimize candidates when the line optimizes and the runner has no optimize record to apply) under the optimize watchdog; a kernel whose compile_key the store records a compile timeout of is skipped; the progress file carries the kernel under way, the tallies and, when memory stops the worker early, the next kernel."""
 
     def __init__(self, package, key, root, lines, span, path, solver_class=None, memory_bytes=None):
         self.package, self.key, self.root = package, key, root
@@ -85,7 +85,9 @@ class Worker:
         import cubie_bench
         build = cubie_bench.Build(self.package, self.key, self.root, trial, cold=False, solver_class=self.solver_class)
         try:
-            build.solver.compile(optimize_candidates=bool(trial["optimize"]), max_parallel=1)
+            # A kernel whose optimize record the runner will apply needs no candidates.
+            candidates = bool(trial["optimize"]) and cubie_bench.optimize_record(trial, self.key, self.root) is None
+            build.solver.compile(optimize_candidates=candidates, max_parallel=1)
         finally:
             build.close()
 

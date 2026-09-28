@@ -207,6 +207,12 @@ def status_text(status_codes):
     return ["|".join(names[index]) if index in names else "" for index in range(codes.shape[0])]
 
 
+def optimize_record(trial, key, root):
+    """The kernel's optimize record, or None; a run without --resume, --no-overwrite or --reuse-optimize ignores records other runs wrote, so it optimizes every kernel once."""
+    run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
+    return adapter.load_optimized(trial, key, root=root, run=run)
+
+
 def _same(a, b):
     if isinstance(a, float) and isinstance(b, float):
         return a == b or (math.isnan(a) and math.isnan(b))
@@ -232,9 +238,7 @@ class CubieAdapter:
         return Build(self.package, self.key, self.root, trial, cold, self.solver_class)
 
     def recorded(self, trial):
-        """The kernel's optimize record, or None; a run without --resume or --no-overwrite ignores records other runs wrote, so it optimizes every kernel once."""
-        run = os.environ.get(store.RUN_ENV) if os.environ.get(store.OVERWRITE_ENV) else None
-        return adapter.load_optimized(trial, self.key, root=self.root, run=run)
+        return optimize_record(trial, self.key, self.root)
 
     def compile(self, build, trial, values):
         """Compile the kernel from the solver settings under the kernel's optimize record when there is one; no grid needed."""

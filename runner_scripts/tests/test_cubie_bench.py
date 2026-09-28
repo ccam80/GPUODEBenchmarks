@@ -348,6 +348,23 @@ class PrecompileWorkerTests(AdapterCase):
         self.assertEqual(progress["failed"], [])
         self.assertIsNone(progress["under_way"])
 
+    def test_a_kernel_whose_record_the_run_applies_compiles_without_candidates(self):
+        lines = self.lines()
+        euler = lines[0]
+        leg = self.adapter.build(euler)
+        with mock.patch.dict(os.environ, {store.RUN_ENV: "old", store.OVERWRITE_ENV: "1"}):
+            self.adapter.optimize(leg, euler)
+        leg.close()
+        path = os.path.join(self.tmp, "cubie.jsonl.precompile0.progress")
+        for overwrite, candidates in (("1", True), ("", False)):
+            FakeSolver.made = []
+            with mock.patch.dict(os.environ, {store.RUN_ENV: "new", store.OVERWRITE_ENV: overwrite}):
+                worker = cubie_precompile.Worker("cubie", KEY, self.root, lines, (0, 5), path, solver_class=FakeSolver)
+                self.assertEqual(worker.run(), 0)
+            # euler's record from another run spares its candidates only where the run applies it; lorenz96 has none.
+            self.assertEqual([s.compiled[0]["optimize_candidates"] for s in FakeSolver.made],
+                             [candidates, False, False, False, True], overwrite)
+
     def test_a_span_takes_its_slice_and_a_failed_compile_is_tallied(self):
         lines = self.lines()
         path = os.path.join(self.tmp, "cubie.jsonl.precompile3.progress")
