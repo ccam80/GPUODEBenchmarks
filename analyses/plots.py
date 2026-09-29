@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with every key's series together, a marker set per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. A package is a colour, a stepping kind a marker (fixed, adaptive), the transfers a line style (solid, dashed with the transfer); julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis (a colour per algorithm, a marker per package, filled for adaptive steps).
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with a pane per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. Every figure follows shared.Encoding; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis.
 """
 
 import math
@@ -445,33 +445,35 @@ def draw_figure(figure, rows, keys, out):
 
 
 def load_rows(store, cache=""):
-    """Every row with its error, controller kind and, on a traced row, interval error and traced errored percent (NaN otherwise), samples dropped; kept in and read from a pickle at `cache` when given, missing values filled in."""
+    """Every row of the store with its error, controller kind and, on a traced row, interval error and traced errored percent (NaN otherwise), samples dropped; values for a (run_id, recorded_utc) already in the pickle at `cache` are reused, the rest computed and the pickle rewritten."""
     import pickle
-    rows = []
+    known = {}
     if cache and os.path.isfile(cache):
         with open(cache, "rb") as handle:
-            rows = pickle.load(handle)
+            known = {(r["run_id"], str(r["recorded_utc"])): r for r in pickle.load(handle)}
     errs = errors_mod.Errors(store)
-    if not rows:
-        rows = [{k: v for k, v in row.items() if k != "samples_ms"} for row in store.rows()]
-    changed = False
-    for row in rows:
-        if "error" not in row:
+    rows, computed = [], 0
+    for row in store.rows():
+        row = {k: v for k, v in row.items() if k != "samples_ms"}
+        held = known.get((row["run_id"], str(row["recorded_utc"])))
+        if held is not None and "interval_error" in held:
+            row.update(error=held["error"], interval_error=held["interval_error"],
+                       trace_errored_pct=held["trace_errored_pct"])
+        else:
+            computed += 1
             try:
                 row["error"] = errs.error(row)
             except ValueError:
                 row["error"] = math.nan
             errs._finals.clear()
-            changed = True
-        if "interval_error" not in row:
             row["interval_error"] = row["trace_errored_pct"] = math.nan
             if row.get("traces"):
                 try:
                     _, row["interval_error"], row["trace_errored_pct"] = errs.trace_metrics(row)
                 except ValueError:
                     pass
-            changed = True
-    if cache and changed:
+        rows.append(row)
+    if cache and (computed or len(known) != len(rows)):
         with open(cache, "wb") as handle:
             pickle.dump(rows, handle)
     return [dict(r, controller_kind=shared.controller_kind(r)) for r in rows]
