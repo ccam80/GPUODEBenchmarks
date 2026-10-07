@@ -11,6 +11,7 @@ from sympy.printing.julia import JuliaCodePrinter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fabbri  # noqa: E402
+from cubie_systems import sweep, swept_parameters  # noqa: E402
 
 GENERATED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated")
 RHS_PATH = os.path.join(GENERATED_DIR, "fabbri_linder_rhs.jl")
@@ -49,13 +50,20 @@ class _Printer(JuliaCodePrinter):
 
 
 def load_system():
-    """The float64 cubie system with the cascade on and the two analogue inputs as parameters."""
+    """The float64 cubie system with the cascade on, sweeping the two analogue inputs as the benchmark's systems do, so every other parameter folds into the equations as a number."""
     from cubie import load_cellml_model
     system = load_cellml_model(fabbri.MODEL_PATH, precision=np.float64, name="fabbri_linder_export",
-                               parameters=[fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER],
                                voltage_variable=fabbri.VOLTAGE_RAW)
-    system.set_constants({fabbri.ANS_CONSTANT: 1.0})
+    system.set_default_parameters({fabbri.ANS_CONSTANT: 1.0})
+    sweep(system, swept_parameters(fabbri.PROBLEM))
     return system
+
+
+def fixed_parameters(system):
+    """{name: float64 default} of every parameter but the two analogue inputs."""
+    inputs = (fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER)
+    return {name: np.float64(value) for name, value in system.parameters.as_float_dict.items()
+            if name not in inputs}
 
 
 def assignments(system):
@@ -84,8 +92,8 @@ def julia_source(system, ordered):
     states = list(system.initial_values.names)
     if sorted(states) != sorted(fabbri.STATE_ORDER):
         raise RuntimeError("cubie's states {0} are not fabbri.STATE_ORDER".format(states))
-    if list(system.parameters.names) != [fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER]:
-        raise RuntimeError("unexpected parameters " + str(list(system.parameters.names)))
+    if not {fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER} <= set(system.parameters.names):
+        raise RuntimeError("the analogue inputs are not parameters: " + str(list(system.parameters.names)))
     printer = _Printer()
     index = {"d" + name: position + 1 for position, name in enumerate(fabbri.STATE_ORDER)}
     derivatives = [name for name, _, is_derivative in ordered if is_derivative]
@@ -103,8 +111,8 @@ def julia_source(system, ordered):
     # ACh = 0 would carry NaN partials, where the plain value is a finite limit.
     lines.append("    {0} = ach".format(fabbri.ACH_PARAMETER))
     lines.append("    {0} = iso".format(fabbri.ISO_PARAMETER))
-    for name in system.constants.names:
-        lines.append("    {0} = R({1!r})".format(name, float(system.constants.get_values([name]))))
+    for name, value in fixed_parameters(system).items():
+        lines.append("    {0} = R({1!r})".format(name, float(value)))
     for name, rhs, is_derivative in ordered:
         code = printer.doprint(rhs)
         if is_derivative:
@@ -131,7 +139,7 @@ def check_points(system, ordered):
     for name, rhs, is_derivative in ordered:
         free = sorted(rhs.free_symbols, key=lambda s: s.name)
         compiled.append((name, free, sp.lambdify(free, rhs, modules=["numpy"]), is_derivative))
-    constants = {name: np.float64(system.constants.get_values([name])) for name in system.constants.names}
+    constants = fixed_parameters(system)
     du = np.zeros_like(u)
     index = {"d" + name: position for position, name in enumerate(fabbri.STATE_ORDER)}
     with np.errstate(all="ignore"):

@@ -17,6 +17,7 @@ import abandon  # noqa: E402
 import cubie_bench  # noqa: E402
 import cubie_adapter  # noqa: E402
 import cubie_precompile  # noqa: E402
+import cubie_systems  # noqa: E402
 import store  # noqa: E402
 import trials as trials_mod  # noqa: E402
 
@@ -135,12 +136,9 @@ class FakeSolver:
         self.updates.append(dict(updates))
 
     def build_grid(self, initial_values, parameters):
-        self.grids = getattr(self, "grids", []) + [dict(parameters)]
-        values = next(iter(parameters.values()))
-        n = len(values)
-        initials = np.zeros((len(initial_values), n), np.float32)
-        params = np.stack([np.asarray(v, np.float32) for v in parameters.values()])
-        return initials, params
+        self.grids = getattr(self, "grids", []) + [parameters]
+        initials = np.zeros((len(initial_values), parameters.shape[1]), np.float32)
+        return initials, np.asarray(parameters, np.float32)
 
     def compile(self, **kwargs):
         self.compiled.append(dict(kwargs))
@@ -205,8 +203,7 @@ class GridTests(AdapterCase):
         import grid
         leg = self.adapter.build(trial(n=4))
         self.adapter.solve(leg, trial(n=4), self.values(4), "both")
-        self.assertEqual(list(leg.solver.grids[-1]), ["rho"])
-        np.testing.assert_array_equal(leg.solver.grids[-1]["rho"], np.float32([0, 7, 14, 21]))
+        np.testing.assert_array_equal(leg.solver.grids[-1], np.float32([[0, 7, 14, 21]]))
         leg.close()
         record = trial(n=4, problem="fabbri_linder", duration=2.0, parameter="ach_iso", grid_max=131071.0,
                        algorithm="euler", dt=2.0 * 2.0 ** -15)
@@ -216,10 +213,9 @@ class GridTests(AdapterCase):
         values = grid.grid(record)
         self.adapter.solve(leg, record, values, "both")
         passed = leg.solver.grids[-1]
-        self.assertEqual(list(passed), [fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER])
-        ach, iso = fabbri.inputs(values, np.float32)
-        np.testing.assert_array_equal(passed[fabbri.ACH_PARAMETER], ach)
-        np.testing.assert_array_equal(passed[fabbri.ISO_PARAMETER], iso)
+        inputs = dict(zip((fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER), fabbri.inputs(values, np.float32)))
+        for row, name in enumerate(cubie_systems.swept_parameters("fabbri_linder")):
+            np.testing.assert_array_equal(passed[row], inputs[name])
         self.assertEqual(leg.grid_arrays[1].shape, (2, 4))
         leg.close()
 

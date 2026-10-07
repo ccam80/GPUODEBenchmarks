@@ -137,7 +137,7 @@ class Build:
         self.applied = stepping
 
     def grid(self, values):
-        """(initial_values, parameters) arrays for a grid of the swept parameter (the problem's parameter arrays of it, cubie_systems.ensemble_parameters); rebuilt only when n changes."""
+        """(initial_values, parameters) arrays for a grid of the swept parameter (the array of the system's swept parameters, cubie_systems.ensemble_parameters); rebuilt only when n changes."""
         n = int(values.shape[0])
         if self.grid_n != n:
             self.grid_arrays = None
