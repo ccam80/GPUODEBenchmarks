@@ -83,14 +83,16 @@ class LatticeTests(unittest.TestCase):
         self.assertEqual(list(parameters), [fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER])
         np.testing.assert_array_equal(parameters[fabbri.ACH_PARAMETER], ach32)
         np.testing.assert_array_equal(parameters[fabbri.ISO_PARAMETER], iso32)
+        names = cubie_systems.swept_parameters("fabbri_linder")
+        self.assertEqual(set(names), set(parameters))
         ensemble = cubie_systems.ensemble_parameters("fabbri_linder", values)
-        self.assertEqual(list(ensemble), list(parameters))
-        for name in parameters:
-            np.testing.assert_array_equal(ensemble[name], parameters[name])
-            self.assertEqual(ensemble[name].dtype, np.float32)
+        self.assertEqual(ensemble.shape, (len(names), values.shape[0]))
+        self.assertEqual(ensemble.dtype, np.float32)
+        for row, name in enumerate(names):
+            np.testing.assert_array_equal(ensemble[row], parameters[name])
+        self.assertEqual(cubie_systems.swept_parameters("lorenz"), ("rho",))
         lorenz = cubie_systems.ensemble_parameters("lorenz", values, np.float64)
-        self.assertEqual(list(lorenz), ["rho"])
-        np.testing.assert_array_equal(lorenz["rho"], values.astype(np.float64))
+        np.testing.assert_array_equal(lorenz, values.astype(np.float64)[np.newaxis, :])
         self.assertEqual(cubie_systems.variable_order("fabbri_linder"), fabbri.STATE_ORDER)
 
     def test_the_state_order_is_the_cellml_document_order(self):

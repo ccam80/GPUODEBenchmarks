@@ -91,7 +91,7 @@ def main():
 
     # Install cubie from PyPI plus the test dependency set.
     # cuda<N> -> cubie-numba-cuda-mlir[cuN]; 0.15 renamed the extra from mlir-cuda<N>.
-    spec = f"cubie[cuda{CUDA_MAJOR},test]>=0.15.1"
+    spec = f"cubie[cuda{CUDA_MAJOR},test]>=0.16.0"
     print(f"Installing {spec} from PyPI...")
     if not run_command([str(venv_uv), "pip", "install", "-p", str(venv_python),
                         "--upgrade", spec]):

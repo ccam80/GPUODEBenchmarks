@@ -1,4 +1,4 @@
-"""Cubie system definitions, one builder per problem; ensemble_parameters() turns a grid into each problem's parameter arrays."""
+"""Cubie system definitions, one builder per problem; ensemble_parameters() turns a grid into the array of each problem's swept parameters."""
 
 import numpy as np
 
@@ -73,8 +73,7 @@ def _lorenz(problem, precision, name):
         dz = x * y - beta * z
         """,
         states={"x": 1.0, "y": 0.0, "z": 0.0},
-        parameters={"rho": 21.0},
-        constants={"sigma": 10.0, "beta": 8.0 / 3.0},
+        parameters={"rho": 21.0, "sigma": 10.0, "beta": 8.0 / 3.0},
         name=name,
         precision=precision,
     )
@@ -142,8 +141,7 @@ def _pleiades(problem, precision, name):
     system = qb.create_ODE_system(
         "\n".join(lines),
         states=dict(states),
-        parameters={"m1": 1.0},
-        constants={"m{0}".format(j): float(j) for j in range(2, 8)},
+        parameters={"m{0}".format(j): float(j) for j in range(1, 8)},
         name=name,
         precision=precision,
     )
@@ -215,8 +213,7 @@ def _pollu(problem, precision, name):
         dy20 = -r25 + r24
         """,
         states=dict(POLLU_STATES),
-        parameters={"k1": 0.35},
-        constants=dict(POLLU_CONSTANTS),
+        parameters=dict(k1=0.35, **POLLU_CONSTANTS),
         name=name,
         precision=precision,
     )
@@ -231,13 +228,11 @@ def _ring_modulator(problem, precision, name):
     dU5 = (I5 + qD1 - qD3) / Cs
     dU6 = (-I6 - qD2 + qD4) / Cs
 """ + RING_COMMON
-    constants = dict(RING_CONSTANTS, Uin1_amplitude=0.5)
     import cubie as qb
     system = qb.create_ODE_system(
         equations,
         states=dict(RING_STATES),
-        parameters={"Cs": 2.0e-12},
-        constants=constants,
+        parameters=dict(RING_CONSTANTS, Cs=2.0e-12, Uin1_amplitude=0.5),
         name=name,
         precision=precision,
     )
@@ -256,8 +251,7 @@ def _ring_modulator_index2(problem, precision, name):
     system = qb.create_ODE_system(
         equations,
         states=dict(RING_STATES),
-        parameters={"Uin1_amplitude": 0.5},
-        constants=dict(RING_CONSTANTS),
+        parameters=dict(RING_CONSTANTS, Uin1_amplitude=0.5),
         observables=list(RING_INDEX2_OBSERVABLES),
         name=name,
         precision=precision,
@@ -339,8 +333,7 @@ def _nand_gate(problem, precision, name):
     system = qb.create_ODE_system(
         NAND_EQUATIONS,
         states=dict(NAND_STATES),
-        parameters={"c9": 0.5e-4},
-        constants=dict(NAND_CONSTANTS),
+        parameters=dict(NAND_CONSTANTS, c9=0.5e-4),
         name=name,
         precision=precision,
     )
@@ -354,12 +347,11 @@ def _nand_gate(problem, precision, name):
 
 
 def _fabbri_linder(problem, precision, name):
-    """The Fabbri-Linder human SAN model from its CellML file (cubie's loader, the GHK singularity rewritten at the membrane voltage) with the cAMP cascade switched on and the two analogue inputs as parameters; the grid maps onto them through fabbri.parameters."""
+    """The Fabbri-Linder human SAN model from its CellML file (cubie's loader, the GHK singularity rewritten at the membrane voltage) with the cAMP cascade switched on; the grid maps onto the two analogue inputs through fabbri.parameters."""
     from cubie import load_cellml_model
     system = load_cellml_model(fabbri.MODEL_PATH, precision=precision, name=name,
-                               parameters=[fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER],
                                voltage_variable=fabbri.VOLTAGE_RAW)
-    system.set_constants({fabbri.ANS_CONSTANT: 1.0})
+    system.set_default_parameters({fabbri.ANS_CONSTANT: 1.0})
     initial = {name: float(value) for name, value in zip(system.initial_values.names,
                                                           system.initial_values.values_array)}
     if sorted(initial) != sorted(fabbri.STATE_ORDER):
@@ -400,13 +392,26 @@ def build_system(problem, precision=np.float32, name_suffix=""):
     """Return ``(system, initial_values)`` for a problem row or name.
 
     ``name_suffix`` separates one caller's generated-code cache from
-    another's for the same equations."""
+    another's for the same equations. The system sweeps the problem's
+    swept_parameters and compiles every other parameter in at its
+    default, so every Solver on it, and every compile before the first
+    grid, builds the kernel the solves run."""
     row = as_problem(problem)
     key = row["problem"]
     if key not in _BUILDERS:
         raise SystemExit("no cubie definition for problem '{0}'".format(key))
     name = row["display"].replace(" ", "_").replace("(", "").replace(")", "")
-    return _BUILDERS[key](row, precision, name + name_suffix)
+    system, initial = _BUILDERS[key](row, precision, name + name_suffix)
+    sweep(system, swept_parameters(row))
+    return system, initial
+
+
+def sweep(system, names):
+    """Read `names` from the parameters array, in that order, and compile every other parameter in at its default."""
+    fixed = tuple((name, value) for name, value in system.parameters.as_float_dict.items()
+                  if name not in names)
+    # Pairs, as cubie's update reads a dict value as a settings group.
+    system.update(swept_parameters=tuple(names), fixed_parameters=fixed)
 
 
 def variable_order(problem):
@@ -479,9 +484,18 @@ def trace_states(system, solution, problem):
     return np.ascontiguousarray(np.stack(columns, axis=-1).transpose(1, 0, 2))
 
 
-def ensemble_parameters(problem, values, precision=np.float32):
-    """The parameter arrays of a grid, one entry per trajectory: the swept scalar itself, or for the Fabbri-Linder model the two cascade inputs its lattice index names."""
+def swept_parameters(problem):
+    """The names of the parameters a grid sweeps, in the row order of ensemble_parameters."""
     row = as_problem(problem)
     if row["problem"] == fabbri.PROBLEM:
-        return fabbri.parameters(values, precision)
-    return {row["sweep_parameter"]: np.asarray(values, dtype=precision)}
+        return (fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER)
+    return (row["sweep_parameter"],)
+
+
+def ensemble_parameters(problem, values, precision=np.float32):
+    """The (swept parameter, trajectory) array of a grid, rows in swept_parameters order: the swept scalar itself, or for the Fabbri-Linder model the two cascade inputs its lattice index names."""
+    row = as_problem(problem)
+    if row["problem"] == fabbri.PROBLEM:
+        by_name = fabbri.parameters(values, precision)
+        return np.stack([by_name[name] for name in swept_parameters(row)])
+    return np.asarray(values, dtype=precision)[np.newaxis, :]
