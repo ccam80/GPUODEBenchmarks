@@ -11,9 +11,12 @@ from store import PACKAGES
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 VENV = {"cubie": "GPU_ODE_CUBIE/venv", "pytorch": "GPU_ODE_PyTorch/venv", "jax": "GPU_ODE_JAX/venv",
-        "myokit_cuda": "GPU_ODE_MYOKIT_CUDA/venv"}
+        "myokit_cuda": "GPU_ODE_MYOKIT_CUDA/venv", "gradsolve": "GPU_ODE_GRADSOLVE/venv",
+        "modax": "GPU_ODE_MODAX/venv"}
 ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
-       "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
+       "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"},
+       "gradsolve": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"},
+       "modax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
 # Kernels a cubie process, runner or precompile worker, compiles before it exits.
 RESTART_KERNELS = {"cubie": 8}
 # Private memory past which a precompile worker hands the rest of its chunk to a new one.
@@ -126,6 +129,8 @@ RUNNERS = {
     "jax": lambda: _python_runner("jax", "GPU_ODE_JAX/bench_diffrax.py"),
     "pytorch": lambda: _python_runner("pytorch", "GPU_ODE_PyTorch/bench_torchdiffeq.py"),
     "myokit_cuda": lambda: _python_runner("myokit_cuda", "GPU_ODE_MYOKIT_CUDA/bench_myokit_cuda.py"),
+    "gradsolve": lambda: _python_runner("gradsolve", "GPU_ODE_GRADSOLVE/bench_gradsolve.py"),
+    "modax": lambda: _python_runner("modax", "GPU_ODE_MODAX/bench_modax.py"),
     "cpp": _cpp_runner,
     "julia_gpu": lambda: [suite_python(), _script("runner_scripts/gpu/julia_driver.py")],
     "julia_cpu": lambda: julia_command() + ["-t", "auto", "--project=" + julia_project(),

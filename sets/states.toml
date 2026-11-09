@@ -1,7 +1,7 @@
 # Runtime and cold build time against the state count: lorenz96 resized, built in a fresh cache so the build time is measured, timed at one ensemble size under each package's default adaptive controller.
 
 [set]
-packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
+packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
 problems   = ["lorenz96"]
 algorithms = "all"
 precision  = "float32"
@@ -11,6 +11,10 @@ build      = "cold"
 
 [set.optimize]
 packages = ["cubie"]
+
+# modax integrates in float64 only.
+[set.float64]
+packages = ["modax"]
 
 [[grid]]
 packages = "all"

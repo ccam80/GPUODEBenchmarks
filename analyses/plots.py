@@ -31,8 +31,8 @@ COMBINED_KINDS = ("runtime_vs_n", "error_vs_runtime", "interval_error_vs_runtime
 ALGORITHM_COLOURS = ("tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
                      "tab:gray", "tab:olive", "tab:cyan", "navy", "darkorange", "darkgreen", "crimson", "indigo",
                      "saddlebrown", "deeppink", "dimgray", "yellowgreen", "teal")
-PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "cpp": "D",
-                   "julia_gpu": "P", "julia_cpu": "X"}
+PACKAGE_MARKERS = {"cubie": "o", "jax": "^", "pytorch": "v", "myokit_cuda": "s", "gradsolve": "<",
+                   "modax": ">", "cpp": "D", "julia_gpu": "P", "julia_cpu": "X"}
 ERROR_LABEL = "RMS error against the golden"
 CROSSED_LABEL = "over 10% of trajectories errored"
 

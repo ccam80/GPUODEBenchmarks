@@ -24,11 +24,13 @@ NAN = float("nan")
 # The figure encoding: a colour per package, a marker per controller kind (one set per card), a line style per transfers.
 COLOURS = {
     "cubie": "tab:blue", "jax": "tab:red", "pytorch": "darkred",
-    "myokit_cuda": "black", "cpp": "tab:orange", "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
+    "myokit_cuda": "black", "gradsolve": "tab:purple", "modax": "tab:olive", "cpp": "tab:orange",
+    "julia_gpu": "tab:green", "julia_cpu": "tab:cyan",
 }
 PACKAGE_NAMES = {
     "cubie": "Cubie", "jax": "Diffrax", "pytorch": "torchdiffeq",
-    "myokit_cuda": "Myokit", "cpp": "MPGOS", "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
+    "myokit_cuda": "Myokit", "gradsolve": "gradsolve", "modax": "modax", "cpp": "MPGOS",
+    "julia_gpu": "DiffEqGPU.jl", "julia_cpu": "DifferentialEquations.jl",
 }
 CONTROLLER_KINDS = ("fixed", "adaptive")
 MARKER_SETS = (("s", "o"), ("P", "v"), ("*", "p"))

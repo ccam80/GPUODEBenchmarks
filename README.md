@@ -2,8 +2,9 @@
 
 Ensemble ODE solvers on the GPU, timed and checked against one another on
 the same problems, grids and stepping: `cubie`, `jax` (Diffrax), `pytorch`
-(torchdiffeq, vmap fork), `myokit_cuda`, `cpp` (MPGOS) and `julia_gpu`
-(DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
+(torchdiffeq, vmap fork), `myokit_cuda`, `gradsolve` (fused NVIDIA Warp
+kernels and fixed-step JAX scans), `modax` (numba-cuda-mlir kernels, float64),
+`cpp` (MPGOS) and `julia_gpu` (DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
 `EnsembleThreads`) runs the same trials and supplies the float64 reference
 every error is measured against. The figures of *Automated Translation and
 Accelerated Solving of Differential Equations on Multiple GPU Platforms* are

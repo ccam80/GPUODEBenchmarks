@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize, the untimed packages and the packages that run in float64 whatever the set's precision; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -18,9 +18,10 @@ JULIA_CONTROLLERS_CSV = os.path.join(REPO_ROOT, "runner_scripts", "julia_control
 NAN = float("nan")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces", "transfers", "build",
-            "optimize", "watchdog", "single_run", "untimed")
+            "optimize", "watchdog", "single_run", "untimed", "float64")
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
+FLOAT64_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -140,6 +141,18 @@ def load_set(name, sets_dir=SETS_DIR):
         if untimed["packages"] == "all":
             untimed["packages"] = list(PACKAGES)
     head["untimed"] = untimed
+    float64 = head.get("float64")
+    if float64 is not None:
+        where = path + " [set.float64]"
+        if not isinstance(float64, dict):
+            raise SetError(where + " must be a table")
+        _check_keys(float64, FLOAT64_KEYS, where)
+        if "packages" not in float64:
+            raise SetError(where + ": packages is required")
+        float64["packages"] = _name_list(float64["packages"], PACKAGES, where + " packages")
+        if float64["packages"] == "all":
+            float64["packages"] = list(PACKAGES)
+    head["float64"] = float64
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
     if not grids or not steppings:
@@ -376,6 +389,13 @@ def _optimize_for(table, package):
     return table is not None and (table["packages"] == "all" or package in table["packages"])
 
 
+def _precision_for(head, package):
+    """float64 for a package the set's float64 table names, else the set's precision."""
+    if head["float64"] is not None and package in head["float64"]["packages"]:
+        return "float64"
+    return head["precision"]
+
+
 def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_dir=SETS_DIR):
     """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems`, `algorithms` and `n` narrow; a grid keeps the counts of its n list that `n` names."""
     catalogue = load_algorithms()
@@ -414,7 +434,7 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                                             "problem": problem.name,
                                             "system_params": canonical_json(params),
                                             "duration": float(problem["duration"]),
-                                            "precision": head["precision"],
+                                            "precision": _precision_for(head, package),
                                             "parameter": parameter, "grid_scale": scale,
                                             "grid_min": lo, "grid_max": hi, "n": int(count),
                                             "grid_dtype": "float32",

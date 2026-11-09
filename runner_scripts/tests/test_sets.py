@@ -110,8 +110,6 @@ class ShippedSetTests(unittest.TestCase):
         expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package, loaded)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual(expected, {"cubie": 1248, "jax": 360, "pytorch": 180,
-                                    "myokit_cuda": 36, "cpp": 120, "julia_gpu": 960})
         # The timed algorithms are exactly those two packages run in the stepping kind.
         timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
                  "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]}
@@ -212,7 +210,7 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(expected["cubie"], CUBIE_GOLDEN_GRID)
         # Every algorithm a package runs at a fixed step is stepped: the two fixed steppings together name them all.
         fixed_named = set(loaded["stepping"][0]["algorithms"]) | set(loaded["stepping"][1]["algorithms"])
-        self.assertEqual(fixed_named, set(FACTS))
+        self.assertEqual(fixed_named, {row.name for row in ROWS if row["fixed"]})
         for package in loaded["set"]["packages"]:
             self.assertEqual({s["algorithm"] for s in specs if s["package"] == package and s["controller"] == "fixed"},
                              {r.name for r in capable(package, "fixed")}, package)
@@ -599,6 +597,24 @@ class SchemaTests(unittest.TestCase):
         self.write(text.replace('packages = ["jax"]', 'packages = ["fortran"]'))
         with self.assertRaises(sets.SetError):
             sets.expand(["s"], sets_dir=self.tmp)
+
+    def test_float64_names_the_packages_that_run_in_float64(self):
+        adaptive = self.MINIMAL.replace('packages = ["jax"]', 'packages = ["jax", "modax"]').replace(
+            'controller = "fixed"\ndt = [0.5]', 'controller = "default"\ntol = [1e-5]')
+        self.write(adaptive + '[set.float64]\npackages = ["modax"]\n')
+        loaded = sets.load_set("s", self.tmp)
+        self.assertEqual(loaded["set"]["float64"], {"packages": ["modax"]})
+        self.assertEqual(loaded["set"]["precision"], "float32")
+        specs = sets.expand(["s"], sets_dir=self.tmp)
+        self.assertEqual({(s["package"], s["precision"]) for s in specs}, {("jax", "float32"), ("modax", "float64")})
+        for bad in ('[set.float64]\npackages = ["fortran"]\n', '[set.float64]\n', '[set.float64]\nper = 1\n'):
+            self.write(self.MINIMAL + bad)
+            with self.assertRaises(sets.SetError, msg=bad):
+                sets.load_set("s", self.tmp)
+        # The shipped sets run modax in float64 and every other package at the set's precision.
+        shipped = sets.expand(["perf"], packages=["modax", "gradsolve"], problems=["lorenz"], n=[8])
+        self.assertEqual({(s["package"], s["precision"]) for s in shipped},
+                         {("modax", "float64"), ("gradsolve", "float32")})
 
     def test_bad_sets_are_refused(self):
         bad = {

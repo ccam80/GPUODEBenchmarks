@@ -53,7 +53,7 @@ def main():
     
     # Setup CUBIE
     print("=" * 50)
-    print("1/5: Setting up CUBIE environment...")
+    print("1/7: Setting up CUBIE environment...")
     print("=" * 50)
     cubie_setup = script_dir / "GPU_ODE_CUBIE" / "setup_environment.py"
     if not run_setup_script(cubie_setup, "CUBIE"):
@@ -62,7 +62,7 @@ def main():
 
     # Setup JAX/Diffrax
     print("=" * 50)
-    print("2/5: Setting up JAX/Diffrax environment...")
+    print("2/7: Setting up JAX/Diffrax environment...")
     print("=" * 50)
     jax_setup = script_dir / "GPU_ODE_JAX" / "setup_environment.py"
     if not run_setup_script(jax_setup, "JAX"):
@@ -71,7 +71,7 @@ def main():
 
     # Setup PyTorch/torchdiffeq
     print("=" * 50)
-    print("3/5: Setting up PyTorch/torchdiffeq environment...")
+    print("3/7: Setting up PyTorch/torchdiffeq environment...")
     print("=" * 50)
     pytorch_setup = script_dir / "GPU_ODE_PyTorch" / "setup_environment.py"
     if not run_setup_script(pytorch_setup, "PyTorch"):
@@ -80,7 +80,7 @@ def main():
 
     # Setup Myokit-CUDA
     print("=" * 50)
-    print("4/5: Setting up Myokit-CUDA environment...")
+    print("4/7: Setting up Myokit-CUDA environment...")
     print("=" * 50)
     myokit_cuda_setup = (
         script_dir / "GPU_ODE_MYOKIT_CUDA" / "setup_environment.py"
@@ -89,9 +89,27 @@ def main():
         failed_setups.append("Myokit-CUDA")
     print()
 
+    # Setup gradsolve
+    print("=" * 50)
+    print("5/7: Setting up gradsolve environment...")
+    print("=" * 50)
+    gradsolve_setup = script_dir / "GPU_ODE_GRADSOLVE" / "setup_environment.py"
+    if not run_setup_script(gradsolve_setup, "gradsolve"):
+        failed_setups.append("gradsolve")
+    print()
+
+    # Setup modax
+    print("=" * 50)
+    print("6/7: Setting up modax environment...")
+    print("=" * 50)
+    modax_setup = script_dir / "GPU_ODE_MODAX" / "setup_environment.py"
+    if not run_setup_script(modax_setup, "modax"):
+        failed_setups.append("modax")
+    print()
+
     # Setup Julia
     print("=" * 50)
-    print("5/5: Setting up Julia environment...")
+    print("7/7: Setting up Julia environment...")
     print("=" * 50)
     julia_setup = script_dir / "setup_julia.py"
     if not run_setup_script(julia_setup, "Julia"):
@@ -125,6 +143,8 @@ def main():
                 "  Myokit-CUDA: "
                 "source GPU_ODE_MYOKIT_CUDA/venv/bin/activate"
             )
+            print("  gradsolve:  source GPU_ODE_GRADSOLVE/venv/bin/activate")
+            print("  modax:      source GPU_ODE_MODAX/venv/bin/activate")
         print("  Julia:      julia --project=.")
         return 0
     else:

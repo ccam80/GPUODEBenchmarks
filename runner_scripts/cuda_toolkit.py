@@ -9,7 +9,8 @@ REQUIRED_MAJOR = 13
 
 _PROBES = (
     (["nvcc", "--version"], r"release\s+(\d+)(?:\.\d+)?"),
-    (["nvidia-smi"], r"CUDA Version:\s*(\d+)(?:\.\d+)?"),
+    # Drivers from 610 on print "CUDA UMD Version" where older ones print "CUDA Version".
+    (["nvidia-smi"], r"CUDA(?: UMD)? Version:\s*(\d+)(?:\.\d+)?"),
 )
 
 

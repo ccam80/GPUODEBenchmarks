@@ -1,7 +1,7 @@
 # Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run, at each problem's default fixed step (problems.csv default_dt_pow) and one tolerance.
 
 [set]
-packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
+packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
 problems   = ["lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modulator", "ring_modulator_index2", "nand_gate"]
 algorithms = "all"
 precision  = "float32"
@@ -11,6 +11,10 @@ build      = "warm"
 
 [set.optimize]
 packages = ["cubie"]
+
+# modax integrates in float64 only.
+[set.float64]
+packages = ["modax"]
 
 [[grid]]
 packages = "all"
