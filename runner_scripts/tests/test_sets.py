@@ -110,11 +110,13 @@ class ShippedSetTests(unittest.TestCase):
         expected = {package: sum(leg_count(loaded, package, p.name) for p in problems_of(package, loaded)) * len(PERF_N)
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        # The timed algorithms are exactly those two packages run in the stepping kind.
+        # The timed algorithms are those two packages run in the stepping kind, and Rodas5P under the adaptive controller.
         timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
-                 "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]}
+                 "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]}
+        extra = {"fixed": set(), "adaptive": {"rodas5p"}}
         for kind, names in timed.items():
-            self.assertEqual(sorted(names), sorted(n for n in FACTS if len(timed_packages(n, kind)) >= 2), kind)
+            shared = {n for n in FACTS if len(timed_packages(n, kind)) >= 2}
+            self.assertEqual(sorted(names), sorted(shared | extra[kind]), kind)
             self.assertEqual(sorted({s["algorithm"] for s in specs
                                      if (s["controller"] == "fixed") == (kind == "fixed")}), sorted(names))
         built = self.trials["perf"]

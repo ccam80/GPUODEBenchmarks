@@ -27,7 +27,7 @@ system_params = {states = [4, 8, 16, 32, 64, 128]}
 
 [[stepping]]
 packages = "all"
-algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}

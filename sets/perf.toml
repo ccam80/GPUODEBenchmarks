@@ -1,4 +1,4 @@
-# Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run, at each problem's default fixed step (problems.csv default_dt_pow) and one tolerance.
+# Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run and Rodas5P, at each problem's default fixed step (problems.csv default_dt_pow) and one tolerance.
 
 [set]
 packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
@@ -34,7 +34,7 @@ newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
 packages = "all"
-algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}
