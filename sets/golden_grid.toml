@@ -49,7 +49,7 @@ nand_gate = {max = 2.5585369761427013e-05}
 
 [[stepping]]
 packages = "all"
-algorithms = ["classical-rk4", "tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "radau_iia_5", "bogacki-shampine-32", "dormand-prince-54", "fehlberg-45", "dormand-prince-853", "vern7", "backwards_euler", "crank_nicolson", "trapezoidal_dirk", "implicit_midpoint", "sdirk_2_2", "l_stable_sdirk_4", "radau_iia_3", "radau_iia_9", "ros3p", "rodas3p", "kvaerno5"]
+algorithms = ["classical-rk4", "tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "radau_iia_5", "bogacki-shampine-32", "dormand-prince-54", "fehlberg-45", "dormand-prince-853", "vern7", "backwards_euler", "crank_nicolson", "trapezoidal_dirk", "implicit_midpoint", "sdirk_2_2", "l_stable_sdirk_4", "radau_iia_3", "radau_iia_9", "ros3p", "rodas3p", "rodas5p", "kvaerno5"]
 controller = "fixed"
 dt = {duration_times_2_pow = [-1, -2, -3, -4, -5, -6, -7, -8, -9, -10, -11, -12, -13]}
 newton = {atol = 1.0e-6, rtol = 1.0e-6}

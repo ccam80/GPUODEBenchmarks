@@ -19,6 +19,7 @@ radau_iia_9,PredictiveController,,,0.2,8.0,0.9,9
 ros3p,PIController,0.23333333333333334,0.13333333333333333,0.2,10.0,0.9,3
 rodas3p,PIController,0.23333333333333334,0.13333333333333333,0.2,10.0,0.9,3
 kvaerno5,PIController,0.14,0.08,0.2,10.0,0.9,5
+rodas5p,PIController,0.14,0.08,0.2,10.0,0.9,5
 Vern9,PIController,0.07777777777777778,0.044444444444444446,0.2,10.0,0.9,9
 Rodas5P,PIController,0.14,0.08,0.2,10.0,0.9,5
 RadauIIA9,PredictiveController,,,0.2,8.0,0.9,9

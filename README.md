@@ -87,6 +87,8 @@ the push the box deletes this key's clock logs a day old that no row names
 | `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm |
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
 | `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
+| `float64_perf` | `cubie`, `modax` | perf's trajectory sweep in float64 at Tsit5 and Rodas5P, modax's Rodas5P with a float32 and a float64 LU, beside cubie's float32 runs in `perf` |
+| `float64_golden` | `cubie`, `modax` | golden_grid's finals in float64 at Tsit5 and Rodas5P at 1e-2 to 1e-8, modax's Rodas5P with a float32 and a float64 LU, beside cubie's float32 runs in `golden_grid` |
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
 | `fabbri_linder` | `cubie` | every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s, 200 s watchdog |
 | `fabbri_euler` | `cubie`, `myokit_cuda` | Euler at 100 us to 250 ns on the same grid, traced on the head lattice, single run past 30 s |

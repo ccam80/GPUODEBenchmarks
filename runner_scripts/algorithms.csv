@@ -62,4 +62,6 @@ rodas3p,julia_cpu,Rodas3P,rosenbrock,3,true,true,true
 kvaerno5,cubie,Kvaerno5,dirk,5,true,true,true
 kvaerno5,julia_gpu,Kvaerno5,dirk,5,true,true,false
 kvaerno5,julia_cpu,Kvaerno5,dirk,5,true,true,true
+rodas5p,cubie,Rodas5P,rosenbrock,5,true,true,true
 rodas5p,modax,Rodas5P,rosenbrock,5,false,true,false
+rodas5p_lu64,modax,Rodas5P (float64 LU),rosenbrock,5,false,true,false

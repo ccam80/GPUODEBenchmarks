@@ -32,6 +32,7 @@ class TrialTests(unittest.TestCase):
     def test_float32_fixed_steps_and_unknown_algorithms_are_refused(self):
         modax_bench.check_trial(trial())
         modax_bench.check_trial(trial(algorithm="rodas5p"))
+        modax_bench.check_trial(trial(algorithm="rodas5p_lu64"))
         for bad in (dict(precision="float32"), dict(controller="fixed", atol=NAN, rtol=NAN),
                     dict(algorithm="kvaerno5")):
             with self.assertRaises(ValueError, msg=bad):
@@ -41,6 +42,10 @@ class TrialTests(unittest.TestCase):
     def test_the_solve_options_carry_tolerances_first_step_step_bound_and_gains(self):
         self.assertEqual(modax_bench.solve_options(trial()),
                          {"rtol": 1e-5, "atol": 1e-5, "first_step": 2.0 ** -10, "max_steps": ADAPTIVE_MAX_STEPS})
+        # The Rodas5P algorithms differ only in the precision of the LU factorisation.
+        self.assertEqual(modax_bench.solve_options(trial(algorithm="rodas5p"))["lu_precision"], "fp32")
+        self.assertEqual(modax_bench.solve_options(trial(algorithm="rodas5p_lu64"))["lu_precision"], "fp64")
+        self.assertEqual(modax_bench.SOLVERS["rodas5p"][0], modax_bench.SOLVERS["rodas5p_lu64"][0])
         self.assertIsNone(modax_bench.solve_options(trial(dt=NAN))["first_step"])
         gained = modax_bench.solve_options(trial(gains='{"icoeff":0.7,"pcoeff":0.4}'))
         self.assertEqual((gained["pcoeff"], gained["icoeff"]), (0.4, 0.7))

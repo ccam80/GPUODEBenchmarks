@@ -2,6 +2,9 @@
 
 """Run modax's Tsit5 and Rodas5P solvers for runner.py.
 
+Run Rodas5P as `rodas5p` with modax's default float32 LU factorisation, and as
+`rodas5p_lu64` with a float64 LU factorisation.
+
 Compile each problem's scalar right-hand side as a modax callback and jit one
 solve per set of solve settings, saving the state at t = 0 and t = duration.
 Compiling the solve also compiles the CUDA kernel through numba-cuda-mlir, and
@@ -31,8 +34,10 @@ CACHE_DIR = os.path.join(REPO_ROOT, "generated", "modax_jax_cache")
 
 CONTROLLERS = ("default",)
 PRECISION = "float64"
-# Map each algorithm to the modax module whose solve runs it.
-SOLVERS = {"tsit5": "modax.tsit5", "rodas5p": "modax.rodas5P"}
+# Map each algorithm to the modax module whose solve runs it and the options that select the method's variant.
+SOLVERS = {"tsit5": ("modax.tsit5", {}),
+           "rodas5p": ("modax.rodas5P", {"lu_precision": "fp32"}),
+           "rodas5p_lu64": ("modax.rodas5P", {"lu_precision": "fp64"})}
 GAINS = ("pcoeff", "icoeff", "dcoeff")
 MAX_STEPS_RETCODE = "max_steps: the step bound was reached before the duration"
 
@@ -54,9 +59,10 @@ def check_trial(trial):
 def solve_options(trial):
     """Return the keyword arguments of modax's solve for a trial.
 
-    Pass the tolerances, the suite's step bound, any PID gains the trial sets
-    and first_step, or None to let modax start from 1e-6 of the span. Raise
-    ValueError if the trial sets dt_min, dt_max or a gain modax does not take.
+    Pass the tolerances, the suite's step bound, any PID gains the trial sets,
+    first_step (None to let modax start from 1e-6 of the span) and, for Rodas5P,
+    the LU precision the algorithm names. Raise ValueError if the trial sets
+    dt_min, dt_max or a gain modax does not take.
     """
     if _finite(trial["dt_min"]) or _finite(trial["dt_max"]):
         raise ValueError("modax takes no dt_min or dt_max")
@@ -68,6 +74,7 @@ def solve_options(trial):
                "first_step": float(trial["dt"]) if _finite(trial["dt"]) else None,
                "max_steps": ADAPTIVE_MAX_STEPS}
     options.update({name: float(value) for name, value in gains.items()})
+    options.update(SOLVERS[trial["algorithm"]][1])
     return options
 
 
@@ -106,7 +113,7 @@ class Build:
         self.row = problem_row(trial)
         self.duration = float(trial["duration"])
         self.algorithm = trial["algorithm"]
-        self.module = importlib.import_module(SOLVERS[self.algorithm])
+        self.module = importlib.import_module(SOLVERS[self.algorithm][0])
         self.system = scalar_systems.system(self.row)
         self.states = len(self.system.y0)
         self.cache_dir = None
