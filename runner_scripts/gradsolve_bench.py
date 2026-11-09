@@ -1,6 +1,18 @@
 #!/usr/bin/env python
 
-"""The gradsolve adapter for runner.py. An adaptive trial runs one of gradsolve's fused NVIDIA Warp kernels, one thread per trajectory: Tsit5 (warp_ode) or Rosenbrock23 (warp_rosenbrock), each on the problem's right-hand side registered through gradsolve.register_jax_field. A fixed trial runs gradsolve's fixed-step lax.scan solver for Tsit5 or classical RK4 at the trial's step count, jitted and vmapped over the ensemble. The adapter drives the kernels through the packages' launch layer, because gradsolve.solve fixes the first step at a hundredth of the span and the step bound at 4096 and returns host arrays; that way a trial gets the protocol's dt0, the suite's step bound and a solve on resident device inputs (`none`) as well as through host arrays (`both`). The fused kernels take no step-size pins or controller gains, so a trial that sets them is refused. A cold build compiles in fresh Warp and jax caches."""
+"""Run gradsolve's solvers for runner.py.
+
+Run adaptive Tsit5 and Rosenbrock23 on gradsolve's fused NVIDIA Warp kernels, one
+thread per trajectory, with each problem registered through
+gradsolve.register_jax_field. Run fixed-step Tsit5 and RK4 on gradsolve's lax.scan
+solvers, jitted over the ensemble.
+
+We launch the fused kernels through gradsolve's Warp launch layer rather than
+gradsolve.solve, because solve fixes the first step at a hundredth of the span,
+fixes the step bound at 4096 and returns host arrays. Launching directly gives a
+trial the protocol's dt0, the suite's step bound and solves on resident device
+inputs. Compile a cold build into fresh Warp and jax caches.
+"""
 
 import math
 import os
@@ -23,12 +35,12 @@ WARP_CACHE_DIR = os.path.join(REPO_ROOT, "generated", "gradsolve_warp_cache")
 
 CONTROLLERS = ("fixed", "default")
 PRECISIONS = ("float32", "float64")
-# algorithm -> the fused kernel module that runs it adaptively, and whether its field is the stiff (Jacobian) form.
+# Map each adaptive algorithm to its fused kernel module and to whether its field needs a Jacobian.
 FUSED = {"tsit5": ("warp_ode", False), "rosenbrock23_sciml": ("warp_rosenbrock", True)}
-# algorithm -> the fixed-step scan module that runs it at a constant step.
+# Map each fixed-step algorithm to its lax.scan solver module.
 SCANS = {"tsit5": "fixed_step_tsit5", "classical-rk4": "fixed_step_explicit"}
 DEVICE = "cuda:0"
-# Functions the scalar right-hand sides call, bound to jax.numpy when the build imports jax.
+# Bind these names to jax.numpy for the scalar right-hand sides.
 JAX_FUNCTIONS = ("exp", "sin", "sqrt", "stack")
 
 
@@ -37,7 +49,10 @@ def _finite(value):
 
 
 def step_count(duration, dt):
-    """The whole number of steps of size dt that span the duration; refuses a dt that does not divide it."""
+    """Return the number of steps of size dt that span the duration.
+
+    Raise ValueError if dt is not positive or does not divide the duration.
+    """
     if not _finite(dt) or dt <= 0.0:
         raise ValueError("a fixed stepping needs a finite positive dt, got {0!r}".format(dt))
     steps = int(round(float(duration) / float(dt)))
@@ -47,7 +62,15 @@ def step_count(duration, dt):
 
 
 def plan(trial):
-    """The solve a trial asks for: a fixed plan names the scan and its step count; an adaptive plan names the fused kernel, the tolerances, dt0 (gradsolve's own span/100 when the trial leaves it unset) and the suite's step bound. Raises ValueError on an algorithm gradsolve does not run under the trial's controller, and on step-size pins or gains, which the fused kernels do not take."""
+    """Return the solve settings for a trial.
+
+    Return the scan module and step count for a fixed step size. For an adaptive
+    controller, return the fused kernel module, the tolerances, dt0 and the
+    suite's step bound; use gradsolve's own dt0 of a hundredth of the span when
+    the trial sets none. Raise ValueError if gradsolve does not run the algorithm
+    under the trial's controller, or if the trial sets dt_min, dt_max or gains,
+    which the fused kernels do not take.
+    """
     controller, algorithm = trial["controller"], trial["algorithm"]
     duration = float(trial["duration"])
     if controller not in CONTROLLERS:
@@ -70,12 +93,17 @@ def plan(trial):
 
 
 def plan_key(trial):
-    """The trial fields that select a compiled solve within a build."""
+    """Return the trial fields that select a compiled solve within a build."""
     return tuple(trial[field] for field in ("controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains"))
 
 
 def finals_of(states, status, duration):
-    """(finals, t_final, retcode): a trajectory whose kernel status is nonzero failed to reach the duration within the step bound and carries NaN states; gradsolve reports no end time, so t_final is the duration."""
+    """Return (finals, t_final, retcode) from final states and kernel statuses.
+
+    Set NaN states and a failure message for every trajectory with a nonzero
+    status, which means it did not reach the duration within the step bound.
+    Report the duration as t_final, because gradsolve reports no end time.
+    """
     finals = np.array(states, copy=True)
     codes = np.asarray(status).reshape(-1)
     finals[codes != 0] = np.nan
@@ -84,20 +112,20 @@ def finals_of(states, status, duration):
 
 
 def to_host(array):
-    """A host copy of a Warp, jax or numpy array."""
+    """Return a host copy of a Warp, jax or numpy array."""
     numpy = getattr(array, "numpy", None)
     return np.asarray(numpy() if callable(numpy) else array)
 
 
 def as_memory_error(exc):
-    """A MemoryError for a Warp allocation failure, else the exception itself."""
+    """Return a MemoryError for a Warp allocation failure, and any other exception unchanged."""
     if isinstance(exc, RuntimeError) and "allocate" in str(exc).lower():
         return MemoryError("OUT_OF_MEMORY: " + str(exc))
     return exc
 
 
 class ScanProblem:
-    """The gradsolve Problem protocol over a scalar system: name, dim, the span and f_jax."""
+    """Present a scalar system to gradsolve's scan solvers through its Problem protocol."""
 
     is_stiff = False
 
@@ -106,7 +134,12 @@ class ScanProblem:
 
 
 class Build:
-    """One problem, precision and algorithm: the scalar right-hand side registered as a gradsolve field (adaptive) or wrapped as a Problem (fixed), a solve per plan, and the device inputs of the last upload."""
+    """Hold the solves of one problem, precision and algorithm.
+
+    Build one solve per set of solve settings: a fused kernel on the problem's
+    registered gradsolve field, or a jitted scan. Keep the device inputs of the
+    last upload for solves on resident inputs.
+    """
 
     serial = 0
 
@@ -141,7 +174,7 @@ class Build:
             jax.config.update("jax_enable_x64", self.precision == "float64")
             namespace = {name: getattr(jnp, name) for name in JAX_FUNCTIONS}
             self.f_jax = scalar_systems.right_hand_side(self.system, namespace, "stack([{0}])")
-            # A cold build registers its field under a name of its own, so it never reuses a kernel the process already loaded.
+            # Register a cold build under a name of its own so that it never reuses a kernel this process loaded.
             self.name = "suite_{0}_{1}".format(self.row["problem"], self.states)
             if cold:
                 self.name += "_cold{0}".format(Build.serial)
@@ -151,7 +184,11 @@ class Build:
 
     # ------------------------------------------------------------ fused
     def fused(self, plan):
-        """(module, kernel, field_key) of an adaptive plan: the field registered once per build, refused above the kernel's GPU dimension ceiling."""
+        """Register the problem's field and return (module, kernel, field_key) for an adaptive plan.
+
+        Raise RuntimeError if the problem has more states than gradsolve's
+        fused kernel runs on a GPU.
+        """
         from gradsolve import register_jax_field
         from gradsolve.warp import warp_ode, warp_rosenbrock
         module = warp_rosenbrock if plan["stiff"] else warp_ode
@@ -169,7 +206,7 @@ class Build:
         return module, kernel, key
 
     def fused_inputs(self, plan, module, key, values):
-        """The kernel's (y0, params) device arrays for the grid values, typed as the module's own driver types them."""
+        """Upload the initial states and grid values as the kernel's (y0, params) device arrays."""
         import warp as wp
         n = int(values.shape[0])
         y0 = np.ascontiguousarray(np.broadcast_to(self.y0, (n, self.states)))
@@ -183,7 +220,7 @@ class Build:
         return wp.array(y0, dtype=vecD, device=DEVICE), wp.array(params, dtype=vecP, device=DEVICE)
 
     def fused_launch(self, solve, y0_wp, p_wp):
-        """One launch on device inputs; returns the device (y_out, status) arrays after the device synchronizes."""
+        """Launch the kernel on device inputs, wait for it, and return the device (y_out, status) arrays."""
         import warp as wp
         plan, kernel = solve["plan"], solve["kernel"]
         n = y0_wp.shape[0]
@@ -202,7 +239,7 @@ class Build:
 
     # ------------------------------------------------------------- scans
     def scan(self, plan):
-        """The jitted, vmapped fixed-step scan of a plan: grid values in, final states out."""
+        """Return the jitted fixed-step scan that maps grid values to final states."""
         import importlib
 
         import jax
@@ -222,7 +259,7 @@ class Build:
 
     # ------------------------------------------------------------ solves
     def solve_of(self, trial):
-        """The solve of a trial's plan, built on first use."""
+        """Return the solve for a trial's settings, building it on first use."""
         key = plan_key(trial)
         if key not in self.solves:
             trial_plan = plan(trial)
@@ -234,7 +271,10 @@ class Build:
         return self.solves[key]
 
     def compile(self, trial, values):
-        """Compile the trial's solve: the Warp module of a fused kernel, or the lowered scan at the trial's n, refused as out of memory when its compiled footprint exceeds the device."""
+        """Load a fused kernel's Warp module, or lower and compile the scan at the trial's n.
+
+        Raise MemoryError if the compiled scan needs more memory than the device has.
+        """
         import jax
         import jax.numpy as jnp
         import warp as wp
@@ -256,7 +296,7 @@ class Build:
         return self.solve_of(trial)
 
     def host_solve(self, trial, values):
-        """One solve through host arrays: the upload is the h2d, the host copy of the finals the d2h; returns (states, status) on the host."""
+        """Solve from host arrays and return (states, status) on the host, timing both copies."""
         import jax
         import jax.numpy as jnp
         solve = self.prepare(trial, values)
@@ -272,7 +312,10 @@ class Build:
             raise as_memory_error(exc)
 
     def device_solve(self, trial, values):
-        """One solve on the resident inputs, uploaded when they are not this grid's; the results stay on the device."""
+        """Solve on resident device inputs and leave the results on the device.
+
+        Upload the inputs first when the resident ones belong to another grid.
+        """
         import jax
         import jax.numpy as jnp
         solve = self.prepare(trial, values)
@@ -306,7 +349,7 @@ class Build:
 
 
 class GradsolveAdapter:
-    """The runner adapter of the gradsolve package on one machine."""
+    """Run gradsolve trials for runner.py on one machine."""
 
     controllers = CONTROLLERS
 
@@ -336,7 +379,7 @@ class GradsolveAdapter:
         return build.device_solve(trial, values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a solve: the final state of every trajectory, the duration, and the kernel status of a failed one."""
+        """Return (finals, t_final, retcode) for the result of a solve."""
         states, status = result
         states = to_host(states).reshape(-1, build.states)
         status = np.zeros(states.shape[0], dtype=np.int32) if status is None else to_host(status)
@@ -344,7 +387,10 @@ class GradsolveAdapter:
 
 
 def run(argv):
-    """Entry point of the gradsolve suite: a GPU backend, the persistent jax and Warp caches, then the trial file through runner.main."""
+    """Run a trial file on the GPU with the persistent jax and Warp caches.
+
+    Exit if jax or Warp sees no GPU.
+    """
     import gradsolve  # noqa: F401
     import jax
     import warp as wp

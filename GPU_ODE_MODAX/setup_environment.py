@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Linux-only modax environment: GPU_ODE_MODAX/venv with modax-solvers on its CUDA 13 stack (numba-cuda-mlir, numba-enzyme-cuda and a CUDA 13 jax)."""
+"""Build GPU_ODE_MODAX/venv on Linux with modax-solvers and its CUDA 13 dependencies."""
 import os
 import platform
 import subprocess
@@ -12,17 +12,17 @@ from cuda_toolkit import require_cuda13
 MODAX_VERSION = "0.0.7"
 JAX_VERSION = "0.11.1"
 
-# jax's CUDA plugins and numba-enzyme-cuda are published for Linux only.
+# We set up on Linux only, because jax's CUDA plugins and numba-enzyme-cuda exist for Linux only.
 CUDA_PLATFORM = "Linux"
 
 
 def run(cmd, env=None):
-    """Run a command with its output streamed; return True on exit status 0."""
+    """Run a command, streaming its output, and return True when it exits with status 0."""
     return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", env=env).returncode == 0
 
 
 def distributions(venv_python):
-    """The names of every distribution installed in the venv, lower-cased."""
+    """Return the lower-cased names of every distribution installed in the venv."""
     result = subprocess.run(
         [str(venv_python), "-c",
          "import importlib.metadata as m;"
@@ -56,7 +56,7 @@ def main():
         return 1
     venv_uv = venv_path / "bin" / "uv"
 
-    # One resolve for the whole stack; pyarrow and tzdata serve the result store.
+    # Resolve the whole stack at once; the runner needs pyarrow and tzdata to write results.
     print(f"Installing modax-solvers[cuda13] {MODAX_VERSION} and jax[cuda13] {JAX_VERSION}...")
     if not run([str(venv_uv), "pip", "install", "-p", str(venv_python),
                 f"modax-solvers[cuda13]=={MODAX_VERSION}", f"jax[cuda13]=={JAX_VERSION}",
@@ -65,7 +65,7 @@ def main():
         return 1
 
     names = distributions(venv_python)
-    # numba-enzyme-cuda provides the numba_enzyme package; upstream numba-enzyme would shadow it.
+    # Refuse upstream numba-enzyme, because it installs the same numba_enzyme package as numba-enzyme-cuda.
     if "numba-enzyme" in names:
         print("Error: upstream numba-enzyme is installed beside numba-enzyme-cuda. Remove it with:")
         print(f"  {venv_uv} pip uninstall -p {venv_python} numba-enzyme")
@@ -76,7 +76,7 @@ def main():
               "by side. Delete the venv and re-run this script.")
         return 1
 
-    # The import check runs jax on the CPU so that setting up never needs the GPU.
+    # Import on jax's CPU backend so that setup never needs a free GPU.
     print("Verifying the installation...")
     check = ("import importlib.metadata as m, jax, modax.tsit5, modax.rodas5P;"
              "print('modax', m.version('modax-solvers'), 'jax', jax.__version__)")

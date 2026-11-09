@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 
-"""The modax adapter for runner.py: a build is one problem's scalar right-hand side as a modax callback and its Tsit5 or Rodas5P solve, jitted per stepping over the ensemble's parameters, saving the state at t = 0 and t = duration; compile lowers and compiles at the trial's n, which compiles the CUDA kernel (and for Rodas5P its Enzyme Jacobian) through numba-cuda-mlir; a solve runs through host arrays (`both`) or on the resident device parameters (`none`). modax integrates in float64 only and adaptively only, under its PID controller (`default`), whose gains a trial may set as pcoeff, icoeff and dcoeff. modax takes no step-size pins, so a trial that sets dt_min or dt_max is refused. A cold build compiles a fresh callback in a fresh jax cache."""
+"""Run modax's Tsit5 and Rodas5P solvers for runner.py.
+
+Compile each problem's scalar right-hand side as a modax callback and jit one
+solve per set of solve settings, saving the state at t = 0 and t = duration.
+Compiling the solve also compiles the CUDA kernel through numba-cuda-mlir, and
+for Rodas5P its Enzyme Jacobian. modax integrates in float64 only and adaptively
+only, under its PID controller, so a trial must name the default controller; it
+may set the gains pcoeff, icoeff and dcoeff but not dt_min or dt_max. Compile a
+cold build from a fresh callback in a fresh jax cache.
+"""
 
 import json
 import math
@@ -22,7 +31,7 @@ CACHE_DIR = os.path.join(REPO_ROOT, "generated", "modax_jax_cache")
 
 CONTROLLERS = ("default",)
 PRECISION = "float64"
-# algorithm -> the modax module whose solve runs it.
+# Map each algorithm to the modax module whose solve runs it.
 SOLVERS = {"tsit5": "modax.tsit5", "rodas5p": "modax.rodas5P"}
 GAINS = ("pcoeff", "icoeff", "dcoeff")
 MAX_STEPS_RETCODE = "max_steps: the step bound was reached before the duration"
@@ -33,7 +42,7 @@ def _finite(value):
 
 
 def check_trial(trial):
-    """Refuses what modax cannot run: a precision other than float64, a controller other than default, an algorithm it has no solver for."""
+    """Raise ValueError if the trial asks for a precision other than float64, a controller other than default, or an algorithm modax lacks."""
     if trial["precision"] != PRECISION:
         raise ValueError("modax integrates in {0} only, not {1}".format(PRECISION, trial["precision"]))
     if trial["controller"] not in CONTROLLERS:
@@ -43,7 +52,12 @@ def check_trial(trial):
 
 
 def solve_options(trial):
-    """The keyword arguments of modax's solve for a trial: the tolerances, first_step (None leaves modax to start from 1e-6 of the span), the suite's step bound and any PID gains the trial sets. Raises ValueError on a step-size pin or a gain modax does not take."""
+    """Return the keyword arguments of modax's solve for a trial.
+
+    Pass the tolerances, the suite's step bound, any PID gains the trial sets
+    and first_step, or None to let modax start from 1e-6 of the span. Raise
+    ValueError if the trial sets dt_min, dt_max or a gain modax does not take.
+    """
     if _finite(trial["dt_min"]) or _finite(trial["dt_max"]):
         raise ValueError("modax takes no dt_min or dt_max")
     gains = json.loads(trial["gains"]) if trial["gains"] else {}
@@ -58,12 +72,17 @@ def solve_options(trial):
 
 
 def stepping_key(trial):
-    """The trial fields that select a jitted solve."""
+    """Return the trial fields that select a jitted solve."""
     return tuple(trial[field] for field in ("controller", "dt", "dt_min", "dt_max", "atol", "rtol", "gains"))
 
 
 def finals_of(states, loop_steps, max_steps, duration):
-    """(finals, t_final, retcode): a trajectory whose loop ran to the step bound stopped short of the duration and carries NaN states; modax reports no end time, so t_final is the duration."""
+    """Return (finals, t_final, retcode) from final states and loop step counts.
+
+    Set NaN states and a failure message for every trajectory whose loop reached
+    the step bound, which means it stopped short of the duration. Report the
+    duration as t_final, because modax reports no end time.
+    """
     finals = np.array(states, copy=True)
     stopped = np.asarray(loop_steps).reshape(-1) >= int(max_steps)
     finals[stopped] = np.nan
@@ -72,7 +91,11 @@ def finals_of(states, loop_steps, max_steps, duration):
 
 
 class Build:
-    """One problem's callback and algorithm: a jitted solve per stepping, one memory check per (stepping, n), the device parameters of the last upload."""
+    """Hold the jitted solves of one problem's callback and algorithm.
+
+    Check the memory of each solve once per ensemble size, and keep the device
+    parameters of the last upload for solves on resident inputs.
+    """
 
     def __init__(self, trial, cold=False):
         import importlib
@@ -97,7 +120,7 @@ class Build:
             jax.clear_caches()
         try:
             jax.config.update("jax_enable_x64", True)
-            # modax caches its kernels on the callback object, so a fresh callback compiles afresh.
+            # modax caches kernels by callback object, so a fresh callback gives a cold build its own kernels.
             self.ode_fn = scalar_systems.right_hand_side(self.system, scalar_systems.MATH, "({0},)",
                                                          arguments="y, t, p")
             self.y0 = jnp.asarray(self.system.y0, dtype=jnp.float64)
@@ -107,7 +130,7 @@ class Build:
             raise
 
     def solve_of(self, trial):
-        """The jitted solve of a trial's stepping, built on first use: grid values in, (final states, loop step counts) out."""
+        """Return the jitted solve that maps grid values to (final states, loop step counts), building it on first use."""
         import jax
         import jax.numpy as jnp
         key = stepping_key(trial)
@@ -127,7 +150,10 @@ class Build:
         return self.solves[key]
 
     def compile(self, trial, values):
-        """Lower and compile the trial's solve at its n; refuses, as an out-of-memory error, a solve whose compiled footprint exceeds the device."""
+        """Lower and compile the trial's solve at its n.
+
+        Raise MemoryError if the compiled solve needs more memory than the device has.
+        """
         import jax
         import jax.numpy as jnp
         compiled = self.solve_of(trial).lower(jnp.asarray(values)).compile()
@@ -144,7 +170,7 @@ class Build:
         return self.solve_of(trial)
 
     def host_solve(self, trial, values):
-        """One solve through host arrays: the upload is the h2d, device_get the d2h."""
+        """Solve from host arrays and copy the result back, timing both copies."""
         import jax
         import jax.numpy as jnp
         solve = self.prepare(trial, values)
@@ -152,7 +178,10 @@ class Build:
         return jax.device_get(jax.block_until_ready(solve(jnp.asarray(host))))
 
     def device_solve(self, trial, values):
-        """One solve on the resident parameters, uploaded when they are not this grid's; the result stays on the device."""
+        """Solve on resident device parameters and leave the result on the device.
+
+        Upload the parameters first when the resident ones belong to another grid.
+        """
         import jax
         import jax.numpy as jnp
         solve = self.prepare(trial, values)
@@ -173,7 +202,7 @@ class Build:
 
 
 class ModaxAdapter:
-    """The runner adapter of the modax package on one machine."""
+    """Run modax trials for runner.py on one machine."""
 
     controllers = CONTROLLERS
 
@@ -202,13 +231,16 @@ class ModaxAdapter:
         return build.device_solve(trial, values)
 
     def finals(self, build, result):
-        """(finals, t_final, retcode) of a solve: the state at the duration of every trajectory, the duration, and a step-bound message for a trajectory that stopped short."""
+        """Return (finals, t_final, retcode) for the result of a solve."""
         states, loop_steps = result
         return finals_of(np.asarray(states), np.asarray(loop_steps), ADAPTIVE_MAX_STEPS, build.duration)
 
 
 def run(argv):
-    """Entry point of the modax suite: a GPU backend and the persistent compilation cache, then the trial file through runner.main."""
+    """Run a trial file on the GPU with the persistent jax compilation cache.
+
+    Exit if jax sees no GPU.
+    """
     import jax
     import modax  # noqa: F401 - the import sets jax's x64 flag
     if jax.default_backend() == "cpu":

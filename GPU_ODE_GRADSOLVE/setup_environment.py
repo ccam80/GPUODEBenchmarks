@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Linux-only gradsolve environment: GPU_ODE_GRADSOLVE/venv with gradsolve, its NVIDIA Warp kernels and a CUDA 13 jax."""
+"""Build GPU_ODE_GRADSOLVE/venv on Linux with gradsolve, NVIDIA Warp and a CUDA 13 jax."""
 import os
 import platform
 import subprocess
@@ -13,17 +13,17 @@ GRADSOLVE_VERSION = "0.2.1"
 WARP_VERSION = "1.19.0"
 JAX_VERSION = "0.11.1"
 
-# jax publishes its CUDA plugins for Linux only; a CPU jax cannot run this suite.
+# We set up on Linux only, because jax publishes its CUDA plugins for Linux only.
 CUDA_PLATFORM = "Linux"
 
 
 def run(cmd, env=None):
-    """Run a command with its output streamed; return True on exit status 0."""
+    """Run a command, streaming its output, and return True when it exits with status 0."""
     return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", env=env).returncode == 0
 
 
 def jax_cuda_generations(venv_python):
-    """The jax-cuda plugin distributions in the venv, and the CUDA generations they span."""
+    """Return the venv's jax-cuda plugin names and the CUDA generations they belong to."""
     result = subprocess.run(
         [str(venv_python), "-c",
          "import importlib.metadata as m;"
@@ -59,7 +59,7 @@ def main():
         return 1
     venv_uv = venv_path / "bin" / "uv"
 
-    # One resolve for the whole stack; pyarrow and tzdata serve the result store.
+    # Resolve the whole stack at once; the runner needs pyarrow and tzdata to write results.
     print(f"Installing gradsolve {GRADSOLVE_VERSION}, warp-lang {WARP_VERSION} and "
           f"jax[cuda13] {JAX_VERSION}...")
     if not run([str(venv_uv), "pip", "install", "-p", str(venv_python),
@@ -74,7 +74,7 @@ def main():
               f"side by side: {', '.join(plugins)}. Delete the venv and re-run this script.")
         return 1
 
-    # The import check runs jax on the CPU so that setting up never needs the GPU.
+    # Import on jax's CPU backend so that setup never needs a free GPU.
     print("Verifying the installation...")
     check = ("import gradsolve, jax, warp; print('gradsolve', gradsolve.__version__, "
              "'jax', jax.__version__, 'warp', warp.__version__)")

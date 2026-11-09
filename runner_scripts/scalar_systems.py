@@ -1,4 +1,10 @@
-"""Scalar right-hand sides for the packages that compile Python source: each problem as straight-line assignments over named scalar states, the time t and the swept parameter p0, turned into a function by right_hand_side(). gradsolve traces the function with jax.numpy and modax compiles it with math, so one definition serves both."""
+"""Define the benchmark problems as Python source for the packages that compile it.
+
+Write each problem as straight-line assignments over named scalar states, the
+time t and the swept parameter p0, and turn it into a function with
+right_hand_side(). gradsolve traces the function with jax.numpy and modax
+compiles it with math, so both packages use the same definitions.
+"""
 
 import math
 
@@ -23,7 +29,12 @@ RING = {"C": 1.6e-8, "Cp": 1.0e-8, "Lh": 4.45, "Ls1": 0.002, "Ls2": 5.0e-4, "Ls3
 
 
 class ScalarSystem:
-    """One problem as source text: state names, initial values, auxiliary assignments and one derivative expression per state, in state order; `p0` names the swept parameter and `t` the time."""
+    """Hold one problem as source text.
+
+    Give the state names, initial values, auxiliary assignments and one
+    derivative expression per state, in state order. Write expressions in terms
+    of the state names, the time `t` and the swept parameter `p0`.
+    """
 
     def __init__(self, states, y0, derivatives, auxiliaries=()):
         if len(states) != len(y0) or len(states) != len(derivatives):
@@ -34,7 +45,12 @@ class ScalarSystem:
         self.auxiliaries = tuple(auxiliaries)
 
     def source(self, name, pack, arguments="t, y, p"):
-        """The text of `def <name>(<arguments>)`, whose arguments name t, y and p in any order: unpack y and p[0], evaluate, and return `pack` applied to the derivative list."""
+        """Return the text of `def <name>(<arguments>)`.
+
+        Pass `arguments` naming t, y and p in the order the caller uses. The
+        function unpacks y and p[0], evaluates the expressions and returns the
+        derivatives formatted by `pack`.
+        """
         lines = ["def {0}({1}):".format(name, arguments), "    p0 = p[0]"]
         lines += ["    {0} = y[{1}]".format(state, i) for i, state in enumerate(self.states)]
         lines += ["    " + line for line in self.auxiliaries]
@@ -168,12 +184,15 @@ BUILDERS = {
     "ring_modulator": _ring_modulator,
 }
 
-# Namespaces that bind the functions the expressions call.
+# Bind the functions the expressions call to the math module for modax.
 MATH = {"exp": math.exp, "sin": math.sin, "sqrt": math.sqrt}
 
 
 def system(problem):
-    """The ScalarSystem of a problem row or name; exits on a problem with no scalar definition."""
+    """Return the ScalarSystem of a problem row or name.
+
+    Exit if the problem has no scalar definition.
+    """
     row = as_problem(problem)
     if row["problem"] not in BUILDERS:
         raise SystemExit("no scalar definition for problem '{0}'".format(row["problem"]))
@@ -181,7 +200,11 @@ def system(problem):
 
 
 def right_hand_side(scalar_system, namespace, pack, arguments="t, y, p", name="rhs"):
-    """A fresh function `name(<arguments>)` compiled from the system's source with the given function namespace; `pack` formats the returned derivatives, e.g. "({0},)" for a tuple."""
+    """Compile a new function `name(<arguments>)` from the system's source.
+
+    Pass the namespace that binds exp, sin and sqrt, and a `pack` format such as
+    "({0},)" for a tuple of derivatives.
+    """
     scope = dict(namespace)
     exec(compile(scalar_system.source(name, pack, arguments), "<{0}>".format(name), "exec"), scope)
     return scope[name]
