@@ -53,18 +53,12 @@ def spec(n=8, **overrides):
     return fields
 
 
-class FakeIndices:
-    def __init__(self, names):
-        self.index_map = list(names)
-
-
 class FakeSystem:
     """Three named states and no observables; `broken` makes every compile of it raise."""
 
     def __init__(self, broken=False):
         self.broken = broken
-        self.indices = type("I", (), {})()
-        self.indices.states = FakeIndices(NAMES)
+        self.states = type("V", (), {"names": list(NAMES)})()
         self.sizes = type("S", (), {"observables": 0})()
 
 
