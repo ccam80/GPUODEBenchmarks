@@ -115,7 +115,9 @@ it with the trials still missing. cubie first precompiles the
 kernels of its trial file into the package cache, with the optimize
 candidates of the kernels whose lines optimize (`bench_cubie.py --trials
 <file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one), then runs a fresh runner every 8 kernels at the next family
-boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
+boundary (`<package>.part<N>.jsonl`). jax, gradsolve and modax run a fresh
+runner per family, because a jax process that runs the device out of memory
+fails every solve after it. A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
 
 A cubie compile the optimize watchdog takes abandons its problem, algorithm
