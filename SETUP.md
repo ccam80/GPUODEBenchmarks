@@ -112,10 +112,10 @@ Linux only; elsewhere the script prints a skip and exits 0. Installs the
 pinned `modax-solvers[cuda13]` (numba-cuda-mlir, numba-enzyme-cuda) and
 `jax[cuda13]` with `pyarrow` and `tzdata`, fails when upstream `numba-enzyme`
 or jax-cuda plugins of two CUDA generations are installed, and imports the
-stack on jax's CPU backend. modax integrates in float64 only, so the sets
-list it under `[set.float64]`, and adaptively only (Tsit5, Rodas5P). The
-`rodas5p` algorithm runs Rodas5P with modax's default float32 LU factorisation
-and `rodas5p_lu64` with a float64 one. It
+stack on jax's CPU backend. modax integrates in float64 only and adaptively
+only (Tsit5, Rodas5P), so it runs in the float64 precision comparison of `perf`
+and `golden_grid` alone. The `rodas5p` algorithm runs Rodas5P with modax's
+default float32 LU factorisation and `rodas5p_lu64` with a float64 one. modax
 builds a C++ FFI shim at first use, so `g++` must be on PATH.
 
 ### cpp

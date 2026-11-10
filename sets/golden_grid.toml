@@ -15,10 +15,6 @@ packages = ["cubie"]
 [set.untimed]
 packages = ["julia_cpu"]
 
-# modax integrates in float64 only.
-[set.float64]
-packages = ["modax"]
-
 [[grid]]
 packages = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
 parameter = "default"
@@ -64,6 +60,20 @@ newton = {atol = 1.0e-6, rtol = 1.0e-6}
 [[stepping]]
 packages = "all"
 algorithms = "all"
+controller = "default"
+tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
+dt0 = {duration_times_2_pow = -10}
+dt_min = "none"
+dt_max = "none"
+newton = "tol"
+gains = {}
+
+# The precision comparison: cubie and modax in float64 at Tsit5 and Rodas5P, modax's Rodas5P with its float32 LU (rodas5p) and a float64 LU (rodas5p_lu64), on the problems both packages run; cubie's float32 points come from the steppings above.
+[[stepping]]
+packages = ["cubie", "modax"]
+problems = ["lorenz", "lorenz96", "pleiades", "pollu"]
+algorithms = ["tsit5", "rodas5p", "rodas5p_lu64"]
+precision = "float64"
 controller = "default"
 tol = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8]
 dt0 = {duration_times_2_pow = -10}

@@ -21,7 +21,7 @@ import protocol  # noqa: E402
 import sets  # noqa: E402
 import store  # noqa: E402
 import trials  # noqa: E402
-from algorithms import algorithm_facts, load_algorithms  # noqa: E402
+from algorithms import algorithm_facts, load_algorithms, precisions_for  # noqa: E402
 from problems import load_problems  # noqa: E402
 KEY = "windows_RTX-4070-SUPER"
 DATA = os.path.join(ROOT, "data")
@@ -76,13 +76,17 @@ def problems_of(package, loaded=None):
 
 
 def stepping_algorithms(loaded, index, package, problem):
-    """The catalogue rows one stepping of a loaded set yields for a package and problem: its list narrowed by capability."""
+    """The catalogue rows one stepping of a loaded set yields for a package and problem: its list narrowed by capability, its problems and its precision."""
     stepping = loaded["stepping"][index]
     kind = "fixed" if stepping["controller"] == "fixed" else "adaptive"
     names = [r.name for r in capable(package, kind)]
     if stepping["algorithms"] != "all":
         names = [n for n in names if n in stepping["algorithms"]]
     if stepping["packages"] != "all" and package not in stepping["packages"]:
+        return []
+    if stepping["problems"] != "all" and problem not in stepping["problems"]:
+        return []
+    if stepping["precision"] not in precisions_for(package):
         return []
     return [r for r in capable(package, kind) if r.name in names]
 
@@ -115,8 +119,8 @@ class ShippedSetTests(unittest.TestCase):
                  "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]}
         for kind, names in timed.items():
             self.assertEqual(sorted(names), sorted(n for n in FACTS if len(timed_packages(n, kind)) >= 2), kind)
-            self.assertEqual(sorted({s["algorithm"] for s in specs
-                                     if (s["controller"] == "fixed") == (kind == "fixed")}), sorted(names))
+            self.assertEqual(sorted({s["algorithm"] for s in specs if (s["controller"] == "fixed") == (kind == "fixed")
+                                     and s["precision"] == loaded["set"]["precision"]}), sorted(names))
         built = self.trials["perf"]
         self.assertEqual(dict(solve_counts(built)), expected)
         # One optimize per kernel; perf gives each build one stepping.
@@ -590,23 +594,36 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(sets.SetError):
             sets.expand(["s"], sets_dir=self.tmp)
 
-    def test_float64_names_the_packages_that_run_in_float64(self):
-        adaptive = self.MINIMAL.replace('packages = ["jax"]', 'packages = ["jax", "modax"]').replace(
+    def test_a_stepping_narrows_problems_and_sets_its_own_precision(self):
+        text = self.MINIMAL.replace('packages = ["jax"]', 'packages = ["jax", "modax"]').replace(
+            'problems = ["lorenz"]', 'problems = ["lorenz", "pleiades"]').replace(
             'controller = "fixed"\ndt = [0.5]', 'controller = "default"\ntol = [1e-5]')
-        self.write(adaptive + '[set.float64]\npackages = ["modax"]\n')
+        float64 = ('[[stepping]]\npackages = ["jax", "modax"]\nproblems = ["pleiades"]\nprecision = "float64"\n'
+                   'controller = "default"\ntol = [1e-5]\n')
+        self.write(text + float64)
         loaded = sets.load_set("s", self.tmp)
-        self.assertEqual(loaded["set"]["float64"], {"packages": ["modax"]})
-        self.assertEqual(loaded["set"]["precision"], "float32")
+        self.assertEqual([s["precision"] for s in loaded["stepping"]], ["float32", "float64"])
+        self.assertEqual(loaded["stepping"][0]["problems"], "all")
         specs = sets.expand(["s"], sets_dir=self.tmp)
-        self.assertEqual({(s["package"], s["precision"]) for s in specs}, {("jax", "float32"), ("modax", "float64")})
-        for bad in ('[set.float64]\npackages = ["fortran"]\n', '[set.float64]\n', '[set.float64]\nper = 1\n'):
-            self.write(self.MINIMAL + bad)
+        # modax runs float64 only, so the float32 stepping gives it no points.
+        self.assertEqual({(s["package"], s["problem"], s["precision"]) for s in specs},
+                         {("jax", "lorenz", "float32"), ("jax", "pleiades", "float32"),
+                          ("jax", "pleiades", "float64"), ("modax", "pleiades", "float64")})
+        for old, bad in (('precision = "float64"', 'precision = "float16"'),
+                         ('problems = ["pleiades"]', 'problems = ["lorenz1000"]')):
+            self.write(text + float64.replace(old, bad))
             with self.assertRaises(sets.SetError, msg=bad):
                 sets.load_set("s", self.tmp)
-        # The shipped sets run modax in float64 and every other package at the set's precision.
-        shipped = sets.expand(["perf"], packages=["modax", "gradsolve"], problems=["lorenz"], n=[8])
-        self.assertEqual({(s["package"], s["precision"]) for s in shipped},
-                         {("modax", "float64"), ("gradsolve", "float32")})
+        self.write(text + '[set.float64]\npackages = ["modax"]\n')
+        with self.assertRaises(sets.SetError):
+            sets.load_set("s", self.tmp)
+        # The shipped perf set runs modax only in its float64 comparison, on the problems cubie and modax share.
+        shipped = sets.expand(["perf"], packages=["modax", "cubie"], n=[8])
+        self.assertEqual({s["precision"] for s in shipped if s["package"] == "modax"}, {"float64"})
+        self.assertEqual({s["problem"] for s in shipped if s["precision"] == "float64"},
+                         {"lorenz", "lorenz96", "pleiades", "pollu"})
+        self.assertEqual({s["algorithm"] for s in shipped if s["precision"] == "float64" and s["package"] == "cubie"},
+                         {"tsit5", "rodas5p"})
 
     def test_bad_sets_are_refused(self):
         bad = {
