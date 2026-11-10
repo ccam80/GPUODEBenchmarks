@@ -17,9 +17,8 @@ ENV = {"cubie": {"CUBIE_MAX_CACHE_ENTRIES": "0"},
        "jax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"},
        "gradsolve": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"},
        "modax": {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}}
-# Kernels a cubie process, runner or precompile worker, compiles before it exits. The packages that solve through
-# jax take a fresh runner per family, because a jax process that runs the device out of memory fails every solve
-# after it.
+# We restart a cubie runner or precompile worker once it has compiled this many kernels. We start a fresh jax,
+# gradsolve or modax runner for each family, because a jax process fails every solve after it runs out of device memory.
 RESTART_KERNELS = {"cubie": 8, "jax": 1, "gradsolve": 1, "modax": 1}
 # Private memory past which a precompile worker hands the rest of its chunk to a new one.
 PRECOMPILE_MEMORY_GB = 6
