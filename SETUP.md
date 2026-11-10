@@ -94,8 +94,10 @@ Linux only; elsewhere the script prints a skip and exits 0. Installs the
 pinned gradsolve, `warp-lang` and `jax[cuda13]` with `pyarrow` and `tzdata`,
 fails when jax-cuda plugins of two CUDA generations coexist, and imports the
 stack on jax's CPU backend, so setting up needs no free GPU. An adaptive trial
-runs gradsolve's fused Warp kernels (Tsit5, and Rosenbrock23 for systems of at
-most 12 states); a fixed trial runs its fixed-step `lax.scan` Tsit5 or RK4.
+runs gradsolve's fused Warp kernels (Tsit5 for systems of at most 64 states,
+and Rosenbrock23 at any size); a fixed trial runs its fixed-step `lax.scan`
+Tsit5 or RK4. gradsolve's own solve refuses Rosenbrock23 above 12 states on a
+GPU; the adapter skips that limit so that the runs show where the kernel fails.
 The adapter (`runner_scripts/gradsolve_bench.py`) launches the kernels through
 gradsolve's Warp launch layer so that a trial sets the first step and the step
 bound. Warp compiles into `generated/gradsolve_warp_cache`.

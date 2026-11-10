@@ -27,7 +27,7 @@ system_params = {}
 
 [[stepping]]
 packages = "all"
-algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]
 controller = "fixed"
 dt = "default_dt"
 newton = {atol = 1.0e-6, rtol = 1.0e-6}

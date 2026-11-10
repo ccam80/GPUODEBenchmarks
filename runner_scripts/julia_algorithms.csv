@@ -20,6 +20,7 @@ radau_iia_9,RadauIIA9(),,
 ros3p,ROS3P(),,
 rodas3p,Rodas3P(),,
 kvaerno5,Kvaerno5(),GPUKvaerno5(autodiff=Val(false)),
+rodas5p,,GPURodas5P(autodiff=Val(false)),
 Vern9,Vern9(),,golden reference algorithm named by problems.csv
 Rodas5P,Rodas5P(),,golden reference algorithm named by problems.csv
 RadauIIA9,RadauIIA9(),,golden reference algorithm named by problems.csv

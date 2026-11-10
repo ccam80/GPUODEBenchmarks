@@ -187,16 +187,15 @@ class Build:
         """Register the problem's field and return (module, kernel, field_key) for an adaptive plan.
 
         Raise RuntimeError if the problem has more states than gradsolve's
-        fused kernel runs on a GPU.
+        Tsit5 kernel runs on a GPU. Run Rosenbrock23 at any state count.
         """
         from gradsolve import register_jax_field
         from gradsolve.warp import warp_ode, warp_rosenbrock
         module = warp_rosenbrock if plan["stiff"] else warp_ode
-        ceiling = (warp_rosenbrock._GPU_MAT_DIM_CEILING if plan["stiff"]
-                   else warp_ode._GPU_VEC_DIM_CEILING)
-        if self.states > ceiling:
-            raise RuntimeError("gradsolve's fused {0} kernel runs at most {1} states on a GPU; {2} has {3}"
-                               .format(plan["module"], ceiling, self.row["problem"], self.states))
+        # We skip gradsolve's 12-state Rosenbrock23 limit so that the GPU shows where the kernel fails.
+        if not plan["stiff"] and self.states > warp_ode._GPU_VEC_DIM_CEILING:
+            raise RuntimeError("gradsolve's fused warp_ode kernel runs at most {0} states on a GPU; {1} has {2}"
+                               .format(warp_ode._GPU_VEC_DIM_CEILING, self.row["problem"], self.states))
         key = self.name + ("_stiff" if plan["stiff"] else "")
         register_jax_field(key, self.f_jax, self.states, 1, stiff=plan["stiff"])
         if plan["stiff"]:

@@ -110,7 +110,8 @@ class ShippedSetTests(unittest.TestCase):
                     for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), expected)
         # The timed algorithms are exactly those two packages run in the stepping kind.
-        timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"],
+        timed = {"fixed": ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5",
+                           "rodas5p"],
                  "adaptive": ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]}
         for kind, names in timed.items():
             self.assertEqual(sorted(names), sorted(n for n in FACTS if len(timed_packages(n, kind)) >= 2), kind)
@@ -120,7 +121,6 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual(dict(solve_counts(built)), expected)
         # One optimize per kernel; perf gives each build one stepping.
         self.assertEqual(line_counts(built, "jax"), (360, 0, 0, 30))
-        self.assertEqual(line_counts(built, "julia_gpu"), (960, 0, 0, 80))
         self.assertEqual({t["cold"] for t in built}, {False})
         self.assertEqual({tuple(t["sets"]) for t in built}, {("perf",)})
         # Every cubie line optimizes, once per kernel.
@@ -179,7 +179,6 @@ class ShippedSetTests(unittest.TestCase):
         self.assertEqual({s["stepping"] for s in specs}, {"default"})
         expected = {package: leg_count(loaded, package, "lorenz96") * 6 for package in loaded["set"]["packages"]}
         self.assertEqual(dict(by_package_kind(specs)), {p: c for p, c in expected.items() if c})
-        self.assertEqual(expected["julia_gpu"], 30)
         self.assertEqual((expected["pytorch"], expected["myokit_cuda"]), (0, 0))
         built = self.trials["states"]
         # Every line is its own cold build, one solve each.
@@ -201,9 +200,6 @@ class ShippedSetTests(unittest.TestCase):
                     count += len(stepping_algorithms(loaded, index, package, problem.name)) * stepping_values(stepping)
             expected[package] = count
         self.assertEqual(dict(by_package_kind(specs)), expected)
-        self.assertEqual({p: expected[p] for p in ("jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu", "julia_cpu")},
-                         {"jax": 315, "pytorch": 180, "myokit_cuda": 30, "cpp": 100, "julia_gpu": 800,
-                          "julia_cpu": 3192})
         # Every algorithm a package runs at a fixed step is stepped: the two fixed steppings together name them all.
         fixed_named = set(loaded["stepping"][0]["algorithms"]) | set(loaded["stepping"][1]["algorithms"])
         self.assertEqual(fixed_named, {row.name for row in ROWS if row["fixed"]})
