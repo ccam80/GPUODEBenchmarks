@@ -129,7 +129,7 @@ class FakeSolver:
     def update(self, updates):
         self.updates.append(dict(updates))
 
-    def build_grid(self, initial_values, parameters):
+    def prepare_grid_arrays(self, initial_values, parameters):
         self.grids = getattr(self, "grids", []) + [parameters]
         initials = np.zeros((len(initial_values), parameters.shape[1]), np.float32)
         return initials, np.asarray(parameters, np.float32)

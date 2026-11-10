@@ -142,7 +142,7 @@ class Build:
         if self.grid_n != n:
             self.grid_arrays = None
             parameters = ensemble_parameters(self.row, values, self.precision)
-            self.grid_arrays = self.solver.build_grid(initial_values=self.initial_conditions,
+            self.grid_arrays = self.solver.prepare_grid_arrays(initial_values=self.initial_conditions,
                                                       parameters=parameters)
             self.grid_n = n
         return self.grid_arrays
@@ -170,7 +170,7 @@ class Build:
             gains = gains_of(trial)
             if gains:
                 self.trace_solver.update(gains)
-        initials, parameters = self.trace_solver.build_grid(
+        initials, parameters = self.trace_solver.prepare_grid_arrays(
             initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
         result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
         states = trace_states(self.system, result, self.row)
