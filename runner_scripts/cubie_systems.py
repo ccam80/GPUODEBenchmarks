@@ -407,11 +407,14 @@ def build_system(problem, precision=np.float32, name_suffix=""):
 
 
 def sweep(system, names):
-    """Read `names` from the parameters array, in that order, and compile every other parameter in at its default."""
-    fixed = tuple((name, value) for name, value in system.parameters.as_float_dict.items()
-                  if name not in names)
-    # Pairs, as cubie's update reads a dict value as a settings group.
-    system.update(swept_parameters=tuple(names), fixed_parameters=fixed)
+    """Read `names` from the parameters array, in that order, and compile every other parameter in at its default.
+
+    Raise ValueError if cubie lays the swept parameters out in another order,
+    because ensemble_parameters fills the array's rows in the order of `names`.
+    """
+    system.set_swept_parameters(tuple(names))
+    if tuple(system.swept_parameters) != tuple(names):
+        raise ValueError("cubie sweeps {0} in the order {1}".format(tuple(names), tuple(system.swept_parameters)))
 
 
 def variable_order(problem):
@@ -429,19 +432,15 @@ def output_types(system):
     return ["state"]
 
 
-def _names(index_map):
-    return [str(symbol) for symbol in index_map]
-
-
 def state_defaults(system):
     """Zero initial values for the states the system actually integrates."""
-    return {name: 0.0 for name in _names(system.indices.states.index_map)}
+    return {name: 0.0 for name in system.states.names}
 
 
 def final_states(system, solution, problem):
     """Final values of the problem's variables, in golden-reference order; torn variables come from the observables."""
     order = variable_order(problem)
-    state_names = _names(system.indices.states.index_map)
+    state_names = list(system.states.names)
     finals = np.asarray(solution.state[-1, :, :]).T
     if len(state_names) == len(order) and list(state_names) == list(order):
         return finals
@@ -452,7 +451,7 @@ def final_states(system, solution, problem):
             columns.append(finals[:, state_names.index(name)])
             continue
         if observables is None:
-            observable_names = _names(system.indices.observables.index_map)
+            observable_names = list(system.observables.names)
             observables = np.asarray(solution.observables[-1, :, :]).T
         if name in observable_names:
             columns.append(observables[:, observable_names.index(name)])
@@ -465,7 +464,7 @@ def final_states(system, solution, problem):
 def trace_states(system, solution, problem):
     """Every saved state of the problem's variables after the initial one, as (runs, samples, variables) in reference order."""
     order = variable_order(problem)
-    state_names = _names(system.indices.states.index_map)
+    state_names = list(system.states.names)
     saved = np.asarray(solution.state)[1:]
     if len(state_names) == len(order) and list(state_names) == list(order):
         return np.ascontiguousarray(saved.transpose(2, 0, 1))
@@ -476,7 +475,7 @@ def trace_states(system, solution, problem):
             columns.append(saved[:, state_names.index(name), :])
             continue
         if observables is None:
-            observable_names = _names(system.indices.observables.index_map)
+            observable_names = list(system.observables.names)
             observables = np.asarray(solution.observables)[1:]
         if name not in observable_names:
             raise SystemExit("variable '{0}' is neither a state nor an observable".format(name))

@@ -62,7 +62,7 @@ def load_system():
 def fixed_parameters(system):
     """{name: float64 default} of every parameter but the two analogue inputs."""
     inputs = (fabbri.ACH_PARAMETER, fabbri.ISO_PARAMETER)
-    return {name: np.float64(value) for name, value in system.parameters.as_float_dict.items()
+    return {name: np.float64(value) for name, value in system.parameters.defaults.items()
             if name not in inputs}
 
 
