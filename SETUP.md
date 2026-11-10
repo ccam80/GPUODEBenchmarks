@@ -97,7 +97,7 @@ stack on jax's CPU backend, so setting up needs no free GPU. An adaptive trial
 runs gradsolve's fused Warp kernels (Tsit5 for systems of at most 64 states,
 and Rosenbrock23 at any size); a fixed trial runs its fixed-step `lax.scan`
 Tsit5 or RK4. gradsolve's own solve refuses Rosenbrock23 above 12 states on a
-GPU; the adapter skips that limit so that the runs show where the kernel fails.
+GPU. The adapter ignores that limit, so a run records where the kernel fails.
 The adapter (`runner_scripts/gradsolve_bench.py`) launches the kernels through
 gradsolve's Warp launch layer so that a trial sets the first step and the step
 bound. Warp compiles into `generated/gradsolve_warp_cache`.

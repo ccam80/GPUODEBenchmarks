@@ -186,13 +186,13 @@ class Build:
     def fused(self, plan):
         """Register the problem's field and return (module, kernel, field_key) for an adaptive plan.
 
-        Raise RuntimeError if the problem has more states than gradsolve's
-        Tsit5 kernel runs on a GPU. Run Rosenbrock23 at any state count.
+        Raise RuntimeError if a Tsit5 plan's problem has more states than
+        gradsolve's Tsit5 kernel runs on a GPU.
         """
         from gradsolve import register_jax_field
         from gradsolve.warp import warp_ode, warp_rosenbrock
         module = warp_rosenbrock if plan["stiff"] else warp_ode
-        # We skip gradsolve's 12-state Rosenbrock23 limit so that the GPU shows where the kernel fails.
+        # We ignore gradsolve's 12-state Rosenbrock23 limit, so a run records where that kernel fails on the GPU.
         if not plan["stiff"] and self.states > warp_ode._GPU_VEC_DIM_CEILING:
             raise RuntimeError("gradsolve's fused warp_ode kernel runs at most {0} states on a GPU; {1} has {2}"
                                .format(warp_ode._GPU_VEC_DIM_CEILING, self.row["problem"], self.states))
