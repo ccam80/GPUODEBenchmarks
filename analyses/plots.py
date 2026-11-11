@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with a pane per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. Every figure follows shared.Encoding; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with a pane per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. Every figure follows shared.Encoding; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers, precision) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis.
 """
 
 import math
@@ -125,7 +125,8 @@ def loose_first(row):
 
 
 def series_key(kind, row):
-    return (row["key"], row["package"], row["controller_kind"], row["transfers"] if kind.by_transfers else "")
+    return (row["key"], row["package"], row["controller_kind"], row["transfers"] if kind.by_transfers else "",
+            row["precision"])
 
 
 def context(kind, row):
@@ -133,7 +134,7 @@ def context(kind, row):
 
 
 def series_of(kind, rows):
-    """{(key, package, controller kind, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values and needs two."""
+    """{(key, package, controller kind, transfers, precision): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values and needs two."""
     grouped = {}
     for row in rows:
         if not takes(kind, row):
@@ -158,7 +159,8 @@ def series_of(kind, rows):
 
 def ordered(series):
     return dict(sorted(series.items(), key=lambda item: (
-        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.CONTROLLER_KINDS.index(item[0][2]), item[0][3])))
+        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.CONTROLLER_KINDS.index(item[0][2]), item[0][3],
+        item[0][4])))
 
 
 def merged(figures):
@@ -170,10 +172,10 @@ def merged(figures):
 
 
 def series_label(kind, key, points):
-    """'Cubie, 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
-    _, package, controller, transfers = key[:4]
+    """'Cubie, 1024 fixed steps, float32 + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
+    _, package, controller, transfers, precision = key[:5]
     parts = [shared.package_name(package),
-             shared.controller_text(controller, None if "dt" in kind.varying else points[0][2])]
+             shared.controller_text(controller, None if "dt" in kind.varying else points[0][2]), precision]
     return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
 
 
@@ -228,7 +230,7 @@ def plot_panel(panel, kind, series, encoding):
 
 def tagged(series):
     """The series with each key's algorithm appended, so several algorithms share one panel."""
-    return {key[:4] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
+    return {key[:5] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
 
 
 def by_card(panels, columns):

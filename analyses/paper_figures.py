@@ -25,6 +25,12 @@ BATCH = plots.kind_named("runtime_vs_n")
 WP = plots.kind_named("error_vs_runtime")
 INTERVAL_WP = plots.kind_named("interval_error_vs_runtime")
 KERNEL = {"transfers": "none"}
+# gradsolve and modax ran in WSL on the 4070, beside Cubie's Tsit5 and Rodas5P in both precisions.
+NEW_PACKAGES_KEY = "linux_RTX-4070-SUPER"
+NEW_PACKAGES = dict(key=NEW_PACKAGES_KEY, package=("cubie", "gradsolve", "modax"), **KERNEL)
+NEW_PACKAGES_PROBLEMS = ("lorenz", "lorenz96", "pleiades", "pollu")
+# modax's Rodas5P with a float64 LU shares the Rodas5P panes.
+SHARED_ALGORITHMS = ((("tsit5",), "Tsit5"), (("rodas5p", "rodas5p_lu64"), "Rodas5P"))
 
 FIGURES = (
     Figure("1_transfers", BATCH, [pane for key in KEYS for problem in TRANSFER_PROBLEMS for pane in (
@@ -43,6 +49,13 @@ FIGURES = (
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),
     Figure("6_fabbri_batch", BATCH, problem_panes(("fabbri_linder",)), columns=1,
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),
+    Figure("7_new_packages_wp", WP, problem_panes(NEW_PACKAGES_PROBLEMS), where=NEW_PACKAGES, columns=2,
+           per_key=False, title=shared.key_label(NEW_PACKAGES_KEY) + ": Cubie, gradsolve and modax work-precision"),
+    Figure("7_new_packages_batch", BATCH,
+           [Pane(dict(problem=problem, algorithm=algorithms), note=name)
+            for problem in NEW_PACKAGES_PROBLEMS for algorithms, name in SHARED_ALGORITHMS],
+           where=NEW_PACKAGES, columns=2, per_key=False,
+           title=shared.key_label(NEW_PACKAGES_KEY) + ": Cubie, gradsolve and modax kernel time, shared algorithms"),
 )
 
 

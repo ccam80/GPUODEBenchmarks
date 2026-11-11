@@ -207,6 +207,24 @@ class PlotTests(AnalysesCase):
                           ("jax adaptive +", "0.0009765625", "0.001")])
         self.assertEqual(len(table), 6)
 
+    def test_each_precision_is_its_own_series_drawn_at_its_own_width(self):
+        for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0)):
+            self.row(n=n, min_ms=ms, transfers="none")
+            self.row(n=n, min_ms=2.0 * ms, transfers="none", precision="float64")
+        plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
+        table = self.table("runtime_vs_n")
+        self.assertEqual(sorted({(sid(r), r["precision"]) for r in table}),
+                         [("cubie fixed", "float32"), ("cubie fixed", "float64")])
+        series = plots.series_of(plots.KINDS[0], plots.with_errors(self.analysis_store().rows(), errors.Errors(self.store)))
+        encoding = shared.Encoding(series)
+        self.assertEqual(encoding.precisions, ["float32", "float64"])
+        widths = {key[4]: encoding.style(key, points)["linewidth"] for key, points in series.items()}
+        self.assertNotEqual(widths["float32"], widths["float64"])
+        _, labels, headings = encoding.legend(shared.pyplot())
+        self.assertIn("Precision", headings)
+        one = {key: points for key, points in series.items() if key[4] == "float32"}
+        self.assertNotIn("Precision", shared.Encoding(one).legend(shared.pyplot())[2])
+
     def test_states_figure_has_runtime_and_cold_build_panels(self):
         for states, build in ((4, 10.0), (8, 20.0), (16, 40.0)):
             fields = dict(problem="lorenz96", system_params={"states": states}, n=131072, **adaptive(1e-5))
