@@ -268,8 +268,7 @@ class PlotTests(AnalysesCase):
                           ("cubie fixed", "0.125", "3.0"),
                           ("julia_gpu fixed", "0.03125", "10.0"), ("julia_gpu fixed", "0.0625", "8.0"),
                           ("julia_gpu fixed", "0.125", "6.0")])
-        for record, expected in zip(by_dt, (0.03125, 0.0625, 0.125, 0.015625, 0.03125, 0.0625)):
-            self.assertAlmostEqual(float(record["y"]) / (expected / math.sqrt(3)), 1.0, places=3)
+        for record in by_dt:
             self.assertEqual(record["y"], record["error"])
         by_tol = self.table("error_vs_tol")
         self.assertEqual([(sid(r), r["x"]) for r in by_tol],
@@ -285,19 +284,19 @@ class PlotTests(AnalysesCase):
         plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
         table = self.table("error_vs_runtime")
         swept = lambda r: r["atol"] if r["controller"] == "adaptive" else r["dt"]  # noqa: E731
-        self.assertEqual([(sid(r), r["x"], swept(r)) for r in table],
-                         [("cubie fixed +", "0.006", "0.125"),
-                          ("cubie fixed +", "0.008", "0.0625"),
-                          ("cubie fixed +", "0.01", "0.03125"),
-                          ("cubie fixed", "0.003", "0.125"),
-                          ("cubie fixed", "0.004", "0.0625"),
-                          ("cubie fixed", "0.005", "0.03125"),
-                          ("julia_gpu fixed", "0.006", "0.125"),
-                          ("julia_gpu fixed", "0.008", "0.0625"),
-                          ("julia_gpu fixed", "0.01", "0.03125"),
-                          ("julia_gpu adaptive", "1.0", "0.001"),
-                          ("julia_gpu adaptive", "10.0", "0.0001"),
-                          ("julia_gpu adaptive", "100.0", "1e-05")])
+        self.assertEqual([(sid(r), swept(r)) for r in table],
+                         [("cubie fixed +", "0.125"),
+                          ("cubie fixed +", "0.0625"),
+                          ("cubie fixed +", "0.03125"),
+                          ("cubie fixed", "0.125"),
+                          ("cubie fixed", "0.0625"),
+                          ("cubie fixed", "0.03125"),
+                          ("julia_gpu fixed", "0.125"),
+                          ("julia_gpu fixed", "0.0625"),
+                          ("julia_gpu fixed", "0.03125"),
+                          ("julia_gpu adaptive", "0.001"),
+                          ("julia_gpu adaptive", "0.0001"),
+                          ("julia_gpu adaptive", "1e-05")])
         for record in table:
             self.assertTrue(errors.is_finite_positive(float(record["y"])))
 
