@@ -10,10 +10,12 @@ solve per set of solve settings, saving the state at t = 0 and t = duration.
 Compiling the solve also compiles the CUDA kernel through numba-cuda-mlir, and
 for Rodas5P its Enzyme Jacobian. modax integrates in float64 only and adaptively
 only, under its PID controller, so a trial must name the default controller; it
-may set the gains pcoeff, icoeff and dcoeff but not dt_min or dt_max. Compile a
-cold build from a fresh callback in a fresh jax cache.
+may set the gains pcoeff, icoeff and dcoeff but not dt_min or dt_max. Leave the
+first step and the step bound to modax. Compile a cold build from a fresh
+callback in a fresh jax cache.
 """
 
+import inspect
 import json
 import math
 import os
@@ -27,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import runner  # noqa: E402
 import scalar_systems  # noqa: E402
-from jax_bench import ADAPTIVE_MAX_STEPS, GIB, memory_shortfall, problem_row, set_cache_dir  # noqa: E402
+from jax_bench import GIB, memory_shortfall, problem_row, set_cache_dir  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(REPO_ROOT, "generated", "modax_jax_cache")
@@ -59,10 +61,9 @@ def check_trial(trial):
 def solve_options(trial):
     """Return the keyword arguments of modax's solve for a trial.
 
-    Pass the tolerances, the suite's step bound, any PID gains the trial sets,
-    first_step (None to let modax start from 1e-6 of the span) and, for Rodas5P,
-    the LU precision the algorithm names. Raise ValueError if the trial sets
-    dt_min, dt_max or a gain modax does not take.
+    Pass the tolerances, any PID gains the trial sets and, for Rodas5P, the LU
+    precision the algorithm names. Raise ValueError if the trial sets dt_min,
+    dt_max or a gain modax does not take.
     """
     if _finite(trial["dt_min"]) or _finite(trial["dt_max"]):
         raise ValueError("modax takes no dt_min or dt_max")
@@ -70,12 +71,15 @@ def solve_options(trial):
     unknown = sorted(set(gains) - set(GAINS))
     if unknown:
         raise ValueError("modax's controller takes {0} only, not {1}".format(", ".join(GAINS), ", ".join(unknown)))
-    options = {"rtol": float(trial["rtol"]), "atol": float(trial["atol"]),
-               "first_step": float(trial["dt"]) if _finite(trial["dt"]) else None,
-               "max_steps": ADAPTIVE_MAX_STEPS}
+    options = {"rtol": float(trial["rtol"]), "atol": float(trial["atol"])}
     options.update({name: float(value) for name, value in gains.items()})
     options.update(SOLVERS[trial["algorithm"]][1])
     return options
+
+
+def step_bound(solve):
+    """Return the step bound of a modax solve function, the default of its max_steps argument."""
+    return int(inspect.signature(solve).parameters["max_steps"].default)
 
 
 def stepping_key(trial):
@@ -114,6 +118,7 @@ class Build:
         self.duration = float(trial["duration"])
         self.algorithm = trial["algorithm"]
         self.module = importlib.import_module(SOLVERS[self.algorithm][0])
+        self.max_steps = step_bound(self.module.solve)
         self.system = scalar_systems.system(self.row)
         self.states = len(self.system.y0)
         self.cache_dir = None
@@ -240,7 +245,7 @@ class ModaxAdapter:
     def finals(self, build, result):
         """Return (finals, t_final, retcode) for the result of a solve."""
         states, loop_steps = result
-        return finals_of(np.asarray(states), np.asarray(loop_steps), ADAPTIVE_MAX_STEPS, build.duration)
+        return finals_of(np.asarray(states), np.asarray(loop_steps), build.max_steps, build.duration)
 
 
 def run(argv):

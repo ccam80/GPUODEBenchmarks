@@ -15,6 +15,10 @@ packages = ["cubie"]
 [set.untimed]
 packages = ["julia_cpu"]
 
+# gradsolve.solve takes and returns host arrays, so the set solves gradsolve with the transfers.
+[set.host_solves]
+packages = ["gradsolve"]
+
 [[grid]]
 packages = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
 parameter = "default"

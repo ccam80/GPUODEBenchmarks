@@ -49,7 +49,9 @@ for a count no grid of the named sets lists. A trial is one line per point;
 a point several set files declare runs under one contract whichever sets
 are named: it builds cold, keeps finals, optimizes and times each
 transfers mode when any declaration asks; a package every declaration
-lists under `[set.untimed]` runs each line once with no warm-up. A cubie
+lists under `[set.untimed]` runs each line once with no warm-up; a set solves
+the packages under its `[set.host_solves]` through host arrays, whatever its
+`transfers`. A cubie
 optimize runs once per build and stepping (once per build across dt for
 an explicit fixed-step algorithm) when a set's `[set.optimize]` names
 cubie, timing the batch and duration cubie's own
