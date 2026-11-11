@@ -142,7 +142,7 @@ class Build:
         if self.grid_n != n:
             self.grid_arrays = None
             parameters = ensemble_parameters(self.row, values, self.precision)
-            self.grid_arrays = self.solver.build_grid(initial_values=self.initial_conditions,
+            self.grid_arrays = self.solver.prepare_grid_arrays(initial_values=self.initial_conditions,
                                                       parameters=parameters)
             self.grid_n = n
         return self.grid_arrays
@@ -170,7 +170,7 @@ class Build:
             gains = gains_of(trial)
             if gains:
                 self.trace_solver.update(gains)
-        initials, parameters = self.trace_solver.build_grid(
+        initials, parameters = self.trace_solver.prepare_grid_arrays(
             initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
         result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
         states = trace_states(self.system, result, self.row)
@@ -246,7 +246,7 @@ class CubieAdapter:
         tuned = self.recorded(trial)
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-        build.solver.compile()
+        adapter.compile_kernel(build.solver)
 
     def optimize(self, build, trial):
         """Apply and compile the kernel's recorded settings, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; an overwriting run applies only the records it wrote; returns what was done."""
@@ -257,7 +257,7 @@ class CubieAdapter:
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile()
+            adapter.compile_kernel(build.solver)
             return "recorded"
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
                                      force=True)

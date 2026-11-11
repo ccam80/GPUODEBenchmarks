@@ -252,7 +252,8 @@ class OptimizeStoreTests(unittest.TestCase):
         class Solver:
             """auto_size times 71680 runs over 1/25 of the duration, whatever grid is given."""
 
-            def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False):
+            def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False,
+                         fix_constant_parameters=True):
                 self.seen = (initial_values.shape, duration, force, auto_size)
                 if not auto_size:
                     raise AssertionError("optimize without auto_size")

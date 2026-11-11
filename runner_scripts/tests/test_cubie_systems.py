@@ -11,44 +11,35 @@ sys.path.insert(0, os.path.dirname(HERE))
 import cubie_systems  # noqa: E402
 
 
-class FakeParameters:
-    def __init__(self, defaults):
-        self.as_float_dict = dict(defaults)
-
-
 class FakeSystem:
-    """Records every update; parameters in declaration order."""
+    """Record the names it is told to sweep; lay them out in `order` when one is given."""
 
-    def __init__(self, defaults):
-        self.parameters = FakeParameters(defaults)
-        self.updates = []
+    def __init__(self, order=None):
+        self.order = order
+        self.swept_parameters = ()
 
-    def update(self, **updates):
-        self.updates.append(updates)
+    def set_swept_parameters(self, names):
+        self.swept_parameters = tuple(self.order or names)
 
 
 class BuildSweepTests(unittest.TestCase):
-    def build(self, problem, defaults):
-        system = FakeSystem(defaults)
+    def build(self, problem, order=None):
+        system = FakeSystem(order)
         builder = mock.Mock(return_value=(system, {}))
         with mock.patch.dict(cubie_systems._BUILDERS, {problem: builder}):
             cubie_systems.build_system(problem)
         return system
 
-    def test_a_built_system_sweeps_the_grid_parameter_and_fixes_the_rest(self):
-        system = self.build("lorenz", {"rho": 21.0, "sigma": 10.0, "beta": 8.0 / 3.0})
-        self.assertEqual(system.updates, [{
-            "swept_parameters": ("rho",),
-            "fixed_parameters": (("sigma", 10.0), ("beta", 8.0 / 3.0)),
-        }])
+    def test_a_built_system_sweeps_the_grid_parameter(self):
+        self.assertEqual(self.build("lorenz").swept_parameters, cubie_systems.swept_parameters("lorenz"))
 
     def test_the_fabbri_system_sweeps_both_inputs_in_ensemble_row_order(self):
-        import fabbri
-        defaults = {"g": 1.0, fabbri.ISO_PARAMETER: 0.0, fabbri.ACH_PARAMETER: 0.0}
-        system = self.build("fabbri_linder", defaults)
-        update, = system.updates
-        self.assertEqual(update["swept_parameters"], cubie_systems.swept_parameters("fabbri_linder"))
-        self.assertEqual(update["fixed_parameters"], (("g", 1.0),))
+        self.assertEqual(self.build("fabbri_linder").swept_parameters, cubie_systems.swept_parameters("fabbri_linder"))
+
+    def test_a_system_that_reorders_the_swept_parameters_is_refused(self):
+        reordered = tuple(reversed(cubie_systems.swept_parameters("fabbri_linder")))
+        with self.assertRaises(ValueError):
+            self.build("fabbri_linder", order=reordered)
 
 
 if __name__ == "__main__":

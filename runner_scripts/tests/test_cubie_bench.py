@@ -53,18 +53,13 @@ def spec(n=8, **overrides):
     return fields
 
 
-class FakeIndices:
-    def __init__(self, names):
-        self.index_map = list(names)
-
-
 class FakeSystem:
     """Three named states and no observables; `broken` makes every compile of it raise."""
 
     def __init__(self, broken=False):
         self.broken = broken
-        self.indices = type("I", (), {})()
-        self.indices.states = FakeIndices(NAMES)
+        self.states = type("V", (), {"names": list(NAMES)})()
+        self.parameters = type("P", (), {"defaults": {"rho": 21.0, "sigma": 10.0}})()
         self.sizes = type("S", (), {"observables": 0})()
 
 
@@ -118,9 +113,12 @@ class FakeSolver:
     """Records its construction keywords, updates, compiles, optimizes and solves; a device solve needs the resident inputs of the last host solve."""
 
     made = []
+    swept_parameters = ("rho",)
+    precision = np.float32
 
     def __init__(self, system, **kwargs):
         self.system = system
+        self.compile_inputs = []
         self.kwargs = kwargs
         self.updates = []
         self.calls = []
@@ -135,23 +133,28 @@ class FakeSolver:
     def update(self, updates):
         self.updates.append(dict(updates))
 
-    def build_grid(self, initial_values, parameters):
+    def prepare_grid_arrays(self, initial_values, parameters):
         self.grids = getattr(self, "grids", []) + [parameters]
         initials = np.zeros((len(initial_values), parameters.shape[1]), np.float32)
         return initials, np.asarray(parameters, np.float32)
 
-    def compile(self, **kwargs):
+    def compile(self, parameters=None, fix_constant_parameters=True, **kwargs):
+        self.compile_inputs.append((np.asarray(parameters).tolist(), fix_constant_parameters))
         self.compiled.append(dict(kwargs))
         if getattr(self.system, "broken", False):
             raise RuntimeError("ptxas failed")
 
-    def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False):
+    def optimize(self, initial_values, parameters, duration, verbose, force=False, auto_size=False,
+                 fix_constant_parameters=True):
+        self.fixes = getattr(self, "fixes", []) + [fix_constant_parameters]
         self.optimized.append((initial_values.shape[1], duration, force, auto_size))
         if not auto_size:
             raise AssertionError("optimize without auto_size")
         return FakeOptimizeResult(SIZED_RUNS, duration * SIZED_FRACTION)
 
-    def solve(self, initial_values, parameters, duration, on_device=False, nan_error_trajectories=True):
+    def solve(self, initial_values, parameters, duration, on_device=False, nan_error_trajectories=True,
+              fix_constant_parameters=True):
+        self.fixes = getattr(self, "fixes", []) + [fix_constant_parameters]
         n = initial_values.shape[1]
         self.calls.append((n, on_device))
         self.nan_error_trajectories = nan_error_trajectories
@@ -445,6 +448,18 @@ class BuildTests(AdapterCase):
         self.assertEqual(leg.precision, np.float64)
         leg.close()
         self.assertTrue(all(s.closed for s in FakeSolver.made))
+
+    def test_a_compile_an_optimize_and_a_solve_keep_every_swept_parameter_in_the_array(self):
+        leg = self.adapter.build(trial(n=8))
+        self.adapter.compile(leg, trial(n=8), self.values(8))
+        parameters, fix_constant_parameters = leg.solver.compile_inputs[-1]
+        self.assertEqual(len(parameters), len(leg.solver.swept_parameters))
+        self.assertFalse(fix_constant_parameters)
+        self.adapter.optimize(leg, trial(n=8, optimize=True))
+        self.adapter.solve(leg, trial(n=8), self.values(8), "both")
+        self.adapter.solve(leg, trial(n=8), self.values(8), "none")
+        self.assertEqual(set(leg.solver.fixes), {False})
+        leg.close()
 
     def test_compile_compiles_under_the_kernels_record(self):
         leg = self.adapter.build(trial(n=8))
