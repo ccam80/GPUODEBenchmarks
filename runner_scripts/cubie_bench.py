@@ -241,12 +241,12 @@ class CubieAdapter:
         return optimize_record(trial, self.key, self.root)
 
     def compile(self, build, trial, values):
-        """Compile the kernel from the solver settings under the kernel's optimize record when there is one; no grid needed."""
+        """Compile the kernel that a solve of the grid `values` runs, under the kernel's optimize record when there is one."""
         build.apply(trial)
         tuned = self.recorded(trial)
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-        adapter.compile_kernel(build.solver)
+        build.solver.compile(parameters=build.grid(values)[1])
 
     def optimize(self, build, trial):
         """Apply and compile the kernel's recorded settings, else Solver.optimize on the line's grid with cubie sizing the batch and duration, recorded for the kernel; an overwriting run applies only the records it wrote; returns what was done."""
@@ -257,7 +257,7 @@ class CubieAdapter:
         initials, parameters = build.grid(grid_mod.grid(trial))
         if tuned is not None:
             adapter.apply_optimized(build.solver, tuned)
-            adapter.compile_kernel(build.solver)
+            build.solver.compile(parameters=parameters)
             return "recorded"
         row = adapter.optimize_point(build.solver, trial, initials, parameters, self.key, root=self.root,
                                      force=True)
