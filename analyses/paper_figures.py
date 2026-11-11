@@ -29,7 +29,7 @@ KERNEL = {"transfers": "none"}
 NEW_PACKAGES_KEY = "linux_RTX-4070-SUPER"
 NEW_PACKAGES = dict(key=NEW_PACKAGES_KEY, package=("cubie", "gradsolve", "modax"), **KERNEL)
 NEW_PACKAGES_PROBLEMS = ("lorenz", "lorenz96", "pleiades", "pollu")
-# modax's Rodas5P with a float64 LU shares the Rodas5P panes.
+# We draw modax's Rodas5P with a float64 LU in the Rodas5P panes.
 SHARED_ALGORITHMS = ((("tsit5",), "Tsit5"), (("rodas5p", "rodas5p_lu64"), "Rodas5P"))
 
 FIGURES = (

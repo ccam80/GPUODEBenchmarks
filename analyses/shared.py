@@ -38,7 +38,7 @@ LINE_LABELS = {("adaptive", "none"): "Adaptive", ("fixed", "none"): "Fixed",
                ("adaptive", "both"): "Adaptive, with transfers", ("fixed", "both"): "Fixed, with transfers"}
 SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">")
 SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
-# Line width per precision; a float64 line is drawn twice as wide as a float32 one.
+# Draw a float64 series twice as wide as a float32 one.
 PRECISION_WIDTHS = {"float32": 1.5, "float64": 3.0}
 RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
       "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
