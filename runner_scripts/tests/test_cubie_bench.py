@@ -130,9 +130,9 @@ class FakeSolver:
     def update(self, updates):
         self.updates.append(dict(updates))
 
-    def prepare_grid_arrays(self, initial_values, parameters):
+    def prepare_grid_arrays(self, parameters):
         self.grids = getattr(self, "grids", []) + [parameters]
-        initials = np.zeros((len(initial_values), parameters.shape[1]), np.float32)
+        initials = np.zeros((len(self.system.states.names), parameters.shape[1]), np.float32)
         return initials, np.asarray(parameters, np.float32)
 
     def compile(self, parameters=None, **kwargs):

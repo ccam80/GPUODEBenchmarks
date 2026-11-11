@@ -108,8 +108,7 @@ class Build:
         try:
             # A resized system keeps its own generated-code cache under a states suffix.
             params = json.loads(trial["system_params"]) if trial["system_params"] else {}
-            self.system, self.initial_conditions = adapter.build_system(
-                self.row, self.precision, states=params.get("states"))
+            self.system, _ = adapter.build_system(self.row, self.precision, states=params.get("states"))
             self.solver = make_solver(self.system, trial, solver_class)
         except BaseException:
             self.close()
@@ -142,8 +141,7 @@ class Build:
         if self.grid_n != n:
             self.grid_arrays = None
             parameters = ensemble_parameters(self.row, values, self.precision)
-            self.grid_arrays = self.solver.prepare_grid_arrays(initial_values=self.initial_conditions,
-                                                      parameters=parameters)
+            self.grid_arrays = self.solver.prepare_grid_arrays(parameters=parameters)
             self.grid_n = n
         return self.grid_arrays
 
@@ -171,7 +169,7 @@ class Build:
             if gains:
                 self.trace_solver.update(gains)
         initials, parameters = self.trace_solver.prepare_grid_arrays(
-            initial_values=self.initial_conditions, parameters=ensemble_parameters(self.row, values, self.precision))
+            parameters=ensemble_parameters(self.row, values, self.precision))
         result = adapter.solve(self.trace_solver, initials, parameters, TRACE_SPAN_S)
         states = trace_states(self.system, result, self.row)
         retcode = status_text(result.status_codes)
