@@ -31,8 +31,8 @@ RING_ORDER = ("U1", "U2", "U3", "U4", "U5", "U6", "U7",
               "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8")
 RING_STATES = {name: 0.0 for name in RING_ORDER}
 
-# Variables torn out of the index-2 form; recorded as observables.
-RING_INDEX2_OBSERVABLES = ["U3", "U4", "U6", "I3"]
+# We declare every variable that cubie may tear out of the index-2 form, because it chooses which of them stay states.
+RING_INDEX2_OBSERVABLES = ["U3", "U4", "U5", "U6", "I3"]
 
 # Diode voltages and currents, shared by both ring modulator formulations.
 RING_AUXILIARIES = """
