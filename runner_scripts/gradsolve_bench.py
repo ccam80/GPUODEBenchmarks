@@ -2,13 +2,14 @@
 
 """Run gradsolve's solvers for runner.py.
 
-Run adaptive Tsit5 and Rosenbrock23 through gradsolve.solve on its fused NVIDIA
-Warp engines, with each problem registered through gradsolve.register_jax_field.
-gradsolve chooses the first step and the step bound, and its limits on the state
-count apply. gradsolve.solve takes and returns host arrays, so an adaptive trial
-has no solve on resident device inputs. Run fixed-step Tsit5 and RK4 on
-gradsolve's lax.scan solvers, jitted over the ensemble. Compile a cold build into
-fresh Warp and jax caches.
+Run an adaptive trial through gradsolve.solve on the fused NVIDIA Warp engine
+that its algorithm names, after registering the problem with
+gradsolve.register_jax_field. Pass the tolerances and nothing else, so that
+gradsolve chooses the first step and the step bound and refuses a problem past
+its own state limits. Raise RuntimeError for an adaptive solve on resident
+device inputs, because gradsolve.solve takes and returns host arrays. Run a
+fixed-step trial on gradsolve's lax.scan Tsit5 or RK4, jitted over the ensemble.
+Compile a cold build into fresh Warp and jax caches.
 """
 
 import math
