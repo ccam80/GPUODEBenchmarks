@@ -1,7 +1,7 @@
 # Timing sweep over trajectory counts: every GPU package, every problem it implements but the Fabbri-Linder model, the algorithms at least two packages run, at each problem's default fixed step (problems.csv default_dt_pow) and one tolerance.
 
 [set]
-packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "cpp", "julia_gpu"]
+packages   = ["cubie", "jax", "pytorch", "myokit_cuda", "gradsolve", "modax", "cpp", "julia_gpu"]
 problems   = ["lorenz", "lorenz96", "lorenz96_20", "pleiades", "pollu", "ring_modulator", "ring_modulator_index2", "nand_gate"]
 algorithms = "all"
 precision  = "float32"
@@ -23,14 +23,28 @@ system_params = {}
 
 [[stepping]]
 packages = "all"
-algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+algorithms = ["euler", "classical-rk4", "tsit5", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]
 controller = "fixed"
 dt = "default_dt"
 newton = {atol = 1.0e-6, rtol = 1.0e-6}
 
 [[stepping]]
 packages = "all"
-algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5"]
+algorithms = ["tsit5", "cash-karp-54", "rosenbrock23_sciml", "kvaerno3", "vern7", "kvaerno5", "rodas5p"]
+controller = "default"
+tol = [1.0e-5]
+dt0 = {duration_times_2_pow = -10}
+dt_min = "none"
+dt_max = "none"
+newton = "tol"
+gains = {}
+
+# The precision comparison: cubie and modax in float64 at Tsit5 and Rodas5P, modax's Rodas5P with its float32 LU (rodas5p) and a float64 LU (rodas5p_lu64), on the problems both packages run; cubie's float32 points come from the steppings above.
+[[stepping]]
+packages = ["cubie", "modax"]
+problems = ["lorenz", "lorenz96", "pleiades", "pollu"]
+algorithms = ["tsit5", "rodas5p", "rodas5p_lu64"]
+precision = "float64"
 controller = "default"
 tol = [1.0e-5]
 dt0 = {duration_times_2_pow = -10}

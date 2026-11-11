@@ -11,6 +11,8 @@ SHARED = (
     Path("GPU_ODE_JAX") / "venv",
     Path("GPU_ODE_PyTorch") / "venv",
     Path("GPU_ODE_MYOKIT_CUDA") / "venv",
+    Path("GPU_ODE_GRADSOLVE") / "venv",
+    Path("GPU_ODE_MODAX") / "venv",
     Path("GPU_ODE_MPGOS") / "build_cache",
     Path("generated"),
 )

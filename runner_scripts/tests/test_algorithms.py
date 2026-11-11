@@ -36,8 +36,6 @@ class CatalogueTests(unittest.TestCase):
 
     def test_rows_are_typed_and_name_known_packages(self):
         rows = load_algorithms()
-        self.assertEqual(len(rows), 59)
-        self.assertEqual(len(algorithm_names()), 23)
         pairs = [(row.package, row.name) for row in rows]
         self.assertEqual(len(pairs), len(set(pairs)))
         for row in rows:

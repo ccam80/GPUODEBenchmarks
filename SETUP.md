@@ -7,16 +7,16 @@ per package from `runner_scripts/launch.py`. One command builds them all:
 python setup_all_environments.py
 ```
 
-It runs, in order, the cubie, JAX, PyTorch and Myokit-CUDA
+It runs, in order, the cubie, JAX, PyTorch, Myokit-CUDA, gradsolve and modax
 setup scripts under `GPU_ODE_*/` and then `setup_julia.py`, and reports which
 failed. Each script can be run on its own and reuses an existing venv.
 
 ## Prerequisites
 
 - An NVIDIA GPU with a driver that reports CUDA 13 in `nvidia-smi`. The JAX,
-  PyTorch and Myokit setups read the CUDA major from `nvcc` or `nvidia-smi`
-  and refuse any other; the cubie setup targets CUDA 13 wheels unless
-  `CUBIE_CUDA_MAJOR=12` is set.
+  PyTorch, Myokit, gradsolve and modax setups read the CUDA major from `nvcc`,
+  or from `nvidia-smi` when no `nvcc` is on PATH, and refuse any other; the
+  cubie setup targets CUDA 13 wheels unless `CUBIE_CUDA_MAJOR=12` is set.
 - Python 3.11 or newer for the suite (`tomllib`); the PyTorch setup looks for
   the newest CPython that torch publishes wheels for (3.14 at the pin) and
   recreates its venv with it.
@@ -84,6 +84,40 @@ Installs `GPU_ODE_MYOKIT_CUDA/requirements.txt` (pinned Myokit), the pinned
 `cupy-cuda13x`, `pyarrow` and `tzdata`, and checks that CuPy sees a device.
 See `GPU_ODE_MYOKIT_CUDA/README.md` for what the kernel does.
 
+### gradsolve
+
+```
+python GPU_ODE_GRADSOLVE/setup_environment.py
+```
+
+Linux only; elsewhere the script prints a skip and exits 0. Installs the
+pinned gradsolve, `warp-lang` and `jax[cuda13]` with `pyarrow` and `tzdata`,
+fails when jax-cuda plugins of two CUDA generations coexist, and imports the
+stack on jax's CPU backend, so setting up needs no free GPU. An adaptive trial
+runs gradsolve's fused Warp kernels (Tsit5 for systems of at most 64 states,
+and Rosenbrock23 at any size); a fixed trial runs its fixed-step `lax.scan`
+Tsit5 or RK4. gradsolve's own solve refuses Rosenbrock23 above 12 states on a
+GPU. The adapter ignores that limit, so a run records where the kernel fails.
+The adapter (`runner_scripts/gradsolve_bench.py`) launches the kernels through
+gradsolve's Warp launch layer so that a trial sets the first step and the step
+bound. Warp compiles into `generated/gradsolve_warp_cache`.
+
+### modax
+
+```
+python GPU_ODE_MODAX/setup_environment.py
+```
+
+Linux only; elsewhere the script prints a skip and exits 0. Installs the
+pinned `modax-solvers[cuda13]` (numba-cuda-mlir, numba-enzyme-cuda) and
+`jax[cuda13]` with `pyarrow` and `tzdata`, fails when upstream `numba-enzyme`
+or jax-cuda plugins of two CUDA generations are installed, and imports the
+stack on jax's CPU backend. modax integrates in float64 only and adaptively
+only (Tsit5, Rodas5P), so it runs in the float64 precision comparison of `perf`
+and `golden_grid` alone. The `rodas5p` algorithm runs Rodas5P with modax's
+default float32 LU factorisation and `rodas5p_lu64` with a float64 one. modax
+builds a C++ FFI shim at first use, so `g++` must be on PATH.
+
 ### cpp
 
 MPGOS needs no environment: `runner_scripts/gpu/run_ode_cpp.ps1` and `.sh`
@@ -122,6 +156,8 @@ Change these in the setup scripts.
 | torch | 2.13.0 (`cu132` index), torchdiffeq `utkarsh530/torchdiffeq@4f4524f` |
 | jax / jaxlib | 0.11.1 (`cuda13` extra), diffrax 0.7.2, equinox 0.13.8 |
 | myokit | 1.39.2 (`GPU_ODE_MYOKIT_CUDA/requirements.txt`), cupy-cuda13x 14.2.0 |
+| gradsolve | 0.2.1, warp-lang 1.19.0, jax 0.11.1 (`cuda13` extra) |
+| modax | modax-solvers 0.0.7 (`cuda13` extra), jax 0.11.1 (`cuda13` extra) |
 | cubie | newest PyPI release at setup time; `package_version` records it per row |
 | Julia | `Manifest.toml` (julia 1.13); DiffEqGPU and OrdinaryDiffEq versions are recorded per row |
 
@@ -132,6 +168,8 @@ GPU_ODE_CUBIE/venv/bin/python -c "import cubie, pyarrow, duckdb, matplotlib"
 GPU_ODE_JAX/venv/bin/python -c "import jax, diffrax; print(jax.default_backend())"
 GPU_ODE_PyTorch/venv/bin/python -c "import torch, torchdiffeq; print(torch.cuda.is_available())"
 GPU_ODE_MYOKIT_CUDA/venv/bin/python -c "import cupy, myokit"
+GPU_ODE_GRADSOLVE/venv/bin/python -c "import gradsolve, warp, jax; print(jax.default_backend())"
+GPU_ODE_MODAX/venv/bin/python -c "import modax.tsit5, modax.rodas5P, jax; print(jax.default_backend())"
 julia +1.13 --project=. -e "using DiffEqGPU, CUDA, GPU_ODE_JuliaKernels"
 nvidia-smi && nvcc --version
 python bench.py plan --set perf
@@ -153,5 +191,6 @@ Remove-Item -Recurse -Force GPU_ODE_CUBIE\venv     # Windows
 If the Julia project fails to instantiate, `setup_julia.py --update`
 re-resolves it under the 1.13 channel.
 
-Caches safe to delete: `generated/` (cubie code, `jax_cache`),
+Caches safe to delete: `generated/` (cubie code, `jax_cache`,
+`gradsolve_jax_cache`, `gradsolve_warp_cache`, `modax_jax_cache`),
 `GPU_ODE_MYOKIT_CUDA/models/generated/` and `GPU_ODE_MPGOS/build_cache/`.

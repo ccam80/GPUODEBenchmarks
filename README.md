@@ -2,8 +2,9 @@
 
 Ensemble ODE solvers on the GPU, timed and checked against one another on
 the same problems, grids and stepping: `cubie`, `jax` (Diffrax), `pytorch`
-(torchdiffeq, vmap fork), `myokit_cuda`, `cpp` (MPGOS) and `julia_gpu`
-(DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
+(torchdiffeq, vmap fork), `myokit_cuda`, `gradsolve` (fused NVIDIA Warp
+kernels and fixed-step JAX scans), `modax` (numba-cuda-mlir kernels, float64),
+`cpp` (MPGOS) and `julia_gpu` (DiffEqGPU kernels). `julia_cpu` (DifferentialEquations.jl on
 `EnsembleThreads`) runs the same trials and supplies the float64 reference
 every error is measured against. The figures of *Automated Translation and
 Accelerated Solving of Differential Equations on Multiple GPU Platforms* are
@@ -83,9 +84,9 @@ the push the box deletes this key's clock logs a day old that no row names
 
 | set | packages | what it times |
 |---|---|---|
-| `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm |
+| `perf` | every GPU package | trajectory sweep, 8 to 2^24, one step and one tolerance per algorithm; cubie and modax also in float64 at Tsit5 and Rodas5P |
 | `states` | every GPU package | lorenz96 at 4 to 128 states, cold builds timed, n = 131072 |
-| `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix) |
+| `golden_grid` | every package | finals at every step and tolerance on the 131072-point grid, the first 8192 trajectories kept (julia_cpu: the 1024-point prefix); cubie and modax also in float64 at Tsit5 and Rodas5P |
 | `golden` | `julia_cpu` | the float64 reference at each problem's golden algorithm and tolerance, fabbri_linder excepted |
 | `fabbri_linder` | `cubie` | every adaptive cubie algorithm at 1e-2 to 1e-8 on the 131072-point ACh x Iso grid, traced on the head lattice, single run past 30 s, 200 s watchdog |
 | `fabbri_euler` | `cubie`, `myokit_cuda` | Euler at 100 us to 250 ns on the same grid, traced on the head lattice, single run past 30 s |
@@ -114,7 +115,9 @@ it with the trials still missing. cubie first precompiles the
 kernels of its trial file into the package cache, with the optimize
 candidates of the kernels whose lines optimize (`bench_cubie.py --trials
 <file> --precompile`, four workers of eight kernels each, a worker past 6 GB handing the rest of its chunk to a new one), then runs a fresh runner every 8 kernels at the next family
-boundary (`<package>.part<N>.jsonl`). A cold cubie line optimizes on a warm
+boundary (`<package>.part<N>.jsonl`). `bench.py` starts a fresh
+jax, gradsolve or modax runner for each family, because a jax process fails
+every solve after it runs out of device memory. A cold cubie line optimizes on a warm
 build first; its timed cold build compiles the optimized kernel once.
 
 A cubie compile the optimize watchdog takes abandons its problem, algorithm

@@ -120,6 +120,15 @@ def supported_for(package, kind=None):
                  if row.supports(package, kind))
 
 
+# The precisions of the packages that run only one; every other package runs both.
+PACKAGE_PRECISIONS = {"modax": ("float64",), "myokit_cuda": ("float32",)}
+
+
+def precisions_for(package):
+    """Return the precisions a package runs."""
+    return PACKAGE_PRECISIONS.get(package, ("float32", "float64"))
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:

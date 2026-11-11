@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; a stepping may narrow the problems and set its own precision; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -6,7 +6,7 @@ import os
 import sys
 import tomllib
 
-from algorithms import algorithm_names, load_algorithms
+from algorithms import algorithm_names, load_algorithms, precisions_for
 from problems import load_problems
 from protocol import WATCHDOG_SECONDS
 from store import PACKAGES, canonical_json
@@ -22,7 +22,7 @@ SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
-STEPPING_KEYS = ("packages", "algorithms", "controller", "dt", "newton", "tol", "dt0",
+STEPPING_KEYS = ("packages", "problems", "algorithms", "precision", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
 GOLDEN_ALGORITHM = "golden_algorithm"
 GOLDEN_TOL = "golden_tol"
@@ -163,8 +163,13 @@ def load_set(name, sets_dir=SETS_DIR):
         where = "{0} [[stepping]] {1}".format(path, index + 1)
         _check_keys(stepping, STEPPING_KEYS, where)
         stepping.setdefault("packages", "all")
+        stepping.setdefault("problems", "all")
         stepping.setdefault("algorithms", "all")
+        stepping.setdefault("precision", head["precision"])
+        if stepping["precision"] not in ("float32", "float64"):
+            raise SetError(where + ": precision must be float32 or float64")
         stepping["packages"] = _name_list(stepping["packages"], PACKAGES, where + " packages")
+        stepping["problems"] = _name_list(stepping["problems"], problems, where + " problems")
         stepping["algorithms"] = _name_list(stepping["algorithms"], algorithms,
                                             where + " algorithms", tokens=(GOLDEN_ALGORITHM,))
         if "controller" not in stepping:
@@ -394,10 +399,15 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                 if packages is not None:
                     chosen = [p for p in chosen if p in packages]
                 for package in chosen:
+                    # A package that does not run the stepping's precision has no points under it.
+                    if stepping["precision"] not in precisions_for(package):
+                        continue
                     for problem in problem_rows:
                         if not problem.supports(package):
                             continue
                         if head["problems"] != "all" and problem.name not in head["problems"]:
+                            continue
+                        if stepping["problems"] != "all" and problem.name not in stepping["problems"]:
                             continue
                         if problems is not None and problem.name not in problems:
                             continue
@@ -414,7 +424,7 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                                             "problem": problem.name,
                                             "system_params": canonical_json(params),
                                             "duration": float(problem["duration"]),
-                                            "precision": head["precision"],
+                                            "precision": stepping["precision"],
                                             "parameter": parameter, "grid_scale": scale,
                                             "grid_min": lo, "grid_max": hi, "n": int(count),
                                             "grid_dtype": "float32",

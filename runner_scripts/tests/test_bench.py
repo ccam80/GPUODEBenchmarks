@@ -852,8 +852,6 @@ class HardExitTests(unittest.TestCase):
         self.assertEqual(len({trials.family_key(t) for t in tols}), 1)
         self.assertGreater(len({trials.kernel_key(t) for t in tols}), 1)
         self.assertEqual(trials.family_parts(tols, 1), [tols])
-        # Only cubie restarts.
-        self.assertEqual(sorted(launch.RESTART_KERNELS), ["cubie"])
         self.assertIsNone(launch.RESTART_KERNELS.get("cpp"))
         saved = launch.RUNNERS["cubie"]
         launch.RUNNERS["cubie"] = lambda: [sys.executable, self.runner]

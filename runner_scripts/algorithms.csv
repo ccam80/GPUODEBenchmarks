@@ -7,9 +7,12 @@ classical-rk4,cubie,RK4,erk,4,true,false,false
 classical-rk4,jax,RK4,erk,4,true,false,false
 classical-rk4,pytorch,RK4,erk,4,true,false,false
 classical-rk4,cpp,RK4,erk,4,true,false,false
+classical-rk4,gradsolve,RK4,erk,4,true,false,false
 tsit5,cubie,Tsit5,erk,5,true,true,false
 tsit5,jax,Tsit5,erk,5,true,true,false
 tsit5,pytorch,Tsit5,erk,5,true,false,false
+tsit5,gradsolve,Tsit5,erk,5,true,true,false
+tsit5,modax,Tsit5,erk,5,false,true,false
 tsit5,julia_gpu,Tsit5,erk,5,true,true,false
 tsit5,julia_cpu,Tsit5,erk,5,true,true,false
 cash-karp-54,cubie,Cash-Karp 5(4),erk,5,true,true,false
@@ -18,6 +21,7 @@ cash-karp-54,julia_cpu,Cash-Karp 5(4),erk,5,true,true,false
 rosenbrock23_sciml,cubie,Rosenbrock23,rosenbrock,2,true,true,true
 rosenbrock23_sciml,julia_gpu,Rosenbrock23,rosenbrock,2,true,true,false
 rosenbrock23_sciml,julia_cpu,Rosenbrock23,rosenbrock,2,true,true,true
+rosenbrock23_sciml,gradsolve,Rosenbrock23,rosenbrock,2,false,true,false
 kvaerno3,cubie,Kvaerno3,dirk,3,true,true,true
 kvaerno3,jax,Kvaerno3,dirk,3,true,true,true
 kvaerno3,julia_gpu,Kvaerno3,dirk,3,true,true,false
@@ -58,3 +62,7 @@ rodas3p,julia_cpu,Rodas3P,rosenbrock,3,true,true,true
 kvaerno5,cubie,Kvaerno5,dirk,5,true,true,true
 kvaerno5,julia_gpu,Kvaerno5,dirk,5,true,true,false
 kvaerno5,julia_cpu,Kvaerno5,dirk,5,true,true,true
+rodas5p,cubie,Rodas5P,rosenbrock,5,true,true,true
+rodas5p,julia_gpu,Rodas5P,rosenbrock,5,true,true,false
+rodas5p,modax,Rodas5P,rosenbrock,5,false,true,false
+rodas5p_lu64,modax,Rodas5P (float64 LU),rosenbrock,5,false,true,false
