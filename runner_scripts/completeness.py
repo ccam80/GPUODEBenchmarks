@@ -10,7 +10,7 @@ MODES = (None, "resume", "no_overwrite")
 
 
 class Missing:
-    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted), `traces` (no readable traces file while traces are wanted); rows all NaN want none, `optimize` (the line's optimize record is absent, or timed out under no_overwrite), `optimize_timed_out` (a timed-out record that stands under resume)."""
+    """What one trial lacks: `rows` (transfers without a row, or with a NaN time under no_overwrite), `build` (transfers whose finite row has no cold build time), `finals` (no readable finals file while finals are wanted), `traces` (no readable traces file while traces are wanted); under resume the audit asks no finals or traces of a trial whose rows all lack a time, `optimize` (the line's optimize record is absent, or timed out under no_overwrite), `optimize_timed_out` (a timed-out record that stands under resume)."""
 
     def __init__(self, trial, wants_finals, wants_traces=False):
         self.trial = trial
@@ -78,7 +78,9 @@ def audit(trial_list, key, store, mode=None, optimize_rows=None):
         rows = {t: recorded.get(run) for t, run in run_ids(trial, key).items()}
         rows = {t: None if r is not None and compile_placeholder(r) else r for t, r in rows.items()}
         carried = [r["finals"] for r in rows.values() if r is not None and r["finals"]]
-        nan_only = all(r is not None and not _finite(r["min_ms"]) for r in rows.values())
+        # Resume keeps a recorded failure, so we exempt a trial whose rows all lack a time from finals and traces;
+        # otherwise resume would run it again for them. No_overwrite runs that trial again anyway, so we keep both.
+        nan_only = mode != "no_overwrite" and all(r is not None and not _finite(r["min_ms"]) for r in rows.values())
         missing = Missing(trial, bool(carried) or (bool(trial["finals"]) and not nan_only))
         for transfers, row in rows.items():
             if row is None or (mode == "no_overwrite" and not _finite(row["min_ms"])):
