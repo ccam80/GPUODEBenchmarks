@@ -30,6 +30,8 @@ NEW_PACKAGES_KEY = "linux_RTX-4070-SUPER"
 NEW_PACKAGES = dict(key=NEW_PACKAGES_KEY, package=("cubie", "gradsolve", "modax"), **KERNEL)
 NEW_PACKAGES_PROBLEMS = ("lorenz", "lorenz96", "pleiades", "pollu")
 # We draw modax's Rodas5P with a float64 LU in the Rodas5P panes.
+# We leave off the points whose error exceeds this, where a fixed-step solve diverged.
+NEW_PACKAGES_ERROR_MAX = 1.0e3
 SHARED_ALGORITHMS = ((("tsit5",), "Tsit5"), (("rodas5p", "rodas5p_lu64"), "Rodas5P"))
 
 FIGURES = (
@@ -49,12 +51,13 @@ FIGURES = (
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),
     Figure("6_fabbri_batch", BATCH, problem_panes(("fabbri_linder",)), columns=1,
            where=dict(package=("cubie", "myokit_cuda"), **KERNEL), title="Cubie against Myokit"),
-    Figure("7_new_packages_wp", WP, problem_panes(NEW_PACKAGES_PROBLEMS), where=NEW_PACKAGES, columns=2,
+    Figure("7_new_packages_wp", WP, problem_panes(NEW_PACKAGES_PROBLEMS, error_max=NEW_PACKAGES_ERROR_MAX),
+           where=NEW_PACKAGES, columns=2,
            per_key=False, title=shared.key_label(NEW_PACKAGES_KEY) + ": Cubie, gradsolve and modax work-precision"),
     Figure("7_new_packages_batch", BATCH,
            [Pane(dict(problem=problem, algorithm=algorithms), note=name)
             for problem in NEW_PACKAGES_PROBLEMS for algorithms, name in SHARED_ALGORITHMS],
-           where=NEW_PACKAGES, columns=2, per_key=False,
+           where=NEW_PACKAGES, columns=2, per_key=False, keep_errored=True,
            title=shared.key_label(NEW_PACKAGES_KEY) + ": Cubie, gradsolve and modax kernel time, shared algorithms"),
 )
 
