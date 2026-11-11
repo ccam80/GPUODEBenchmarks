@@ -1,6 +1,6 @@
 """plots.py [--where "<sql>"] [--kind KIND]* [--root data] [--out plots]
 
-plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with a pane per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. Every figure follows shared.Encoding; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis.
+plots/<key>/<kind>/<problem>_<algorithm>.png for the kinds runtime_vs_n, error_vs_runtime, interval_error_vs_runtime (the mean absolute inter-beat interval error of the traced first state, ms), trace_errored_vs_runtime (percent of traced trajectories errored by a failure code or a non-finite sample, linear axis), error_vs_dt, error_vs_tol and states (runtime and compile panels), with the points of a problem in <kind>/<problem>.csv; plots/all_cards/ holds the same figures with a pane per key. Every row of the store is read, or the rows a SQL predicate over the results view matches; every kind is written, or the kinds named. Every figure follows shared.Encoding; julia_cpu is on the error_vs_dt and error_vs_tol figures only. A series is one (key, package, controller kind, transfers, precision) and is drawn when it has two or more x values. A figure with one package or no series past three points goes under <kind>/limited_data/. A row over 10% errored trajectories is left off the figures and kept in the CSVs. runtime_vs_n, error_vs_runtime, interval_error_vs_runtime, trace_errored_vs_runtime and states also get <problem>_algorithms.png (a subplot per algorithm) and <algorithm>_problems.png (a subplot per problem); all but states also <problem>.png, every algorithm on one axis.
 """
 
 import math
@@ -125,7 +125,8 @@ def loose_first(row):
 
 
 def series_key(kind, row):
-    return (row["key"], row["package"], row["controller_kind"], row["transfers"] if kind.by_transfers else "")
+    return (row["key"], row["package"], row["controller_kind"], row["transfers"] if kind.by_transfers else "",
+            row["precision"])
 
 
 def context(kind, row):
@@ -133,7 +134,7 @@ def context(kind, row):
 
 
 def series_of(kind, rows):
-    """{(key, package, controller kind, transfers): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values and needs two."""
+    """{(key, package, controller kind, transfers, precision): [(x, y, row)]} of one algorithm's rows on a kind, in axis order (sweep order on the runtime axis). A series keeps the rows of the context with the most distinct x values and needs two."""
     grouped = {}
     for row in rows:
         if not takes(kind, row):
@@ -158,7 +159,8 @@ def series_of(kind, rows):
 
 def ordered(series):
     return dict(sorted(series.items(), key=lambda item: (
-        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.CONTROLLER_KINDS.index(item[0][2]), item[0][3])))
+        item[0][0], store_mod.PACKAGES.index(item[0][1]), shared.CONTROLLER_KINDS.index(item[0][2]), item[0][3],
+        item[0][4])))
 
 
 def merged(figures):
@@ -170,10 +172,10 @@ def merged(figures):
 
 
 def series_label(kind, key, points):
-    """'Cubie, 1024 fixed steps + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
-    _, package, controller, transfers = key[:4]
+    """'Cubie, 1024 fixed steps, float32 + transfer' from a series key and its first row; ' + transfer' for the both transfers, no step count where the axis sweeps dt."""
+    _, package, controller, transfers, precision = key[:5]
     parts = [shared.package_name(package),
-             shared.controller_text(controller, None if "dt" in kind.varying else points[0][2])]
+             shared.controller_text(controller, None if "dt" in kind.varying else points[0][2]), precision]
     return ", ".join(parts) + (" + transfer" if transfers == "both" else "")
 
 
@@ -195,14 +197,22 @@ def cards_of(series):
 ERROR_COLUMNS = ("error", "interval_error")
 
 
-def fit_errors(panel, kind, series):
-    """Fit an error axis to the positive finite errors drawn."""
+def fit_errors(panel, kind, series, error_max=None):
+    """Fit an error axis to the positive finite errors drawn, ending it at `error_max` when one is given."""
     for column, index, limits in ((kind.x, 0, panel.set_xlim), (kind.y, 1, panel.set_ylim)):
         if column not in ERROR_COLUMNS:
             continue
         values = [p[index] for points in series.values() for p in points if math.isfinite(p[index]) and p[index] > 0]
         if values:
-            limits(min(values) / 2.0, max(values) * 2.0)
+            top = max(values) * 2.0
+            limits(min(values) / 2.0, top if error_max is None else min(top, error_max))
+
+
+def below_error(kind, series, error_max):
+    """Return the series without the points whose error exceeds `error_max`, dropping a series left empty."""
+    columns = [index for index, column in ((0, kind.x), (1, kind.y)) if column in ERROR_COLUMNS]
+    kept = {key: [p for p in points if not any(p[i] > error_max for i in columns)] for key, points in series.items()}
+    return {key: points for key, points in kept.items() if points}
 
 
 def unflagged(series):
@@ -211,14 +221,14 @@ def unflagged(series):
     return {key: points for key, points in kept.items() if points}
 
 
-def plot_panel(panel, kind, series, encoding):
-    """Every series on one panel in the figure's encoding."""
+def plot_panel(panel, kind, series, encoding, error_max=None):
+    """Every series on one panel in the figure's encoding, the error axis ending at `error_max` when one is given."""
     for key, points in series.items():
         panel.plot([p[0] for p in points], [p[1] for p in points], **encoding.style(key, points))
     panel.set_xscale("log")
     if kind.log_y:
         panel.set_yscale("log")
-    fit_errors(panel, kind, series)
+    fit_errors(panel, kind, series, error_max)
     if kind.invert_x:
         panel.invert_xaxis()
     panel.set_xlabel(kind.x_label)
@@ -228,7 +238,7 @@ def plot_panel(panel, kind, series, encoding):
 
 def tagged(series):
     """The series with each key's algorithm appended, so several algorithms share one panel."""
-    return {key[:4] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
+    return {key[:5] + (shared.Encoding.algorithm(key, points),): points for key, points in series.items()}
 
 
 def by_card(panels, columns):
@@ -248,10 +258,11 @@ def by_card(panels, columns):
     return out, (columns * most if columns else None)
 
 
-def render_panels(path, kind, panels, title, columns=None):
-    """The one renderer: a subplot per (name, series[, kind]) row-major over `columns` (near-square without), a pane per card, points over the errored limit left out, an empty series left blank, one encoding legend at the right."""
+def render_panels(path, kind, panels, title, columns=None, keep_errored=False):
+    """The one renderer: a subplot per (name, series[, kind[, error_max]]) row-major over `columns` (near-square without), a pane per card, points over the errored limit left out unless `keep_errored`, an empty series left blank, one encoding legend at the right."""
     plt = shared.pyplot()
-    panels = [(spec[0], unflagged(spec[1])) + tuple(spec[2:]) for spec in panels]
+    if not keep_errored:
+        panels = [(spec[0], unflagged(spec[1])) + tuple(spec[2:]) for spec in panels]
     panels, columns = by_card(panels, columns)
     count = len(panels)
     columns = columns or min(4, math.ceil(math.sqrt(count)))
@@ -267,7 +278,7 @@ def render_panels(path, kind, panels, title, columns=None):
         if not series:
             panel.set_axis_off()
             continue
-        plot_panel(panel, spec[2] if len(spec) > 2 else kind, series, encoding)
+        plot_panel(panel, spec[2] if len(spec) > 2 else kind, series, encoding, spec[3] if len(spec) > 3 else None)
         panel.set_title(name)
     for index in range(count, rows * columns):
         axes[index // columns][index % columns].set_axis_off()
@@ -338,10 +349,11 @@ TRANSFER = Kind("transfer_vs_n", "n", "transfer_s", ("n",), GPU_PACKAGES, False,
 
 
 class Pane:
-    """One panel: the rows it takes ({column: value or tuple of values}), a note after its title, a transform of its series, a kind in place of the figure's."""
+    """One panel: the rows it takes ({column: value or tuple of values}), a note after its title, a transform of its series, a kind in place of the figure's, and the largest error it draws."""
 
-    def __init__(self, where, note="", transform=None, kind=None):
+    def __init__(self, where, note="", transform=None, kind=None, error_max=None):
         self.where, self.note, self.transform, self.kind = where, note, transform, kind
+        self.error_max = error_max
 
     def title(self, card_in_title):
         parts = []
@@ -353,11 +365,12 @@ class Pane:
 
 
 class Figure:
-    """A figure as an inclusion list: its file stem, kind, panes, the rows every pane takes, the grid columns, a figure per key or one over every key, and a title."""
+    """A figure as an inclusion list: its file stem, kind, panes, the rows every pane takes, the grid columns, a figure per key or one over every key, a title, and whether it draws rows over the errored limit."""
 
-    def __init__(self, name, kind, panes, where=None, columns=None, per_key=True, title=""):
+    def __init__(self, name, kind, panes, where=None, columns=None, per_key=True, title="", keep_errored=False):
         self.name, self.kind, self.panes, self.where = name, kind, panes, where or {}
         self.columns, self.per_key, self.title = columns, per_key, title
+        self.keep_errored = keep_errored
 
 
 def problem_panes(problems, **pane):
@@ -430,15 +443,17 @@ def draw_figure(figure, rows, keys, out):
             series = pane_series(figure.kind, [r for r in rows if matches(r, where)])
             if pane.transform:
                 series = pane.transform(series)
+            if pane.error_max is not None:
+                series = below_error(kind, series, pane.error_max)
             if series:
-                panels.append((pane.title(key is None), series, kind))
+                panels.append((pane.title(key is None), series, kind, pane.error_max))
                 tables += csv_rows(kind, "", series)
         if not panels:
             continue
         stem = figure.name + ("_" + shared.slug(key) if key else "")
         title = (shared.key_label(key) + ": " if key else "") + figure.title
         path = os.path.join(out, stem + ".png")
-        render_panels(path, figure.kind, panels, title, figure.columns)
+        render_panels(path, figure.kind, panels, title, figure.columns, figure.keep_errored)
         shared.write_csv(os.path.join(out, stem + ".csv"), CSV_COLUMNS, tables)
         written.append(path)
     return written
