@@ -89,7 +89,8 @@ class Worker:
             tuned = cubie_bench.optimize_record(trial, self.key, self.root)
             if tuned is not None:
                 cubie_bench.adapter.apply_optimized(build.solver, tuned)
-            build.solver.compile(optimize_candidates=bool(trial["optimize"]) and tuned is None, max_parallel=1)
+            cubie_bench.adapter.compile_kernel(build.solver, optimize_candidates=bool(trial["optimize"]) and tuned is None,
+                                               max_parallel=1)
         finally:
             build.close()
 

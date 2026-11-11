@@ -74,10 +74,22 @@ def solve(solver, initial_values, parameters, duration, on_device=False):
     """One solve at the solver's own launch geometry, keeping the states of failed runs beside their status codes; a device solve is synchronised before returning."""
     result = solver.solve(initial_values=initial_values,
                           parameters=parameters, duration=duration,
-                          nan_error_trajectories=False, on_device=on_device)
+                          nan_error_trajectories=False, on_device=on_device, fix_constant_parameters=False)
     if on_device:
         result.stream.synchronize()
     return result
+
+
+def compile_kernel(solver, **kwargs):
+    """Compile the kernel that a solve of the system's swept parameters runs.
+
+    Pass keyword arguments through to Solver.compile.
+    """
+    import numpy as np
+    defaults = solver.system.parameters.defaults
+    # We give cubie one row per swept parameter, because it compiles in every parameter it gets no row for.
+    swept = np.array([[defaults[name]] for name in solver.swept_parameters], dtype=solver.precision)
+    solver.compile(parameters=swept, fix_constant_parameters=False, **kwargs)
 
 
 # ------------------------------------------------------------------ optimize
@@ -216,7 +228,7 @@ def record_optimize_timeout(trial, key, root=None):
 def optimize_point(solver, trial, initial_values, parameters, key, root=None, force=False, verbose=True):
     """Run Solver.optimize with cubie sizing the batch and duration itself (auto_size), apply the winner and record it for the line's kernel; `force` varies settings an earlier optimize applied."""
     result = solver.optimize(initial_values, parameters, duration=float(trial["duration"]), verbose=verbose,
-                             force=force, auto_size=True)
+                             force=force, auto_size=True, fix_constant_parameters=False)
     if result.best is None:
         raise RuntimeError("optimize timed no launch for {0} {1}".format(
             trial["problem"], trial["algorithm"]))
