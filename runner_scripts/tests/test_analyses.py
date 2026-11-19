@@ -207,6 +207,58 @@ class PlotTests(AnalysesCase):
                           ("jax adaptive +", "0.0009765625", "0.001")])
         self.assertEqual(len(table), 6)
 
+    def test_each_precision_is_its_own_series_drawn_at_its_own_width(self):
+        for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0)):
+            self.row(n=n, min_ms=ms, transfers="none")
+            self.row(n=n, min_ms=2.0 * ms, transfers="none", precision="float64")
+        plots.run(self.analysis_store(), where="problem = 'lorenz'", out=self.out)
+        table = self.table("runtime_vs_n")
+        self.assertEqual(sorted({(sid(r), r["precision"]) for r in table}),
+                         [("cubie fixed", "float32"), ("cubie fixed", "float64")])
+        series = plots.series_of(plots.KINDS[0], plots.with_errors(self.analysis_store().rows(), errors.Errors(self.store)))
+        encoding = shared.Encoding(series)
+        self.assertEqual(encoding.precisions, ["float32", "float64"])
+        widths = {key[4]: encoding.style(key, points)["linewidth"] for key, points in series.items()}
+        self.assertNotEqual(widths["float32"], widths["float64"])
+        _, labels, headings = encoding.legend(shared.pyplot())
+        self.assertIn("Precision", headings)
+        one = {key: points for key, points in series.items() if key[4] == "float32"}
+        self.assertNotIn("Precision", shared.Encoding(one).legend(shared.pyplot())[2])
+
+    def test_a_pane_leaves_off_errors_past_its_limit_and_a_figure_can_keep_errored_rows(self):
+        self.error_sweep()
+        os.makedirs(self.out)
+        rows = plots.load_rows(self.analysis_store())
+        def drawn(error_max):
+            figure = plots.Figure("wp", plots.kind_named("error_vs_runtime"),
+                                  [plots.Pane(dict(problem="lorenz"), error_max=error_max)], where=dict(transfers="none"))
+            plots.draw_figure(figure, rows, [KEY], self.out)
+            return [float(r["error"]) for r in read_csv(os.path.join(self.out, "wp_" + shared.slug(KEY) + ".csv"))]
+
+        every = drawn(None)
+        limit = sorted(every)[len(every) // 2]
+        kept = drawn(limit)
+        self.assertTrue(kept)
+        self.assertLess(len(kept), len(every))
+        self.assertTrue(all(error <= limit for error in kept))
+        batch = [self.row(n=n, min_ms=float(n), transfers="none", errored_pct=50.0) for n in (8, 32)]
+        rows = plots.load_rows(self.analysis_store())
+        drawn_points = []
+        real_plot_panel = plots.plot_panel
+
+        def counting(panel, kind, series, encoding, error_max=None):
+            drawn_points.append(sum(len(points) for points in series.values()))
+            return real_plot_panel(panel, kind, series, encoding, error_max)
+
+        plots.plot_panel = counting
+        self.addCleanup(setattr, plots, "plot_panel", real_plot_panel)
+        for keep in (False, True):
+            figure = plots.Figure("batch", plots.kind_named("runtime_vs_n"), [plots.Pane(dict(problem="lorenz", n=(8, 32)))],
+                                  where=dict(transfers="none", dt=batch[0]["dt"]), keep_errored=keep)
+            plots.draw_figure(figure, rows, [KEY], self.out)
+        # The errored rows are left off unless the figure keeps them.
+        self.assertEqual(drawn_points, [2])
+
     def test_states_figure_has_runtime_and_cold_build_panels(self):
         for states, build in ((4, 10.0), (8, 20.0), (16, 40.0)):
             fields = dict(problem="lorenz96", system_params={"states": states}, n=131072, **adaptive(1e-5))
