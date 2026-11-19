@@ -1,4 +1,4 @@
-"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize and the untimed packages; a stepping may narrow the problems and set its own precision; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
+"""Set expansion: a TOML file under sets/ names packages, problems, algorithms, grids, steppings, the packages that optimize, the untimed packages and the packages it solves through host arrays; a stepping may narrow the problems and set its own precision; expand() turns the named sets into run specs, each with its transfers, finals flag, traces flag, build mode, optimize flag, watchdog budget and single-run threshold; declarations() expands every set file so a point's specs from all of them can merge. cubie's default adaptive controller is Julia's for the algorithm (runner_scripts/julia_controllers.csv, mapped by cubie_adapter.julia_controller) and cubie's own where Julia has none that maps. `python sets.py <name>` prints the spec count per package."""
 
 import csv
 import math
@@ -18,9 +18,10 @@ JULIA_CONTROLLERS_CSV = os.path.join(REPO_ROOT, "runner_scripts", "julia_control
 NAN = float("nan")
 GRID_FIELDS = ("parameter", "scale", "min", "max")
 SET_KEYS = ("packages", "problems", "algorithms", "precision", "finals", "traces", "transfers", "build",
-            "optimize", "watchdog", "single_run", "untimed")
+            "optimize", "watchdog", "single_run", "untimed", "host_solves")
 OPTIMIZE_KEYS = ("packages",)
 UNTIMED_KEYS = ("packages",)
+HOST_SOLVES_KEYS = ("packages",)
 GRID_KEYS = ("packages", "parameter", "scale", "min", "max", "problems", "n", "system_params")
 STEPPING_KEYS = ("packages", "problems", "algorithms", "precision", "controller", "dt", "newton", "tol", "dt0",
                  "dt_min", "dt_max", "gains")
@@ -140,6 +141,18 @@ def load_set(name, sets_dir=SETS_DIR):
         if untimed["packages"] == "all":
             untimed["packages"] = list(PACKAGES)
     head["untimed"] = untimed
+    host_solves = head.get("host_solves")
+    if host_solves is not None:
+        where = path + " [set.host_solves]"
+        if not isinstance(host_solves, dict):
+            raise SetError(where + " must be a table")
+        _check_keys(host_solves, HOST_SOLVES_KEYS, where)
+        if "packages" not in host_solves:
+            raise SetError(where + ": packages is required")
+        host_solves["packages"] = _name_list(host_solves["packages"], PACKAGES, where + " packages")
+        if host_solves["packages"] == "all":
+            host_solves["packages"] = list(PACKAGES)
+    head["host_solves"] = host_solves
     grids = data.get("grid", [])
     steppings = data.get("stepping", [])
     if not grids or not steppings:
@@ -381,6 +394,11 @@ def _optimize_for(table, package):
     return table is not None and (table["packages"] == "all" or package in table["packages"])
 
 
+def _host_solved(head, package):
+    """True when the set's host_solves table names the package."""
+    return head["host_solves"] is not None and package in head["host_solves"]["packages"]
+
+
 def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_dir=SETS_DIR):
     """Run specs of the named sets in order: the cartesian product of packages, the problems each implements, the algorithms it runs under each stepping kind, grids and steppings. `packages`, `problems`, `algorithms` and `n` narrow; a grid keeps the counts of its n list that `n` names."""
     catalogue = load_algorithms()
@@ -431,7 +449,9 @@ def expand(names, packages=None, problems=None, algorithms=None, n=None, sets_di
                                             "algorithm": algorithm.name}
                                         spec.update(values)
                                         spec["package"] = package
-                                        spec["transfers"] = list(head["transfers"])
+                                        # A package the set solves through host arrays has the one transfers mode.
+                                        spec["transfers"] = ["both"] if _host_solved(head, package) \
+                                            else list(head["transfers"])
                                         spec["finals"] = bool(head["finals"])
                                         spec["traces"] = bool(head["traces"])
                                         spec["build"] = head["build"]

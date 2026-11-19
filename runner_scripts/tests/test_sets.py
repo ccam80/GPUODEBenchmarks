@@ -192,7 +192,6 @@ class ShippedSetTests(unittest.TestCase):
 
     def test_golden_grid_counts(self):
         specs = self.expanded["golden_grid"]
-        self.assertEqual({tuple(s["transfers"]) for s in specs}, {("none",)})
         self.assertEqual({s["finals"] for s in specs}, {True})
         self.assertEqual({s["stepping"] for s in specs}, {"fixed", "default"})
         loaded = sets.load_set("golden_grid")
@@ -556,6 +555,20 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual({t["optimize"] for t in built}, {False})
         self.assertEqual(len(built), len(specs))
 
+    def test_host_solves_names_the_packages_solved_through_host_arrays(self):
+        text = self.MINIMAL.replace('packages = ["jax"]', 'packages = ["jax", "gradsolve"]').replace(
+            'problems = ["lorenz"]\n', 'problems = ["lorenz"]\ntransfers = ["none"]\n')
+        self.write(text + '[set.host_solves]\npackages = ["gradsolve"]\n')
+        loaded = sets.load_set("s", self.tmp)
+        self.assertEqual(loaded["set"]["host_solves"], {"packages": ["gradsolve"]})
+        specs = sets.expand(["s"], sets_dir=self.tmp)
+        self.assertEqual({(s["package"], tuple(s["transfers"])) for s in specs},
+                         {("jax", ("none",)), ("gradsolve", ("both",))})
+        for bad in ('[set.host_solves]\npackages = ["nobody"]\n', '[set.host_solves]\n', '[set.host_solves]\nper = 1\n'):
+            self.write(text + bad)
+            with self.assertRaises(sets.SetError, msg=bad):
+                sets.load_set("s", self.tmp)
+
     def test_untimed_names_the_packages_whose_lines_run_once(self):
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["jax"]\n'))
         loaded = sets.load_set("s", self.tmp)
@@ -566,6 +579,10 @@ class SchemaTests(unittest.TestCase):
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["nobody"]\n'))
         with self.assertRaises(sets.SetError):
             sets.load_set("s", self.tmp)
+        # The shipped golden_grid solves gradsolve through host arrays and every other package on resident inputs.
+        specs = sets.expand(["golden_grid"], packages=["gradsolve", "cpp"], problems=["lorenz"])
+        self.assertEqual({(s["package"], tuple(s["transfers"])) for s in specs},
+                         {("gradsolve", ("both",)), ("cpp", ("none",))})
         # The shipped golden_grid times every package but the reference.
         specs = sets.expand(["golden_grid"], packages=["julia_cpu", "cpp"], problems=["lorenz"])
         self.assertEqual({(s["package"], s["timed"]) for s in specs}, {("julia_cpu", False), ("cpp", True)})

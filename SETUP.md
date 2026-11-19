@@ -94,13 +94,13 @@ Linux only; elsewhere the script prints a skip and exits 0. Installs the
 pinned gradsolve, `warp-lang` and `jax[cuda13]` with `pyarrow` and `tzdata`,
 fails when jax-cuda plugins of two CUDA generations coexist, and imports the
 stack on jax's CPU backend, so setting up needs no free GPU. An adaptive trial
-runs gradsolve's fused Warp kernels (Tsit5 for systems of at most 64 states,
-and Rosenbrock23 at any size); a fixed trial runs its fixed-step `lax.scan`
-Tsit5 or RK4. gradsolve's own solve refuses Rosenbrock23 above 12 states on a
-GPU. The adapter ignores that limit, so a run records where the kernel fails.
-The adapter (`runner_scripts/gradsolve_bench.py`) launches the kernels through
-gradsolve's Warp launch layer so that a trial sets the first step and the step
-bound. Warp compiles into `generated/gradsolve_warp_cache`.
+runs `gradsolve.solve` on its fused Warp engines (Tsit5, Rosenbrock23); a fixed
+trial runs its fixed-step `lax.scan` Tsit5 or RK4. The adapter
+(`runner_scripts/gradsolve_bench.py`) passes `gradsolve.solve` the tolerances
+and nothing else, so gradsolve chooses the first step and the step bound and
+refuses a problem past its own state limits. `gradsolve.solve` takes and
+returns host arrays, so an adaptive trial records no solve on resident inputs.
+Warp compiles into `generated/gradsolve_warp_cache`.
 
 ### modax
 
@@ -115,7 +115,8 @@ or jax-cuda plugins of two CUDA generations are installed, and imports the
 stack on jax's CPU backend. modax integrates in float64 only and adaptively
 only (Tsit5, Rodas5P), so it runs in the float64 precision comparison of `perf`
 and `golden_grid` alone. The `rodas5p` algorithm runs Rodas5P with modax's
-default float32 LU factorisation and `rodas5p_lu64` with a float64 one. modax
+default float32 LU factorisation and `rodas5p_lu64` with a float64 one. The
+adapter leaves the first step and the step bound to modax. modax
 builds a C++ FFI shim at first use, so `g++` must be on PATH.
 
 ### cpp

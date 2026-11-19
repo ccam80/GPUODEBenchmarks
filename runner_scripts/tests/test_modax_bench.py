@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import modax_bench  # noqa: E402
 import store  # noqa: E402
-from jax_bench import ADAPTIVE_MAX_STEPS  # noqa: E402
 
 NAN = float("nan")
 
@@ -39,19 +38,24 @@ class TrialTests(unittest.TestCase):
                 modax_bench.check_trial(trial(**bad))
         self.assertEqual(modax_bench.ModaxAdapter.controllers, ("default",))
 
-    def test_the_solve_options_carry_tolerances_first_step_step_bound_and_gains(self):
-        self.assertEqual(modax_bench.solve_options(trial()),
-                         {"rtol": 1e-5, "atol": 1e-5, "first_step": 2.0 ** -10, "max_steps": ADAPTIVE_MAX_STEPS})
+    def test_the_solve_options_carry_tolerances_and_gains_and_leave_the_steps_to_modax(self):
+        self.assertEqual(modax_bench.solve_options(trial()), {"rtol": 1e-5, "atol": 1e-5})
         # The Rodas5P algorithms differ only in the precision of the LU factorisation.
         self.assertEqual(modax_bench.solve_options(trial(algorithm="rodas5p"))["lu_precision"], "fp32")
         self.assertEqual(modax_bench.solve_options(trial(algorithm="rodas5p_lu64"))["lu_precision"], "fp64")
         self.assertEqual(modax_bench.SOLVERS["rodas5p"][0], modax_bench.SOLVERS["rodas5p_lu64"][0])
-        self.assertIsNone(modax_bench.solve_options(trial(dt=NAN))["first_step"])
+        self.assertEqual(modax_bench.solve_options(trial(dt=NAN)), modax_bench.solve_options(trial()))
         gained = modax_bench.solve_options(trial(gains='{"icoeff":0.7,"pcoeff":0.4}'))
         self.assertEqual((gained["pcoeff"], gained["icoeff"]), (0.4, 0.7))
         for bad in (dict(dt_min=1e-7), dict(dt_max=0.5), dict(gains='{"safety":0.9}')):
             with self.assertRaises(ValueError, msg=bad):
                 modax_bench.solve_options(trial(**bad))
+
+    def test_the_step_bound_is_the_solve_functions_own_default(self):
+        def solve(ode_fn, y0, t_span, params, *, rtol=1e-8, max_steps=321):
+            return None
+
+        self.assertEqual(modax_bench.step_bound(solve), 321)
 
     def test_the_stepping_key_follows_the_stepping_fields_not_the_ensemble(self):
         self.assertEqual(modax_bench.stepping_key(trial()), modax_bench.stepping_key(trial(n=32)))
