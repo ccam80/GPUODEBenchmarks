@@ -297,12 +297,13 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(audits[states[0]["trial_id"]].reasons(), ["build:both", "build:none"])
         self.assertEqual(audits[states[1]["trial_id"]].reasons(), ["build:none"])
         self.assertTrue(audits[states[2]["trial_id"]].complete())
-        # A cold line recorded NaN wants no build time: complete under --resume, its rows under --no-overwrite.
+        # A cold line recorded without a time needs no build time. It is complete under --resume and runs again
+        # with its finals under --no-overwrite.
         for transfers in ("both", "none"):
             self.record(states[3], transfers, min_ms=NAN, reason="error: BuildError: out of memory")
         self.assertNotIn(states[3]["trial_id"], self.kept(states, resume=True))
         self.assertEqual(completeness.audit(states, KEY, self.data, "no_overwrite")[states[3]["trial_id"]].reasons(),
-                         ["row:both", "row:none"])
+                         ["row:both", "row:none", "finals"])
         # A warm line's rows never need one.
         perf = self.plan("--set", "perf", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4", "-n", "8")["cpp"]
         for transfers in ("both", "none"):
@@ -338,7 +339,7 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual((kept[point["trial_id"]]["transfers"], kept[point["trial_id"]]["finals"]),
                          (["both", "none"], True))
         self.assertEqual(completeness.audit(perf, KEY, self.data, "resume")[point["trial_id"]].reasons(), ["finals"])
-        # Rows all NaN carry no finals: complete under --resume, the row alone under --no-overwrite.
+        # A trial whose rows all lack a time is complete under --resume and runs again with its finals under --no-overwrite.
         timed_out = self.plan("--set", "golden_grid", "-p", "cpp", "-s", "lorenz", "-g", "classical-rk4",
                               "--dt", "0.125")["cpp"]
         spec = {f: timed_out[0][f] for f in store.TRIAL_FIELDS}
@@ -347,7 +348,8 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(self.kept(timed_out, resume=True), {})
         self.assertTrue(completeness.audit(timed_out, KEY, self.data)[timed_out[0]["trial_id"]].complete())
         self.assertEqual(completeness.audit(timed_out, KEY, self.data, "no_overwrite")[timed_out[0]["trial_id"]].reasons(),
-                         ["row:none"])
+                         ["row:none", "finals"])
+        self.assertTrue(self.kept(timed_out, no_overwrite=True)[timed_out[0]["trial_id"]]["finals"])
 
     def test_an_optimize_record_must_exist_for_the_kernel(self):
         perf = self.plan("--set", "perf", "-p", "cubie", "-s", "lorenz", "-g", "tsit5", "--mode", "fixed",
