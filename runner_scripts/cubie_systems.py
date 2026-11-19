@@ -352,8 +352,7 @@ def _fabbri_linder(problem, precision, name):
     system = load_cellml_model(fabbri.MODEL_PATH, precision=precision, name=name,
                                voltage_variable=fabbri.VOLTAGE_RAW)
     system.set_default_parameters({fabbri.ANS_CONSTANT: 1.0})
-    initial = {name: float(value) for name, value in zip(system.initial_values.names,
-                                                          system.initial_values.values_array)}
+    initial = {name: float(value) for name, value in system.states.defaults.items()}
     if sorted(initial) != sorted(fabbri.STATE_ORDER):
         raise SystemExit("the Fabbri-Linder CellML loaded states {0}, not fabbri.STATE_ORDER".format(
             sorted(initial)))

@@ -11,6 +11,7 @@ import timeit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import abandon  # noqa: E402
+import grid as grid_mod  # noqa: E402
 import runner  # noqa: E402
 import store as store_mod  # noqa: E402
 import trials as trials_mod  # noqa: E402
@@ -89,8 +90,9 @@ class Worker:
             tuned = cubie_bench.optimize_record(trial, self.key, self.root)
             if tuned is not None:
                 cubie_bench.adapter.apply_optimized(build.solver, tuned)
-            cubie_bench.adapter.compile_kernel(build.solver, optimize_candidates=bool(trial["optimize"]) and tuned is None,
-                                               max_parallel=1)
+            # cubie compiles the kernel for the parameters it is given, so we give it the line's own grid.
+            build.solver.compile(parameters=build.grid(grid_mod.grid(trial))[1],
+                                 optimize_candidates=bool(trial["optimize"]) and tuned is None, max_parallel=1)
         finally:
             build.close()
 
