@@ -94,11 +94,13 @@ Linux only; elsewhere the script prints a skip and exits 0. Installs the
 pinned gradsolve, `warp-lang` and `jax[cuda13]` with `pyarrow` and `tzdata`,
 fails when jax-cuda plugins of two CUDA generations coexist, and imports the
 stack on jax's CPU backend, so setting up needs no free GPU. An adaptive trial
-runs `gradsolve.solve` on its fused Warp engines (Tsit5, Rosenbrock23); a fixed
-trial runs its fixed-step `lax.scan` Tsit5 or RK4. The adapter
-(`runner_scripts/gradsolve_bench.py`) passes `gradsolve.solve` the tolerances
-and nothing else, so gradsolve chooses the first step and the step bound and
-refuses a problem past its own state limits. `gradsolve.solve` takes and
+runs `gradsolve.solve` on the engine its router picks; a fixed trial runs its
+fixed-step `lax.scan` Tsit5 or RK4. The adapter
+(`runner_scripts/gradsolve_bench.py`) registers the problem's field, declares it
+non-stiff for Tsit5 and stiff for Rosenbrock23, and passes `gradsolve.solve` the
+tolerances and nothing else, so gradsolve chooses the kernel, the first step and
+the step bound and refuses a problem past its own state limits; the runner log
+names the engine each solve ran. `gradsolve.solve` takes and
 returns host arrays, so an adaptive trial records no solve on resident inputs.
 Warp compiles into `generated/gradsolve_warp_cache`.
 
