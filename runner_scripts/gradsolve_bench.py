@@ -7,10 +7,8 @@ router picks, after registering the problem with gradsolve.register_jax_field.
 Declare the problem stiff for an implicit algorithm and non-stiff for an
 explicit one, and pass the tolerances and nothing else, so that gradsolve
 chooses the kernel, the first step and the step bound and refuses a problem
-past its own state limits. Route the non-stiff cell of 16 states or fewer to
-warp_ode, not to the hand-written cuda_tsit5 kernel, because cuda_tsit5 holds
-CUDA source for gradsolve's built-in fields only and raises on a registered
-one. Print the engine each solve ran. Raise RuntimeError
+past its own state limits. Route a non-stiff problem of 16 states or fewer to
+warp_ode. Print the engine each solve ran. Raise RuntimeError
 for an adaptive solve on resident device inputs, because gradsolve.solve takes
 and returns host arrays. Run a fixed-step trial on gradsolve's lax.scan Tsit5 or
 RK4, jitted over the ensemble. Compile a cold build into fresh Warp and jax
@@ -176,7 +174,7 @@ class Build:
     def fused(self, plan):
         """Register the problem's field and return the Problem that gradsolve.solve routes."""
         from gradsolve import dispatch, register_jax_field
-        # cuda_tsit5 accepts any registered field but emits CUDA source only for its built-ins, so its cell goes to warp_ode.
+        # Route the small non-stiff cell to warp_ode.
         dispatch.CUDA_TSIT5_ENABLED = False
         key = self.name + ("_stiff" if plan["stiff"] else "")
         register_jax_field(key, self.f_jax, self.states, 1, stiff=plan["stiff"])

@@ -101,9 +101,7 @@ non-stiff for Tsit5 and stiff for Rosenbrock23, and passes `gradsolve.solve` the
 tolerances and nothing else, so gradsolve chooses the kernel, the first step and
 the step bound and refuses a problem past its own state limits. The adapter
 turns off gradsolve's `dispatch.CUDA_TSIT5_ENABLED` switch, so a non-stiff
-problem of 16 states or fewer runs on `warp_ode`: the hand-written `cuda_tsit5`
-kernel the router would otherwise pick holds CUDA source for gradsolve's
-built-in fields only and raises on a registered one. The runner log
+problem of 16 states or fewer runs on `warp_ode`. The runner log
 names the engine each solve ran. `gradsolve.solve` takes and
 returns host arrays, so an adaptive trial records no solve on resident inputs.
 Warp compiles into `generated/gradsolve_warp_cache`.
