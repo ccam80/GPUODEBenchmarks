@@ -2,14 +2,16 @@
 
 """Run gradsolve's solvers for runner.py.
 
-Run an adaptive trial through gradsolve.solve on the fused NVIDIA Warp engine
-that its algorithm names, after registering the problem with
-gradsolve.register_jax_field. Pass the tolerances and nothing else, so that
-gradsolve chooses the first step and the step bound and refuses a problem past
-its own state limits. Raise RuntimeError for an adaptive solve on resident
-device inputs, because gradsolve.solve takes and returns host arrays. Run a
-fixed-step trial on gradsolve's lax.scan Tsit5 or RK4, jitted over the ensemble.
-Compile a cold build into fresh Warp and jax caches.
+Run an adaptive trial through gradsolve.solve on the engine gradsolve's own
+router picks, after registering the problem with gradsolve.register_jax_field.
+Declare the problem stiff for an implicit algorithm and non-stiff for an
+explicit one, and pass the tolerances and nothing else, so that gradsolve
+chooses the kernel, the first step and the step bound and refuses a problem
+past its own state limits. Print the engine each solve ran. Raise RuntimeError
+for an adaptive solve on resident device inputs, because gradsolve.solve takes
+and returns host arrays. Run a fixed-step trial on gradsolve's lax.scan Tsit5 or
+RK4, jitted over the ensemble. Compile a cold build into fresh Warp and jax
+caches.
 """
 
 import math
@@ -32,8 +34,8 @@ WARP_CACHE_DIR = os.path.join(REPO_ROOT, "generated", "gradsolve_warp_cache")
 
 CONTROLLERS = ("fixed", "default")
 PRECISIONS = ("float32", "float64")
-# Map each adaptive algorithm to its fused engine and to whether gradsolve treats its problems as stiff.
-ENGINES = {"tsit5": ("warp_ode", False), "rosenbrock23_sciml": ("warp_rosenbrock", True)}
+# Map each adaptive algorithm to the stiffness we declare, which is the only routing input gradsolve takes from us.
+STIFF = {"tsit5": False, "rosenbrock23_sciml": True}
 # Map each fixed-step algorithm to its lax.scan solver module.
 SCANS = {"tsit5": "fixed_step_tsit5", "classical-rk4": "fixed_step_explicit"}
 DEVICE = "cuda"
@@ -63,7 +65,7 @@ def plan(trial):
     """Return the solve settings for a trial.
 
     Return the scan module and step count for a fixed step size. For an adaptive
-    controller, return the fused engine and the tolerances. Raise ValueError if
+    controller, return the declared stiffness and the tolerances. Raise ValueError if
     gradsolve does not run the algorithm under the trial's controller, or if the
     trial sets dt_min, dt_max or gains, which gradsolve.solve does not take.
     """
@@ -75,14 +77,13 @@ def plan(trial):
             raise ValueError("gradsolve has no fixed-step {0}".format(algorithm))
         return {"kind": "fixed", "module": SCANS[algorithm],
                 "steps": step_count(float(trial["duration"]), trial["dt"])}
-    if algorithm not in ENGINES:
+    if algorithm not in STIFF:
         raise ValueError("gradsolve has no adaptive {0}".format(algorithm))
     if _finite(trial["dt_min"]) or _finite(trial["dt_max"]):
         raise ValueError("gradsolve.solve takes no dt_min or dt_max")
     if trial["gains"] not in ("", "{}"):
         raise ValueError("gradsolve.solve takes no controller gains, got " + trial["gains"])
-    engine, stiff = ENGINES[algorithm]
-    return {"kind": "adaptive", "engine": engine, "stiff": stiff,
+    return {"kind": "adaptive", "stiff": STIFF[algorithm],
             "atol": float(trial["atol"]), "rtol": float(trial["rtol"])}
 
 
@@ -122,7 +123,7 @@ class Problem:
 class Build:
     """Hold the solves of one problem, precision and algorithm.
 
-    Build one solve per set of solve settings: a fused engine on the problem's
+    Build one solve per set of solve settings: gradsolve.solve on the problem's
     registered gradsolve field, or a jitted scan. Keep the device inputs of the
     last scan upload for scans on resident inputs.
     """
@@ -170,7 +171,7 @@ class Build:
 
     # ------------------------------------------------------------ fused
     def fused(self, plan):
-        """Register the problem's field and return the Problem that gradsolve.solve routes to the plan's engine."""
+        """Register the problem's field and return the Problem that gradsolve.solve routes."""
         from gradsolve import register_jax_field
         key = self.name + ("_stiff" if plan["stiff"] else "")
         register_jax_field(key, self.f_jax, self.states, 1, stiff=plan["stiff"])
@@ -179,7 +180,7 @@ class Build:
     def fused_solve(self, solve, values):
         """Solve the grid values through gradsolve.solve and return the final states on the host.
 
-        Raise RuntimeError if gradsolve ran an engine other than the plan's.
+        Print the engine gradsolve ran the first time each solve runs it.
         """
         import gradsolve
         plan = solve["plan"]
@@ -187,12 +188,14 @@ class Build:
         y0 = np.ascontiguousarray(np.broadcast_to(self.y0, (n, self.states)))
         params = np.asarray(values, dtype=self.np_dtype).reshape(n, 1)
         try:
-            result = gradsolve.solve(solve["problem"], y0, params, engine=plan["engine"], rtol=plan["rtol"],
-                                     atol=plan["atol"], device=DEVICE)
+            result = gradsolve.solve(solve["problem"], y0, params, rtol=plan["rtol"], atol=plan["atol"],
+                                     device=DEVICE)
         except RuntimeError as exc:
             raise as_memory_error(exc)
-        if result.solver != plan["engine"]:
-            raise RuntimeError("gradsolve ran {0} where the trial names {1}".format(result.solver, plan["engine"]))
+        if solve.get("engine") != result.solver:
+            solve["engine"] = result.solver
+            print("gradsolve engine: {0} {1} rtol={2:g} ran {3}".format(
+                self.name, self.algorithm, plan["rtol"], result.solver), flush=True)
         return np.asarray(result.y_final).reshape(n, self.states)
 
     # ------------------------------------------------------------- scans

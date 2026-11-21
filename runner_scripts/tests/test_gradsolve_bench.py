@@ -44,11 +44,11 @@ class PlanTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 gradsolve_bench.plan(trial(**bad))
 
-    def test_an_adaptive_trial_names_a_fused_engine_and_its_tolerances_and_nothing_else(self):
+    def test_an_adaptive_trial_declares_its_stiffness_and_tolerances_and_leaves_the_engine_to_gradsolve(self):
         tsit5 = gradsolve_bench.plan(trial(**adaptive()))
-        self.assertEqual(tsit5, {"kind": "adaptive", "engine": "warp_ode", "stiff": False, "atol": 1e-5, "rtol": 1e-5})
+        self.assertEqual(tsit5, {"kind": "adaptive", "stiff": False, "atol": 1e-5, "rtol": 1e-5})
         rosenbrock = gradsolve_bench.plan(trial(algorithm="rosenbrock23_sciml", **adaptive()))
-        self.assertEqual((rosenbrock["engine"], rosenbrock["stiff"]), ("warp_rosenbrock", True))
+        self.assertEqual(rosenbrock, {"kind": "adaptive", "stiff": True, "atol": 1e-5, "rtol": 1e-5})
         # gradsolve chooses its own first step, so the trial's does not reach the plan.
         self.assertEqual(gradsolve_bench.plan(trial(**adaptive(dt=NAN))), tsit5)
 
