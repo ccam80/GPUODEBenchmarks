@@ -107,6 +107,14 @@ class SolveTests(unittest.TestCase):
         build.compile(trial(**adaptive()), values)
         self.assertEqual(build.fused_solves, [2])
 
+    def test_registering_a_field_routes_the_small_non_stiff_cell_to_warp_ode(self):
+        from gradsolve import dispatch
+        build = gradsolve_bench.Build.__new__(gradsolve_bench.Build)
+        build.name, build.states = "suite_lorenz_3", 3
+        build.duration, build.f_jax = 1.0, lambda t, y, p: y
+        problem = build.fused({"stiff": False})
+        self.assertEqual(dispatch.choose_engine(problem.dim, problem.is_stiff, False), "warp_ode")
+
     def test_a_warp_allocation_failure_is_recorded_as_out_of_memory(self):
         error = gradsolve_bench.as_memory_error(RuntimeError("Failed to allocate 1024 bytes on device 'cuda:0'"))
         self.assertIsInstance(error, MemoryError)

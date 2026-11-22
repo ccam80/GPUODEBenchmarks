@@ -99,7 +99,9 @@ fixed-step `lax.scan` Tsit5 or RK4. The adapter
 (`runner_scripts/gradsolve_bench.py`) registers the problem's field, declares it
 non-stiff for Tsit5 and stiff for Rosenbrock23, and passes `gradsolve.solve` the
 tolerances and nothing else, so gradsolve chooses the kernel, the first step and
-the step bound and refuses a problem past its own state limits; the runner log
+the step bound and refuses a problem past its own state limits. The adapter
+turns off gradsolve's `dispatch.CUDA_TSIT5_ENABLED` switch, so a non-stiff
+problem of 16 states or fewer runs on `warp_ode`. The runner log
 names the engine each solve ran. `gradsolve.solve` takes and
 returns host arrays, so an adaptive trial records no solve on resident inputs.
 Warp compiles into `generated/gradsolve_warp_cache`.
