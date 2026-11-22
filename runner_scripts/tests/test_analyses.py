@@ -207,7 +207,7 @@ class PlotTests(AnalysesCase):
                           ("jax adaptive +", "0.0009765625", "0.001")])
         self.assertEqual(len(table), 6)
 
-    def test_each_precision_is_its_own_series_drawn_at_its_own_width(self):
+    def test_an_algorithm_at_each_precision_is_its_own_series_and_marker(self):
         for n, ms in ((8, 1.0), (32, 2.0), (128, 4.0)):
             self.row(n=n, min_ms=ms, transfers="none")
             self.row(n=n, min_ms=2.0 * ms, transfers="none", precision="float64")
@@ -217,13 +217,30 @@ class PlotTests(AnalysesCase):
                          [("cubie fixed", "float32"), ("cubie fixed", "float64")])
         series = plots.series_of(plots.KINDS[0], plots.with_errors(self.analysis_store().rows(), errors.Errors(self.store)))
         encoding = shared.Encoding(series)
-        self.assertEqual(encoding.precisions, ["float32", "float64"])
-        widths = {key[4]: encoding.style(key, points)["linewidth"] for key, points in series.items()}
-        self.assertNotEqual(widths["float32"], widths["float64"])
+        markers = {key[4]: (encoding.style(key, points)["marker"], encoding.style(key, points)["markerfacecolor"])
+                   for key, points in series.items()}
+        self.assertNotEqual(markers["float32"], markers["float64"])
+        widths = {encoding.style(key, points)["linewidth"] for key, points in series.items()}
+        self.assertEqual(len(widths), 1)
         _, labels, headings = encoding.legend(shared.pyplot())
-        self.assertIn("Precision", headings)
+        self.assertEqual(headings, ["Package", "Algorithm", "Steps"])
+        algorithm_labels = labels[labels.index("Algorithm") + 1:labels.index("Steps")]
+        self.assertEqual(len(algorithm_labels), 2)
+        self.assertEqual(len(set(algorithm_labels)), 2)
         one = {key: points for key, points in series.items() if key[4] == "float32"}
-        self.assertNotIn("Precision", shared.Encoding(one).legend(shared.pyplot())[2])
+        _, labels, _ = shared.Encoding(one).legend(shared.pyplot())
+        self.assertEqual(labels[labels.index("Algorithm") + 1], shared.algorithm_name("tsit5"))
+
+    def test_every_algorithm_of_a_figure_takes_its_own_marker_up_to_twice_the_shapes(self):
+        names = shared.catalogue_order()
+        identities = [(name, precision) for name in names for precision in ("float32", "float64")]
+        identities = identities[:2 * len(shared.SHAPES)]
+        row = dict(spec(), min_ms=1.0)
+        series = {(KEY, "cubie", "fixed", "", precision, name): [(1.0, 1.0, row), (2.0, 2.0, row)]
+                  for name, precision in identities}
+        encoding = shared.Encoding(series)
+        markers = {encoding.marker_of(identity) for identity in identities}
+        self.assertEqual(len(markers), len(identities))
 
     def test_a_pane_leaves_off_errors_past_its_limit_and_a_figure_can_keep_errored_rows(self):
         self.error_sweep()

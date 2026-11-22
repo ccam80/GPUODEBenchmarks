@@ -267,7 +267,7 @@ def render_panels(path, kind, panels, title, columns=None, keep_errored=False):
     count = len(panels)
     columns = columns or min(4, math.ceil(math.sqrt(count)))
     rows = math.ceil(count / columns)
-    encoding = shared.Encoding(merged(p[1] for p in panels if p[1]))
+    encoding = shared.Encoding(*(p[1] for p in panels if p[1]))
     _, labels, _ = encoding.legend(plt)
     width = 5.0 * columns
     fig, axes = plt.subplots(rows, columns, figsize=(width + 2.6, max(3.8 * rows, 0.17 * len(labels) + 0.8)),
