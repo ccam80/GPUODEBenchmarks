@@ -41,6 +41,12 @@ EVERY_PACKAGE = dict(key=NEW_PACKAGES_KEY)
 WITH_TRANSFERS = {"transfers": "both"}
 
 
+def gradsolve_with_transfers(series):
+    """Return the Cubie and modax series without transfers and the gradsolve series with them."""
+    kept = {("cubie", "none"), ("modax", "none"), ("gradsolve", "both")}
+    return {key: points for key, points in series.items() if (key[1], key[3]) in kept}
+
+
 def batch_figures(stem, algorithms, where, problems, title):
     """Return a figure of time with transfers per (algorithm names, display name), a pane per problem, keeping errored rows."""
     return [Figure("{0}_batch_{1}".format(stem, shared.slug(names[0])), BATCH, problem_panes(problems),
@@ -78,6 +84,10 @@ FIGURES = (
     Figure("7_new_packages_wp", WP, problem_panes(NEW_PACKAGES_PROBLEMS, error_max=NEW_PACKAGES_ERROR_MAX),
            where=dict(NEW_PACKAGES, algorithm=EVERY_NEW_PACKAGES_ALGORITHM, **KERNEL), columns=2, per_key=False,
            title=NEW_PACKAGES_TITLE + "Cubie, gradsolve and modax work-precision, every algorithm gradsolve or modax ran"),
+    Figure("7_new_packages_wp_gradsolve_transfers", WP,
+           problem_panes(NEW_PACKAGES_PROBLEMS, error_max=NEW_PACKAGES_ERROR_MAX, transform=gradsolve_with_transfers),
+           where=dict(NEW_PACKAGES, algorithm=EVERY_NEW_PACKAGES_ALGORITHM), columns=2, per_key=False,
+           title=NEW_PACKAGES_TITLE + "Cubie and modax kernel time, gradsolve time with transfers, work-precision"),
     *batch_figures("7_new_packages", NEW_PACKAGES_ALGORITHMS, NEW_PACKAGES, NEW_PACKAGES_PROBLEMS,
                    "Cubie, gradsolve and modax"),
     *batch_figures("8_every_package", (TSIT5, RODAS5P), EVERY_PACKAGE, PROBLEMS, "every package"),
