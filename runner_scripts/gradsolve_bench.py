@@ -8,11 +8,13 @@ Declare the problem stiff for an implicit algorithm and non-stiff for an
 explicit one, and pass the tolerances and nothing else, so that gradsolve
 chooses the kernel, the first step and the step bound and refuses a problem
 past its own state limits. Route a non-stiff problem of 16 states or fewer to
-warp_ode. Print the engine each solve ran. Raise RuntimeError
-for an adaptive solve on resident device inputs, because gradsolve.solve takes
-and returns host arrays. Run a fixed-step trial on gradsolve's lax.scan Tsit5 or
-RK4, jitted over the ensemble. Compile a cold build into fresh Warp and jax
-caches.
+warp_ode. Print the engine each solve ran. gradsolve.solve takes and returns
+host arrays, so time an adaptive Tsit5 solve on resident device inputs by
+launching the warp_ode kernel that gradsolve.solve runs, with the same first
+step and step bound, on inputs uploaded before the timing. Raise RuntimeError
+for any other adaptive solve on resident inputs. Run a fixed-step trial on
+gradsolve's lax.scan Tsit5 or RK4, jitted over the ensemble. Compile a cold
+build into fresh Warp and jax caches.
 """
 
 import math
@@ -43,6 +45,11 @@ DEVICE = "cuda"
 # Bind these names to jax.numpy for the scalar right-hand sides.
 JAX_FUNCTIONS = ("exp", "sin", "sqrt", "stack")
 NO_FINAL_STATE = "gradsolve returned no finite final state"
+# We call private warp_ode functions as they stand in this gradsolve release.
+RESIDENT_GRADSOLVE = "0.2.1"
+# warp_ode.solve starts every trajectory at a hundredth of the span and stops it after this many steps.
+FIRST_STEP_FRACTION = 0.01
+STEP_BOUND = 4096
 
 
 def _finite(value):
@@ -113,6 +120,108 @@ def as_memory_error(exc):
     return exc
 
 
+def _host(array):
+    """Return a Warp, jax or NumPy array as a NumPy array."""
+    if type(array).__module__.startswith("warp"):
+        return array.numpy()
+    return np.asarray(array)
+
+
+class ResidentResult:
+    """Hold the final states and status of a resident solve on the device."""
+
+    def __init__(self, states, status, dim):
+        self.states, self.status, self.dim = states, status, dim
+
+    def numpy(self):
+        """Return the final states on the host, NaN for every trajectory with a nonzero status, as warp_ode.solve does."""
+        states = np.array(_host(self.states)).reshape(-1, self.dim)
+        states[np.asarray(_host(self.status)).reshape(-1) != 0] = np.nan
+        return states
+
+
+class ResidentTsit5:
+    """Launch the warp_ode kernel that gradsolve.solve runs for a problem, on inputs held on the device.
+
+    Raise RuntimeError if gradsolve's router sends the problem to another
+    engine, if the installed gradsolve is not RESIDENT_GRADSOLVE, or if the
+    problem has more states than warp_ode runs on a GPU.
+    """
+
+    def __init__(self, problem, plan, precision, device=DEVICE):
+        import gradsolve
+        from gradsolve import dispatch
+        from gradsolve.warp import warp_ode
+        if gradsolve.__version__ != RESIDENT_GRADSOLVE:
+            raise RuntimeError("the resident Tsit5 solve calls private warp_ode functions of gradsolve {0}; "
+                               "gradsolve {1} is installed".format(RESIDENT_GRADSOLVE, gradsolve.__version__))
+        engine = dispatch.choose_engine(problem.dim, problem.is_stiff, False)
+        if engine != warp_ode.name or not warp_ode.supports(problem):
+            raise RuntimeError("gradsolve.solve runs {0} for this problem, which takes and returns host arrays, "
+                               "so it has no solve on resident inputs".format(engine))
+        self.warp_ode, self.problem, self.precision, self.device = warp_ode, problem, precision, device
+        self.field_key, self.dim = warp_ode._field_for(problem)
+        gpu = device in ("cuda", "gpu")
+        if gpu and self.dim > warp_ode._GPU_VEC_DIM_CEILING:
+            raise RuntimeError("warp fused GPU register-vector limit: dim={0} > {1}".format(
+                self.dim, warp_ode._GPU_VEC_DIM_CEILING))
+        # warp_ode.solve launches a 3-state field on a GPU through its jax FFI runner and every other field through wp.launch.
+        self.ffi = gpu and self.dim == 3
+        self.np_dtype = np.float32 if precision == "float32" else np.float64
+        span = problem.t1 - problem.t0
+        self.conf = np.array([problem.t0, problem.t1, plan["rtol"], plan["atol"], span * FIRST_STEP_FRACTION],
+                             dtype=self.np_dtype)
+        self.n = None
+        self.inputs = None
+
+    def upload(self, y0, params):
+        """Copy the initial states, the parameters and the solver settings to the device."""
+        warp_ode = self.warp_ode
+        param = warp_ode._param_of(self.problem, params)
+        self.inputs = None
+        if self.ffi:
+            import jax.numpy as jnp
+            y0_np, param_np, n = warp_ode._validate_batch(y0, param, self.np_dtype, dim=3)
+            self.run = warp_ode._ffi_runner(n, STEP_BOUND, 0, self.precision)
+            self.inputs = (jnp.asarray(y0_np), jnp.asarray(param_np), jnp.asarray(self.conf))
+        else:
+            import warp as wp
+            if self.field_key in warp_ode._warp_kernel._VECP_FIELDS:
+                param_2d = np.ascontiguousarray(np.asarray(param))
+                _, scalar, vec, self.kernel = warp_ode._precision_spec(self.field_key, self.dim, self.precision,
+                                                                       vecp_P=param_2d.shape[1])
+                vec_p = wp.types.vector(length=max(param_2d.shape[1], 1), dtype=scalar)
+                param_wp = wp.array(param_2d.astype(self.np_dtype), dtype=vec_p, device=self.device)
+                y0_np = np.ascontiguousarray(np.asarray(y0, dtype=self.np_dtype))
+                n = y0_np.shape[0]
+            else:
+                _, scalar, vec, self.kernel = warp_ode._precision_spec(self.field_key, self.dim, self.precision)
+                y0_np, param_np, n = warp_ode._validate_batch(y0, param, self.np_dtype, dim=self.dim)
+                param_wp = wp.array(param_np, dtype=scalar, device=self.device)
+            self.scalar, self.vec = scalar, vec
+            self.inputs = (wp.array(y0_np, dtype=vec, device=self.device), param_wp,
+                           wp.array(self.conf, dtype=scalar, device=self.device))
+        self.n = n
+
+    def launch(self):
+        """Run the kernel on the resident inputs and return a ResidentResult left on the device."""
+        if self.ffi:
+            import jax
+            outputs = jax.block_until_ready(self.run(*self.inputs))
+            return ResidentResult(outputs[0], outputs[3], self.dim)
+        import warp as wp
+        n, device = self.n, self.device
+        states = wp.zeros(n, dtype=self.vec, device=device)
+        accepted = wp.zeros(n, dtype=wp.int32, device=device)
+        rejected = wp.zeros(n, dtype=wp.int32, device=device)
+        status = wp.zeros(n, dtype=wp.int32, device=device)
+        steps = wp.zeros((1, 1), dtype=self.scalar, device=device)
+        wp.launch(self.kernel, dim=n, inputs=[*self.inputs, STEP_BOUND, 0, states, accepted, rejected, status, steps],
+                  device=device)
+        wp.synchronize_device(device)
+        return ResidentResult(states, status, self.dim)
+
+
 class Problem:
     """Present a scalar system to gradsolve through its Problem protocol."""
 
@@ -180,6 +289,12 @@ class Build:
         register_jax_field(key, self.f_jax, self.states, 1, stiff=plan["stiff"])
         return Problem(key, self.states, self.duration, self.f_jax, is_stiff=plan["stiff"])
 
+    def fused_inputs(self, values):
+        """Return the (y0, params) host arrays gradsolve.solve takes for the grid values."""
+        n = int(values.shape[0])
+        y0 = np.ascontiguousarray(np.broadcast_to(self.y0, (n, self.states)))
+        return y0, np.asarray(values, dtype=self.np_dtype).reshape(n, 1)
+
     def fused_solve(self, solve, values):
         """Solve the grid values through gradsolve.solve and return the final states on the host.
 
@@ -188,8 +303,7 @@ class Build:
         import gradsolve
         plan = solve["plan"]
         n = int(values.shape[0])
-        y0 = np.ascontiguousarray(np.broadcast_to(self.y0, (n, self.states)))
-        params = np.asarray(values, dtype=self.np_dtype).reshape(n, 1)
+        y0, params = self.fused_inputs(values)
         try:
             result = gradsolve.solve(solve["problem"], y0, params, rtol=plan["rtol"], atol=plan["atol"],
                                      device=DEVICE)
@@ -271,15 +385,15 @@ class Build:
         return jax.device_get(jax.block_until_ready(solve["scan"](jnp.asarray(host))))
 
     def device_solve(self, trial, values):
-        """Solve a scan on resident device inputs and leave the result on the device.
+        """Solve on resident device inputs and leave the result on the device.
 
         Upload the inputs first when the resident ones belong to another grid.
-        Raise RuntimeError for a fused solve, because gradsolve.solve takes and
-        returns host arrays.
+        Launch an adaptive solve through ResidentTsit5, which raises
+        RuntimeError for an engine other than warp_ode.
         """
         solve = self.prepare(trial, values)
         if "scan" not in solve:
-            raise RuntimeError("gradsolve.solve takes and returns host arrays, so it has no solve on resident inputs")
+            return self.resident_fused_solve(solve, values)
         import jax
         import jax.numpy as jnp
         n = int(values.shape[0])
@@ -288,6 +402,15 @@ class Build:
             self.resident = jnp.asarray(np.ascontiguousarray(values))
             self.resident_n = n
         return jax.block_until_ready(solve["scan"](self.resident))
+
+    def resident_fused_solve(self, solve, values):
+        """Launch the solve's warp_ode kernel on resident inputs, uploading them when they belong to another grid."""
+        resident = solve.get("resident")
+        if resident is None:
+            resident = solve["resident"] = ResidentTsit5(solve["problem"], solve["plan"], self.precision)
+        if resident.n != int(values.shape[0]):
+            resident.upload(*self.fused_inputs(values))
+        return resident.launch()
 
     def close(self):
         self.solves = {}
@@ -333,7 +456,8 @@ class GradsolveAdapter:
 
     def finals(self, build, result):
         """Return (finals, t_final, retcode) for the result of a solve."""
-        return finals_of(np.asarray(result).reshape(-1, build.states), build.duration)
+        states = result.numpy() if isinstance(result, ResidentResult) else np.asarray(result)
+        return finals_of(states.reshape(-1, build.states), build.duration)
 
 
 def run(argv):

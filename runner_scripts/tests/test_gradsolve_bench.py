@@ -1,4 +1,4 @@
-"""The gradsolve adapter's solve plans, step counts, finals, memory errors and the pieces that need no gradsolve; the solves run on a GPU through bench.py."""
+"""The gradsolve adapter's solve plans, step counts, finals, memory errors, the pieces that need no gradsolve, and the resident Tsit5 launch against gradsolve.solve on Warp's CPU device; the GPU solves run through bench.py."""
 
 import os
 import sys
@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import gradsolve_bench  # noqa: E402
+import grid  # noqa: E402
 import runner  # noqa: E402
 import store  # noqa: E402
 
@@ -93,15 +94,13 @@ class SolveTests(unittest.TestCase):
         self.assertEqual(retcode, ["", gradsolve_bench.NO_FINAL_STATE, "", ""])
         self.assertEqual(store.errored_pct(finals, t_final, retcode, 3.0), 25.0)
 
-    def test_a_fused_solve_runs_from_host_arrays_and_has_no_solve_on_resident_inputs(self):
+    def test_a_fused_solve_with_transfers_runs_from_host_arrays(self):
         adapter = gradsolve_bench.GradsolveAdapter("linux_RTX-4070-SUPER", "data")
         build = FakeBuild()
         values = np.linspace(0.0, 21.0, 8, dtype=np.float32)
         result = adapter.solve(build, trial(**adaptive()), values, "both")
         finals, _, retcode = adapter.finals(build, result)
         self.assertEqual((finals.shape, retcode), ((8, 3), [""] * 8))
-        with self.assertRaises(RuntimeError):
-            adapter.solve(build, trial(**adaptive()), values, "none")
         # A fused kernel compiles through a solve of two grid points.
         build.fused_solves = []
         build.compile(trial(**adaptive()), values)
@@ -114,6 +113,15 @@ class SolveTests(unittest.TestCase):
         build.duration, build.f_jax = 1.0, lambda t, y, p: y
         problem = build.fused({"stiff": False})
         self.assertEqual(dispatch.choose_engine(problem.dim, problem.is_stiff, False), "warp_ode")
+
+    def test_a_resident_result_hands_back_host_finals_with_failed_trajectories_nan(self):
+        states = np.arange(12, dtype=np.float32).reshape(4, 3)
+        result = gradsolve_bench.ResidentResult(states.reshape(-1), np.array([0, 2, 0, 0], dtype=np.int32), 3)
+        adapter = gradsolve_bench.GradsolveAdapter("linux_RTX-4070-SUPER", "data")
+        finals, _, retcode = adapter.finals(FakeBuild(), result)
+        self.assertTrue(np.isnan(finals[1]).all())
+        np.testing.assert_array_equal(finals[[0, 2, 3]], states[[0, 2, 3]])
+        self.assertEqual(retcode, ["", gradsolve_bench.NO_FINAL_STATE, "", ""])
 
     def test_a_warp_allocation_failure_is_recorded_as_out_of_memory(self):
         error = gradsolve_bench.as_memory_error(RuntimeError("Failed to allocate 1024 bytes on device 'cuda:0'"))
@@ -130,6 +138,39 @@ class SolveTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             adapter.optimize(None, trial())
         self.assertEqual(gradsolve_bench.step_count(3.0, 3.0 * 2.0 ** -10), 1024)
+
+
+class ResidentTests(unittest.TestCase):
+    """The resident Tsit5 launch on Warp's CPU device against gradsolve.solve on the same device."""
+
+    def resident_and_public(self, record):
+        import gradsolve
+        build = gradsolve_bench.Build(record)
+        self.addCleanup(build.close)
+        plan = gradsolve_bench.plan(record)
+        problem = build.fused(plan)
+        y0, params = build.fused_inputs(grid.grid(record))
+        resident = gradsolve_bench.ResidentTsit5(problem, plan, record["precision"], device="cpu")
+        resident.upload(y0, params)
+        public = gradsolve.solve(problem, y0, params, rtol=plan["rtol"], atol=plan["atol"], device="cpu")
+        return resident.launch().numpy(), np.asarray(public.y_final)
+
+    def test_a_resident_tsit5_solve_matches_gradsolve_solve(self):
+        lorenz96 = dict(problem="lorenz96", system_params='{"states":8}', parameter="F", grid_max=16.0)
+        for record in (trial(n=16, **adaptive()), trial(n=16, precision="float64", **adaptive()),
+                       trial(n=16, **adaptive(), **lorenz96)):
+            got, want = self.resident_and_public(record)
+            self.assertEqual(got.dtype, want.dtype)
+            np.testing.assert_array_equal(got, want, err_msg=record["problem"] + " " + record["precision"])
+            self.assertTrue(np.isfinite(got).all())
+
+    def test_a_stiff_problem_has_no_resident_solve(self):
+        record = trial(algorithm="rosenbrock23_sciml", **adaptive())
+        build = gradsolve_bench.Build(record)
+        self.addCleanup(build.close)
+        plan = gradsolve_bench.plan(record)
+        with self.assertRaisesRegex(RuntimeError, "warp_rosenbrock"):
+            gradsolve_bench.ResidentTsit5(build.fused(plan), plan, "float32", device="cpu")
 
 
 if __name__ == "__main__":
