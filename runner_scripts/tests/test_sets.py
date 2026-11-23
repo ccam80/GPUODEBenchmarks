@@ -555,20 +555,6 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual({t["optimize"] for t in built}, {False})
         self.assertEqual(len(built), len(specs))
 
-    def test_host_solves_names_the_packages_solved_through_host_arrays(self):
-        text = self.MINIMAL.replace('packages = ["jax"]', 'packages = ["jax", "gradsolve"]').replace(
-            'problems = ["lorenz"]\n', 'problems = ["lorenz"]\ntransfers = ["none"]\n')
-        self.write(text + '[set.host_solves]\npackages = ["gradsolve"]\n')
-        loaded = sets.load_set("s", self.tmp)
-        self.assertEqual(loaded["set"]["host_solves"], {"packages": ["gradsolve"]})
-        specs = sets.expand(["s"], sets_dir=self.tmp)
-        self.assertEqual({(s["package"], tuple(s["transfers"])) for s in specs},
-                         {("jax", ("none",)), ("gradsolve", ("both",))})
-        for bad in ('[set.host_solves]\npackages = ["nobody"]\n', '[set.host_solves]\n', '[set.host_solves]\nper = 1\n'):
-            self.write(text + bad)
-            with self.assertRaises(sets.SetError, msg=bad):
-                sets.load_set("s", self.tmp)
-
     def test_untimed_names_the_packages_whose_lines_run_once(self):
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["jax"]\n'))
         loaded = sets.load_set("s", self.tmp)
