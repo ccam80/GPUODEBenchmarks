@@ -36,10 +36,8 @@ CONTROLLER_KINDS = ("fixed", "adaptive")
 LINE_STYLES = {("adaptive", "none"): "-", ("fixed", "none"): "--", ("adaptive", "both"): ":", ("fixed", "both"): "-."}
 LINE_LABELS = {("adaptive", "none"): "Adaptive", ("fixed", "none"): "Fixed",
                ("adaptive", "both"): "Adaptive, with transfers", ("fixed", "both"): "Fixed, with transfers"}
-SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">")
+SHAPES = ("o", "s", "^", "D", "v", "P", "X", "*", "p", "h", "<", ">", "8", "d", "H")
 SERIES_STYLE = {"linewidth": 1.5, "markersize": 6, "markeredgecolor": "black", "markeredgewidth": 0.5}
-# Draw a float64 series twice as wide as a float32 one.
-PRECISION_WIDTHS = {"float32": 1.5, "float64": 3.0}
 RC = {"axes.grid": True, "axes.grid.which": "both", "grid.alpha": 0.3, "legend.fontsize": 7,
       "axes.titlesize": 9, "figure.titlesize": 12, "savefig.dpi": 150}
 
@@ -225,17 +223,20 @@ def catalogue_order():
 
 
 class Encoding:
-    """Every figure's visual language: colour is the package, marker shape and fill the algorithm, line style the steps (dashed fixed) and transfers, line width the precision."""
+    """Every figure's visual language: colour is the package, marker shape and fill the algorithm at its precision, line style the steps (dashed fixed) and transfers."""
 
-    def __init__(self, series):
+    def __init__(self, *series):
+        """Take the series of every panel of the figure, one dict per panel."""
+        items = [item for panel in series for item in panel.items()]
         self.order = catalogue_order()
-        self.packages = [p for p in COLOURS if any(k[1] == p for k in series)]
-        self.algorithms = sorted({self.algorithm(k, pts) for k, pts in series.items()}, key=self._rank)
-        self.lines = [s for s in LINE_STYLES if any((k[2], k[3] or "none") == s for k in series)]
-        self.precisions = [p for p in PRECISION_WIDTHS if any(self.precision(k, pts) == p for k, pts in series.items())]
+        self.packages = [p for p in COLOURS if any(k[1] == p for k, _ in items)]
+        self.algorithms = sorted({self.identity(k, pts) for k, pts in items}, key=self._rank)
+        self.lines = [s for s in LINE_STYLES if any((k[2], k[3] or "none") == s for k, _ in items)]
+        self.precise = len({precision for _, precision in self.algorithms}) > 1
 
-    def _rank(self, algorithm):
-        return self.order.index(algorithm) if algorithm in self.order else len(self.order)
+    def _rank(self, identity):
+        algorithm, precision = identity
+        return (self.order.index(algorithm) if algorithm in self.order else len(self.order), algorithm, precision)
 
     @staticmethod
     def algorithm(key, points):
@@ -245,22 +246,31 @@ class Encoding:
     def precision(key, points):
         return key[4] if len(key) > 4 else points[0][2]["precision"]
 
-    def marker_of(self, algorithm):
-        """(shape, filled): the catalogue's first len(SHAPES) algorithms filled, the rest hollow."""
-        rank = self._rank(algorithm) % (2 * len(SHAPES))
+    @classmethod
+    def identity(cls, key, points):
+        """Return (algorithm, precision), the algorithm a marker stands for."""
+        return cls.algorithm(key, points), cls.precision(key, points)
+
+    def marker_of(self, identity):
+        """Return (shape, filled) of an (algorithm, precision), assigned in catalogue order with float32 first."""
+        rank = self.algorithms.index(identity) % (2 * len(SHAPES))
         return SHAPES[rank % len(SHAPES)], rank < len(SHAPES)
+
+    def label_of(self, identity):
+        """Return the algorithm's display name, followed by its precision when the figure shows two."""
+        algorithm, precision = identity
+        return algorithm_name(algorithm) + (", " + precision if self.precise else "")
 
     def style(self, key, points):
         """matplotlib plot() keywords for one series."""
-        shape, filled = self.marker_of(self.algorithm(key, points))
+        shape, filled = self.marker_of(self.identity(key, points))
         colour_value = colour(key[1])
         return dict(SERIES_STYLE, color=colour_value, marker=shape,
                     markerfacecolor=colour_value if filled else "white",
-                    linestyle=LINE_STYLES[(key[2], key[3] or "none")],
-                    linewidth=PRECISION_WIDTHS.get(self.precision(key, points), SERIES_STYLE["linewidth"]))
+                    linestyle=LINE_STYLES[(key[2], key[3] or "none")])
 
     def legend(self, plt):
-        """(handles, labels, headings): each channel under its heading, only what the figure shows; precision only when the figure shows two."""
+        """(handles, labels, headings): each channel under its heading, only what the figure shows."""
         handles, labels, headings = [], [], []
 
         def section(heading, entries):
@@ -276,14 +286,12 @@ class Encoding:
 
         section("Package", [(swatch(color=colour(p)), package_name(p)) for p in self.packages])
         markers = []
-        for a in self.algorithms:
-            shape, filled = self.marker_of(a)
+        for identity in self.algorithms:
+            shape, filled = self.marker_of(identity)
             markers.append((swatch(color="gray", linestyle="none", marker=shape,
-                                   markerfacecolor="gray" if filled else "white"), algorithm_name(a)))
+                                   markerfacecolor="gray" if filled else "white"), self.label_of(identity)))
         section("Algorithm", markers)
         section("Steps", [(swatch(color="gray", linestyle=LINE_STYLES[s]), LINE_LABELS[s]) for s in self.lines])
-        if len(self.precisions) > 1:
-            section("Precision", [(swatch(color="gray", linewidth=PRECISION_WIDTHS[p]), p) for p in self.precisions])
         return handles, labels, headings
 
 
