@@ -103,7 +103,13 @@ the step bound and refuses a problem past its own state limits. The adapter
 turns off gradsolve's `dispatch.CUDA_TSIT5_ENABLED` switch, so a non-stiff
 problem of 16 states or fewer runs on `warp_ode`. The runner log
 names the engine each solve ran. `gradsolve.solve` takes and
-returns host arrays, so an adaptive trial records no solve on resident inputs.
+returns host arrays. For an adaptive Tsit5 solve without transfers, the
+adapter uploads the inputs before the timing and launches the `warp_ode` kernel
+that `gradsolve.solve` runs, with the same first step and step bound, through
+private gradsolve functions. The adapter refuses to do this on a gradsolve other
+than 0.2.1, whose private functions it calls. The adapter records no solve on
+resident inputs for an adaptive solve on any other engine, such as Rosenbrock23
+on `warp_rosenbrock`.
 Warp compiles into `generated/gradsolve_warp_cache`.
 
 ### modax

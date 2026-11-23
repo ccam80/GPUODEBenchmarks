@@ -579,10 +579,6 @@ class SchemaTests(unittest.TestCase):
         self.write(self.MINIMAL.replace('problems = ["lorenz"]\n', 'problems = ["lorenz"]\n[set.untimed]\npackages = ["nobody"]\n'))
         with self.assertRaises(sets.SetError):
             sets.load_set("s", self.tmp)
-        # The shipped golden_grid solves gradsolve through host arrays and every other package on resident inputs.
-        specs = sets.expand(["golden_grid"], packages=["gradsolve", "cpp"], problems=["lorenz"])
-        self.assertEqual({(s["package"], tuple(s["transfers"])) for s in specs},
-                         {("gradsolve", ("both",)), ("cpp", ("none",))})
         # The shipped golden_grid times every package but the reference.
         specs = sets.expand(["golden_grid"], packages=["julia_cpu", "cpp"], problems=["lorenz"])
         self.assertEqual({(s["package"], s["timed"]) for s in specs}, {("julia_cpu", False), ("cpp", True)})
